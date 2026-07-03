@@ -1,0 +1,803 @@
+package com.personal.aurora_downloader
+
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
+import android.media.MediaScannerConnection
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.util.Log
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import android.provider.DocumentsContract
+import android.webkit.CookieManager
+import java.io.BufferedReader
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.ByteBuffer
+
+class MainActivity : FlutterActivity() {
+    private val channelName = "aurora_downloader/public_downloads"
+    private val networkChannelName = "aurora_downloader/network"
+    private val fgServiceChannelName = "aurora_downloader/foreground_service"
+    private var pendingImportResult: MethodChannel.Result? = null
+    private var pendingExportResult: MethodChannel.Result? = null
+    private var pendingExportSourcePath: String? = null
+    private var pendingPickUriResult: MethodChannel.Result? = null
+    private var pendingPickDirectoryResult: MethodChannel.Result? = null
+
+    companion object {
+        private const val PICK_IMPORT_FILE = 1001
+        private const val REQUEST_EXPORT_FILE = 1002
+        private const val REQUEST_PICK_EXPORT_URI = 1003
+        private const val REQUEST_PICK_DIRECTORY = 1004
+        private const val NETWORK_TAG = "AuroraNet"
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "publishFile" -> publishFile(call, result)
+                    "openUri" -> openUri(call, result)
+                    "shareUri" -> shareUri(call, result)
+                    "shareFile" -> shareFile(call, result)
+                    "pickImportFile" -> pickImportFile(result)
+                    "exportFile" -> exportFile(call, result)
+                    "openUrl" -> openUrl(call, result)
+                    "shareUrl" -> shareUrl(call, result)
+                    "selectExportUri" -> selectExportUri(call, result)
+                    "writeExportFile" -> writeExportFile(call, result)
+                    "selectExportDirectory" -> selectExportDirectory(result)
+                    "writeExportFileToDirectory" -> writeExportFileToDirectory(call, result)
+                    "remuxTsToMp4" -> remuxTsToMp4(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+        // Bind the process to the default active network so Dart's
+        // getaddrinfo() resolves DNS through the same network the WebView
+        // and OkHttp-based apps use. Fixes "Failed host lookup" inside
+        // Samsung Secure Folder and similar restricted network environments.
+        // See NetworkBindingService for the Dart side.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, networkChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "bindProcessToNetwork" -> {
+                        val bound = bindProcessToDefaultNetwork()
+                        Log.d(NETWORK_TAG, "bindProcessToNetwork result=$bound")
+                        result.success(bound)
+                    }
+                    "fetchUrl" -> fetchUrl(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Foreground service channel: Dart tells us to start, update, or
+        // stop the persistent notification that keeps downloads alive.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, fgServiceChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        val count = call.argument<Int>("count") ?: 1
+                        val intent = Intent(applicationContext, DownloadForegroundService::class.java).apply {
+                            putExtra("action", "start")
+                            putExtra("count", count)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(null)
+                    }
+                    "update" -> {
+                        val count = call.argument<Int>("count") ?: 1
+                        val fileName = call.argument<String>("fileName")
+                        val percent = call.argument<Int>("percent") ?: 0
+                        val intent = Intent(applicationContext, DownloadForegroundService::class.java).apply {
+                            putExtra("action", "update")
+                            putExtra("count", count)
+                            if (fileName != null) putExtra("fileName", fileName)
+                            putExtra("percent", percent)
+                        }
+                        startService(intent)
+                        result.success(null)
+                    }
+                    "stop" -> {
+                        stopService(Intent(applicationContext, DownloadForegroundService::class.java))
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * Fetches a URL using Android's native [HttpURLConnection] which
+     * produces a TLS fingerprint (JA3) that Cloudflare and similar
+     * WAFs consider legitimate — unlike Dart's [http.Client] which
+     * triggers Cloudflare challenge pages.  Also applies the same
+     * browser-like headers as the manual-paste path.
+     */
+    private fun fetchUrl(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url") ?: ""
+        if (url.isBlank()) {
+            result.error("bad_args", "url is required", null)
+            return
+        }
+        val referer = call.argument<String>("referer") ?: ""
+        val origin = call.argument<String>("origin") ?: ""
+        val userAgent = call.argument<String>("userAgent") ?:
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        val cookieHeader = call.argument<String>("cookie") ?: ""
+
+        // Merge cookies from Android's system CookieManager (set by the
+        // WebView when the user visited surrit.com) with any explicit
+        // cookie header passed from Dart.  The WebView's cookies are
+        // what makes 1DM's requests succeed while ours fail.
+        val mergedCookies = buildString {
+            // 1. System WebView cookies for this domain
+            try {
+                val webCookies = CookieManager.getInstance().getCookie(url)
+                if (!webCookies.isNullOrBlank()) {
+                    append(webCookies)
+                }
+            } catch (_: Exception) {}
+            // 2. Explicit cookie header from Dart (if any)
+            if (isNotEmpty() && cookieHeader.isNotBlank()) {
+                append("; ")
+            }
+            if (cookieHeader.isNotBlank()) {
+                append(cookieHeader)
+            }
+        }
+
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", userAgent)
+            if (referer.isNotBlank()) connection.setRequestProperty("Referer", referer)
+            if (origin.isNotBlank()) connection.setRequestProperty("Origin", origin)
+            if (mergedCookies.isNotBlank()) connection.setRequestProperty("Cookie", mergedCookies)
+            connection.setRequestProperty("Accept", "*/*")
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            connection.setRequestProperty("Accept-Encoding", "gzip, deflate, br")
+            connection.setRequestProperty("Sec-Fetch-Dest", "empty")
+            connection.setRequestProperty("Sec-Fetch-Mode", "cors")
+            connection.setRequestProperty("Sec-Fetch-Site", "same-origin")
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+            connection.instanceFollowRedirects = true
+
+            val statusCode = connection.responseCode
+            val body = if (statusCode in 200..399) {
+                BufferedReader(InputStreamReader(connection.inputStream)).readText()
+            } else {
+                connection.errorStream?.let { BufferedReader(InputStreamReader(it)).readText() } ?: ""
+            }
+            connection.disconnect()
+
+            result.success(mapOf(
+                "statusCode" to statusCode,
+                "body" to body
+            ))
+        } catch (e: Exception) {
+            Log.w(NETWORK_TAG, "fetchUrl failed: ${e.message}")
+            result.error("fetch_failed", e.message, null)
+        }
+    }
+
+    /**
+     * Binds the calling process to Android's currently active default
+     * network so that subsequent sockets (including those opened by
+     * Dart's `dart:io` HTTP client) resolve DNS through the same
+     * resolver the WebView uses. Returns `true` on success.
+     *
+     * Requires `ConnectivityManager.bindProcessToNetwork(Network)` which
+     * is available from API 23 (Marshmallow). `minSdk` for this app is
+     * 24, so no legacy fallback is needed; older devices get a `true`
+     * no-op so the Dart caller does not surface an error.
+     */
+    private fun bindProcessToDefaultNetwork(): Boolean {
+        return try {
+            val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                    as? ConnectivityManager ?: return false
+            val active: Network? = cm.activeNetwork
+            if (active == null) {
+                Log.d(NETWORK_TAG, "no active network yet")
+                return false
+            }
+            val ok = cm.bindProcessToNetwork(active)
+            Log.d(NETWORK_TAG, "bound to network=$active ok=$ok")
+            ok
+        } catch (se: SecurityException) {
+            Log.w(NETWORK_TAG, "SecurityException binding process to network: ${se.message}")
+            false
+        } catch (e: Exception) {
+            Log.w(NETWORK_TAG, "bindProcessToNetwork failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun shareFile(call: MethodCall, result: MethodChannel.Result) {
+        val filePath = call.argument<String>("filePath")
+        if (filePath.isNullOrBlank()) {
+            result.error("bad_args", "filePath is required.", null)
+            return
+        }
+        val source = File(filePath)
+        if (!source.exists()) {
+            result.error("missing_file", "File not found: $filePath", null)
+            return
+        }
+
+        val resolver = applicationContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloads")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        } else {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val destDir = File(downloadsDir, "Aurora Downloads")
+            if (!destDir.exists()) destDir.mkdirs()
+            val destFile = File(destDir, source.name)
+            source.copyTo(destFile, overwrite = true)
+            MediaScannerConnection.scanFile(this, arrayOf(destFile.absolutePath), null, null)
+            result.success(null)
+            return
+        }
+
+        if (uri == null) {
+            result.error("insert_failed", "Could not create MediaStore item for sharing.", null)
+            return
+        }
+
+        try {
+            resolver.openOutputStream(uri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            } ?: throw IllegalStateException("Could not open output stream.")
+
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, source.name))
+            result.success(null)
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            result.error("share_failed", error.message, null)
+        }
+    }
+
+    private fun pickImportFile(result: MethodChannel.Result) {
+        pendingImportResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+        }
+        try {
+            startActivityForResult(intent, PICK_IMPORT_FILE)
+        } catch (error: ActivityNotFoundException) {
+            result.error("no_activity", "No file picker available.", null)
+            pendingImportResult = null
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_IMPORT_FILE && pendingImportResult != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                try {
+                    val destFile = File(filesDir, "imported_library_${System.currentTimeMillis()}.json")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(destFile).use { output -> input.copyTo(output) }
+                    }
+                    pendingImportResult?.success(destFile.absolutePath)
+                } catch (error: Exception) {
+                    pendingImportResult?.error("read_failed", error.message, null)
+                }
+            } else {
+                pendingImportResult?.success(null)
+            }
+            pendingImportResult = null
+        } else if (requestCode == REQUEST_EXPORT_FILE && pendingExportResult != null) {
+            val sourcePath = pendingExportSourcePath
+            if (resultCode == Activity.RESULT_OK && data?.data != null && sourcePath != null) {
+                val uri = data.data!!
+                try {
+                    val source = File(sourcePath)
+                    contentResolver.openOutputStream(uri)?.use { output ->
+                        FileInputStream(source).use { input -> input.copyTo(output) }
+                    }
+                    pendingExportResult?.success(true)
+                } catch (error: Exception) {
+                    pendingExportResult?.error("write_failed", error.message, null)
+                }
+            } else {
+                pendingExportResult?.success(false)
+            }
+            pendingExportResult = null
+            pendingExportSourcePath = null
+        } else if (requestCode == REQUEST_PICK_EXPORT_URI && pendingPickUriResult != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                try {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (_: Exception) {}
+                pendingPickUriResult?.success(uri.toString())
+            } else {
+                pendingPickUriResult?.success(null)
+            }
+            pendingPickUriResult = null
+        } else if (requestCode == REQUEST_PICK_DIRECTORY && pendingPickDirectoryResult != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                try {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (_: Exception) {}
+                pendingPickDirectoryResult?.success(uri.toString())
+            } else {
+                pendingPickDirectoryResult?.success(null)
+            }
+            pendingPickDirectoryResult = null
+        }
+    }
+
+    private fun exportFile(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (sourcePath.isNullOrBlank() || displayName.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath and displayName are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Completed file not found: $sourcePath", null)
+            return
+        }
+
+        pendingExportResult = result
+        pendingExportSourcePath = sourcePath
+
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, displayName)
+        }
+
+        try {
+            startActivityForResult(intent, REQUEST_EXPORT_FILE)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingExportResult = null
+            pendingExportSourcePath = null
+        }
+    }
+
+    private fun openUrl(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        if (url.isNullOrBlank()) {
+            result.error("bad_args", "url is required.", null)
+            return
+        }
+        // Resolve through the system default browser chooser instead of
+        // hardcoding a specific vendor package like UC Browser. This lets
+        // users pick their preferred browser on first run.
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+            result.success(null)
+        } catch (_: ActivityNotFoundException) {
+            result.error("no_activity", "No browser found.", null)
+        }
+    }
+
+    private fun publishFile(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloads"
+
+        if (sourcePath.isNullOrBlank() || displayName.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath and displayName are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Completed file was not found: $sourcePath", null)
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            publishWithMediaStore(source, displayName, mimeType, relativePath, result)
+        } else {
+            publishLegacy(source, displayName, mimeType, relativePath, result)
+        }
+    }
+
+    private fun publishWithMediaStore(
+        source: File,
+        displayName: String,
+        mimeType: String,
+        relativePath: String,
+        result: MethodChannel.Result
+    ) {
+        val resolver = applicationContext.contentResolver
+        var formattedRelativePath = relativePath.replace('\\', '/')
+        if (!formattedRelativePath.endsWith("/")) {
+            formattedRelativePath = "$formattedRelativePath/"
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, formattedRelativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            result.error("insert_failed", "Could not create MediaStore download item.", null)
+            return
+        }
+
+        try {
+            resolver.openOutputStream(uri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            } ?: throw IllegalStateException("Could not open MediaStore output stream.")
+
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+
+            val pathLabel = if (relativePath.startsWith("Download/")) {
+                relativePath.replaceFirst("Download/", "Downloads/")
+            } else if (relativePath.startsWith("Download")) {
+                relativePath.replaceFirst("Download", "Downloads")
+            } else {
+                relativePath
+            }
+
+            result.success(
+                mapOf(
+                    "uri" to uri.toString(),
+                    "pathLabel" to pathLabel.removeSuffix("/")
+                )
+            )
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            result.error("publish_failed", error.message, null)
+        }
+    }
+
+    private fun publishLegacy(
+        source: File,
+        displayName: String,
+        mimeType: String,
+        relativePath: String,
+        result: MethodChannel.Result
+    ) {
+        try {
+            val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val subFolder = if (relativePath.startsWith("Download/")) {
+                relativePath.substring("Download/".length)
+            } else if (relativePath.startsWith("Download")) {
+                relativePath.substring("Download".length)
+            } else {
+                relativePath
+            }
+            val cleanSubFolder = subFolder.trim('/', '\\').replace('\\', '/')
+            val destinationDir = if (cleanSubFolder.isNotEmpty()) {
+                File(downloads, cleanSubFolder)
+            } else {
+                downloads
+            }
+
+            if (!destinationDir.exists()) destinationDir.mkdirs()
+            val destination = uniqueFile(destinationDir, displayName)
+            FileInputStream(source).use { input ->
+                FileOutputStream(destination).use { output -> input.copyTo(output) }
+            }
+
+            MediaScannerConnection.scanFile(
+                this,
+                arrayOf(destination.absolutePath),
+                arrayOf(mimeType)
+            ) { _, scannedUri ->
+                val uri = scannedUri ?: Uri.fromFile(destination)
+                val pathLabel = if (relativePath.startsWith("Download/")) {
+                    relativePath.replaceFirst("Download/", "Downloads/")
+                } else if (relativePath.startsWith("Download")) {
+                    relativePath.replaceFirst("Download", "Downloads")
+                } else {
+                    "Downloads/$cleanSubFolder"
+                }
+                result.success(
+                    mapOf(
+                        "uri" to uri.toString(),
+                        "pathLabel" to pathLabel.removeSuffix("/")
+                    )
+                )
+            }
+        } catch (error: Exception) {
+            result.error("publish_failed", error.message, null)
+        }
+    }
+
+    private fun uniqueFile(directory: File, displayName: String): File {
+        val base = displayName.substringBeforeLast('.', displayName)
+        val extension = displayName.substringAfterLast('.', "")
+        var candidate = File(directory, displayName)
+        var counter = 1
+        while (candidate.exists()) {
+            val name = if (extension.isEmpty()) {
+                "$base ($counter)"
+            } else {
+                "$base ($counter).$extension"
+            }
+            candidate = File(directory, name)
+            counter++
+        }
+        return candidate
+    }
+
+    private fun openUri(call: MethodCall, result: MethodChannel.Result) {
+        val uri = call.argument<String>("uri")?.let(Uri::parse)
+        val mimeType = call.argument<String>("mimeType") ?: "*/*"
+        if (uri == null) {
+            result.error("bad_args", "uri is required.", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(intent)
+            result.success(null)
+        } catch (error: ActivityNotFoundException) {
+            result.error("no_activity", "No app can open this file type.", null)
+        }
+    }
+
+    private fun shareUri(call: MethodCall, result: MethodChannel.Result) {
+        val uri = call.argument<String>("uri")?.let(Uri::parse)
+        val mimeType = call.argument<String>("mimeType") ?: "*/*"
+        val displayName = call.argument<String>("displayName") ?: "Aurora download"
+        if (uri == null) {
+            result.error("bad_args", "uri is required.", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, displayName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = android.content.ClipData.newUri(contentResolver, displayName, uri)
+        }
+        try {
+            startActivity(Intent.createChooser(intent, displayName))
+            result.success(null)
+        } catch (error: ActivityNotFoundException) {
+            result.error("no_activity", "No app can share this file type.", null)
+        }
+    }
+
+    private fun shareUrl(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        if (url.isNullOrBlank()) {
+            result.error("bad_args", "url is required.", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, url)
+        }
+        try {
+            startActivity(Intent.createChooser(intent, "Share via"))
+            result.success(null)
+        } catch (error: ActivityNotFoundException) {
+            result.error("no_activity", "No app available to share.", null)
+        }
+    }
+
+    private fun selectExportUri(call: MethodCall, result: MethodChannel.Result) {
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (displayName.isNullOrBlank()) {
+            result.error("bad_args", "displayName is required.", null)
+            return
+        }
+
+        pendingPickUriResult = result
+
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, displayName)
+        }
+
+        try {
+            startActivityForResult(intent, REQUEST_PICK_EXPORT_URI)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingPickUriResult = null
+        }
+    }
+
+    private fun writeExportFile(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val exportUri = call.argument<String>("exportUri")
+
+        if (sourcePath.isNullOrBlank() || exportUri.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath and exportUri are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Source file not found: $sourcePath", null)
+            return
+        }
+
+        try {
+            val uri = Uri.parse(exportUri)
+            contentResolver.openOutputStream(uri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            }
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("write_failed", error.message, null)
+        }
+    }
+
+    private fun selectExportDirectory(result: MethodChannel.Result) {
+        pendingPickDirectoryResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        try {
+            startActivityForResult(intent, REQUEST_PICK_DIRECTORY)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingPickDirectoryResult = null
+        }
+    }
+
+    private fun writeExportFileToDirectory(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val directoryUriStr = call.argument<String>("directoryUri")
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (sourcePath.isNullOrBlank() || directoryUriStr.isNullOrBlank() || displayName.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath, directoryUri, and displayName are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Source file not found: $sourcePath", null)
+            return
+        }
+
+        try {
+            val treeUri = Uri.parse(directoryUriStr)
+            val documentId = DocumentsContract.getTreeDocumentId(treeUri)
+            val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+            val newFileUri = DocumentsContract.createDocument(contentResolver, parentDocumentUri, mimeType, displayName)
+            if (newFileUri == null) {
+                result.error("create_failed", "Could not create document in tree.", null)
+                return
+            }
+            contentResolver.openOutputStream(newFileUri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            }
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("write_failed", error.message, null)
+        }
+    }
+
+    /**
+     * Remuxes an MPEG-TS file to an MP4 container using Android's native
+     * [MediaExtractor] + [MediaMuxer] APIs. No transcoding — just a
+     * container change, so the operation is fast and lossless.
+     *
+     * Runs on a background thread because MediaMuxer.start() / writeSampleData()
+     * can take noticeable time on large files.
+     *
+     * Returns `true` on success, `false` on any failure. The destination file
+     * is deleted on failure so the caller can keep the original .ts as a
+     * fallback rather than a half-written .mp4.
+     */
+    private fun remuxTsToMp4(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath") ?: ""
+        val destPath = call.argument<String>("destPath") ?: ""
+        if (sourcePath.isBlank() || destPath.isBlank()) {
+            result.success(false)
+            return
+        }
+        Thread {
+            try {
+                val extractor = MediaExtractor()
+                extractor.setDataSource(sourcePath)
+                val muxer = MediaMuxer(destPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                val trackInfo = mutableMapOf<Int, MediaFormat>()
+                for (i in 0 until extractor.trackCount) {
+                    trackInfo[i] = extractor.getTrackFormat(i)
+                    muxer.addTrack(trackInfo[i]!!)
+                }
+                if (trackInfo.isEmpty()) {
+                    extractor.release()
+                    muxer.release()
+                    File(destPath).delete()
+                    result.success(false)
+                    return@Thread
+                }
+                muxer.start()
+                val buffer = ByteBuffer.allocate(1024 * 1024)
+                for (i in 0 until extractor.trackCount) {
+                    extractor.selectTrack(i)
+                    val info = MediaCodec.BufferInfo()
+                    while (true) {
+                        val size = extractor.readSampleData(buffer, 0)
+                        if (size < 0) break
+                        info.offset = 0
+                        info.size = size
+                        info.presentationTimeUs = extractor.sampleTime
+                        info.flags = extractor.sampleFlags
+                        muxer.writeSampleData(i, buffer, info)
+                        extractor.advance()
+                    }
+                    extractor.unselectTrack(i)
+                }
+                muxer.stop()
+                muxer.release()
+                extractor.release()
+                result.success(true)
+            } catch (e: Exception) {
+                Log.w("AuroraRemux", "remuxTsToMp4 failed: ${e.message}")
+                try { File(destPath).delete() } catch (_: Exception) {}
+                result.success(false)
+            }
+        }.start()
+    }
+}
