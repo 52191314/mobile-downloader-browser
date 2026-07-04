@@ -276,12 +276,14 @@ class DownloadPropertiesDialog extends StatefulWidget {
   final Future<void> Function(DownloadTask task) onOpenDownload;
   final Future<void> Function(DownloadTask task) onShareDownload;
   final Future<void> Function(DownloadTask task)? onExport;
+  final void Function(String url)? onOpenUrlInBrowser;
 
   const DownloadPropertiesDialog({
     required this.task,
     required this.onOpenDownload,
     required this.onShareDownload,
     required this.onExport,
+    this.onOpenUrlInBrowser,
   });
 
   @override
@@ -439,6 +441,15 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                       );
                     },
                   ),
+                  if (widget.onOpenUrlInBrowser != null)
+                    IconButton(
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      tooltip: 'Open in Browser',
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.onOpenUrlInBrowser!(widget.task.sourcePageUrl!);
+                      },
+                    ),
                 ],
               ),
               const SizedBox(height: 16),

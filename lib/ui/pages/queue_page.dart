@@ -8,6 +8,16 @@ import '../../theme/aurora_colors.dart';
 import '../widgets/empty_queue.dart';
 import '../widgets/download_task_row.dart';
 
+/// Describes a state-filter chip option in the queue page.
+/// [states] is `null` to show all tasks; otherwise only tasks whose
+/// [DownloadState] is in the set are shown.
+final class _StateFilterOption {
+  final Set<DownloadState>? states;
+  final String label;
+  final IconData icon;
+  const _StateFilterOption(this.states, this.label, this.icon);
+}
+
 class QueuePage extends StatefulWidget {
   final DownloadQueue queue;
   final TextEditingController urlController;
@@ -21,6 +31,7 @@ class QueuePage extends StatefulWidget {
   final VoidCallback? Function(DownloadTask task)? onCancelTask;
   final Future<bool> Function(DownloadTask task)? onForceMergeTask;
   final double speedLimitKbps;
+  final void Function(String url)? onOpenUrlInBrowser;
 
   const QueuePage({
     super.key,
@@ -36,6 +47,7 @@ class QueuePage extends StatefulWidget {
     this.onCancelTask,
     this.onForceMergeTask,
     required this.speedLimitKbps,
+    this.onOpenUrlInBrowser,
   });
 
   @override
@@ -50,11 +62,20 @@ class _QueuePageState extends State<QueuePage> {
   final FocusNode _urlFocusNode = FocusNode();
   bool _hasUrlText = false;
 
+  // -- Search/sort/filter state --
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  Timer? _searchDebounceTimer;
+  TaskSortField _sortBy = TaskSortField.date;
+  bool _sortDescending = true;
+  Set<DownloadState>? _stateFilter; // null = all states
+
   @override
   void initState() {
     super.initState();
     _hasUrlText = widget.urlController.text.isNotEmpty;
     widget.urlController.addListener(_onUrlTextChanged);
+    _searchController.addListener(_onSearchChanged);
     _sub = widget.queue.onTaskUpdated.listen((task) {
       if (_rebuildTimer == null || !_rebuildTimer!.isActive) {
         _rebuildTimer = Timer(const Duration(milliseconds: 500), () {
@@ -77,9 +98,23 @@ class _QueuePageState extends State<QueuePage> {
     }
   }
 
+  void _onSearchChanged() {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      final text = _searchController.text;
+      if (text != _searchQuery) {
+        setState(() => _searchQuery = text);
+      }
+    });
+  }
+
   @override
   void dispose() {
     widget.urlController.removeListener(_onUrlTextChanged);
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    _searchDebounceTimer?.cancel();
     _urlFocusNode.dispose();
     _rebuildTimer?.cancel();
     _sub?.cancel();
@@ -122,10 +157,8 @@ class _QueuePageState extends State<QueuePage> {
   @override
   Widget build(BuildContext context) {
     final tasks = widget.queue.allTasks;
-    final completed =
-        tasks.where((t) => t.state == DownloadState.completed).toList();
-    final failed =
-        tasks.where((t) => t.state == DownloadState.failed).toList();
+    final completed = widget.queue.completedTasks;
+    final failed = widget.queue.failedTasks;
 
     return DefaultTabController(
       length: 2,
@@ -192,10 +225,16 @@ class _QueuePageState extends State<QueuePage> {
       _selectedFolderFilter = 'All';
     }
 
-    final sortedTasks = List<DownloadTask>.from(tasks)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    // Use the new queryTasks API with all search/sort/filter params.
+    final queriedTasks = widget.queue.queryTasks(
+      states: _stateFilter,
+      query: _searchQuery.isNotEmpty ? _searchQuery : null,
+      sortBy: _sortBy,
+      sortDescending: _sortDescending,
+    );
 
-    final filteredTasks = sortedTasks.where((task) {
+    // Apply folder filter as a post-step (not part of the core API).
+    final filteredTasks = queriedTasks.where((task) {
       if (_selectedFolderFilter == 'All') return true;
       final folder = _getTaskFolder(task);
       if (_selectedFolderFilter == 'Default') return folder == null;
@@ -223,174 +262,494 @@ class _QueuePageState extends State<QueuePage> {
       folderTabs.addAll(folders.toList()..sort());
     }
 
+    final headerSlivers = <Widget>[
+      _buildAggregateHeader(
+        context,
+        activeCount: activeCount,
+        queuedCount: queuedCount,
+        completedCount: filteredCompleted,
+        failedCount: filteredFailed,
+        totalSpeed: totalSpeed,
+      ),
+      const SizedBox(height: 16),
+      _buildUrlInputBar(context),
+      const SizedBox(height: 10),
+      _buildSearchBar(context),
+      const SizedBox(height: 10),
+      _buildSortAndFilterRow(context),
+      const SizedBox(height: 8),
+      if (folders.isNotEmpty) ...[
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: folderTabs.map((folder) {
+              final isSelected = _selectedFolderFilter == folder;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: ChoiceChip(
+                  key: Key('folder_tab_$folder'),
+                  label: Text(folder),
+                  selected: isSelected,
+                  selectedColor: AuroraColors.accent.withValues(alpha: 0.2),
+                  labelStyle: TextStyle(
+                    color: isSelected
+                        ? AuroraColors.accent
+                        : AuroraColors.mutedText,
+                    fontWeight:
+                        isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() => _selectedFolderFilter = folder);
+                    }
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+      if (filteredTasks.isNotEmpty && !_viewMode) ...[
+        _buildBulkActions(filteredTasks, filteredFailed),
+        const SizedBox(height: 8),
+      ],
+    ];
+
     return RefreshIndicator(
       onRefresh: () async {
-        // Soft refresh: just rebuild the UI
         await Future<void>.delayed(const Duration(milliseconds: 300));
       },
-      child: ListView(
-        cacheExtent: 2000,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          // -- Aggregate stats header --
-          _buildAggregateHeader(
-            context,
-            activeCount: activeCount,
-            queuedCount: queuedCount,
-            completedCount: filteredCompleted,
-            failedCount: filteredFailed,
-            totalSpeed: totalSpeed,
-          ),
-          const SizedBox(height: 16),
-
-          // -- URL input (address / link bar) --
-          GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: () => _urlFocusNode.requestFocus(),
-            child: Card(
-              color: AuroraColors.glassSurface,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: BorderSide(color: AuroraColors.glassBorder),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.only(
-                    left: 4, right: 4, top: 4, bottom: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: widget.urlController,
-                        focusNode: _urlFocusNode,
-                        decoration: InputDecoration(
-                          hintText: 'Paste a URL to download…',
-                          hintStyle: TextStyle(
-                            color: AuroraColors.mutedDeep,
-                            fontSize: 13,
-                          ),
-                          prefixIcon: Icon(Icons.link,
-                              color: AuroraColors.accent, size: 18),
-                          suffixIcon: _hasUrlText
-                              ? IconButton(
-                                  icon: Icon(Icons.clear,
-                                      size: 18,
-                                      color: AuroraColors.mutedText),
-                                  onPressed: () {
-                                    widget.urlController.clear();
-                                    _urlFocusNode.requestFocus();
-                                  },
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
-                                  splashRadius: 14,
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: AuroraColors.surface,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            borderSide: BorderSide.none,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            borderSide: BorderSide(
-                              color: AuroraColors.accent.withValues(alpha: 0.5),
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        style: const TextStyle(
-                            fontSize: 13, color: AuroraColors.text),
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => widget.onAddDownload(),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    SizedBox(
-                      height: 40,
-                      child: IconButton.filled(
-                        tooltip: 'Add download',
-                        onPressed: widget.onAddDownload,
-                        icon: const Icon(Icons.add, size: 20),
-                        style: IconButton.styleFrom(
-                          backgroundColor: AuroraColors.accent,
-                          foregroundColor: AuroraColors.background,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          minimumSize: const Size(40, 40),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate(headerSlivers),
             ),
           ),
-          const SizedBox(height: 12),
-
-          // -- Folder filter chips --
-          if (folders.isNotEmpty) ...[
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: folderTabs.map((folder) {
-                  final isSelected = _selectedFolderFilter == folder;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ChoiceChip(
-                      key: Key('folder_tab_$folder'),
-                      label: Text(folder),
-                      selected: isSelected,
-                      selectedColor: AuroraColors.accent.withValues(alpha: 0.2),
-                      labelStyle: TextStyle(
-                        color: isSelected
-                            ? AuroraColors.accent
-                            : AuroraColors.mutedText,
-                        fontWeight:
-                            isSelected ? FontWeight.bold : FontWeight.normal,
-                      ),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _selectedFolderFilter = folder);
-                        }
-                      },
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-
-          // -- Bulk action buttons --
-          if (filteredTasks.isNotEmpty && !_viewMode)
-            _buildBulkActions(filteredTasks, filteredFailed),
-          const SizedBox(height: 8),
-
-          // -- Task list or grid --
-          if (filteredTasks.isEmpty)
-            const SizedBox(
-              height: 280,
-              child: EmptyQueue(),
-            )
-          else if (_viewMode)
-            _buildGridView(filteredTasks)
-          else
-            ...filteredTasks.map((task) => _buildTaskRow(context, task)),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            sliver: _buildTaskSliver(filteredTasks),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildTaskSliver(List<DownloadTask> filteredTasks) {
+    if (filteredTasks.isEmpty) {
+      return SliverToBoxAdapter(child: _buildEmptyHint(context));
+    }
+
+    if (_viewMode) {
+      final completed = filteredTasks
+          .where((t) => t.state == DownloadState.completed)
+          .toList(growable: false);
+
+      if (completed.isEmpty) {
+        return const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(
+              child: Text(
+                'No completed downloads yet',
+                style: TextStyle(color: AuroraColors.mutedText),
+              ),
+            ),
+          ),
+        );
+      }
+
+      return SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.2,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => _buildGridTile(completed[index]),
+          childCount: completed.length,
+        ),
+      );
+    }
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) => _buildTaskRow(context, filteredTasks[index]),
+        childCount: filteredTasks.length,
+      ),
+    );
+  }
+
+  Widget _buildEmptyHint(BuildContext context) {
+    if (_searchQuery.isNotEmpty || _stateFilter != null) {
+      return SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.search_off, size: 48, color: AuroraColors.mutedDeep),
+              const SizedBox(height: 12),
+              Text(
+                _searchQuery.isNotEmpty
+                    ? 'No results for "$_searchQuery"'
+                    : 'No tasks match the current filter',
+                style: TextStyle(color: AuroraColors.mutedText, fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              TextButton.icon(
+                icon: const Icon(Icons.clear_all, size: 16),
+                label: const Text('Clear filters'),
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                    _searchController.clear();
+                    _stateFilter = null;
+                    _sortBy = TaskSortField.date;
+                    _sortDescending = true;
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const SizedBox(height: 280, child: EmptyQueue());
+  }
+
+  // ---------------------------------------------------------------------------
+  // URL input bar (extracted from inline build)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildUrlInputBar(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => _urlFocusNode.requestFocus(),
+      child: Card(
+        color: AuroraColors.glassSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: AuroraColors.glassBorder),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: widget.urlController,
+                  focusNode: _urlFocusNode,
+                  decoration: InputDecoration(
+                    hintText: 'Paste a URL to download…',
+                    hintStyle: TextStyle(
+                      color: AuroraColors.mutedDeep,
+                      fontSize: 13,
+                    ),
+                    prefixIcon: Icon(Icons.link,
+                        color: AuroraColors.accent, size: 18),
+                    suffixIcon: _hasUrlText
+                        ? IconButton(
+                            icon: Icon(Icons.clear,
+                                size: 18,
+                                color: AuroraColors.mutedText),
+                            onPressed: () {
+                              widget.urlController.clear();
+                              _urlFocusNode.requestFocus();
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            splashRadius: 14,
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: AuroraColors.surface,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide(
+                        color: AuroraColors.accent.withValues(alpha: 0.5),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  style: const TextStyle(
+                      fontSize: 13, color: AuroraColors.text),
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => widget.onAddDownload(),
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                height: 40,
+                child: IconButton.filled(
+                  tooltip: 'Add download',
+                  onPressed: widget.onAddDownload,
+                  icon: const Icon(Icons.add, size: 20),
+                  style: IconButton.styleFrom(
+                    backgroundColor: AuroraColors.accent,
+                    foregroundColor: AuroraColors.background,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    minimumSize: const Size(40, 40),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search bar
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSearchBar(BuildContext context) {
+    return Card(
+      color: AuroraColors.glassSurface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: AuroraColors.glassBorder),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 4, right: 4, top: 2, bottom: 2),
+        child: TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'Search URL or filename…',
+            hintStyle: TextStyle(
+              color: AuroraColors.mutedDeep,
+              fontSize: 13,
+            ),
+            prefixIcon: Icon(Icons.search,
+                color: AuroraColors.accent, size: 18),
+            suffixIcon: _searchQuery.isNotEmpty
+                ? IconButton(
+                    icon: Icon(Icons.clear,
+                        size: 18,
+                        color: AuroraColors.mutedText),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _searchQuery = '');
+                    },
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                        minWidth: 32, minHeight: 32),
+                    splashRadius: 14,
+                  )
+                : null,
+            filled: true,
+            fillColor: AuroraColors.surface,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(20),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(20),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(20),
+              borderSide: BorderSide(
+                color: AuroraColors.accent.withValues(alpha: 0.5),
+                width: 1,
+              ),
+            ),
+          ),
+          style: const TextStyle(
+              fontSize: 13, color: AuroraColors.text),
+          textInputAction: TextInputAction.search,
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sort & state filter row
+  // ---------------------------------------------------------------------------
+
+  static const _stateFilterOptions = <_StateFilterOption>{
+    _StateFilterOption(null, 'All', Icons.all_inclusive),
+    _StateFilterOption({DownloadState.downloading, DownloadState.idle}, 'Active', Icons.bolt),
+    _StateFilterOption({DownloadState.paused}, 'Paused', Icons.pause_circle_outline),
+    _StateFilterOption({DownloadState.completed}, 'Done', Icons.done_all),
+    _StateFilterOption({DownloadState.failed}, 'Failed', Icons.error_outline),
+  };
+
+  Widget _buildSortAndFilterRow(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // Sort chip
+          _buildSortChip(context),
+          const SizedBox(width: 8),
+
+          // State filter chips
+          for (final option in _stateFilterOptions)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: _buildStateChip(option),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSortChip(BuildContext context) {
+    final sortLabel = _sortLabel(_sortBy);
+    final arrowIcon = _sortDescending
+        ? Icons.arrow_downward_rounded
+        : Icons.arrow_upward_rounded;
+    return ActionChip(
+      avatar: Icon(arrowIcon, size: 14, color: AuroraColors.accent),
+      label: Text(sortLabel, style: const TextStyle(fontSize: 11)),
+      backgroundColor: AuroraColors.glassSurface,
+      side: BorderSide(color: AuroraColors.glassBorder),
+      onPressed: () => _showSortPicker(context),
+    );
+  }
+
+  Widget _buildStateChip(_StateFilterOption option) {
+    final isSelected = _stateFilter == option.states;
+    return ChoiceChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(option.icon, size: 13,
+              color: isSelected ? AuroraColors.accent : AuroraColors.mutedText),
+          const SizedBox(width: 4),
+          Text(option.label, style: const TextStyle(fontSize: 11)),
+        ],
+      ),
+      selected: isSelected,
+      selectedColor: AuroraColors.accent.withValues(alpha: 0.2),
+      labelStyle: TextStyle(
+        color: isSelected ? AuroraColors.accent : AuroraColors.mutedText,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      ),
+      onSelected: (_) {
+        setState(() {
+          _stateFilter = isSelected ? null : option.states;
+        });
+      },
+    );
+  }
+
+  void _showSortPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AuroraColors.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Sort by',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AuroraColors.text,
+                    )),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                for (final field in TaskSortField.values)
+                  InkWell(
+                    onTap: () {
+                      final sameField = _sortBy == field;
+                      setState(() {
+                        if (sameField) {
+                          _sortDescending = !_sortDescending;
+                        } else {
+                          _sortBy = field;
+                          _sortDescending = true;
+                        }
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _sortLabel(field),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: _sortBy == field
+                                    ? AuroraColors.accent
+                                    : AuroraColors.text,
+                                fontWeight: _sortBy == field
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          if (_sortBy == field)
+                            Icon(
+                              _sortDescending
+                                  ? Icons.arrow_downward_rounded
+                                  : Icons.arrow_upward_rounded,
+                              size: 16,
+                              color: AuroraColors.accent,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _sortLabel(TaskSortField field) {
+    switch (field) {
+      case TaskSortField.date:
+        return 'Date';
+      case TaskSortField.name:
+        return 'Name';
+      case TaskSortField.size:
+        return 'Size';
+      case TaskSortField.priority:
+        return 'Priority';
+      case TaskSortField.state:
+        return 'State';
+      case TaskSortField.speed:
+        return 'Speed';
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -503,10 +862,10 @@ class _QueuePageState extends State<QueuePage> {
                   AuroraColors.accentPurple),
               const SizedBox(width: 8),
               _statBadge(Icons.done_all, '$completedCount', 'Done',
-                  const AuroraColors.nordGreen),
+                  AuroraColors.nordGreen),
               const SizedBox(width: 8),
               _statBadge(Icons.error_outline, '$failedCount', 'Failed',
-                  const AuroraColors.nordRed),
+                  AuroraColors.nordRed),
             ],
           ),
           if (activeCount > 0 || queuedCount > 0) ...[
@@ -516,7 +875,7 @@ class _QueuePageState extends State<QueuePage> {
                 Icon(Icons.speed, size: 14, color: AuroraColors.mutedText),
                 const SizedBox(width: 4),
                 Text(
-                  '${_speedLabel(totalSpeed)}',
+                  _speedLabel(totalSpeed),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -584,27 +943,9 @@ class _QueuePageState extends State<QueuePage> {
       case DownloadState.paused:
         return AuroraColors.accentAmber; // Amber
       case DownloadState.completed:
-        return const AuroraColors.nordGreen; // Green (Nord)
+        return AuroraColors.nordGreen; // Green (Nord)
       case DownloadState.failed:
-        return const AuroraColors.nordRed; // Red (Nord)
-      default:
-        return AuroraColors.mutedDeep; // Grey
-    }
-  }
-
-  IconData _taskIcon(DownloadTask task) {
-    switch (task.state) {
-      case DownloadState.downloading:
-      case DownloadState.idle:
-        return Icons.download_rounded;
-      case DownloadState.paused:
-        return Icons.pause_circle_outline;
-      case DownloadState.completed:
-        return Icons.check_circle_outline;
-      case DownloadState.failed:
-        return Icons.error_outline;
-      default:
-        return Icons.hourglass_empty;
+        return AuroraColors.nordRed; // Red (Nord)
     }
   }
 
@@ -768,139 +1109,179 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _buildTaskActions(DownloadTask task, Color color) {
-    final list = <Widget>[];
+    // ── Primary action icon (visible outside popup) ──────────────
+    Widget? primaryAction;
 
-    // 1. Primary Action (Play/Pause/Retry/Open)
-    if (task.state == DownloadState.downloading || task.state == DownloadState.idle) {
-      list.add(
-        _compactButton(
-          icon: Icons.pause_rounded,
-          color: AuroraColors.accent,
-          tooltip: 'Pause',
-          onPressed: () => widget.onPauseTask?.call(task)?.call(),
-        ),
+    if (task.state == DownloadState.downloading ||
+        task.state == DownloadState.idle) {
+      primaryAction = _compactButton(
+        icon: Icons.pause_rounded,
+        color: AuroraColors.accent,
+        tooltip: 'Pause',
+        onPressed: () => widget.onPauseTask?.call(task)?.call(),
       );
     } else if (task.state == DownloadState.paused) {
-      list.add(
-        _compactButton(
-          icon: Icons.play_arrow_rounded,
-          color: AuroraColors.accent,
-          tooltip: 'Resume',
-          onPressed: () => widget.onResumeTask?.call(task)?.call(),
-        ),
+      primaryAction = _compactButton(
+        icon: Icons.play_arrow_rounded,
+        color: AuroraColors.accent,
+        tooltip: 'Resume',
+        onPressed: () => widget.onResumeTask?.call(task)?.call(),
+      );
+    } else if (task.state == DownloadState.failed) {
+      primaryAction = _compactButton(
+        icon: Icons.refresh_rounded,
+        color: AuroraColors.nordRed,
+        tooltip: 'Retry',
+        onPressed: () => widget.onRetryTask?.call(task),
       );
     } else if (task.state == DownloadState.completed) {
       if (widget.onExportDownload != null) {
-        list.add(
-          _compactButton(
-            icon: Icons.drive_file_move_outlined,
-            color: const AuroraColors.nordGreen,
-            tooltip: 'Export',
-            onPressed: () => widget.onExportDownload!(task),
-          ),
-        );
-      }
-    } else if (task.state == DownloadState.failed) {
-      list.add(
-        _compactButton(
-          icon: Icons.refresh_rounded,
-          color: const AuroraColors.nordRed,
-          tooltip: 'Retry',
-          onPressed: () => widget.onRetryTask?.call(task),
-        ),
-      );
-      if (widget.onForceMergeTask != null) {
-        list.add(
-          _compactButton(
-            icon: Icons.merge_type,
-            color: Colors.orange,
-            tooltip: 'Force Merge',
-            onPressed: () => widget.onForceMergeTask!(task),
-          ),
+        primaryAction = _compactButton(
+          icon: Icons.drive_file_move_outlined,
+          color: AuroraColors.nordGreen,
+          tooltip: 'Export',
+          onPressed: () => widget.onExportDownload!(task),
         );
       }
     }
 
-    // 2. Delete / Cancel Action
-    list.add(
-      _compactButton(
-        icon: Icons.delete_outline,
-        color: const AuroraColors.nordRed,
-        tooltip: task.state == DownloadState.completed ? 'Remove' : 'Cancel',
-        onPressed: () async {
-          final isCompleted = task.state == DownloadState.completed;
-          final confirm = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: Text(isCompleted ? 'Remove download?' : 'Cancel download?'),
-              content: Text(
-                isCompleted
-                    ? 'Remove "${_fileName(task.savePath)}" from the download list?'
-                    : 'Cancel and remove "${_fileName(task.savePath)}" from your queue?\nThis will delete any temporary or downloaded files.',
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-                TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(isCompleted ? 'Remove' : 'Cancel')),
-              ],
-            ),
-          );
-          if (confirm == true) {
-            widget.onCancelTask?.call(task)?.call();
-          }
-        },
-      ),
-    );
+    // ── Overflow popup menu with all secondary actions ──────────
+    final popupItems = <PopupMenuEntry<String>>[];
 
-    // 3. Info / Properties Action
-    list.add(
-      _compactButton(
-        icon: Icons.info_outline,
-        color: AuroraColors.mutedText,
-        tooltip: 'Properties',
-        onPressed: () {
-          showDialog(
-            context: context,
-            builder: (context) => DownloadPropertiesDialog(
-              task: task,
-              onOpenDownload: widget.onOpenDownload,
-              onShareDownload: widget.onShareDownload,
-              onExport: widget.onExportDownload,
-            ),
-          ).then((_) {
-            if (mounted) setState(() {});
-          });
-        },
-      ),
-    );
-
-    final rows = <Widget>[];
-    for (int i = 0; i < list.length; i += 2) {
-      final rowChildren = <Widget>[];
-      rowChildren.add(list[i]);
-      if (i + 1 < list.length) {
-        rowChildren.add(const SizedBox(width: 4));
-        rowChildren.add(list[i + 1]);
-      }
-      rows.add(
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: rowChildren,
+    // Force merge (failed only)
+    if (task.state == DownloadState.failed &&
+        widget.onForceMergeTask != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'force_merge',
+          child: _popupRow(Icons.merge_type, Colors.orange, 'Force Merge'),
         ),
       );
-      if (i + 2 < list.length) {
-        rows.add(const SizedBox(height: 4));
-      }
     }
+
+    // Open source page
+    if (task.sourcePageUrl != null && widget.onOpenUrlInBrowser != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'open_source',
+          child:
+              _popupRow(Icons.open_in_new, AuroraColors.accentPurple, 'Open Source Page'),
+        ),
+      );
+    }
+
+    // Delete / Cancel
+    final isCompleted = task.state == DownloadState.completed;
+    popupItems.add(
+      PopupMenuItem(
+        value: 'delete',
+        child: _popupRow(Icons.delete_outline, AuroraColors.nordRed,
+            isCompleted ? 'Remove' : 'Cancel'),
+      ),
+    );
+
+    // Properties
+    popupItems.add(
+      PopupMenuItem(
+        value: 'properties',
+        child: _popupRow(Icons.info_outline, AuroraColors.mutedText, 'Properties'),
+      ),
+    );
+
+    final hasPrimary = primaryAction != null;
+    final hasOverflow = popupItems.isNotEmpty;
+
+    if (!hasPrimary && !hasOverflow) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: rows,
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (primaryAction != null) ...[
+            primaryAction,
+            const SizedBox(width: 4),
+          ],
+          if (hasOverflow)
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, size: 14,
+                    color: AuroraColors.mutedText),
+                padding: EdgeInsets.zero,
+                splashRadius: 14,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                color: AuroraColors.surfaceCard,
+                elevation: 4,
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'force_merge':
+                      unawaited(widget.onForceMergeTask!(task));
+                    case 'open_source':
+                      widget.onOpenUrlInBrowser!(task.sourcePageUrl!);
+                    case 'delete':
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: Text(isCompleted
+                              ? 'Remove download?'
+                              : 'Cancel download?'),
+                          content: Text(
+                            isCompleted
+                                ? 'Remove "${_fileName(task.savePath)}" from the download list?'
+                                : 'Cancel and remove "${_fileName(task.savePath)}" from your queue?\nThis will delete any temporary or downloaded files.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Keep'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child:
+                                  Text(isCompleted ? 'Remove' : 'Cancel'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        widget.onCancelTask?.call(task)?.call();
+                      }
+                    case 'properties':
+                      showDialog(
+                        context: context,
+                        builder: (context) => DownloadPropertiesDialog(
+                          task: task,
+                          onOpenDownload: widget.onOpenDownload,
+                          onShareDownload: widget.onShareDownload,
+                          onExport: widget.onExportDownload,
+                          onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
+                        ),
+                      ).then((_) {
+                        if (mounted) setState(() {});
+                      });
+                  }
+                },
+                itemBuilder: (_) => popupItems,
+              ),
+            ),
+        ],
       ),
+    );
+  }
+
+  Widget _popupRow(IconData icon, Color color, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 10),
+        Text(label, style: const TextStyle(fontSize: 13)),
+      ],
     );
   }
 
@@ -955,42 +1336,7 @@ class _QueuePageState extends State<QueuePage> {
   // Grid view (completed only)
   // ---------------------------------------------------------------------------
 
-  Widget _buildGridView(List<DownloadTask> tasks) {
-    final completed = tasks
-        .where((t) => t.state == DownloadState.completed)
-        .toList(growable: false);
 
-    if (completed.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.only(top: 40),
-        child: Center(
-          child: Text(
-            'No completed downloads yet',
-            style: TextStyle(color: AuroraColors.mutedText),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1.2,
-        ),
-        itemCount: completed.length,
-        itemBuilder: (context, index) {
-          final task = completed[index];
-          return _buildGridTile(task);
-        },
-      ),
-    );
-  }
 
   Widget _buildGridTile(DownloadTask task) {
     return GestureDetector(
@@ -1009,7 +1355,7 @@ class _QueuePageState extends State<QueuePage> {
             Icon(
               Icons.check_circle_outline,
               size: 32,
-              color: const AuroraColors.nordGreen,
+              color: AuroraColors.nordGreen,
             ),
             const SizedBox(height: 8),
             Text(

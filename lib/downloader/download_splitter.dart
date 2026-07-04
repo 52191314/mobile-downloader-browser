@@ -256,6 +256,7 @@ class DownloadSplitter implements BaseDownloader {
 
         _lastBytesTick = task.downloadedBytes;
         _speedTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+          _updateProgress();
           final currentBytes = task.downloadedBytes;
           task.speed = (currentBytes - _lastBytesTick) * 2.0;
           _lastBytesTick = currentBytes;
@@ -363,6 +364,7 @@ class DownloadSplitter implements BaseDownloader {
           await tempDir.delete(recursive: true);
         }
 
+        _updateProgress();
         if (task.totalBytes <= 0) {
           task.totalBytes = task.downloadedBytes;
         }
@@ -416,6 +418,7 @@ class DownloadSplitter implements BaseDownloader {
           }
         } catch (_) {}
 
+        _updateProgress();
         task.state = DownloadState.failed;
         task.errorMessage = e.toString();
         _emitTask();
@@ -584,14 +587,15 @@ class DownloadSplitter implements BaseDownloader {
       if (chunk.isOpenEnded && diskBytes > 0 &&
           response.statusCode == 200) {
         // Open-ended resume was answered with 200 OK — the server ignored
-        // the Range header and is re-sending the full body. The append
-        // sink will write the new bytes at the current end-of-file, so
-        // the existing on-disk bytes remain at the front. Log a debug
-        // message and proceed; the result is the same as a fresh full
-        // download because the user just gets the whole file again.
+        // the Range header and is re-sending the full body. Truncate the
+        // file and reset diskBytes so the full body is written fresh from
+        // the beginning instead of being appended after existing bytes
+        // (which would produce a corrupt file with duplicate data).
+        await chunkFile.writeAsBytes([], flush: true);
+        diskBytes = 0;
         debugPrint(
           '[DownloadSplitter] Open-ended resume returned 200 OK for '
-          'chunk ${chunk.index}; treating as a full body re-send.',
+          'chunk ${chunk.index}; truncated file for fresh re-download.',
         );
       }
     }
@@ -616,7 +620,6 @@ class DownloadSplitter implements BaseDownloader {
             }
             diskBytes += data.length;
             chunk.bytesDownloaded = diskBytes;
-            _updateProgress();
           },
           onError: (Object error) {
             if (!completer.isCompleted) {
@@ -671,6 +674,7 @@ class DownloadSplitter implements BaseDownloader {
         _runningFuture == null) {
       return;
     }
+    _updateProgress();
     _isPaused = true;
     task.state = targetState;
     task.speed = 0;

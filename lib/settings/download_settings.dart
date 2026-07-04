@@ -441,6 +441,7 @@ class DownloadSettings {
   final bool doNotTrackEnabled;
   final DownloadLinkBehavior downloadLinkBehavior;
   final bool trackerBlockingEnabled;
+  final List<String> adblockAllowlist;
   final DarkModePreference darkModePreference;
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
@@ -480,6 +481,7 @@ class DownloadSettings {
     this.doNotTrackEnabled = true,
     this.downloadLinkBehavior = DownloadLinkBehavior.capture,
     this.trackerBlockingEnabled = false,
+    this.adblockAllowlist = const [],
     this.darkModePreference = DarkModePreference.system,
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
@@ -539,6 +541,7 @@ class DownloadSettings {
     bool? doNotTrackEnabled,
     DownloadLinkBehavior? downloadLinkBehavior,
     bool? trackerBlockingEnabled,
+    List<String>? adblockAllowlist,
     DarkModePreference? darkModePreference,
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
@@ -588,6 +591,7 @@ class DownloadSettings {
           downloadLinkBehavior ?? this.downloadLinkBehavior,
       trackerBlockingEnabled:
           trackerBlockingEnabled ?? this.trackerBlockingEnabled,
+      adblockAllowlist: adblockAllowlist ?? this.adblockAllowlist,
       darkModePreference: darkModePreference ?? this.darkModePreference,
       translateTargetLang:
           translateTargetLang ?? this.translateTargetLang,
@@ -628,6 +632,7 @@ class DownloadSettings {
       'doNotTrackEnabled': doNotTrackEnabled,
       'downloadLinkBehavior': downloadLinkBehavior.name,
     'trackerBlockingEnabled': trackerBlockingEnabled,
+    'adblockAllowlist': adblockAllowlist,
     'darkModePreference': darkModePreference.name,
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
@@ -706,6 +711,8 @@ class DownloadSettings {
       ),
       trackerBlockingEnabled: json['trackerBlockingEnabled'] as bool? ??
           defaults.trackerBlockingEnabled,
+      adblockAllowlist: (json['adblockAllowlist'] as List?)
+          ?.cast<String>() ?? defaults.adblockAllowlist,
       darkModePreference: DarkModePreference.values.byName(
         json['darkModePreference'] as String? ??
             defaults.darkModePreference.name,

@@ -775,5 +775,72 @@
     }, true);
   })();
 
+  // --- Edge swipe detection for back/forward navigation ---
+  // JS-side detection is the ONLY reliable way to intercept edge swipes
+  // because the native Android WebView sits in its own view layer and
+  // absorbs touches before Flutter's gesture system can claim them.
+  // Debounced on the Dart side to avoid double-navigation when the
+  // Flutter-side GestureDetector also fires.
+  (function() {
+    var _swipeCfg = {
+      edgeWidth: 44,
+      minDistance: 60,
+      maxVerticalDrift: 50,
+      minVelocity: 200
+    };
+    var _swipeStartX = 0, _swipeStartY = 0, _swipeStartTime = 0;
+    var _swipeTracking = false;
+
+    document.addEventListener('touchstart', function(e) {
+      if (!e.touches || e.touches.length !== 1) return;
+      var x = e.touches[0].clientX;
+      var y = e.touches[0].clientY;
+      var w = window.innerWidth;
+      // Only track touches that start within the edge zone
+      if (x > _swipeCfg.edgeWidth && x < w - _swipeCfg.edgeWidth) return;
+
+      _swipeStartX = x;
+      _swipeStartY = y;
+      _swipeStartTime = Date.now();
+      _swipeTracking = true;
+    }, {passive: true});
+
+    document.addEventListener('touchmove', function(e) {
+      if (!_swipeTracking || !e.touches || e.touches.length !== 1) return;
+      var dy = Math.abs(e.touches[0].clientY - _swipeStartY);
+      if (dy > _swipeCfg.maxVerticalDrift) {
+        _swipeTracking = false;  // too much vertical drift — abort
+      }
+    }, {passive: true});
+
+    document.addEventListener('touchend', function(e) {
+      if (!_swipeTracking || !e.changedTouches || e.changedTouches.length !== 1) {
+        _swipeTracking = false;
+        return;
+      }
+      var x = e.changedTouches[0].clientX;
+      var y = e.changedTouches[0].clientY;
+      var dx = x - _swipeStartX;
+      var absDx = dx < 0 ? -dx : dx;
+      var dy = y - _swipeStartY;
+      var dt = Date.now() - _swipeStartTime;
+      _swipeTracking = false;
+
+      if (absDx < _swipeCfg.minDistance) return;
+      if ((dy < 0 ? -dy : dy) > _swipeCfg.maxVerticalDrift) return;
+      var vel = dt > 50 ? absDx / (dt / 1000) : 99999;
+      if (vel < _swipeCfg.minVelocity) return;
+
+      var w = window.innerWidth;
+      if (dx > 0 && _swipeStartX <= _swipeCfg.edgeWidth) {
+        // Swipe right from left edge → go back
+        try { window.NavigationSwipeChannel.postMessage('back'); } catch(_) {}
+      } else if (dx < 0 && _swipeStartX >= w - _swipeCfg.edgeWidth) {
+        // Swipe left from right edge → go forward
+        try { window.NavigationSwipeChannel.postMessage('forward'); } catch(_) {}
+      }
+    }, {passive: true});
+  })();
+
   window.__auroraGuardVersion = (window.__auroraGuardVersion || 0) + 1;
 })();

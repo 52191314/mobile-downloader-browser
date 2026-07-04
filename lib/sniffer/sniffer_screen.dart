@@ -304,6 +304,7 @@ class SnifferScreen extends StatefulWidget {
   final BrowserLibraryStore libraryStore;
   final SnifferBrowserController Function()? debugControllerFactory;
   final SafeBrowsingService safeBrowsing;
+  final ValueNotifier<int>? libraryUpdateNotifier;
 
   SnifferScreen({
     super.key,
@@ -318,6 +319,7 @@ class SnifferScreen extends StatefulWidget {
     BrowserLibraryStore? libraryStore,
     this.debugControllerFactory,
     SafeBrowsingService? safeBrowsing,
+    this.libraryUpdateNotifier,
   }) : settings = settings ?? DownloadSettings.defaults(),
        libraryStore = libraryStore ?? const BrowserLibraryStore(),
        safeBrowsing =
@@ -500,6 +502,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       debugControllerFactory: widget.debugControllerFactory,
       injectedSnifferEngine: widget.snifferEngine,
     );
+    widget.controller?.setOnOpenUrlRequest((url) {
+      _tabLifecycleController.openNewTab(url: url);
+    });
     _desktopMode = widget.settings.desktopMode;
     _privateMode = widget.settings.privateMode;
     _mediaCatchController.captureShowAllMedia =
@@ -514,6 +519,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     _initPaths();
     unawaited(_libraryController.load());
     unawaited(_loadAutofillProfiles());
+    widget.libraryUpdateNotifier?.addListener(_onLibraryUpdate);
+  }
+
+  void _onLibraryUpdate() {
+    if (mounted) {
+      unawaited(_libraryController.load());
+    }
   }
 
   Future<void> _loadAutofillProfiles() async {
@@ -540,6 +552,10 @@ class _SnifferScreenState extends State<SnifferScreen>
         oldWidget.settings.manualCosmeticRules !=
             widget.settings.manualCosmeticRules) {
       _updateAllTabAdblock();
+    }
+    if (oldWidget.settings.adblockAllowlist !=
+        widget.settings.adblockAllowlist) {
+      _updateAllTabAdblockAllowlist();
     }
     if (oldWidget.settings.desktopMode != widget.settings.desktopMode) {
       _desktopMode = widget.settings.desktopMode;
@@ -577,6 +593,16 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
+  /// Pushes the current per-site allowlist to every tab controller. Called
+  /// whenever [widget.settings.adblockAllowlist] changes so that each tab's
+  /// in-memory allowlist stays in sync with the global settings.
+  void _updateAllTabAdblockAllowlist() {
+    final list = widget.settings.adblockAllowlist;
+    for (final tab in _tabs) {
+      tab.controller.updateAdblockAllowlist(list);
+    }
+  }
+
   Future<void> _configureTabAdblock(BrowserTab tab) async {
     await tab.controller.configureAdBlock(
       enabled: widget.settings.adblockEnabled,
@@ -585,6 +611,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       manualRules: widget.settings.manualAdBlockRules,
       cosmeticRules: widget.settings.manualCosmeticRules,
     );
+    tab.controller.updateAdblockAllowlist(widget.settings.adblockAllowlist);
     await _applyCosmeticRules(tab);
   }
 
@@ -739,6 +766,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   void dispose() {
+    widget.libraryUpdateNotifier?.removeListener(_onLibraryUpdate);
     _tabManager.mediaRebuildTimer?.cancel();
     _tabManager.mediaSaveTimer?.cancel();
     unawaited(_sessionRecovery.markClean());
@@ -761,6 +789,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     for (final tab in _tabs) {
       tab.detachAddressListener(_onAddressChanged);
     }
+    widget.controller?.setOnOpenUrlRequest(null);
     _tabManager.dispose();
     super.dispose();
   }
@@ -996,6 +1025,145 @@ class _SnifferScreenState extends State<SnifferScreen>
         decoded = await widget.libraryStore.readImportMap(filePath);
       }
 
+      final hasFavorites = decoded.containsKey('favorites') && (decoded['favorites'] is List) && (decoded['favorites'] as List).isNotEmpty;
+      final hasHistory = decoded.containsKey('history') && (decoded['history'] is List) && (decoded['history'] as List).isNotEmpty;
+      final hasSavedPages = decoded.containsKey('savedPages') && (decoded['savedPages'] is List) && (decoded['savedPages'] as List).isNotEmpty;
+      final hasQueue = decoded.containsKey('downloadQueue') && (decoded['downloadQueue'] is List) && (decoded['downloadQueue'] as List).isNotEmpty;
+      final hasSettings = decoded.containsKey('settings');
+
+      final isLegacy = decoded.containsKey('favorites') ||
+          decoded.containsKey('history') ||
+          decoded.containsKey('savedPages') ||
+          (!decoded.containsKey('settings') &&
+              !decoded.containsKey('downloadQueue') &&
+              decoded.isNotEmpty &&
+              !decoded.containsKey('favorites') &&
+              !decoded.containsKey('history') &&
+              !decoded.containsKey('savedPages'));
+
+      bool importFavorites = hasFavorites || isLegacy;
+      bool importHistory = hasHistory || isLegacy;
+      bool importSavedPages = hasSavedPages || isLegacy;
+      bool importQueue = hasQueue;
+      bool importSettings = hasSettings;
+
+      if (!hasFavorites && !isLegacy) importFavorites = false;
+      if (!hasHistory && !isLegacy) importHistory = false;
+      if (!hasSavedPages && !isLegacy) importSavedPages = false;
+
+      bool proceed = false;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.file_download_outlined,
+                            color: AuroraColors.accent,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Import Library',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AuroraColors.text,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text)),
+                        value: importFavorites,
+                        onChanged: (hasFavorites || isLegacy)
+                            ? (val) => setModalState(() => importFavorites = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Web History', style: TextStyle(color: AuroraColors.text)),
+                        value: importHistory,
+                        onChanged: (hasHistory || isLegacy)
+                            ? (val) => setModalState(() => importHistory = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text)),
+                        value: importSavedPages,
+                        onChanged: (hasSavedPages || isLegacy)
+                            ? (val) => setModalState(() => importSavedPages = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text)),
+                        value: importQueue,
+                        onChanged: hasQueue
+                            ? (val) => setModalState(() => importQueue = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('App Settings', style: TextStyle(color: AuroraColors.text)),
+                        value: importSettings,
+                        onChanged: hasSettings
+                            ? (val) => setModalState(() => importSettings = val)
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cancel', style: TextStyle(color: AuroraColors.mutedText)),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AuroraColors.accent,
+                              foregroundColor: AuroraColors.background,
+                            ),
+                            onPressed: (!importFavorites &&
+                                    !importHistory &&
+                                    !importSavedPages &&
+                                    !importQueue &&
+                                    !importSettings)
+                                ? null
+                                : () {
+                                    proceed = true;
+                                    Navigator.pop(ctx);
+                                  },
+                            child: const Text('Import'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+
+      if (!proceed) return;
+
       int importedFavoritesCount = 0;
       int importedHistoryCount = 0;
       int importedSavedPagesCount = 0;
@@ -1005,7 +1173,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       BrowserLibrary updatedLibrary = _library;
 
       // 1. App Settings
-      if (decoded.containsKey('settings')) {
+      if (importSettings && decoded.containsKey('settings')) {
         final settingsMap = decoded['settings'];
         if (settingsMap is Map) {
           final imported = DownloadSettings.fromJson(
@@ -1017,7 +1185,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
 
       // 2. Download Queue
-      if (decoded.containsKey('downloadQueue')) {
+      if (importQueue && decoded.containsKey('downloadQueue')) {
         final queueList = decoded['downloadQueue'];
         if (queueList is List) {
           for (final item in queueList) {
@@ -1067,7 +1235,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
 
       // 3. Browser Library - Favorites / Folders
-      if (decoded.containsKey('favorites')) {
+      if (importFavorites && decoded.containsKey('favorites')) {
         final importedFolders = decoded.containsKey('folders')
             ? (decoded['folders'] as List? ?? const [])
                   .whereType<Map>()
@@ -1102,7 +1270,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
 
       // 4. Browser Library - History
-      if (decoded.containsKey('history')) {
+      if (importHistory && decoded.containsKey('history')) {
         final importedHistory = (decoded['history'] as List? ?? const [])
             .whereType<Map>()
             .map(
@@ -1115,7 +1283,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
 
       // 5. Browser Library - Saved Pages
-      if (decoded.containsKey('savedPages')) {
+      if (importSavedPages && decoded.containsKey('savedPages')) {
         final importedSavedPages = (decoded['savedPages'] as List? ?? const [])
             .whereType<Map>()
             .map((item) => SavedPage.fromJson(Map<String, dynamic>.from(item)))
@@ -1126,20 +1294,36 @@ class _SnifferScreenState extends State<SnifferScreen>
         importedSavedPagesCount = importedSavedPages.length;
       }
 
-      if (decoded.containsKey('favorites') ||
-          decoded.containsKey('history') ||
-          decoded.containsKey('savedPages') ||
-          (!decoded.containsKey('settings') &&
-              !decoded.containsKey('downloadQueue') &&
-              decoded.isNotEmpty)) {
+      if (importFavorites || importHistory || importSavedPages) {
         if (!decoded.containsKey('favorites') &&
             !decoded.containsKey('history') &&
             !decoded.containsKey('savedPages')) {
           final legacyLib = BrowserLibrary.fromJson(decoded);
-          updatedLibrary = legacyLib;
-          importedFavoritesCount = legacyLib.favorites.length;
-          importedHistoryCount = legacyLib.history.length;
-          importedSavedPagesCount = legacyLib.savedPages.length;
+          List<BrowserFavorite>? favs;
+          List<BookmarkFolder>? folders;
+          List<BrowserHistoryEntry>? hist;
+          List<SavedPage>? saved;
+
+          if (importFavorites) {
+            favs = legacyLib.favorites;
+            folders = legacyLib.folders;
+            importedFavoritesCount = legacyLib.favorites.length;
+          }
+          if (importHistory) {
+            hist = legacyLib.history;
+            importedHistoryCount = legacyLib.history.length;
+          }
+          if (importSavedPages) {
+            saved = legacyLib.savedPages;
+            importedSavedPagesCount = legacyLib.savedPages.length;
+          }
+
+          updatedLibrary = updatedLibrary.copyWith(
+            favorites: favs,
+            folders: folders,
+            history: hist,
+            savedPages: saved,
+          );
         }
         await _saveLibrary(updatedLibrary);
       }
@@ -1507,10 +1691,23 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.controller.addJavaScriptChannel(
       'NavigationSwipeChannel',
       onMessageReceived: (message) {
-        // JS-based edge swipe detector fired. message is 'back' or 'forward'.
+        // JS-based edge swipe detector fired. Debounce to prevent
+        // double-navigation when the Flutter-side GestureDetector
+        // in the edge overlay also fires and wins the race.
+        final now = DateTime.now();
         if (message == 'back') {
+          if (tab.lastSwipeBack != null &&
+              now.difference(tab.lastSwipeBack!).inMilliseconds < 500) {
+            return;
+          }
+          tab.lastSwipeBack = now;
           unawaited(tab.controller.goBack());
         } else if (message == 'forward') {
+          if (tab.lastSwipeForward != null &&
+              now.difference(tab.lastSwipeForward!).inMilliseconds < 500) {
+            return;
+          }
+          tab.lastSwipeForward = now;
           unawaited(tab.controller.goForward());
         }
       },
@@ -2534,6 +2731,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                   enabled: true,
                   onTap: _showTabsSheet,
                 ),
+                _buildAdblockShieldButton(tab),
                 const SizedBox(width: 8),
                 // App nav
                 _miniDockTab(
@@ -2630,6 +2828,149 @@ class _SnifferScreenState extends State<SnifferScreen>
                   ],
                 ),
         ),
+      ),
+    );
+  }
+
+  /// Builds the adblock shield icon shown in the consolidated nav strip.
+  /// - Green shield + blocked-count badge: adblock active and current site
+  ///   is not in the per-site allowlist.
+  /// - Grey outlined shield: current site is in the per-site allowlist
+  ///   (adblock bypassed for this host only).
+  /// - Red shield: adblock is globally disabled in settings.
+  ///
+  /// Tapping the shield opens a popup where the user can add or remove the
+  /// current host from the per-site allowlist.
+  Widget _buildAdblockShieldButton(BrowserTab tab) {
+    final settings = widget.settings;
+    final host = Uri.tryParse(tab.currentUrl ?? '')?.host ?? '';
+    final isAllowlisted = host.isNotEmpty && settings.adblockAllowlist.contains(host);
+    final blocked = tab.controller.blockedRequestCount;
+    final IconData icon;
+    final Color color;
+    if (!settings.adblockEnabled) {
+      icon = Icons.shield;
+      color = Colors.redAccent;
+    } else if (isAllowlisted) {
+      icon = Icons.shield_outlined;
+      color = AuroraColors.mutedText;
+    } else {
+      icon = Icons.shield;
+      color = Colors.green;
+    }
+    return Material(
+      key: const Key('browser_adblock_shield'),
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => _showAdblockPopup(tab),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: AuroraColors.glassSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AuroraColors.glassBorder),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon, size: 20, color: color),
+              if (blocked > 0)
+                Positioned(
+                  right: -6,
+                  top: -4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    constraints: const BoxConstraints(
+                        minWidth: 14, minHeight: 14),
+                    child: Text(
+                      blocked > 99 ? '99+' : '$blocked',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Popup that shows the current adblock state for the active tab and lets
+  /// the user add/remove the current host from the per-site allowlist.
+  void _showAdblockPopup(BrowserTab tab) {
+    final settings = widget.settings;
+    final host = Uri.tryParse(tab.currentUrl ?? '')?.host ?? '';
+    if (host.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No site loaded')),
+      );
+      return;
+    }
+    final isAllowlisted = settings.adblockAllowlist.contains(host);
+    final blocked = tab.controller.blockedRequestCount;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(children: [
+          const Icon(Icons.shield, color: Colors.green),
+          const SizedBox(width: 8),
+          const Text('Adblock'),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(host,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Text(settings.adblockEnabled
+                ? (isAllowlisted
+                    ? 'Status: disabled for this site'
+                    : 'Status: active')
+                : 'Status: globally disabled'),
+            const SizedBox(height: 4),
+            Text('Blocked: $blocked requests on this page'),
+            const Divider(),
+            SwitchListTile(
+              title: Text(isAllowlisted
+                  ? 'Block ads on $host'
+                  : 'Allow ads on $host'),
+              subtitle: Text(isAllowlisted
+                  ? 'Re-enable adblock for this site'
+                  : 'Temporarily disable adblock for this site'),
+              value: !isAllowlisted,
+              contentPadding: EdgeInsets.zero,
+              onChanged: (v) {
+                final List<String> updated = v
+                    ? settings.adblockAllowlist
+                        .where((h) => h != host)
+                        .toList()
+                    : [...settings.adblockAllowlist, host];
+                final newSettings =
+                    settings.copyWith(adblockAllowlist: updated);
+                widget.onSettingsChanged?.call(newSettings);
+                tab.controller.updateAdblockAllowlist(updated);
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Done'),
+          ),
+        ],
       ),
     );
   }
@@ -3366,6 +3707,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     folder,
     items,
     library: _library,
+    unsortedFolder: _unsortedFolder,
     isCurrentPageFavorited: (_) => _isCurrentPageFavorited(),
     onSaveLibrary: _saveLibrary,
     onLoadUrl: (url) => _loadUrlWithHostSettings(tab, Uri.parse(url)),
@@ -3470,6 +3812,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     library: _library,
     onSaveLibrary: _saveLibrary,
     onLoadUrl: (url) => _loadUrlWithHostSettings(_activeTab, Uri.parse(url)),
+    onSaveCurrentPage: _saveCurrentPage,
+    onReopen: () => _showSavedPagesSheet(),
   );
 
   void _showBrowserMenuSheet() {
@@ -3522,6 +3866,15 @@ class _SnifferScreenState extends State<SnifferScreen>
                       onTap: () {
                         Navigator.pop(ctx);
                         _showSavedPagesSheet();
+                      },
+                    ),
+                    _buildMenuItem(
+                      icon: Icons.save_alt_rounded,
+                      label: 'Save Page',
+                      color: Colors.green,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        unawaited(_saveCurrentPage());
                       },
                     ),
                     _buildMenuItem(

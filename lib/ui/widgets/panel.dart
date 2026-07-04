@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/aurora_colors.dart';
+
 class Panel extends StatelessWidget {
   final Widget child;
 
@@ -29,7 +31,7 @@ class PanelHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: Theme.of(context).colorScheme.primary),
+        Icon(icon, color: AuroraColors.accent),
         const SizedBox(width: 10),
         Expanded(
           child: Text(

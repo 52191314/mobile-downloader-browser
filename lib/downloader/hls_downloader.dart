@@ -29,6 +29,11 @@ class HlsDownloader implements BaseDownloader {
   bool _needsRefresh = false;
   final Set<int> _staleSegmentIndexes = {};
   final Set<int> _countedSegmentIndexes = {};
+  /// True when [_probeSegmentSizes] determined the total size before
+  /// downloading segments.  Prevents per-segment accumulation from
+  /// overwriting the pre-calculated total (which would make progress
+  /// track downloaded bytes 1:1 and always show ~100%).
+  bool _totalBytesLocked = false;
   HlsPlaylist? _playlist;
   Uint8List? _encryptionKeyBytes;
   String _currentPlaylistUrl = '';
@@ -56,8 +61,12 @@ class HlsDownloader implements BaseDownloader {
     task.state = DownloadState.downloading;
     task.errorMessage = null;
     task.downloadedBytes = 0;
-    if (task.totalBytes <= 0) {
+    if (task.totalBytes > 0) {
+      // Size already determined (previous run or sniffer estimate) — keep it.
+      _totalBytesLocked = true;
+    } else {
       task.totalBytes = -1;
+      _totalBytesLocked = false;
     }
     _countedSegmentIndexes.clear();
     _taskUpdateController.add(task);
@@ -231,6 +240,11 @@ class HlsDownloader implements BaseDownloader {
   }
 
   Future<void> _probeSegmentSizes(HlsPlaylist playlist) async {
+    // 0. Skip if total is already locked (previous run or sniffer estimate)
+    if (_totalBytesLocked && task.totalBytes > 0) {
+      return;
+    }
+
     // 1. Skip if resuming
     if (task.downloadedBytes > 0) {
       return;
@@ -247,6 +261,7 @@ class HlsDownloader implements BaseDownloader {
     final brSize = playlist.totalByteRangeLength;
     if (brSize != null && brSize > 0) {
       task.totalBytes = brSize;
+      _totalBytesLocked = true;
       _taskUpdateController.add(task);
       return;
     }
@@ -290,10 +305,17 @@ class HlsDownloader implements BaseDownloader {
 
     if (!headSupported) {
       print('[HlsDownloader] HEAD request not supported by server/CDN, falling back to indeterminate mode.');
-      task.totalBytes = -1;
+      // Preserve the sniffer's estimated totalBytes if one was carried over
+      // from SniffedMedia.contentLengthBytes (e.g. segment-sampling estimate).
+      if (task.totalBytes > 0) {
+        _totalBytesLocked = true;
+      } else {
+        task.totalBytes = -1;
+      }
       task.errorMessage = null;
       _taskUpdateController.add(task);
       return;
+
     }
 
     // B. Concurrency-limited probe worker pool
@@ -336,6 +358,7 @@ class HlsDownloader implements BaseDownloader {
     if (!_isPaused) {
       if (totalSize > 0) {
         task.totalBytes = totalSize;
+        _totalBytesLocked = true;
       } else {
         task.totalBytes = -1;
       }
@@ -370,8 +393,11 @@ class HlsDownloader implements BaseDownloader {
     task.state = DownloadState.idle;
     task.errorMessage = null;
     task.downloadedBytes = 0;
-    if (task.totalBytes <= 0) {
+    if (task.totalBytes > 0) {
+      _totalBytesLocked = true;
+    } else {
       task.totalBytes = -1;
+      _totalBytesLocked = false;
     }
     _needsRefresh = false;
     _staleSegmentIndexes.clear();
@@ -535,6 +561,21 @@ class HlsDownloader implements BaseDownloader {
   Future<Uint8List?> _loadEncryptionKey(HlsPlaylist playlist) async {
     final key = playlist.encryptionKey;
     if (key == null || !key.isAes128) return null;
+
+    // 1st attempt: WebView binary fetch (bypasses Cloudflare WAF).
+    if (task.fetchBinaryViaWebView != null) {
+      try {
+        final data = await task.fetchBinaryViaWebView!(key.uri.toString());
+        if (data != null && data.length == 16) {
+          print('[HlsDownloader] WebView binary fetch key OK (16 bytes)');
+          return Uint8List.fromList(data);
+        }
+      } catch (e) {
+        print('[HlsDownloader] WebView binary fetch key threw: $e');
+      }
+    }
+
+    // 2nd attempt: Dart HTTP client.
     final request = http.Request('GET', key.uri);
     request.headers.addAll(_requestHeaders(key.uri));
     final response = await client
@@ -681,12 +722,12 @@ class HlsDownloader implements BaseDownloader {
             '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext',
           );
           await file.writeAsBytes(data);
-          if (!isInit && !_countedSegmentIndexes.contains(index)) {
+          if (!_totalBytesLocked &&
+              !isInit &&
+              !_countedSegmentIndexes.contains(index)) {
             _countedSegmentIndexes.add(index);
-            if (task.totalBytes <= 0) {
-              if (task.totalBytes < 0) task.totalBytes = 0;
-              task.totalBytes += data.length;
-            }
+            if (task.totalBytes < 0) task.totalBytes = 0;
+            task.totalBytes += data.length;
           }
           task.downloadedBytes += data.length;
           if (task.totalBytes > 0 && task.downloadedBytes > task.totalBytes) {
@@ -736,15 +777,14 @@ class HlsDownloader implements BaseDownloader {
         }
 
         final contentLength = response.contentLength;
-        if (contentLength != null &&
+        if (!_totalBytesLocked &&
+            contentLength != null &&
             contentLength > 0 &&
             !isInit &&
             !_countedSegmentIndexes.contains(index)) {
           _countedSegmentIndexes.add(index);
-          if (task.totalBytes <= 0) {
-            if (task.totalBytes < 0) task.totalBytes = 0;
-            task.totalBytes += contentLength;
-          }
+          if (task.totalBytes < 0) task.totalBytes = 0;
+          task.totalBytes += contentLength;
         }
 
         final ext = isInit

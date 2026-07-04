@@ -21,6 +21,8 @@ void showSavedPagesSheet(
   required BrowserLibrary library,
   required Future<void> Function(BrowserLibrary) onSaveLibrary,
   required Future<void> Function(String url) onLoadUrl,
+  required Future<void> Function() onSaveCurrentPage,
+  required void Function() onReopen,
 }) {
   showLibrarySheet<SavedPage>(
     context,
@@ -41,6 +43,16 @@ void showSavedPagesSheet(
       );
       final file = File(item.localPath);
       if (await file.exists()) await file.delete();
+      onReopen();
     },
+    action: TextButton.icon(
+      icon: const Icon(Icons.download_done),
+      label: const Text('Save Page'),
+      onPressed: () async {
+        Navigator.pop(context);
+        await onSaveCurrentPage();
+        onReopen();
+      },
+    ),
   );
 }

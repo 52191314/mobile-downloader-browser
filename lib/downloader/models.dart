@@ -45,10 +45,10 @@ class DownloadChunk {
   };
 
   factory DownloadChunk.fromJson(Map<String, dynamic> json) => DownloadChunk(
-    index: json['index'] as int,
-    start: json['start'] as int,
-    end: json['end'] as int,
-    bytesDownloaded: json['bytesDownloaded'] as int,
+    index: (json['index'] as num?)?.toInt() ?? 0,
+    start: (json['start'] as num?)?.toInt() ?? 0,
+    end: (json['end'] as num?)?.toInt() ?? 0,
+    bytesDownloaded: (json['bytesDownloaded'] as num?)?.toInt() ?? 0,
     isCompleted: json['isCompleted'] as bool? ?? false,
   );
 }
@@ -171,38 +171,86 @@ class DownloadTask implements Comparable<DownloadTask> {
     'exportDirectoryUri': exportDirectoryUri,
   };
 
-  factory DownloadTask.fromJson(Map<String, dynamic> json) => DownloadTask(
-    id: json['id'] as String,
-    url: json['url'] as String,
-    sourcePageUrl: json['sourcePageUrl'] as String?,
-    savePath: json['savePath'] as String,
-    tempDir: json['tempDir'] as String,
-    expectedHash: json['expectedHash'] as String?,
-    contentType: json['contentType'] as String?,
-    headers: json['headers'] != null
-        ? Map<String, String>.from(json['headers'] as Map)
-        : null,
-    priority: DownloadPriority.values.byName(json['priority'] as String),
-    state: DownloadState.values.byName(json['state'] as String),
-    totalBytes: json['totalBytes'] as int,
-    downloadedBytes: json['downloadedBytes'] as int,
-    speed: (json['speed'] as num?)?.toDouble() ?? 0.0,
-    actualHash: json['actualHash'] as String?,
-    errorMessage: json['errorMessage'] as String?,
-    publicUri: json['publicUri'] as String?,
-    publicPathLabel: json['publicPathLabel'] as String?,
-    publishErrorMessage: json['publishErrorMessage'] as String?,
-    etag: json['etag'] as String?,
-    lastModified: json['lastModified'] as String?,
-    chunks: (json['chunks'] as List<dynamic>)
-        .map((c) => DownloadChunk.fromJson(c as Map<String, dynamic>))
-        .toList(),
-    createdAt: json['createdAt'] != null
-        ? DateTime.parse(json['createdAt'] as String)
-        : DateTime.now(),
-    exportUri: json['exportUri'] as String?,
-    exportDirectoryUri: json['exportDirectoryUri'] as String?,
-  );
+  factory DownloadTask.fromJson(Map<String, dynamic> json) {
+    String optString(String key, String defaultValue) {
+      final v = json[key];
+      if (v == null) return defaultValue;
+      return v.toString();
+    }
+
+    int optInt(String key, int defaultValue) {
+      final v = json[key];
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? defaultValue;
+      return defaultValue;
+    }
+
+    final id = optString('id', '');
+    final url = optString('url', '');
+    final savePath = optString('savePath', '');
+    final tempDir = optString('tempDir', '');
+    final priorityStr = optString('priority', 'medium');
+    final stateStr = optString('state', 'paused');
+    final totalBytes = optInt('totalBytes', 0);
+    final downloadedBytes = optInt('downloadedBytes', 0);
+
+    final chunksList = json['chunks'];
+    final chunks = <DownloadChunk>[];
+    if (chunksList is List) {
+      for (final c in chunksList) {
+        if (c is Map<String, dynamic>) {
+          chunks.add(DownloadChunk.fromJson(c));
+        } else if (c is Map) {
+          chunks.add(DownloadChunk.fromJson(Map<String, dynamic>.from(c)));
+        }
+      }
+    }
+
+    DownloadPriority priority;
+    try {
+      priority = DownloadPriority.values.byName(priorityStr);
+    } catch (_) {
+      priority = DownloadPriority.medium;
+    }
+
+    DownloadState state;
+    try {
+      state = DownloadState.values.byName(stateStr);
+    } catch (_) {
+      state = DownloadState.paused;
+    }
+
+    return DownloadTask(
+      id: id,
+      url: url,
+      sourcePageUrl: json['sourcePageUrl'] as String?,
+      savePath: savePath,
+      tempDir: tempDir,
+      expectedHash: json['expectedHash'] as String?,
+      contentType: json['contentType'] as String?,
+      headers: json['headers'] != null
+          ? Map<String, String>.from(json['headers'] as Map)
+          : null,
+      priority: priority,
+      state: state,
+      totalBytes: totalBytes,
+      downloadedBytes: downloadedBytes,
+      speed: (json['speed'] as num?)?.toDouble() ?? 0.0,
+      actualHash: json['actualHash'] as String?,
+      errorMessage: json['errorMessage'] as String?,
+      publicUri: json['publicUri'] as String?,
+      publicPathLabel: json['publicPathLabel'] as String?,
+      publishErrorMessage: json['publishErrorMessage'] as String?,
+      etag: json['etag'] as String?,
+      lastModified: json['lastModified'] as String?,
+      chunks: chunks,
+      createdAt: json['createdAt'] != null
+          ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
+          : DateTime.now(),
+      exportUri: json['exportUri'] as String?,
+      exportDirectoryUri: json['exportDirectoryUri'] as String?,
+    );
+  }
 
   @override
   int compareTo(DownloadTask other) {
@@ -214,6 +262,28 @@ class DownloadTask implements Comparable<DownloadTask> {
     // Creation time is ascending (older first = FIFO)
     return createdAt.compareTo(other.createdAt);
   }
+}
+
+/// Fields by which a list of [DownloadTask] can be sorted.
+/// Used by [DownloadQueue.queryTasks].
+enum TaskSortField {
+  /// Sort by [DownloadTask.createdAt] (newest first).
+  date,
+
+  /// Sort by the filename portion of [DownloadTask.savePath].
+  name,
+
+  /// Sort by [DownloadTask.totalBytes] (largest first).
+  size,
+
+  /// Sort by [DownloadTask.priority] (highest priority first).
+  priority,
+
+  /// Sort by [DownloadTask.state] (terminal states last).
+  state,
+
+  /// Sort by [DownloadTask.speed] (fastest first).
+  speed,
 }
 
 class PublishedDownload {

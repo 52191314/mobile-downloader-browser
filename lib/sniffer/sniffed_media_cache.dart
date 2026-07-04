@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,7 +15,8 @@ import 'models/sniffed_media.dart';
 /// detected by one tab suppress duplicates in all other tabs. The
 /// per-engine set, list, and timers are instance state.
 class SniffedMediaCache {
-  final List<SniffedMedia> detectedMedia = [];
+  late final List<SniffedMedia> detectedMedia;
+  List<SniffedMedia>? _cachedUnmodifiable;
   final Set<String> urlCache = {};
   final Map<String, Timer> evictionTimers = {};
 
@@ -36,14 +38,18 @@ class SniffedMediaCache {
   SniffedMediaCache({
     required this.mediaChangedController,
     this.maxDetectedMedia = 200,
-  });
+  }) {
+    detectedMedia = MutationAwareList(() {
+      _cachedUnmodifiable = null;
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Accessors
   // ---------------------------------------------------------------------------
 
   List<SniffedMedia> get unmodifiableDetectedMedia =>
-      List.unmodifiable(detectedMedia);
+      _cachedUnmodifiable ??= List.unmodifiable(detectedMedia);
 
   bool get capReached => detectedMedia.length >= maxDetectedMedia;
 
@@ -250,6 +256,12 @@ class SniffedMediaCache {
         final media = _mediaFromCacheItem(item);
         if (media == null) continue;
         detectedMedia.add(media);
+        // Repopulate both the per-engine and global cross-tab dedup caches
+        // so that restored entries are not duplicated on re-sniff
+        // after a clear-and-reload cycle.
+        final norm = normalizeUrl(media.url);
+        urlCache.add(norm);
+        _globalUrlCache.add(norm);
         added++;
       }
       if (added > 0) {
@@ -350,5 +362,55 @@ class SniffedMediaCache {
       timer.cancel();
     }
     evictionTimers.clear();
+  }
+}
+
+class MutationAwareList<E> extends ListBase<E> {
+  final List<E> _inner = [];
+  final VoidCallback onMutated;
+
+  MutationAwareList(this.onMutated);
+
+  @override
+  int get length => _inner.length;
+
+  @override
+  set length(int newLength) {
+    _inner.length = newLength;
+    onMutated();
+  }
+
+  @override
+  E operator [](int index) => _inner[index];
+
+  @override
+  void operator []=(int index, E value) {
+    _inner[index] = value;
+    onMutated();
+  }
+
+  @override
+  void add(E element) {
+    _inner.add(element);
+    onMutated();
+  }
+
+  @override
+  void addAll(Iterable<E> iterable) {
+    _inner.addAll(iterable);
+    onMutated();
+  }
+
+  @override
+  bool remove(Object? element) {
+    final res = _inner.remove(element);
+    if (res) onMutated();
+    return res;
+  }
+
+  @override
+  void clear() {
+    _inner.clear();
+    onMutated();
   }
 }

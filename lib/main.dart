@@ -120,14 +120,14 @@ ThemeData _buildTheme() {
       shape: const CircularNotchedRectangle(),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(
-      color: colorScheme.primary,
+      color: AuroraColors.accent,
       linearTrackColor: AuroraColors.surfaceVariant,
     ),
     sliderTheme: SliderThemeData(
-      activeTrackColor: colorScheme.primary,
+      activeTrackColor: AuroraColors.accent,
       inactiveTrackColor: AuroraColors.surfaceVariant,
-      thumbColor: colorScheme.primary,
-      overlayColor: colorScheme.primary.withValues(alpha: 0.14),
+      thumbColor: AuroraColors.accent,
+      overlayColor: AuroraColors.accent.withValues(alpha: 0.14),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: AuroraColors.dockSurface,
@@ -162,6 +162,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final TextEditingController _folderController;
   late final TextEditingController _adblockSourceController;
   late final TextEditingController _customSearchController;
+  late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final PublicDownloadsService _publicDownloadsService =
       const PublicDownloadsService();
@@ -199,6 +200,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _driveSyncService = widget.driveSyncService ?? DriveSyncService();
     _browserController = widget.browserController ?? _createBrowserController();
     _urlController = TextEditingController();
+    _libraryUpdateNotifier = ValueNotifier<int>(0);
     try {
       _folderController = TextEditingController(
         text: _driveSyncService.state.destinationFolderName,
@@ -258,6 +260,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _queueSubscription?.cancel();
     _driveSubscription?.cancel();
     _urlController.dispose();
+    _libraryUpdateNotifier.dispose();
     _folderController.dispose();
     _adblockSourceController.dispose();
     _customSearchController.dispose();
@@ -352,6 +355,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onForceMergeTask: (task) =>
                                 _downloadQueue.forceMergeTask(task.id),
                             speedLimitKbps: _speedLimitKbps,
+                            onOpenUrlInBrowser: _openUrlInBrowser,
                           ),
                         ),
                       ),
@@ -367,6 +371,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             downloadQueue: _downloadQueue,
                             settings: _settings,
                             onSettingsChanged: _updateSettings,
+                            libraryUpdateNotifier: _libraryUpdateNotifier,
                             onOpenQueue: () =>
                                 setState(() { _currentTabIndex = 0; _visitedMainTabs.add(0); }),
                             onOpenSettings: () =>
@@ -390,6 +395,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             customSearchController: _customSearchController,
                             settings: _settings,
                             onSettingsChanged: _updateSettings,
+                            downloadQueue: _downloadQueue,
+                            libraryUpdateNotifier: _libraryUpdateNotifier,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -476,6 +483,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       isTorrent ? 'Added torrent to queue.' : 'Added $fileName to queue.',
     );
     if (mounted) setState(() {});
+  }
+
+  void _openUrlInBrowser(String url) {
+    setState(() {
+      _currentTabIndex = 1;
+      _visitedMainTabs.add(1);
+    });
+    _browserController.requestOpenUrl(url);
   }
 
   Future<Directory> _completedWorkspaceDirectory() async {

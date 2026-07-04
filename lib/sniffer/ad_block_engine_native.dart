@@ -97,11 +97,44 @@ class AdBlockRule {
 class AdBlockParseResult {
   final List<AdBlockRule> networkRules;
   final List<CosmeticAdRule> cosmeticRules;
+  final List<ScriptletRule> scriptletRules;
+  final List<CssInjectionRule> cssInjectionRules;
 
   const AdBlockParseResult({
     required this.networkRules,
     required this.cosmeticRules,
+    this.scriptletRules = const [],
+    this.cssInjectionRules = const [],
   });
+}
+
+class ScriptletRule {
+  final String host;
+  final String name;
+  final List<String> args;
+
+  const ScriptletRule({
+    this.host = '',
+    required this.name,
+    this.args = const [],
+  });
+}
+
+class CssInjectionRule {
+  final String host;
+  final String css;
+
+  const CssInjectionRule({
+    this.host = '',
+    required this.css,
+  });
+}
+
+class _ScriptletParseResult {
+  final String name;
+  final List<String> args;
+
+  const _ScriptletParseResult({required this.name, this.args = const []});
 }
 
 class AdBlockEngine {
@@ -111,6 +144,8 @@ class AdBlockEngine {
   final bool enabled;
   final List<AdBlockRule> rules;
   final List<CosmeticAdRule> cosmeticRules;
+  final List<ScriptletRule> scriptletRules;
+  final List<CssInjectionRule> cssInjectionRules;
   final List<AdblockSourceStatus> sourceStatuses;
   final AdBlockNativeEngine? _nativeEngine;
   final String? rawRulesText;
@@ -119,6 +154,8 @@ class AdBlockEngine {
     required this.enabled,
     required this.rules,
     this.cosmeticRules = const [],
+    this.scriptletRules = const [],
+    this.cssInjectionRules = const [],
     this.sourceStatuses = const [],
     this.rawRulesText,
   }) : _nativeEngine = (_bindings != null && enabled)
@@ -129,7 +166,12 @@ class AdBlockEngine {
       if (rawRulesText != null) {
         nativeEngine.loadRules(rawRulesText!);
       } else {
-        final rulesText = serializeRules(rules, cosmeticRules: cosmeticRules);
+        final rulesText = serializeRules(
+          rules,
+          cosmeticRules: cosmeticRules,
+          scriptletRules: scriptletRules,
+          cssInjectionRules: cssInjectionRules,
+        );
         nativeEngine.loadRules(rulesText);
       }
     }
@@ -138,6 +180,8 @@ class AdBlockEngine {
   static String serializeRules(
     List<AdBlockRule> rules, {
     List<CosmeticAdRule> cosmeticRules = const [],
+    List<ScriptletRule> scriptletRules = const [],
+    List<CssInjectionRule> cssInjectionRules = const [],
   }) {
     final sb = StringBuffer();
     for (final rule in rules) {
@@ -161,6 +205,26 @@ class AdBlockEngine {
       sb.write(rule.selector);
       sb.write('\n');
     }
+    for (final rule in scriptletRules) {
+      if (rule.host.isNotEmpty) {
+        sb.write(rule.host);
+      }
+      sb.write('#%#//scriptlet(\'');
+      sb.write(rule.name);
+      for (final arg in rule.args) {
+        sb.write('\', \'');
+        sb.write(arg);
+      }
+      sb.write('\')\n');
+    }
+    for (final rule in cssInjectionRules) {
+      if (rule.host.isNotEmpty) {
+        sb.write(rule.host);
+      }
+      sb.write('#\$#');
+      sb.write(rule.css);
+      sb.write('\n');
+    }
     return sb.toString();
   }
 
@@ -170,6 +234,8 @@ class AdBlockEngine {
       enabled: enabled,
       rules: parsed.networkRules,
       cosmeticRules: parsed.cosmeticRules,
+      scriptletRules: parsed.scriptletRules,
+      cssInjectionRules: parsed.cssInjectionRules,
       rawRulesText: _builtInRules,
     );
   }
@@ -191,6 +257,8 @@ class AdBlockEngine {
         ...builtIn.cosmeticRules,
         ...manualCosmeticRules,
       ];
+      final scriptlets = <ScriptletRule>[...builtIn.scriptletRules];
+      final cssInjections = <CssInjectionRule>[...builtIn.cssInjectionRules];
       final statuses = <AdblockSourceStatus>[];
 
       // Add manual cosmetic rules to rawSb
@@ -225,6 +293,8 @@ class AdBlockEngine {
           enabled: enabled,
           rules: rules,
           cosmeticRules: cosmetics,
+          scriptletRules: scriptlets,
+          cssInjectionRules: cssInjections,
           sourceStatuses: [
             for (final source in sources)
               AdblockSourceStatus(
@@ -267,6 +337,8 @@ class AdBlockEngine {
             final parsed = await _parseFilterTextResponsive(response.body);
             rules.addAll(parsed.networkRules);
             cosmetics.addAll(parsed.cosmeticRules);
+            scriptlets.addAll(parsed.scriptletRules);
+            cssInjections.addAll(parsed.cssInjectionRules);
             rawSb.writeln(response.body);
             statuses.add(
               AdblockSourceStatus(
@@ -308,6 +380,8 @@ class AdBlockEngine {
         enabled: enabled,
         rules: rules,
         cosmeticRules: cosmetics,
+        scriptletRules: scriptlets,
+        cssInjectionRules: cssInjections,
         sourceStatuses: statuses,
         rawRulesText: rawSb.toString(),
       );
@@ -389,6 +463,64 @@ class AdBlockEngine {
     return false;
   }
 
+  /// Returns all scriptlet rules that apply to the given [host].
+  List<ScriptletRule> getScriptletsForHost(String host) {
+    if (!enabled) return const [];
+    final normalizedHost = host.toLowerCase();
+    final result = <ScriptletRule>[];
+    for (final rule in scriptletRules) {
+      if (rule.host.isEmpty) {
+        // Global scriptlet — applies to all pages
+        result.add(rule);
+      } else {
+        final ruleHost = rule.host.toLowerCase();
+        if (normalizedHost == ruleHost ||
+            normalizedHost.endsWith('.$ruleHost')) {
+          result.add(rule);
+        }
+      }
+    }
+    return result;
+  }
+
+  /// Returns combined cosmetic CSS for the given [host], including
+  /// both standard cosmetic selectors and CSS injection rules.
+  String getCosmeticCssForHost(String host) {
+    if (!enabled) return '';
+    final normalizedHost = host.toLowerCase();
+    final selectors = <String>[];
+    final cssInjections = <String>[];
+
+    // Collect standard cosmetic rules
+    for (final rule in cosmeticRules) {
+      final ruleHost = rule.host.toLowerCase();
+      if (ruleHost.isEmpty ||
+          normalizedHost == ruleHost ||
+          normalizedHost.endsWith('.$ruleHost')) {
+        selectors.add(rule.selector);
+      }
+    }
+
+    // Collect CSS injection rules
+    for (final rule in cssInjectionRules) {
+      final ruleHost = rule.host.toLowerCase();
+      if (ruleHost.isEmpty ||
+          normalizedHost == ruleHost ||
+          normalizedHost.endsWith('.$ruleHost')) {
+        cssInjections.add(rule.css);
+      }
+    }
+
+    final parts = <String>[];
+    if (selectors.isNotEmpty) {
+      parts.add('${selectors.join(",")}{display:none!important}');
+    }
+    if (cssInjections.isNotEmpty) {
+      parts.addAll(cssInjections);
+    }
+    return parts.join('\n');
+  }
+
   static bool looksLikeAdMediaUrl(String rawUrl) {
     final normalized = rawUrl.toLowerCase();
     if (normalized.contains('/vast') ||
@@ -423,6 +555,8 @@ class AdBlockEngine {
   static AdBlockParseResult parseFilterText(String text) {
     final network = <AdBlockRule>[];
     final cosmetics = <CosmeticAdRule>[];
+    final scriptlets = <ScriptletRule>[];
+    final cssInjections = <CssInjectionRule>[];
     for (final rawLine in text.split(RegExp(r'\r?\n'))) {
       final line = rawLine.trim();
       if (line.isEmpty || line.startsWith('!') || line.startsWith('[')) {
@@ -433,6 +567,34 @@ class AdBlockEngine {
       if (cosmetic != null) {
         cosmetics.add(cosmetic);
         continue;
+      }
+
+      // Parse scriptlet rules (#%#//scriptlet(...))
+      final scriptletMatch =
+          RegExp(r'^([^#]*)#%#\/\/scriptlet\((.+)\)$').firstMatch(line);
+      if (scriptletMatch != null) {
+        final host = scriptletMatch.group(1)?.trim() ?? '';
+        final argsStr = scriptletMatch.group(2)?.trim() ?? '';
+        if (argsStr.isNotEmpty) {
+          final nameAndArgs = _parseScriptletArgs(argsStr);
+          scriptlets.add(ScriptletRule(
+            host: host,
+            name: nameAndArgs.name,
+            args: nameAndArgs.args,
+          ));
+          continue;
+        }
+      }
+
+      // Parse CSS injection rules (#$#)
+      final cssInjectIndex = line.indexOf('#\$#');
+      if (cssInjectIndex != -1 && cssInjectIndex < line.length - 3) {
+        final host = line.substring(0, cssInjectIndex).trim();
+        final css = line.substring(cssInjectIndex + 3).trim();
+        if (css.isNotEmpty && (host.isEmpty || !host.contains(','))) {
+          cssInjections.add(CssInjectionRule(host: host, css: css));
+          continue;
+        }
       }
 
       final hostsRule = _parseHostsRule(line);
@@ -446,7 +608,12 @@ class AdBlockEngine {
       final rule = _parseRuleBody(body, isException: isException);
       if (rule != null) network.add(rule);
     }
-    return AdBlockParseResult(networkRules: network, cosmeticRules: cosmetics);
+    return AdBlockParseResult(
+      networkRules: network,
+      cosmeticRules: cosmetics,
+      scriptletRules: scriptlets,
+      cssInjectionRules: cssInjections,
+    );
   }
 
   static AdBlockRule? _parseHostsRule(String line) {
@@ -471,6 +638,31 @@ class AdBlockEngine {
     final selector = line.substring(index + 2).trim();
     if (host.isEmpty || selector.isEmpty || host.contains(',')) return null;
     return CosmeticAdRule(host: host, selector: selector);
+  }
+
+  static _ScriptletParseResult _parseScriptletArgs(String argsStr) {
+    // Parse comma-separated quoted args: 'name', 'arg1', 'arg2'
+    final args = <String>[];
+    final regex = RegExp(r"'(?:[^'\\]|\\.)*'");
+    for (final match in regex.allMatches(argsStr)) {
+      var arg = match.group(0) ?? '';
+      if (arg.startsWith("'") && arg.endsWith("'")) {
+        arg = arg.substring(1, arg.length - 1);
+      }
+      args.add(arg);
+    }
+    if (args.isEmpty) {
+      // Split by comma as fallback
+      final parts = argsStr.split(',');
+      if (parts.isNotEmpty) {
+        for (var part in parts) {
+          part = part.trim().replaceAll(RegExp(r"^'|'$"), '');
+          if (part.isNotEmpty) args.add(part);
+        }
+      }
+    }
+    final name = args.isNotEmpty ? args.removeAt(0) : argsStr;
+    return _ScriptletParseResult(name: name, args: args);
   }
 
   static AdBlockRule? _parseRuleBody(String body, {required bool isException}) {

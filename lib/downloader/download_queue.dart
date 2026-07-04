@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'download_splitter.dart';
 import 'file_combiner.dart';
@@ -15,6 +16,14 @@ import '../platform/download_foreground_service.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
+}
+
+/// Internal pair for relevance-scored search results used by
+/// [DownloadQueue.searchTasks].
+final class _ScoredTask {
+  final DownloadTask task;
+  final int score;
+  const _ScoredTask({required this.task, required this.score});
 }
 
 class DownloadQueue {
@@ -142,9 +151,10 @@ class DownloadQueue {
       // Duplicate prevention: skip if a task with the same URL is already
       // in the queue (idle, downloading, or paused). Completed/failed tasks
       // don't block re-downloading the same URL.
+      final normalizedUrl = _normalizeUrl(task.url);
       final existing = _tasks.values.where(
         (t) =>
-            t.url == task.url &&
+            _normalizeUrl(t.url) == normalizedUrl &&
             (t.state == DownloadState.idle ||
                 t.state == DownloadState.downloading ||
                 t.state == DownloadState.paused),
@@ -531,7 +541,8 @@ class DownloadQueue {
       // Persist all tasks, including completed history, so the queue survives
       // app restarts and ADB installs.
       final data = _tasks.values.map((t) => t.toJson()).toList(growable: false);
-      await tempFile.writeAsString(jsonEncode(data), flush: true);
+      final jsonString = await Isolate.run(() => jsonEncode(data));
+      await tempFile.writeAsString(jsonString, flush: true);
       if (await backupFile.exists()) {
         await backupFile.delete();
       }
@@ -564,15 +575,19 @@ class DownloadQueue {
       }
       for (final item in decoded) {
         if (item is! Map) continue;
-        final task = DownloadTask.fromJson(Map<String, dynamic>.from(item));
-        // Reset in-flight states to idle so _schedule() re-queues them.
-        // Without this, tasks saved as 'downloading' are never re-started
-        // because addTask only puts 'idle' tasks into the execution queue.
-        if (task.state == DownloadState.downloading ||
-            task.state == DownloadState.paused) {
-          task.state = DownloadState.idle;
+        try {
+          final task = DownloadTask.fromJson(Map<String, dynamic>.from(item));
+          // Reset in-flight states to idle so _schedule() re-queues them.
+          // Without this, tasks saved as 'downloading' are never re-started
+          // because addTask only puts 'idle' tasks into the execution queue.
+          if (task.state == DownloadState.downloading ||
+              task.state == DownloadState.paused) {
+            task.state = DownloadState.idle;
+          }
+          addTask(task);
+        } catch (e, s) {
+          _logError('Skipped loading corrupted task in queue file', e, s);
         }
-        addTask(task);
         // Yield to the event loop between tasks so the UI can process
         // frames and download updates even during a large queue restore.
         await Future.delayed(Duration.zero);
@@ -583,6 +598,9 @@ class DownloadQueue {
     } finally {
       _isLoading = false;
     }
+
+    // Recover any tasks from previous corrupt backups
+    await _recoverCorruptQueueFiles(path);
   }
 
   void _schedule() {
@@ -709,9 +727,30 @@ class DownloadQueue {
 
   DownloadTask? getTask(String id) => _tasks[id];
 
+  static String _normalizeUrl(String url) {
+    // Matches SniffedMediaCache.normalizeUrl — strips common tracking params.
+    const trackingParams = {
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'msclkid', 'ref', 'source', 'si', 'pi',
+      '_hsenc', '_hsmi', 'trk',
+    };
+    if (url.startsWith('blob:')) return url;
+    try {
+      final uri = Uri.parse(url);
+      final params = Map<String, List<String>>.from(uri.queryParametersAll);
+      params.removeWhere((k, _) => trackingParams.contains(k.toLowerCase()));
+      return uri
+          .replace(queryParameters: params.isEmpty ? null : params)
+          .toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
   bool urlExists(String url, {bool activeOnly = false}) {
+    final normalized = _normalizeUrl(url);
     return _tasks.values.any((t) {
-      if (t.url != url) return false;
+      if (_normalizeUrl(t.url) != normalized) return false;
       if (activeOnly) {
         return t.state == DownloadState.idle ||
             t.state == DownloadState.downloading ||
@@ -719,6 +758,236 @@ class DownloadQueue {
       }
       return true;
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search, sort, and filter helpers
+  // ---------------------------------------------------------------------------
+
+  /// Convenience: all tasks whose state is [DownloadState.completed].
+  List<DownloadTask> get completedTasks =>
+      _tasks.values.where((t) => t.state == DownloadState.completed).toList();
+
+  /// Convenience: all tasks whose state is [DownloadState.failed].
+  List<DownloadTask> get failedTasks =>
+      _tasks.values.where((t) => t.state == DownloadState.failed).toList();
+
+  /// Convenience: all tasks that are currently active (downloading), queued
+  /// (idle), or paused — i.e. not in a terminal state.
+  List<DownloadTask> get activeAndQueuedTasks => _tasks.values
+      .where((t) => t.state != DownloadState.completed &&
+          t.state != DownloadState.failed)
+      .toList();
+
+  /// Returns the filename portion of a task's [savePath], URL-decoded.
+  /// Matching is case-insensitive; the query is split into space-separated
+  /// tokens and every token must match at least one searched field.
+  ///
+  /// Searched fields and the weight of each hit:
+  ///  1. URL (highest weight — direct match)
+  ///  2. Filename (medium weight)
+  ///  3. Content-type label (low weight)
+  ///  4. Source page title or URL (low weight)
+  ///  5. Error-message keywords when [includeFailedDetails] is true
+  ///
+  /// Returns results sorted by relevance (best match first).
+  List<DownloadTask> searchTasks(
+    String query, {
+    bool includeFailedDetails = false,
+    Iterable<DownloadTask>? targetTasks,
+  }) {
+    final trimmed = query.trim();
+    final tasksSource = targetTasks ?? _tasks.values;
+    if (trimmed.isEmpty) return tasksSource.toList();
+
+    final tokens = trimmed.toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    if (tokens.isEmpty) return tasksSource.toList();
+
+    final scored = <_ScoredTask>[];
+
+    for (final task in tasksSource) {
+      int score = 0;
+      final urlLower = task.url.toLowerCase();
+      final nameLower = _fileName(task.savePath).toLowerCase();
+      final ext = _extensionFromUrl(task.url);
+      final fileExt = _extensionFromUrl(task.savePath);
+      final contentTypeLower = (task.contentType ?? '').toLowerCase();
+      final sourcePageLower = (task.sourcePageUrl ?? '').toLowerCase();
+      final errorLower = includeFailedDetails
+          ? (task.errorMessage ?? '').toLowerCase()
+          : '';
+
+      for (final token in tokens) {
+        // URL match — strongest signal
+        if (urlLower.contains(token)) {
+          // Prefer domain+path matches over query-param matches
+          if (urlLower.startsWith('https://$token') ||
+              urlLower.startsWith('http://$token') ||
+              urlLower.contains('/$token/') ||
+              urlLower.contains('.$token/')) {
+            score += 50;
+          } else {
+            score += 30;
+          }
+        }
+        // Filename match
+        if (nameLower.contains(token)) {
+          score += 20;
+        }
+        // Extension match (e.g. "mp4", "m3u8")
+        if (ext != null && ext == '.$token') score += 15;
+        if (fileExt != null && fileExt == '.$token') score += 15;
+        // Content-type match
+        if (contentTypeLower.contains(token)) score += 10;
+        // Source page match
+        if (sourcePageLower.contains(token)) score += 8;
+        // Error message match (when explicitly opted in)
+        if (includeFailedDetails && errorLower.contains(token)) score += 5;
+      }
+
+      if (score > 0) {
+        scored.add(_ScoredTask(task: task, score: score));
+      }
+    }
+
+    // Sort by score descending, then by date descending for ties
+    scored.sort((a, b) {
+      final c = b.score.compareTo(a.score);
+      if (c != 0) return c;
+      return b.task.createdAt.compareTo(a.task.createdAt);
+    });
+    return scored.map((s) => s.task).toList();
+  }
+
+  /// Returns a new list of tasks that match all of the supplied criteria.
+  /// When a parameter is `null` or empty that criterion is not applied.
+  ///
+  /// Parameters are AND-ed together (all must match).  Pass `states` to
+  /// constrain the result to a specific set of [DownloadState] values.
+  /// Pass [query] to perform full-text search (delegates to [searchTasks],
+  /// then the other filters are applied on top).
+  ///
+  /// When [sortBy] is set the result is sorted accordingly; otherwise the
+  /// default ordering (priority descending, then creation date ascending)
+  /// used by [DownloadTask.compareTo] is preserved.
+  List<DownloadTask> queryTasks({
+    Set<DownloadState>? states,
+    String? query,
+    TaskSortField? sortBy,
+    bool sortDescending = true,
+    DateTime? fromDate,
+    DateTime? toDate,
+    int? minSize,
+    int? maxSize,
+    String? urlFilter,
+    bool includeFailedDetails = false,
+  }) {
+      Iterable<DownloadTask> results = _tasks.values;
+
+    // 1. State filter
+    if (states != null && states.isNotEmpty) {
+      results = results.where((t) => states.contains(t.state));
+    }
+
+    // 2. Date range
+    if (fromDate != null) {
+      results = results.where((t) => !t.createdAt.isBefore(fromDate));
+    }
+    if (toDate != null) {
+      results =
+          results.where((t) => !t.createdAt.isAfter(toDate.add(const Duration(days: 1))));
+    }
+
+    // 3. Size range
+    if (minSize != null) {
+      results = results.where((t) => t.totalBytes >= minSize);
+    }
+    if (maxSize != null) {
+      results = results.where((t) => t.totalBytes <= maxSize);
+    }
+
+    // 4. URL exact-match filter (normalized)
+    if (urlFilter != null && urlFilter.isNotEmpty) {
+      final normalized = _normalizeUrl(urlFilter);
+      results = results.where((t) => _normalizeUrl(t.url) == normalized);
+    }
+
+    // 5. Full-text search (runs after hard filters to reduce work)
+    if (query != null && query.trim().isNotEmpty) {
+      results = searchTasks(
+        query,
+        includeFailedDetails: includeFailedDetails,
+        targetTasks: results,
+      );
+    }
+
+    // 6. Sort
+    final list = results.toList();
+    if (sortBy != null) {
+      _sortTasks(list, sortBy, descending: sortDescending);
+    }
+
+    return list;
+  }
+
+  /// Sorts [tasks] in-place by [field].
+  static void _sortTasks(
+    List<DownloadTask> tasks,
+    TaskSortField field, {
+    bool descending = true,
+  }) {
+    tasks.sort((a, b) {
+      int c;
+      switch (field) {
+        case TaskSortField.date:
+          c = a.createdAt.compareTo(b.createdAt);
+        case TaskSortField.name:
+          c = _fileName(a.savePath)
+              .toLowerCase()
+              .compareTo(_fileName(b.savePath).toLowerCase());
+        case TaskSortField.size:
+          final aSize = a.totalBytes;
+          final bSize = b.totalBytes;
+          if (aSize < 0 && bSize < 0) {
+            c = 0;
+          } else if (aSize < 0) {
+            c = 1;
+          } else if (bSize < 0) {
+            c = -1;
+          } else {
+            c = aSize.compareTo(bSize);
+          }
+        case TaskSortField.priority:
+          c = a.priority.compareTo(b.priority);
+        case TaskSortField.state:
+          c = a.state.index.compareTo(b.state.index);
+        case TaskSortField.speed:
+          c = a.speed.compareTo(b.speed);
+      }
+      return descending ? -c : c;
+    });
+  }
+
+  /// Returns the last path segment of [path] (URL or file path).
+  static String _fileName(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    return normalized.split('/').last;
+  }
+
+  /// Returns the lowercased file extension (including the dot) from a URL
+  /// or file path, or `null` when there is no recognizable extension.
+  static String? _extensionFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final path = uri.path;
+      final slash = path.lastIndexOf('/');
+      final lastSegment = slash >= 0 ? path.substring(slash + 1) : path;
+      final dot = lastSegment.lastIndexOf('.');
+      if (dot <= 0 || dot == lastSegment.length - 1) return null;
+      return lastSegment.substring(dot).toLowerCase();
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Removes oldest completed/failed tasks when the history limit is exceeded.
@@ -950,6 +1219,51 @@ class DownloadQueue {
     }
   }
 
+  Future<void> _recoverCorruptQueueFiles(String path) async {
+    try {
+      final file = File(path);
+      final parentDir = file.parent;
+      if (!await parentDir.exists()) return;
+      final baseName = p.basename(path);
+      final list = parentDir.list();
+      int recoveredCount = 0;
+      await for (final entity in list) {
+        if (entity is File) {
+          final name = p.basename(entity.path);
+          if (name.startsWith('$baseName.corrupt.')) {
+            try {
+              final content = await entity.readAsString();
+              final decoded = jsonDecode(content);
+              if (decoded is List) {
+                for (final item in decoded) {
+                  if (item is! Map) continue;
+                  try {
+                    final task = DownloadTask.fromJson(Map<String, dynamic>.from(item));
+                    if (!_tasks.containsKey(task.id)) {
+                      if (task.state == DownloadState.downloading ||
+                          task.state == DownloadState.paused) {
+                        task.state = DownloadState.idle;
+                      }
+                      addTask(task);
+                      recoveredCount++;
+                    }
+                  } catch (_) {}
+                }
+              }
+              await entity.delete();
+            } catch (_) {}
+          }
+        }
+      }
+      if (recoveredCount > 0 && !_isLoading) {
+        debugPrint('[DownloadQueue] INFO: Successfully recovered $recoveredCount tasks from corrupt history backups.');
+        unawaited(saveToFile(path));
+      }
+    } catch (e, s) {
+      _logError('Failed to run queue recovery', e, s);
+    }
+  }
+
   bool _isHlsTask(DownloadTask task) {
     final contentType = task.contentType?.toLowerCase().split(';').first.trim();
     if (contentType != null) {
@@ -981,13 +1295,14 @@ class DownloadQueue {
     // routed to the HLS downloader.  The HLS downloader will verify the
     // body starts with #EXTM3U and fail gracefully if it is not actually
     // an HLS playlist.
+    final urlLower = url.toLowerCase();
     if (path.contains('/hls/') ||
         path.contains('/master') ||
         path.contains('/playlist') ||
         path.contains('/manifest') ||
         path.contains('/dash/') ||
-        path.contains('m3u8') ||
-        path.contains('mpd')) {
+        urlLower.contains('m3u8') ||
+        urlLower.contains('mpd')) {
       return true;
     }
     // Known direct-media extensions — definitely not a playlist

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../downloader/hls_models.dart';
 import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
+import 'adblock_injector.dart';
 import 'browser_guard_installer.dart';
 import 'webview_fetch_delegate.dart';
 
@@ -52,6 +54,9 @@ abstract interface class SnifferBrowserController {
   bool get popupBlockingEnabled;
   int get blockedPopupsCount;
   void incrementBlockedPopups();
+  int get blockedRequestCount;
+  List<String> get adblockAllowlist;
+  void updateAdblockAllowlist(List<String> allowlist);
   bool shouldBlockUrl(
     String url, {
     String sourceHost = '',
@@ -66,6 +71,9 @@ abstract interface class SnifferBrowserController {
     List<ManualAdBlockRule> manualRules = const [],
     List<CosmeticAdRule> cosmeticRules = const [],
   });
+  Future<WebResourceResponse?> shouldInterceptRequestCallback(
+    WebResourceRequest request,
+  );
   Map<String, String> get currentHeaders;
   HlsPlaylist? get lastMasterPlaylist;
   void setOnIframeMediaDetected(void Function(String url) callback);
@@ -92,6 +100,8 @@ abstract interface class SnifferBrowserController {
   /// Returns cookies for the given [url]. If [url] is null or empty, falls
   /// back to the current page URL.
   Future<Map<String, String>> getCookiesForDomain({String? url});
+  void requestOpenUrl(String url);
+  void setOnOpenUrlRequest(void Function(String url)? callback);
   void dispose();
 }
 
@@ -148,6 +158,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   bool _adBlockerEnabled = true;
   bool _popupBlockingEnabled = true;
   AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
+  int _blockedRequestCount = 0;
+  /// Per-site allowlist of hostnames. When the current page host matches an
+  /// entry in this list, adblock is bypassed for both subresource requests
+  /// and main-frame navigations.
+  List<String> _adblockAllowlist = const [];
   String? _lastAdBlockConfigSignature;
   Future<void>? _adBlockConfigFuture;
   int _adBlockConfigGeneration = 0;
@@ -179,6 +194,12 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   late final BrowserGuardInstaller _guardInstaller =
       BrowserGuardInstaller(controller: _controller);
 
+  // Cosmetic filter + scriptlet injector.
+  final AdblockInjector _adblockInjector = AdblockInjector(
+    controller: null,
+    engine: AdBlockEngine.builtIn(),
+  );
+
   static final RegExp _mediaUrlRegExp = RegExp(
     // .ts is excluded â€” HLS segments are not discoverable media; the
     // playlist (.m3u8) is what the downloader needs.
@@ -197,6 +218,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     // sniffing race where the page's HLS player fetches the playlist
     // before `evaluateJavascript` can install the fetch/XHR hooks.
     unawaited(_guardInstaller.installAsUserScript());
+    _adblockInjector.setController(controller);
+    // Register the cosmetic + scriptlet scripts as user scripts that
+    // run AT_DOCUMENT_START, before any page JavaScript executes.
+    unawaited(_adblockInjector.installAsUserScript());
     _registerPendingChannels();
     unawaited(_syncPopupBlockingFlag());
     if (!_ready.isCompleted) _ready.complete();
@@ -228,6 +253,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   bool get popupBlockingEnabled => _popupBlockingEnabled;
 
   @override
+  int get blockedRequestCount => _blockedRequestCount;
+
+  @override
   set adBlockerEnabled(bool enabled) {
     _adBlockerEnabled = enabled;
     _adBlockEngine = AdBlockEngine(
@@ -244,6 +272,14 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   void incrementBlockedPopups() {
     _blockedPopupsCount++;
+  }
+
+  @override
+  List<String> get adblockAllowlist => _adblockAllowlist;
+
+  @override
+  void updateAdblockAllowlist(List<String> allowlist) {
+    _adblockAllowlist = List<String>.unmodifiable(allowlist);
   }
 
   @override
@@ -321,6 +357,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       );
       if (generation != _adBlockConfigGeneration) return;
       _adBlockEngine = engine;
+      _adblockInjector.setEngine(engine);
       await _syncPopupBlockingFlag();
     }();
     late final Future<void> pendingFuture;
@@ -345,6 +382,76 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
   }
 
+  @override
+  Future<WebResourceResponse?> shouldInterceptRequestCallback(
+    WebResourceRequest request,
+  ) async {
+    if (!_adBlockerEnabled) return null;
+
+    // Skip main frame — already handled by shouldOverrideUrlLoading
+    if (request.isForMainFrame == true) return null;
+
+    // Per-site allowlist: skip adblock for the current page's host
+    final pageHost = Uri.tryParse(_currentUrl ?? '')?.host ?? '';
+    if (pageHost.isNotEmpty && _adblockAllowlist.contains(pageHost)) {
+      return null;
+    }
+
+    final url = request.url.toString();
+    if (url.isEmpty) return null;
+
+    // Skip data: and blob: URLs
+    final lower = url.toLowerCase();
+    if (lower.startsWith('data:') || lower.startsWith('blob:')) return null;
+
+    // Skip non-http(s) schemes
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) return null;
+
+    final requestUri = Uri.tryParse(url);
+    final pageUri = Uri.tryParse(_currentUrl ?? '');
+    if (requestUri == null) return null;
+
+    final sourceHost = pageUri?.host ?? '';
+    bool isThirdParty = false;
+    if (pageUri != null && requestUri.host != pageUri.host) {
+      isThirdParty = true;
+    }
+
+    // Infer request type from URL extension and headers
+    final requestType = _inferRequestType(url, request.method ?? 'GET');
+
+    if (shouldBlockUrl(
+      url,
+      sourceHost: sourceHost,
+      requestType: requestType,
+      isThirdParty: isThirdParty,
+    )) {
+      _blockedRequestCount++;
+      // Return an empty 204 No Content response to block the request
+      return WebResourceResponse(
+        contentType: 'text/plain',
+        statusCode: 204,
+        data: Uint8List(0),
+        reasonPhrase: 'No Content',
+      );
+    }
+
+    return null; // allow
+  }
+
+  String _inferRequestType(String url, String method) {
+    final ext = url.toLowerCase();
+    if (ext.endsWith('.js')) return 'script';
+    if (ext.endsWith('.css')) return 'stylesheet';
+    if (ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') ||
+        ext.endsWith('.gif') || ext.endsWith('.webp') || ext.endsWith('.svg') ||
+        ext.endsWith('.ico') || ext.endsWith('.bmp')) return 'image';
+    if (ext.endsWith('.html') || ext.endsWith('.htm')) return 'subdocument';
+    if (ext.endsWith('.xml')) return 'xmlhttprequest';
+    if (ext.endsWith('.json')) return 'xmlhttprequest';
+    return 'other';
+  }
+
   // --- Widget callback methods (called by BrowserWidget) ---
 
   /// Called by InAppWebView onLoadStart
@@ -353,6 +460,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (urlStr.isNotEmpty) {
       _currentUrl = urlStr;
     }
+    unawaited(_adblockInjector.injectForPage(urlStr));
     _guardInstaller.installBrowserGuards();
     _onPageStarted?.call(urlStr);
     _onUrlChanged?.call(urlStr);
@@ -405,9 +513,19 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         pageUri.hasScheme) {
       isThirdParty = pageUri.host != requestUri.host;
     }
+    // Per-site allowlist: skip adblock for the current page's host
+    final pageHost = Uri.tryParse(_currentUrl ?? '')?.host ?? '';
+    final allowlisted = pageHost.isNotEmpty && _adblockAllowlist.contains(pageHost);
+
     // Skip adblock for history navigation (back/forward) so that URLs
     // that were successfully visited before are never blocked on revisit.
-    if (!_isHistoryNavigation &&
+    // The `_history.contains(url)` fallback catches the race where
+    // `_isHistoryNavigation` has already been reset by the time
+    // this native callback fires.
+    final isHistoryNav =
+        _isHistoryNavigation || _history.contains(url);
+    if (!allowlisted &&
+        !isHistoryNav &&
         shouldBlockUrl(
           url,
           sourceHost: sourceHost,
@@ -860,9 +978,19 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Future<Map<String, String>> getCookiesForDomain({String? url}) =>
       _fetchDelegate.getCookiesForDomain(url: url);
 
+  void Function(String)? _onOpenUrlRequest;
+
+  @override
+  void requestOpenUrl(String url) => _onOpenUrlRequest?.call(url);
+
+  @override
+  void setOnOpenUrlRequest(void Function(String url)? callback) =>
+      _onOpenUrlRequest = callback;
+
   @override
   void dispose() {
     _guardInstaller.dispose();
+    _adblockInjector.dispose();
     _loadResourceTimer?.cancel();
     _controller?.dispose();
     _controller = null;
@@ -887,6 +1015,15 @@ class MockBrowserController implements SnifferBrowserController {
   int _blockedPopupsCount = 0;
   Map<String, String> _currentHeaders = {};
   HlsPlaylist? _lastMasterPlaylist;
+
+  void Function(String)? _onOpenUrlRequest;
+
+  @override
+  void requestOpenUrl(String url) => _onOpenUrlRequest?.call(url);
+
+  @override
+  void setOnOpenUrlRequest(void Function(String url)? callback) =>
+      _onOpenUrlRequest = callback;
 
   @override
   void dispose() {}
@@ -925,6 +1062,20 @@ class MockBrowserController implements SnifferBrowserController {
   void incrementBlockedPopups() {
     _blockedPopupsCount++;
   }
+
+  @override
+  int get blockedRequestCount => 0;
+
+  @override
+  List<String> get adblockAllowlist => const [];
+
+  @override
+  void updateAdblockAllowlist(List<String> allowlist) {}
+
+  @override
+  Future<WebResourceResponse?> shouldInterceptRequestCallback(
+    WebResourceRequest request,
+  ) async => null;
 
   @override
   bool shouldBlockUrl(

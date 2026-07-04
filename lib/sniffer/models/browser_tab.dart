@@ -31,6 +31,12 @@ class BrowserTab {
   /// header survives the sanitization in [sanitizeSniffedMediaHeaders]
   /// and can be re-added at download time. Cleared on each page navigation.
   Map<String, String> authHeaderCache = {};
+  /// Timestamp of the last JS-fired swipe-back, used for debouncing to
+  /// prevent double-navigation when the Flutter-side GestureDetector
+  /// also fires in the same gesture sequence.
+  DateTime? lastSwipeBack;
+  /// Same as [lastSwipeBack] but for forward navigation.
+  DateTime? lastSwipeForward;
 
   BrowserTab({
     required this.id,

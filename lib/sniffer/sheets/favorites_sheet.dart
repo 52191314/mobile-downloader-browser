@@ -143,6 +143,7 @@ void showFavoritesSheet(
                           folder.id == '__unsorted__' ? null : folder.id,
                         ),
                         library: library,
+                        unsortedFolder: unsortedFolder,
                         isCurrentPageFavorited: isCurrentPageFavorited,
                         onSaveLibrary: onSaveLibrary,
                         onLoadUrl: onLoadUrl,
@@ -167,6 +168,7 @@ Widget buildFavoritesFolderList(
   BookmarkFolder folder,
   List<BrowserFavorite> items, {
   required BrowserLibrary library,
+  required BookmarkFolder unsortedFolder,
   required bool Function(String url) isCurrentPageFavorited,
   required Future<void> Function(BrowserLibrary) onSaveLibrary,
   required Future<void> Function(String url) onLoadUrl,
@@ -174,8 +176,11 @@ Widget buildFavoritesFolderList(
   required Future<void> Function() onNewFolderCreated,
   required Future<void> Function(BrowserFavorite favorite) onEditFavorite,
 }) {
+  final isUnsorted = folder.id == '__unsorted__';
+
+  Widget listWidget;
   if (items.isEmpty) {
-    return Center(
+    listWidget = Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
@@ -184,85 +189,237 @@ Widget buildFavoritesFolderList(
         ),
       ),
     );
-  }
-  return ListView.builder(
-    itemCount: items.length,
-    itemBuilder: (context, i) {
-      final fav = items[i];
-      return ListTile(
-        leading: const Icon(Icons.star, color: AuroraColors.accentAmber),
-        title: Text(fav.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              fav.url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            ),
-            if (fav.tags.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 2,
-                  children: [
-                    for (final tag in fav.tags)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AuroraColors.surfaceVariant,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          tag,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: AuroraColors.accent,
+  } else {
+    listWidget = ListView.builder(
+      itemCount: items.length,
+      itemBuilder: (context, i) {
+        final fav = items[i];
+        return ListTile(
+          leading: const Icon(Icons.star, color: AuroraColors.accentAmber),
+          title: Text(fav.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                fav.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+              if (fav.tags.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Wrap(
+                    spacing: 4,
+                    runSpacing: 2,
+                    children: [
+                      for (final tag in fav.tags)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AuroraColors.surfaceVariant,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            tag,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: AuroraColors.accent,
+                            ),
                           ),
                         ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          trailing: PopupMenuButton<String>(
+            onSelected: (action) async {
+              if (action == 'delete') {
+                await onSaveLibrary(
+                  library.copyWith(
+                    favorites: library.favorites
+                        .where((favorite) => favorite.id != fav.id)
+                        .toList(growable: false),
+                  ),
+                );
+              } else if (action == 'move') {
+                final selectedFolder = await showDialog<BookmarkFolder?>(
+                  context: context,
+                  builder: (dialogCtx) => AlertDialog(
+                    title: const Text('Move to folder'),
+                    content: SizedBox(
+                      width: 280,
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          ListTile(
+                            title: const Text('Unsorted'),
+                            onTap: () =>
+                                Navigator.of(dialogCtx).pop(unsortedFolder),
+                          ),
+                          const Divider(),
+                          for (final f in library.folders)
+                            ListTile(
+                              title: Text(f.name),
+                              onTap: () => Navigator.of(dialogCtx).pop(f),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (action) async {
-            if (action == 'delete') {
-              await onSaveLibrary(
-                library.copyWith(
-                  favorites: library.favorites
-                      .where((favorite) => favorite.id != fav.id)
-                      .toList(growable: false),
-                ),
-              );
-            } else if (action == 'move' && folder.id != '__unsorted__') {
-              await onEditFavorite(fav);
-            } else if (action == 'edit' && folder.id != '__unsorted__') {
-              await onEditFavorite(fav);
-            } else if (action == 'edit') {
-              await onEditFavorite(fav);
-            }
-            if (context.mounted) {
+                    ),
+                  ),
+                );
+                if (selectedFolder != null) {
+                  final targetFolderId = selectedFolder.id == '__unsorted__'
+                      ? null
+                      : selectedFolder.id;
+                  await onSaveLibrary(
+                    library.copyWith(
+                      favorites: library.favorites
+                          .map((f) => f.id == fav.id
+                              ? f.copyWith(
+                                  folderId: targetFolderId,
+                                  clearFolder: targetFolderId == null,
+                                )
+                              : f)
+                          .toList(growable: false),
+                    ),
+                  );
+                }
+              } else if (action == 'edit') {
+                await onEditFavorite(fav);
+              }
               onNewFolderCreated();
-            }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit tags')),
+              PopupMenuItem(value: 'move', child: Text('Move to folder…')),
+              PopupMenuItem(value: 'delete', child: Text('Remove bookmark')),
+            ],
+          ),
+          onTap: () {
+            Navigator.of(context).pop();
+            unawaited(onLoadUrl(fav.url));
           },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'edit', child: Text('Move / edit tags')),
-            PopupMenuItem(value: 'delete', child: Text('Delete')),
+        );
+      },
+    );
+  }
+
+  if (isUnsorted) {
+    return listWidget;
+  }
+
+  return Column(
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton.icon(
+              icon: const Icon(Icons.edit, size: 16),
+              label:
+                  const Text('Rename folder', style: TextStyle(fontSize: 12)),
+              onPressed: () async {
+                final nameController = TextEditingController(text: folder.name);
+                final newName = await showDialog<String>(
+                  context: sheetContext,
+                  builder: (dialogCtx) => AlertDialog(
+                    title: const Text('Rename folder'),
+                    content: TextField(
+                      controller: nameController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Folder name',
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogCtx)
+                            .pop(nameController.text.trim()),
+                        child: const Text('Save'),
+                      ),
+                    ],
+                  ),
+                );
+                nameController.dispose();
+                if (newName == null || newName.isEmpty || newName == folder.name) return;
+
+                final updatedFolders = library.folders.map((f) {
+                  return f.id == folder.id
+                      ? BookmarkFolder(
+                          id: f.id,
+                          name: newName,
+                          createdAt: f.createdAt,
+                        )
+                      : f;
+                }).toList();
+
+                await onSaveLibrary(library.copyWith(folders: updatedFolders));
+                onNewFolderCreated();
+              },
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              icon: const Icon(Icons.delete_outline, size: 16),
+              label:
+                  const Text('Delete folder', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: sheetContext,
+                  builder: (dialogCtx) => AlertDialog(
+                    title: const Text('Delete folder?'),
+                    content: const Text(
+                      'All bookmarks inside this folder will be moved to Unsorted.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(true),
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm != true) return;
+
+                final updatedFolders =
+                    library.folders.where((f) => f.id != folder.id).toList();
+                final updatedFavorites = library.favorites.map((fav) {
+                  if (fav.folderId == folder.id) {
+                    return fav.copyWith(clearFolder: true);
+                  }
+                  return fav;
+                }).toList();
+
+                await onSaveLibrary(
+                  library.copyWith(
+                    folders: updatedFolders,
+                    favorites: updatedFavorites,
+                  ),
+                );
+                onNewFolderCreated();
+              },
+            ),
           ],
         ),
-        onTap: () {
-          Navigator.of(context).pop();
-          unawaited(onLoadUrl(fav.url));
-        },
-      );
-    },
+      ),
+      const Divider(height: 1),
+      Expanded(child: listWidget),
+    ],
   );
 }

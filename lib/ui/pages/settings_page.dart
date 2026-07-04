@@ -1,6 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+import '../../downloader/downloader.dart';
+import '../../platform/public_downloads_service.dart';
+import '../../sniffer/browser_library.dart';
+import '../../sniffer/idm_backup_parser.dart';
 
 import '../../settings/download_settings.dart';
 import '../../sniffer/media_sniffer_engine.dart';
@@ -19,6 +28,8 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<DownloadSettings> onSettingsChanged;
   final double speedLimitKbps;
   final ValueChanged<double> onSpeedLimitChanged;
+  final DownloadQueue downloadQueue;
+  final ValueNotifier<int> libraryUpdateNotifier;
 
   const SettingsPage({
     super.key,
@@ -30,6 +41,8 @@ class SettingsPage extends StatefulWidget {
     required this.onSettingsChanged,
     required this.speedLimitKbps,
     required this.onSpeedLimitChanged,
+    required this.downloadQueue,
+    required this.libraryUpdateNotifier,
   });
 
   @override
@@ -223,7 +236,9 @@ class _SettingsPageState extends State<SettingsPage> {
         Row(children: [
           Expanded(child: _buildCard(
               Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
-          const Spacer(),
+          const SizedBox(width: 12),
+          Expanded(child: _buildCard(
+              Icons.backup_rounded, 'Backup', 'Import & export data', () => _openPage(_buildBackupPage()))),
         ]),
       ],
     );
@@ -410,6 +425,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     _update(local);
                   },
                   contentPadding: EdgeInsets.zero),
+              ListTile(
+                title: const Text('Per-site allowlist'),
+                subtitle: Text(
+                    local.adblockAllowlist.isEmpty
+                        ? 'No sites are allowlisted. Manage allowlist per-site from the browser toolbar shield icon.'
+                        : '${local.adblockAllowlist.length} site${local.adblockAllowlist.length == 1 ? "" : "s"} allowlisted',
+                    style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                trailing: local.adblockAllowlist.isEmpty
+                    ? null
+                    : TextButton(
+                        onPressed: () {
+                          final updated = local.copyWith(adblockAllowlist: const []);
+                          setLocal(() => local = updated);
+                          _update(updated);
+                        },
+                        child: const Text('Clear all'),
+                      ),
+                contentPadding: EdgeInsets.zero,
+              ),
               const Divider(),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -820,6 +854,15 @@ class _SettingsPageState extends State<SettingsPage> {
               fontFamily: 'monospace')),
     ]);
   }
+
+  Widget _buildBackupPage() {
+    return BackupPage(
+      downloadQueue: widget.downloadQueue,
+      settings: _settings,
+      onSettingsChanged: _update,
+      libraryUpdateNotifier: widget.libraryUpdateNotifier,
+    );
+  }
 }
 
 /// Detail page for Drive Sync settings with live state subscription.
@@ -937,6 +980,554 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                     ])),
         ],
       ),
+    );
+  }
+}
+
+class BackupPage extends StatefulWidget {
+  final DownloadQueue downloadQueue;
+  final DownloadSettings settings;
+  final ValueChanged<DownloadSettings> onSettingsChanged;
+  final ValueNotifier<int> libraryUpdateNotifier;
+
+  const BackupPage({
+    super.key,
+    required this.downloadQueue,
+    required this.settings,
+    required this.onSettingsChanged,
+    required this.libraryUpdateNotifier,
+  });
+
+  @override
+  State<BackupPage> createState() => _BackupPageState();
+}
+
+class _BackupPageState extends State<BackupPage> {
+  BrowserLibrary? _library;
+  bool _loading = true;
+
+  bool exportFavorites = true;
+  bool exportHistory = true;
+  bool exportSavedPages = true;
+  bool exportQueue = true;
+  bool exportSettings = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLibrary();
+  }
+
+  Future<void> _loadLibrary() async {
+    final lib = await const BrowserLibraryStore().load();
+    if (mounted) {
+      setState(() {
+        _library = lib;
+        _loading = false;
+      });
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: AuroraColors.text)),
+        backgroundColor: AuroraColors.surfaceVariant,
+      ),
+    );
+  }
+
+  Future<void> _exportBackup() async {
+    try {
+      final List<Map<String, dynamic>>? downloadQueueJson = exportQueue
+          ? widget.downloadQueue.allTasks.map((t) => t.toJson()).toList()
+          : null;
+      final Map<String, dynamic>? settingsJson = exportSettings
+          ? widget.settings.toJson()
+          : null;
+
+      final file = await const BrowserLibraryStore().exportToFile(
+        exportFavorites: exportFavorites,
+        exportHistory: exportHistory,
+        exportSavedPages: exportSavedPages,
+        downloadQueueJson: downloadQueueJson,
+        settingsJson: settingsJson,
+      );
+      await PublicDownloadsService.shareFile(file.path);
+      _showSnack('Backup exported successfully.');
+    } catch (error) {
+      _showSnack('Export failed: $error');
+    }
+  }
+
+  Future<void> _importBackup() async {
+    try {
+      final filePath = await PublicDownloadsService.pickImportFile();
+      if (filePath == null) return;
+
+      final Map<String, dynamic> decoded;
+      if (filePath.toLowerCase().endsWith('.1dmbak')) {
+        decoded = await IdmBackupParser.parse(filePath);
+      } else {
+        decoded = await const BrowserLibraryStore().readImportMap(filePath);
+      }
+
+      final hasFavorites = decoded.containsKey('favorites') && (decoded['favorites'] is List) && (decoded['favorites'] as List).isNotEmpty;
+      final hasHistory = decoded.containsKey('history') && (decoded['history'] is List) && (decoded['history'] as List).isNotEmpty;
+      final hasSavedPages = decoded.containsKey('savedPages') && (decoded['savedPages'] is List) && (decoded['savedPages'] as List).isNotEmpty;
+      final hasQueue = decoded.containsKey('downloadQueue') && (decoded['downloadQueue'] is List) && (decoded['downloadQueue'] as List).isNotEmpty;
+      final hasSettings = decoded.containsKey('settings');
+
+      final isLegacy = decoded.containsKey('favorites') ||
+          decoded.containsKey('history') ||
+          decoded.containsKey('savedPages') ||
+          (!decoded.containsKey('settings') &&
+              !decoded.containsKey('downloadQueue') &&
+              decoded.isNotEmpty &&
+              !decoded.containsKey('favorites') &&
+              !decoded.containsKey('history') &&
+              !decoded.containsKey('savedPages'));
+
+      bool importFavorites = hasFavorites || isLegacy;
+      bool importHistory = hasHistory || isLegacy;
+      bool importSavedPages = hasSavedPages || isLegacy;
+      bool importQueue = hasQueue;
+      bool importSettings = hasSettings;
+
+      if (!hasFavorites && !isLegacy) importFavorites = false;
+      if (!hasHistory && !isLegacy) importHistory = false;
+      if (!hasSavedPages && !isLegacy) importSavedPages = false;
+
+      bool proceed = false;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.file_download_outlined,
+                            color: AuroraColors.accent,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Import Library',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AuroraColors.text,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text)),
+                        value: importFavorites,
+                        onChanged: (hasFavorites || isLegacy)
+                            ? (val) => setModalState(() => importFavorites = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Web History', style: TextStyle(color: AuroraColors.text)),
+                        value: importHistory,
+                        onChanged: (hasHistory || isLegacy)
+                            ? (val) => setModalState(() => importHistory = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text)),
+                        value: importSavedPages,
+                        onChanged: (hasSavedPages || isLegacy)
+                            ? (val) => setModalState(() => importSavedPages = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text)),
+                        value: importQueue,
+                        onChanged: hasQueue
+                            ? (val) => setModalState(() => importQueue = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: AuroraColors.accent,
+                        title: const Text('App Settings', style: TextStyle(color: AuroraColors.text)),
+                        value: importSettings,
+                        onChanged: hasSettings
+                            ? (val) => setModalState(() => importSettings = val)
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cancel', style: TextStyle(color: AuroraColors.mutedText)),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AuroraColors.accent,
+                              foregroundColor: AuroraColors.background,
+                            ),
+                            onPressed: (!importFavorites &&
+                                    !importHistory &&
+                                    !importSavedPages &&
+                                    !importQueue &&
+                                    !importSettings)
+                                ? null
+                                : () {
+                                    proceed = true;
+                                    Navigator.pop(ctx);
+                                  },
+                            child: const Text('Import'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+
+      if (!proceed) return;
+
+      final baseDir = (await getApplicationSupportDirectory()).path;
+      final baseTemp = (await getTemporaryDirectory()).path;
+      int importedFavoritesCount = 0;
+      int importedHistoryCount = 0;
+      int importedSavedPagesCount = 0;
+      int importedQueueCount = 0;
+      bool importedSettings = false;
+
+      BrowserLibrary updatedLibrary = _library ?? BrowserLibrary.empty();
+
+      // 1. App Settings
+      if (importSettings && decoded.containsKey('settings')) {
+        final settingsMap = decoded['settings'];
+        if (settingsMap is Map) {
+          final imported = DownloadSettings.fromJson(
+            Map<String, dynamic>.from(settingsMap),
+          );
+          widget.onSettingsChanged.call(imported);
+          importedSettings = true;
+        }
+      }
+
+      // 2. Download Queue
+      if (importQueue && decoded.containsKey('downloadQueue')) {
+        final queueList = decoded['downloadQueue'];
+        if (queueList is List) {
+          for (final item in queueList) {
+            if (item is! Map) continue;
+            try {
+              final taskMap = Map<String, dynamic>.from(item);
+
+              // Dynamic re-basing of savePath to the current base directory
+              String savePath = taskMap['savePath'] as String? ?? '';
+              final normalized = savePath.replaceAll('\\', '/');
+              final completedIndex = normalized.lastIndexOf('/completed/');
+              if (completedIndex != -1) {
+                final relativePart = normalized.substring(
+                  completedIndex + '/completed/'.length,
+                );
+                taskMap['savePath'] =
+                    '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}${relativePart.replaceAll('/', Platform.pathSeparator)}';
+              } else if (savePath.startsWith('completed/') ||
+                  savePath.startsWith('completed\\')) {
+                final relativePart = savePath.substring('completed/'.length);
+                taskMap['savePath'] =
+                    '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}${relativePart.replaceAll('/', Platform.pathSeparator).replaceAll('\\', Platform.pathSeparator)}';
+              } else {
+                final filename = p.basename(savePath);
+                taskMap['savePath'] =
+                    '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$filename';
+              }
+
+              // Dynamic re-basing of tempDir to the current base temp directory
+              String tempDir = taskMap['tempDir'] as String? ?? '';
+              final normalizedTemp = tempDir.replaceAll('\\', '/');
+              final tempIndex = normalizedTemp.lastIndexOf('/temp_');
+              if (tempIndex != -1) {
+                final relativePart = normalizedTemp.substring(tempIndex);
+                taskMap['tempDir'] = '$baseTemp$relativePart';
+              } else {
+                taskMap['tempDir'] =
+                    '$baseTemp${Platform.pathSeparator}temp_${DateTime.now().millisecondsSinceEpoch}_$importedQueueCount';
+              }
+
+              final task = DownloadTask.fromJson(taskMap);
+              widget.downloadQueue.addTask(task);
+              importedQueueCount++;
+            } catch (_) {}
+          }
+        }
+      }
+
+      // 3. Browser Library - Favorites / Folders
+      if (importFavorites && decoded.containsKey('favorites')) {
+        final importedFolders = decoded.containsKey('folders')
+            ? (decoded['folders'] as List? ?? const [])
+                  .whereType<Map>()
+                  .map(
+                    (item) => BookmarkFolder.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .toList()
+            : updatedLibrary.folders;
+        final known = {for (final folder in importedFolders) folder.id};
+        final importedFavorites = (decoded['favorites'] as List? ?? const [])
+            .whereType<Map>()
+            .map(
+              (item) =>
+                  BrowserFavorite.fromJson(Map<String, dynamic>.from(item)),
+            )
+            .map((favorite) {
+              if (favorite.folderId != null &&
+                  !known.contains(favorite.folderId)) {
+                return favorite.copyWith(clearFolder: true);
+              }
+              return favorite;
+            })
+            .toList();
+
+        updatedLibrary = updatedLibrary.copyWith(
+          favorites: importedFavorites,
+          folders: importedFolders,
+        );
+        importedFavoritesCount = importedFavorites.length;
+      }
+
+      // 4. Browser Library - History
+      if (importHistory && decoded.containsKey('history')) {
+        final importedHistory = (decoded['history'] as List? ?? const [])
+            .whereType<Map>()
+            .map(
+              (item) =>
+                  BrowserHistoryEntry.fromJson(Map<String, dynamic>.from(item)),
+            )
+            .toList();
+        updatedLibrary = updatedLibrary.copyWith(history: importedHistory);
+        importedHistoryCount = importedHistory.length;
+      }
+
+      // 5. Browser Library - Saved Pages
+      if (importSavedPages && decoded.containsKey('savedPages')) {
+        final importedSavedPages = (decoded['savedPages'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => SavedPage.fromJson(Map<String, dynamic>.from(item)))
+            .toList();
+        updatedLibrary = updatedLibrary.copyWith(
+          savedPages: importedSavedPages,
+        );
+        importedSavedPagesCount = importedSavedPages.length;
+      }
+
+      if (importFavorites || importHistory || importSavedPages) {
+        if (!decoded.containsKey('favorites') &&
+            !decoded.containsKey('history') &&
+            !decoded.containsKey('savedPages')) {
+          final legacyLib = BrowserLibrary.fromJson(decoded);
+          List<BrowserFavorite>? favs;
+          List<BookmarkFolder>? folders;
+          List<BrowserHistoryEntry>? hist;
+          List<SavedPage>? saved;
+
+          if (importFavorites) {
+            favs = legacyLib.favorites;
+            folders = legacyLib.folders;
+            importedFavoritesCount = legacyLib.favorites.length;
+          }
+          if (importHistory) {
+            hist = legacyLib.history;
+            importedHistoryCount = legacyLib.history.length;
+          }
+          if (importSavedPages) {
+            saved = legacyLib.savedPages;
+            importedSavedPagesCount = legacyLib.savedPages.length;
+          }
+
+          updatedLibrary = updatedLibrary.copyWith(
+            favorites: favs,
+            folders: folders,
+            history: hist,
+            savedPages: saved,
+          );
+        }
+        await const BrowserLibraryStore().save(updatedLibrary);
+      }
+
+      final List<String> summary = [];
+      if (importedFavoritesCount > 0) {
+        summary.add('$importedFavoritesCount favorites');
+      }
+      if (importedHistoryCount > 0) {
+        summary.add('$importedHistoryCount history entries');
+      }
+      if (importedSavedPagesCount > 0) {
+        summary.add('$importedSavedPagesCount saved pages');
+      }
+      if (importedQueueCount > 0) {
+        summary.add('$importedQueueCount download tasks');
+      }
+      if (importedSettings) {
+        summary.add('app settings');
+      }
+
+      if (summary.isEmpty) {
+        _showSnack('Import completed (no new items found).');
+      } else {
+        _showSnack('Imported: ${summary.join(", ")}.');
+      }
+
+      widget.libraryUpdateNotifier.value++;
+      await _loadLibrary();
+    } catch (error) {
+      _showSnack('Import failed: $error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Backup & Restore')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  PanelHeader(icon: Icons.backup_rounded, title: 'Backup & Restore'),
+                  const SizedBox(height: 8),
+                  Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Export Backup',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AuroraColors.text),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Select categories to include in your backup file:',
+                          style: TextStyle(fontSize: 12, color: AuroraColors.mutedText),
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          activeColor: AuroraColors.accent,
+                          title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          subtitle: Text(
+                            '${_library?.favorites.length ?? 0} favorites, ${_library?.folders.length ?? 0} folders',
+                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          ),
+                          value: exportFavorites,
+                          onChanged: (v) => setState(() => exportFavorites = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: AuroraColors.accent,
+                          title: const Text('Web History', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          subtitle: Text(
+                            '${_library?.history.length ?? 0} entries',
+                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          ),
+                          value: exportHistory,
+                          onChanged: (v) => setState(() => exportHistory = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: AuroraColors.accent,
+                          title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          subtitle: Text(
+                            '${_library?.savedPages.length ?? 0} pages',
+                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          ),
+                          value: exportSavedPages,
+                          onChanged: (v) => setState(() => exportSavedPages = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: AuroraColors.accent,
+                          title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          subtitle: Text(
+                            '${widget.downloadQueue.allTasks.length} tasks',
+                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          ),
+                          value: exportQueue,
+                          onChanged: (v) => setState(() => exportQueue = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: AuroraColors.accent,
+                          title: const Text('App Settings', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          subtitle: const Text(
+                            'Limits, search engine, adblock toggles',
+                            style: TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          ),
+                          value: exportSettings,
+                          onChanged: (v) => setState(() => exportSettings = v),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.share_rounded),
+                          label: const Text('Export Backup File'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AuroraColors.accent,
+                            foregroundColor: AuroraColors.background,
+                          ),
+                          onPressed: (!exportFavorites &&
+                                  !exportHistory &&
+                                  !exportSavedPages &&
+                                  !exportQueue &&
+                                  !exportSettings)
+                              ? null
+                              : _exportBackup,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Import Backup',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AuroraColors.text),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Restore your bookmarks, history, settings, or tasks from a previously saved JSON or 1DMBak backup file.',
+                          style: TextStyle(fontSize: 12, color: AuroraColors.mutedText),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.file_download_outlined),
+                          label: const Text('Import Backup File'),
+                          onPressed: _importBackup,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

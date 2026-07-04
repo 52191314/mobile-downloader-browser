@@ -86,7 +86,7 @@ class _CaptureStatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chipColor = color ?? Colors.grey;
+    final chipColor = color ?? AuroraColors.mutedDeep;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Container(
@@ -126,21 +126,21 @@ class _MiniPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: AuroraColors.surfaceCard,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        border: Border.all(color: AuroraColors.glassBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 12, color: Colors.white70),
+            Icon(icon, size: 12, color: AuroraColors.mutedText),
             const SizedBox(width: 4),
             Text(
               label,
               style: const TextStyle(
-                color: Colors.white70,
+                color: AuroraColors.mutedText,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
@@ -242,7 +242,7 @@ class _CaptureMediaTile extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? colors.primary
-                  : Colors.white.withValues(alpha: 0.08),
+                  : AuroraColors.glassBorder,
               width: selected ? 2.0 : 1.0,
             ),
             boxShadow: selected
@@ -479,8 +479,8 @@ class _CaptureActionBar extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: onDownloadSelected == null
-                        ? [Colors.grey.shade700, Colors.grey.shade800]
-                        : [Colors.teal, Colors.blue],
+                        ? [AuroraColors.surfaceVariant, AuroraColors.surface]
+                        : [AuroraColors.accent, const Color(0xFF5E81AC)],
                     begin: Alignment.centerLeft,
                     end: Alignment.centerRight,
                   ),
@@ -488,7 +488,7 @@ class _CaptureActionBar extends StatelessWidget {
                   boxShadow: onDownloadSelected != null
                       ? [
                           BoxShadow(
-                            color: Colors.teal.withValues(alpha: 0.3),
+                            color: AuroraColors.accent.withValues(alpha: 0.3),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
