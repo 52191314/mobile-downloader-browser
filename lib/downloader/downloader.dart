@@ -11,4 +11,4 @@ export 'magnet_link.dart';
 export 'bencode_decoder.dart';
 export 'torrent_metadata.dart';
 export 'torrent_downloader.dart';
-export 'download_logger.dart';
+export 'file_classifier.dart';

@@ -455,6 +455,15 @@ class DownloadSettings {
   /// Set to 1.0 to disable this behavior entirely.
   final double partialDownloadThreshold;
 
+  /// When true, completed files are automatically sorted into subdirectories
+  /// (Videos, Audio, Images, Documents, etc.) under the completed/ folder.
+  final bool autoClassifyEnabled;
+
+  /// Optional overrides: file extension → folder name.
+  /// E.g. `{".mp4": "Movies", ".mkv": "Movies"}` routes all MP4s and MKVs
+  /// into a "Movies" subfolder instead of the default "Videos" folder.
+  final Map<String, String> autoClassifyMappings;
+
   const DownloadSettings({
     required this.maxConcurrentDownloads,
     required this.chunksPerTask,
@@ -491,6 +500,8 @@ class DownloadSettings {
     this.minSpeedThresholdKbps = 0,
     this.stallTimeoutSeconds = 20,
     this.partialDownloadThreshold = 0.95,
+    this.autoClassifyEnabled = true,
+    this.autoClassifyMappings = const {},
   });
 
   static const trustedAdblockSources = [
@@ -513,6 +524,7 @@ class DownloadSettings {
     browserToolbarPosition: BrowserToolbarPosition.bottom,
     autoRetry: true,
     retryLimit: 3,
+    autoClassifyEnabled: true,
   );
 
   DownloadSettings copyWith({
@@ -551,6 +563,8 @@ class DownloadSettings {
     int? minSpeedThresholdKbps,
     int? stallTimeoutSeconds,
     double? partialDownloadThreshold,
+    bool? autoClassifyEnabled,
+    Map<String, String>? autoClassifyMappings,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -560,6 +574,10 @@ class DownloadSettings {
       stallTimeoutSeconds: stallTimeoutSeconds ?? this.stallTimeoutSeconds,
       partialDownloadThreshold:
           partialDownloadThreshold ?? this.partialDownloadThreshold,
+      autoClassifyEnabled:
+          autoClassifyEnabled ?? this.autoClassifyEnabled,
+      autoClassifyMappings:
+          autoClassifyMappings ?? this.autoClassifyMappings,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -642,6 +660,8 @@ class DownloadSettings {
     'minSpeedThresholdKbps': minSpeedThresholdKbps,
     'stallTimeoutSeconds': stallTimeoutSeconds,
     'partialDownloadThreshold': partialDownloadThreshold,
+    'autoClassifyEnabled': autoClassifyEnabled,
+    'autoClassifyMappings': autoClassifyMappings,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -731,6 +751,16 @@ class DownloadSettings {
           (json['stallTimeoutSeconds'] as num?)?.round() ?? 20,
       partialDownloadThreshold:
           (json['partialDownloadThreshold'] as num?)?.toDouble() ?? 0.95,
+      autoClassifyEnabled:
+          json['autoClassifyEnabled'] as bool? ?? true,
+      autoClassifyMappings:
+          json['autoClassifyMappings'] is Map
+              ? Map<String, String>.from(
+                  (json['autoClassifyMappings'] as Map).map(
+                    (k, v) => MapEntry(k.toString(), v.toString()),
+                  ),
+                )
+              : const {},
     );
   }
 

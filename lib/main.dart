@@ -3,10 +3,15 @@ import 'dart:io';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'downloader/downloader.dart';
+import 'downloader/url_filename_resolver.dart';
+import 'logging/aurora_log.dart';
+import 'logging/log_settings_store.dart';
 import 'notifications/download_notification_service.dart';
+import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
 import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
@@ -35,10 +40,24 @@ void main() {
     WidgetsFlutterBinding.ensureInitialized();
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
+      AuroraLog.instance.error(
+        '[FlutterError] ${details.exceptionAsString()}',
+        category: LogCategory.app,
+        screen: LogScreen.unknown,
+        eventType: LogEventType.error,
+        stackTrace: details.stack,
+      );
       debugPrint('[AuroraFlutterError] ${details.exceptionAsString()}');
     };
     runApp(const MyApp());
   }, (error, stack) {
+    AuroraLog.instance.fatal(
+      '[ZoneError] $error',
+      category: LogCategory.app,
+      screen: LogScreen.background,
+      eventType: LogEventType.error,
+      stackTrace: stack,
+    );
     debugPrint('[AuroraZoneError] $error\n$stack');
   });
 }
@@ -155,6 +174,10 @@ class AuroraHome extends StatefulWidget {
 }
 
 class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
+  /// Static flag so the battery-optimisation exemption dialog is shown
+  /// only once per process lifetime (on the first download start).
+  static bool _batteryOptRequested = false;
+
   late final DownloadQueue _downloadQueue;
   late final DriveSyncService _driveSyncService;
   late final SnifferBrowserController _browserController;
@@ -181,9 +204,31 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   DateTime? _lastBackPress;
   Timer? _adblockRefreshTimer;
   Timer? _queueRebuildTimer;
+  final Map<String, DownloadState> _prevTaskStates = {};
+  bool _isDisposed = false;
 
   void _logError(String context, Object error, [StackTrace? stack]) {
     debugPrint('[AuroraHome] $context: $error');
+    AuroraLog.instance.error(
+      '$context: $error',
+      category: LogCategory.app,
+      screen: _currentScreen,
+      eventType: LogEventType.error,
+      stackTrace: stack,
+    );
+  }
+
+  LogScreen get _currentScreen {
+    switch (_currentTabIndex) {
+      case 0:
+        return LogScreen.queue;
+      case 1:
+        return LogScreen.browser;
+      case 2:
+        return LogScreen.settings;
+      default:
+        return LogScreen.unknown;
+    }
   }
 
   @override
@@ -229,6 +274,28 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           if (mounted) setState(() {});
         });
       }
+      // Log download state transitions.
+      final fileName = task.savePath.split('/').last;
+      final prevState = _prevTaskStates[task.id];
+      if (prevState != task.state) {
+        _prevTaskStates[task.id] = task.state;
+        if (!_isDisposed) {
+          AuroraLog.instance.info(
+            'Task "$fileName": ${prevState?.name ?? "new"} → ${task.state.name}',
+            category: LogCategory.download,
+            screen: _currentScreen,
+            eventType: LogEventType.stateChange,
+            taskId: task.id,
+          );
+        }
+      }
+      // Request battery-optimisation exemption on first download start
+      // so Android does not kill the process during background downloads.
+      // Uses a static flag so the system dialog is shown only once per
+      // process lifetime.
+      if (task.state == DownloadState.downloading) {
+        _requestBatteryOptOnce();
+      }
     });
     WidgetsBinding.instance.addObserver(this);
   }
@@ -240,6 +307,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     } catch (e, s) {
       _logError('Failed to init notifications', e, s);
     }
+    // On Android 13+, request the POST_NOTIFICATIONS permission so the
+    // foreground service notification is visible, which makes Android
+    // less likely to kill the process during background downloads.
+    unawaited(DownloadForegroundService.requestNotificationPermission());
     _driveSubscription = _driveSyncService.onStateChanged.listen((state) {
       if (mounted) {
         setState(() {
@@ -253,8 +324,46 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     return SnifferWebViewControllerImpl();
   }
 
+  /// Called on the first download-start event to request battery
+  /// optimisation exemption.  On Android 6+ this shows a system dialog;
+  /// the user must tap "Allow" to whitelist Aurora so doze / app-standby
+  /// does not kill the process or throttle network during background
+  /// downloads.
+  static void _requestBatteryOptOnce() {
+    if (_batteryOptRequested) return;
+    _batteryOptRequested = true;
+    unawaited(DownloadForegroundService.requestBatteryOptimizationExemption());
+  }
+
+  /// Switches the active main tab (Queue=0, Browser=1, Settings=2).
+  /// Automatically pauses browser WebViews when leaving the Browser tab
+  /// and resumes them when re-entering, so the Dart event loop is freed
+  /// for download HTTP stream processing.
+  void _selectTab(int index) {
+    final previous = _currentTabIndex;
+    setState(() {
+      _currentTabIndex = index;
+      _visitedMainTabs.add(index);
+    });
+    debugPrint('[AuroraHome] Tab switch: $previous → $index');
+    AuroraLog.instance.info(
+      'Tab switch: $previous → $index',
+      category: LogCategory.app,
+      screen: LogScreen.settings,
+      eventType: LogEventType.navigation,
+    );
+    if (previous == 1 && index != 1) {
+      // Leaving Browser tab → pause WebView JS timers globally.
+      unawaited(_browserController.pauseAllWebViews());
+    } else if (index == 1 && previous != 1) {
+      // Entering Browser tab → resume WebView JS timers.
+      unawaited(_browserController.resumeActiveWebView());
+    }
+  }
+
   @override
   void dispose() {
+    _isDisposed = true;
     _adblockRefreshTimer?.cancel();
     _queueRebuildTimer?.cancel();
     _queueSubscription?.cancel();
@@ -276,13 +385,34 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused) {
       // App going to background — log it so we can trace kills.
       debugPrint('[AuroraHome] App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}');
+      AuroraLog.instance.info(
+        'App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}',
+        category: LogCategory.app,
+        eventType: LogEventType.lifecycle,
+      );
+      // Pause browser WebViews to free resources for background downloads.
+      unawaited(_browserController.pauseAllWebViews());
       // Force-sync the foreground service so Android sees the persistent
       // notification immediately and is less likely to kill us.
       _downloadQueue.syncForegroundService();
     } else if (state == AppLifecycleState.resumed) {
       debugPrint('[AuroraHome] App resumed');
+      AuroraLog.instance.info(
+        'App resumed',
+        category: LogCategory.app,
+        eventType: LogEventType.lifecycle,
+      );
+      // Only resume WebViews if the user is on the Browser tab.
+      if (_currentTabIndex == 1) {
+        unawaited(_browserController.resumeActiveWebView());
+      }
     } else if (state == AppLifecycleState.detached) {
       debugPrint('[AuroraHome] App detached — process likely being killed');
+      AuroraLog.instance.warn(
+        'App detached — process likely being killed',
+        category: LogCategory.app,
+        eventType: LogEventType.lifecycle,
+      );
     }
   }
 
@@ -306,10 +436,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             }
           }
           if (_currentTabIndex != 1) {
-            setState(() {
-              _currentTabIndex = 1;
-              _visitedMainTabs.add(1);
-            });
+            _selectTab(1);
             return;
           }
           final now = DateTime.now();
@@ -356,6 +483,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                                 _downloadQueue.forceMergeTask(task.id),
                             speedLimitKbps: _speedLimitKbps,
                             onOpenUrlInBrowser: _openUrlInBrowser,
+                            onResniffAuto: _resniffAuto,
+                            onResniffManual: _resniffManual,
                           ),
                         ),
                       ),
@@ -372,10 +501,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             settings: _settings,
                             onSettingsChanged: _updateSettings,
                             libraryUpdateNotifier: _libraryUpdateNotifier,
-                            onOpenQueue: () =>
-                                setState(() { _currentTabIndex = 0; _visitedMainTabs.add(0); }),
-                            onOpenSettings: () =>
-                                setState(() { _currentTabIndex = 2; _visitedMainTabs.add(2); }),
+                            onOpenQueue: () => _selectTab(0),
+                            onOpenSettings: () => _selectTab(2),
                             onSniffedCountChanged: (count) =>
                                 setState(() => _sniffedCount = count),
                           ),
@@ -418,8 +545,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                   offstage: _currentTabIndex == 1, // hidden on browser tab
                   child: AuroraDock(
                     currentIndex: _currentTabIndex,
-                    onTabSelected: (index) =>
-                        setState(() { _currentTabIndex = index; _visitedMainTabs.add(index); }),
+                    onTabSelected: (index) => _selectTab(index),
                     onAddPressed: _addDownloadFromUrl,
                     sniffedBadgeCount: _sniffedCount,
                   ),
@@ -456,20 +582,51 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     final baseDir = await _completedWorkspaceDirectory();
     final tempDir = await _tempWorkspaceDirectory();
     final isTorrent = rawUrl.startsWith('magnet:') || _isTorrentFileUrl(uri);
-    final fileName = isTorrent ? '' : _safeFileName(uri);
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final headers = _buildManualDownloadHeaders(rawUrl);
+
+    if (isTorrent) {
+      final task = DownloadTask(
+        id: id,
+        url: rawUrl,
+        headers: headers,
+        savePath: baseDir.path,
+        tempDir: '${tempDir.path}/$id',
+      );
+      if (_downloadQueue.urlExists(rawUrl)) {
+        if (!mounted) return;
+        final skip = await _showDuplicatePrompt(context, 'Torrent');
+        if (skip) {
+          _urlController.clear();
+          return;
+        }
+      }
+      _downloadQueue.addTask(task);
+      _urlController.clear();
+      _showSnack('Added torrent to queue.');
+      if (mounted) setState(() {});
+      return;
+    }
+
+    // Probe the URL for a real filename, Content-Type, and size.
+    final resolved = await resolveFilename(
+      url: rawUrl,
+      headers: headers,
+    );
+    final fileName = resolved.name;
     final task = DownloadTask(
       id: id,
       url: rawUrl,
       headers: headers,
-      savePath: isTorrent ? baseDir.path : '${baseDir.path}/$fileName',
+      savePath: '${baseDir.path}/$fileName',
       tempDir: '${tempDir.path}/$id',
+      contentType: resolved.contentType,
+      totalBytes: resolved.contentLength ?? -1,
     );
     bool force = false;
     if (_downloadQueue.urlExists(rawUrl)) {
       if (!mounted) return;
-      final skip = await _showDuplicatePrompt(context, isTorrent ? 'Torrent' : fileName);
+      final skip = await _showDuplicatePrompt(context, fileName);
       if (skip) {
         _urlController.clear();
         return;
@@ -479,18 +636,121 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     _downloadQueue.addTask(task, force: force);
     _urlController.clear();
-    _showSnack(
-      isTorrent ? 'Added torrent to queue.' : 'Added $fileName to queue.',
-    );
+    _showSnack('Added $fileName to queue.');
     if (mounted) setState(() {});
   }
 
   void _openUrlInBrowser(String url) {
-    setState(() {
-      _currentTabIndex = 1;
-      _visitedMainTabs.add(1);
-    });
+    _selectTab(1);
     _browserController.requestOpenUrl(url);
+  }
+
+  /// Auto-resniff: probe the download URL through the browser controller
+  /// to check whether a fresher / token-refreshed variant is available.
+  /// If a new URL is found and differs from the task's current URL, show
+  /// a dialog asking the user whether to update or create a new download.
+  Future<void> _resniffAuto(DownloadTask task) async {
+    try {
+      // Try the HLS playlist refresh path first (handles token expiry).
+      String? freshUrl = await _browserController.fetchFreshPlaylistUrl(task.url);
+      // Fall back to a head-fetch through the WebView's JS context.
+      if (freshUrl == null || freshUrl == task.url) {
+        final headers =
+            await _browserController.fetchHeadersViaJavaScript(task.url);
+        // The URL itself hasn't changed; nothing to update.
+        if (headers == null || headers.isEmpty) {
+          if (mounted) _showSnack('No updated link found — the URL is still valid.');
+          return;
+        }
+        freshUrl = task.url;
+      }
+
+      // If the fresh URL is the same, nothing to do.
+      if (_normalizeForCompare(freshUrl) == _normalizeForCompare(task.url)) {
+        if (mounted) _showSnack('The link is unchanged — no update needed.');
+        return;
+      }
+
+      if (!mounted) return;
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Updated Link Found'),
+          content: const Text(
+            'A fresher download link was detected.\n\n'
+            'Update the existing download with the new link, '
+            'or create a separate new download?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('cancel'),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('new'),
+              child: const Text('Create New'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop('update'),
+              child: const Text('Update Existing'),
+            ),
+          ],
+        ),
+      );
+      if (choice == 'update') {
+        task.url = freshUrl;
+        if (mounted) _showSnack('Download link updated. You can retry the download.');
+        setState(() {});
+      } else if (choice == 'new') {
+        final newId = DateTime.now().microsecondsSinceEpoch.toString();
+        final baseDir = await _completedWorkspaceDirectory();
+        final tempDir = await _tempWorkspaceDirectory();
+        final newTask = DownloadTask(
+          id: newId,
+          url: freshUrl,
+          headers: task.headers,
+          savePath: '${baseDir.path}/${_taskFileName(freshUrl)}',
+          tempDir: '${tempDir.path}/$newId',
+          contentType: task.contentType,
+          sourcePageUrl: task.sourcePageUrl,
+        );
+        _downloadQueue.addTask(newTask, force: true);
+        if (mounted) _showSnack('New download added with refreshed link.');
+        setState(() {});
+      }
+    } catch (e, s) {
+      _logError('Auto-resniff failed', e, s);
+      if (mounted) _showSnack('Resniff failed: $e');
+    }
+  }
+
+  /// Manual resniff: open the task's source page in the browser so the
+  /// user can re-navigate and re-sniff the media URL manually.  Sets the
+  /// queue into "resniff mode" so that duplicate URLs trigger a dialog
+  /// instead of being silently skipped.
+  Future<void> _resniffManual(DownloadTask task) async {
+    _downloadQueue.resniffPendingTaskId = task.id;
+    final target = task.sourcePageUrl ?? task.url;
+    _browserController.requestOpenUrl(target);
+    _selectTab(1);
+    if (mounted) _showSnack('Opened source page — re-sniff the media. A dialog will appear if the link is detected as a duplicate.');
+  }
+
+  static String _normalizeForCompare(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.replace(queryParameters: {}).toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
+  static String _taskFileName(String url) {
+    try {
+      return Uri.parse(url).pathSegments.last;
+    } catch (_) {
+      return 'download_${DateTime.now().millisecondsSinceEpoch}';
+    }
   }
 
   Future<Directory> _completedWorkspaceDirectory() async {
@@ -549,8 +809,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     try {
       final docs = await getApplicationSupportDirectory();
-      final lPath = '${docs.path}/download_logs.json';
-      await DownloadLogger.instance.initialize(lPath);
+      final lPath = '${docs.path}/aurora_logs.json';
+      final verbosity = await LogSettingsStore.instance.load(docs.path);
+      await AuroraLog.instance.initialize(lPath, verbosity: verbosity);
 
       final qPath = '${docs.path}/download_queue.json';
       _downloadQueue.queuePath = qPath;
@@ -565,6 +826,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     setState(() => _settings = settings);
     _applySettings(settings);
     unawaited(_settingsStore.save(settings));
+    AuroraLog.instance.info(
+      'Settings updated',
+      category: LogCategory.settings,
+      screen: _currentScreen,
+      eventType: LogEventType.userAction,
+    );
   }
 
   void _applySettings(DownloadSettings settings) {
@@ -572,6 +839,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       maxConcurrentDownloads: settings.maxConcurrentDownloads,
       numChunksPerTask: settings.chunksPerTask,
       completedDownloadPublisher: _publicDownloadsService,
+      autoClassifyEnabled: settings.autoClassifyEnabled,
       autoRetry: settings.autoRetry,
       retryLimit: settings.retryLimit,
       minSpeedThresholdBytesPerSec: settings.minSpeedThresholdKbps * 1024,
@@ -645,15 +913,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     } catch (error) {
       _showSnack('Could not export file: $error');
     }
-  }
-
-  String _safeFileName(Uri uri) {
-    final lastSegment = uri.pathSegments.isNotEmpty
-        ? uri.pathSegments.last
-        : 'aurora-download.bin';
-    final decoded = Uri.decodeComponent(lastSegment);
-    final sanitized = decoded.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
-    return sanitized.isEmpty ? 'aurora-download.bin' : sanitized;
   }
 
   bool _isTorrentFileUrl(Uri uri) {

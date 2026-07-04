@@ -18,6 +18,7 @@ import '../../sync/sync.dart';
 import '../../theme/aurora_colors.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
+import 'diagnostics_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final DriveSyncService driveSyncService;
@@ -235,10 +236,10 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _buildCard(
-              Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
+              Icons.backup_rounded, 'Backup', 'Import & export data', () => _openPage(_buildBackupPage()))),
           const SizedBox(width: 12),
           Expanded(child: _buildCard(
-              Icons.backup_rounded, 'Backup', 'Import & export data', () => _openPage(_buildBackupPage()))),
+              Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
         ]),
       ],
     );
@@ -333,6 +334,17 @@ class _SettingsPageState extends State<SettingsPage> {
                       _update(local);
                     }),
               ],
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text('Auto-classify downloads'),
+                subtitle: const Text('Sort completed files into Videos, Audio, Documents, etc.'),
+                value: local.autoClassifyEnabled,
+                onChanged: (v) {
+                  setLocal(() => local = local.copyWith(autoClassifyEnabled: v));
+                  _update(local);
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
               const SizedBox(height: 16),
               _label('Max detected media'),
               _slider(local.maxDetectedMedia.toDouble(), 20, 150, 13,
@@ -760,6 +772,18 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 24),
               Text('Built with Flutter, libtorrent, and the Nord palette.',
                   style: TextStyle(fontSize: 12, color: AuroraColors.mutedDeep)),
+            ],
+          )),
+          const SizedBox(height: 16),
+          Panel(child: Column(
+            children: [
+              ListTile(
+                leading: Icon(Icons.monitor_heart_outlined, color: AuroraColors.accent),
+                title: const Text('Diagnostics'),
+                subtitle: const Text('View, filter, and export app logs'),
+                trailing: const Icon(Icons.chevron_right, color: AuroraColors.mutedText),
+                onTap: () => _openPage(const DiagnosticsPage()),
+              ),
             ],
           )),
         ],

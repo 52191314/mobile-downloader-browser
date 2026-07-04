@@ -10,6 +10,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaScannerConnection
+import android.Manifest
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
@@ -17,7 +18,10 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
+import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -45,10 +49,12 @@ class MainActivity : FlutterActivity() {
     private var pendingPickDirectoryResult: MethodChannel.Result? = null
 
     companion object {
+        private const val TAG = "AuroraMain"
         private const val PICK_IMPORT_FILE = 1001
         private const val REQUEST_EXPORT_FILE = 1002
         private const val REQUEST_PICK_EXPORT_URI = 1003
         private const val REQUEST_PICK_DIRECTORY = 1004
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val NETWORK_TAG = "AuroraNet"
     }
 
@@ -93,6 +99,8 @@ class MainActivity : FlutterActivity() {
 
         // Foreground service channel: Dart tells us to start, update, or
         // stop the persistent notification that keeps downloads alive.
+        // Also handles battery-optimisation and notification-permission
+        // requests.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, fgServiceChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -124,6 +132,14 @@ class MainActivity : FlutterActivity() {
                     }
                     "stop" -> {
                         stopService(Intent(applicationContext, DownloadForegroundService::class.java))
+                        result.success(null)
+                    }
+                    "requestNotificationPermission" -> {
+                        requestNotificationPermission()
+                        result.success(null)
+                    }
+                    "requestBatteryOpt" -> {
+                        requestBatteryOptimizationExemption()
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -799,5 +815,41 @@ class MainActivity : FlutterActivity() {
                 result.success(false)
             }
         }.start()
+    }
+
+    // ─── Permissions & battery opt ──────────────────────────────────
+
+    /// Request the POST_NOTIFICATIONS runtime permission on Android 13+.
+    /// Without this the foreground service notification is hidden,
+    /// making the process more vulnerable to being killed by the OS.
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST_CODE,
+                )
+            }
+        }
+    }
+
+    /// Open the system battery-optimisation exemption dialog so the user
+    /// can whitelist Aurora.  This prevents Android's doze / app-standby
+    /// from killing the process or throttling network during downloads.
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:${applicationContext.packageName}")
+                )
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to open battery opt exemption", e)
+            }
+        }
     }
 }

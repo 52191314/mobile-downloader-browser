@@ -6,12 +6,18 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 import 'range_calculator.dart';
 import 'file_combiner.dart';
-import 'download_logger.dart';
+import '../logging/aurora_log.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[DownloadSplitter] $context: $error';
   debugPrint(message);
-  DownloadLogger.instance.error(message);
+  AuroraLog.instance.error(
+    message,
+    category: LogCategory.download,
+    screen: LogScreen.background,
+    eventType: LogEventType.error,
+    stackTrace: stack,
+  );
 }
 
 class DownloadSplitter implements BaseDownloader {
@@ -40,6 +46,9 @@ class DownloadSplitter implements BaseDownloader {
 
   Timer? _speedTimer;
   int _lastBytesTick = 0;
+  /// Diagnostic: counts consecutive 500ms ticks where speed was 0 while
+  /// the task is in downloading state.  Reset to 0 whenever data flows.
+  int _zeroSpeedTickCount = 0;
 
   final StreamController<DownloadTask> _taskUpdateController =
       StreamController<DownloadTask>.broadcast();
@@ -282,6 +291,49 @@ class DownloadSplitter implements BaseDownloader {
             } else {
               _stallAccumSeconds = 0.0;
             }
+          }
+
+          // Diagnostic: track consecutive zero-speed ticks while
+          // actively downloading.  Log a warning after 4 ticks (2 s)
+          // so we can detect when the Dart event loop is starved by
+          // WebView activity (the primary cause of the "0 KB/s on
+          // non-Queue tab" symptom).
+          if (task.state == DownloadState.downloading && task.speed <= 0) {
+            _zeroSpeedTickCount++;
+            if (_zeroSpeedTickCount == 4) {
+              debugPrint(
+                '[DownloadSplitter] ⚠ Speed 0 for ${_zeroSpeedTickCount * 0.5}s '
+                'on ${task.savePath.split("/").last} '
+                '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
+                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
+              );
+              AuroraLog.instance.warn(
+                'Speed 0 for ${_zeroSpeedTickCount * 0.5}s '
+                'on ${task.savePath.split("/").last} '
+                '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
+                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
+                category: LogCategory.download,
+                screen: LogScreen.background,
+                eventType: LogEventType.network,
+                taskId: task.id,
+              );
+            } else if (_zeroSpeedTickCount > 4 && _zeroSpeedTickCount % 10 == 0) {
+              // Every 5 s after the initial warning
+              debugPrint(
+                '[DownloadSplitter] ⚠ Speed still 0 after ${_zeroSpeedTickCount * 0.5}s '
+                'on ${task.savePath.split("/").last}',
+              );
+              AuroraLog.instance.warn(
+                'Speed still 0 after ${_zeroSpeedTickCount * 0.5}s '
+                'on ${task.savePath.split("/").last}',
+                category: LogCategory.download,
+                screen: LogScreen.background,
+                eventType: LogEventType.network,
+                taskId: task.id,
+              );
+            }
+          } else {
+            _zeroSpeedTickCount = 0;
           }
           _emitTask();
         });
@@ -596,6 +648,14 @@ class DownloadSplitter implements BaseDownloader {
         debugPrint(
           '[DownloadSplitter] Open-ended resume returned 200 OK for '
           'chunk ${chunk.index}; truncated file for fresh re-download.',
+        );
+        AuroraLog.instance.debug(
+          'Open-ended resume returned 200 OK for '
+          'chunk ${chunk.index}; truncated file for fresh re-download.',
+          category: LogCategory.download,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+          taskId: task.id,
         );
       }
     }

@@ -11,11 +11,19 @@ import 'download_splitter.dart';
 import 'file_combiner.dart';
 import 'hls_downloader.dart';
 import 'torrent_downloader.dart';
-import 'download_logger.dart';
+import '../logging/aurora_log.dart';
 import '../platform/download_foreground_service.dart';
+import 'file_classifier.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
+  AuroraLog.instance.error(
+    '$context: $error',
+    category: LogCategory.download,
+    screen: LogScreen.background,
+    eventType: LogEventType.error,
+    stackTrace: stack,
+  );
 }
 
 /// Internal pair for relevance-scored search results used by
@@ -45,6 +53,7 @@ class DownloadQueue {
   final bool _ownsClient;
   CompletedDownloadPublisher? completedDownloadPublisher;
   bool wifiOnly = false;
+  bool autoClassifyEnabled = true;
   bool autoRetry = true;
   int retryLimit = 3;
   int minSpeedThresholdBytesPerSec = 0;
@@ -81,6 +90,18 @@ class DownloadQueue {
       StreamController<String>.broadcast();
   Stream<String> get onWarning => _warningController.stream;
 
+  /// When set, the queue is in "resniff" mode.  Duplicate URLs that match
+  /// the task with this ID will trigger [onResniffDuplicate] instead of
+  /// being silently skipped.  Set to null to exit resniff mode.
+  String? resniffPendingTaskId;
+
+  /// Called when a URL is added that duplicates an existing task while
+  /// [resniffPendingTaskId] is set.  The queue page uses this to ask the
+  /// user whether to update the existing download or create a new one.
+  /// Signature: (existingTaskId, newUrl, contentType)
+  void Function(String existingTaskId, String newUrl, String? contentType)?
+      onResniffDuplicate;
+
   DownloadQueue({
     this.maxConcurrentDownloads = 3,
     this.enablePreemption = true,
@@ -105,6 +126,7 @@ class DownloadQueue {
     int? maxConcurrentDownloads,
     int? numChunksPerTask,
     CompletedDownloadPublisher? completedDownloadPublisher,
+    bool? autoClassifyEnabled,
     bool? autoRetry,
     int? retryLimit,
     int? minSpeedThresholdBytesPerSec,
@@ -120,6 +142,9 @@ class DownloadQueue {
     }
     if (completedDownloadPublisher != null) {
       this.completedDownloadPublisher = completedDownloadPublisher;
+    }
+    if (autoClassifyEnabled != null) {
+      this.autoClassifyEnabled = autoClassifyEnabled;
     }
     if (autoRetry != null) {
       this.autoRetry = autoRetry;
@@ -160,6 +185,15 @@ class DownloadQueue {
                 t.state == DownloadState.paused),
       );
       if (existing.isNotEmpty) {
+        // When resniff mode is active and the existing task matches the
+        // pending resniff task, delegate to the callback so the user can
+        // choose "Update existing" or "Create new".
+        if (resniffPendingTaskId != null &&
+            onResniffDuplicate != null &&
+            _tasks[resniffPendingTaskId]?.url == task.url) {
+          onResniffDuplicate!(resniffPendingTaskId!, task.url, task.contentType);
+          return;
+        }
         _warn('Already in queue: ${task.url}');
         return;
       }
@@ -184,6 +218,11 @@ class DownloadQueue {
           'Look for the .m3u8 or .mpd playlist URL in the captured media list instead.';
       _emitTask(task);
       return;
+    }
+
+    // Auto-classify: inject category subfolder into savePath.
+    if (autoClassifyEnabled && task.state != DownloadState.completed) {
+      _applyAutoClassification(task);
     }
 
     if (!_splitters.containsKey(task.id)) {
@@ -226,8 +265,12 @@ class DownloadQueue {
           _schedule();
 
           if (updatedTask.state == DownloadState.failed) {
-            DownloadLogger.instance.error(
+            AuroraLog.instance.error(
               'Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}',
+              category: LogCategory.download,
+              screen: LogScreen.background,
+              eventType: LogEventType.error,
+              taskId: updatedTask.id,
             );
             if (autoRetry) {
               final isStallOrTruncation =
@@ -239,12 +282,16 @@ class DownloadQueue {
               if (isStallOrTruncation && alreadyDownloadedEnough) {
                 // Don't full-restart. Mark as failed with a
                 // salvageable-data message so the user can Force Merge.
-                DownloadLogger.instance.error(
+                AuroraLog.instance.error(
                   'Skipped auto-retry for '
                   '${updatedTask.savePath.split("/").last}: '
                   'already downloaded '
                   '${(updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB. '
                   'User can use Force Merge or manual retry.',
+                  category: LogCategory.download,
+                  screen: LogScreen.background,
+                  eventType: LogEventType.error,
+                  taskId: updatedTask.id,
                 );
                 final alreadyMb =
                     (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
@@ -269,8 +316,12 @@ class DownloadQueue {
                   }
                 });
               } else {
-                DownloadLogger.instance.error(
+                AuroraLog.instance.error(
                   'Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.',
+                  category: LogCategory.download,
+                  screen: LogScreen.background,
+                  eventType: LogEventType.error,
+                  taskId: updatedTask.id,
                 );
                 final originalError = updatedTask.errorMessage ?? 'Unknown error';
                 final cleanError = originalError.replaceFirst(RegExp(r'^\[Retrying in 2s, attempt \d+/\d+\] '), '');
@@ -401,9 +452,13 @@ class DownloadQueue {
     if (task == null) return false;
 
     if (task.state == DownloadState.downloading) {
-      DownloadLogger.instance.error(
+      AuroraLog.instance.error(
         'Force merge refused for '
         '${task.savePath.split("/").last}: task is still downloading.',
+        category: LogCategory.download,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+        taskId: task.id,
       );
       task.errorMessage = '[Force merge refused] Task is still downloading.';
       _emitTask(task);
@@ -990,6 +1045,26 @@ class DownloadQueue {
     }
   }
 
+  /// Applies auto-classification to [task.savePath], inserting a category
+  /// subfolder (e.g. "Videos", "Documents") between `/completed/` and the
+  /// filename. No-op when the path already has a user-chosen subfolder or
+  /// does not live under `/completed/`.
+  void _applyAutoClassification(DownloadTask task) {
+    final normalized = task.savePath.replaceAll('\\', '/');
+    const sep = '/completed/';
+    final idx = normalized.lastIndexOf(sep);
+    // Not under completed/ – skip (torrents, custom exports, etc.)
+    if (idx == -1) return;
+    final after = normalized.substring(idx + sep.length);
+    // Already has a subfolder (user's manual choice) – skip
+    if (after.contains('/')) return;
+
+    final category = FileClassifier.classify(after);
+    final label = FileClassifier.categoryLabel(category);
+    final base = task.savePath.substring(0, idx + sep.length - 1);
+    task.savePath = '$base/$label/$after';
+  }
+
   /// Removes oldest completed/failed tasks when the history limit is exceeded.
   /// This prevents unbounded memory and JSON-serialization growth.
   void _evictOldCompletedTasks() {
@@ -1041,8 +1116,12 @@ class DownloadQueue {
       }
     } catch (error) {
       task.publishErrorMessage = error.toString();
-      DownloadLogger.instance.error(
+      AuroraLog.instance.error(
         'Failed to publish completed file: ${task.savePath.split("/").last}. Error: $error',
+        category: LogCategory.download,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+        taskId: task.id,
       );
     } finally {
       _publishingTasks.remove(task.id);
@@ -1257,6 +1336,12 @@ class DownloadQueue {
       }
       if (recoveredCount > 0 && !_isLoading) {
         debugPrint('[DownloadQueue] INFO: Successfully recovered $recoveredCount tasks from corrupt history backups.');
+        AuroraLog.instance.info(
+          'Successfully recovered $recoveredCount tasks from corrupt history backups.',
+          category: LogCategory.download,
+          screen: LogScreen.background,
+          eventType: LogEventType.stateChange,
+        );
         unawaited(saveToFile(path));
       }
     } catch (e, s) {

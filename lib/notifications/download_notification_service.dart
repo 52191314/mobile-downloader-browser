@@ -1,10 +1,18 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../logging/aurora_log.dart';
 import '../downloader/models.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadNotification] $context: $error');
+  AuroraLog.instance.error(
+    '$context: $error',
+    category: LogCategory.notification,
+    screen: LogScreen.background,
+    eventType: LogEventType.error,
+    stackTrace: stack,
+  );
 }
 
 class DownloadNotificationService {

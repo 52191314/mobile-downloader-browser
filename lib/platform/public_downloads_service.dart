@@ -220,4 +220,38 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
       _ => 'application/octet-stream',
     };
   }
+
+  /// Returns the file extension (including the dot) for a given MIME type,
+  /// or `null` if the MIME type is not recognized.
+  static String? extensionForMime(String mimeType) {
+    return switch (mimeType.toLowerCase()) {
+      'video/mp4' => '.mp4',
+      'application/vnd.apple.mpegurl' => '.m3u8',
+      'application/x-mpegurl' => '.m3u8',
+      'video/mp2t' => '.ts',
+      'video/webm' => '.webm',
+      'video/x-matroska' => '.mkv',
+      'video/quicktime' => '.mov',
+      'audio/mpeg' => '.mp3',
+      'audio/mp4' => '.m4a',
+      'audio/aac' => '.aac',
+      'audio/flac' => '.flac',
+      'audio/ogg' => '.ogg',
+      'application/pdf' => '.pdf',
+      'application/zip' => '.zip',
+      'application/vnd.rar' => '.rar',
+      'application/x-7z-compressed' => '.7z',
+      'application/x-bittorrent' => '.torrent',
+      'text/plain' => '.txt',
+      'application/dash+xml' => '.mpd',
+      'image/jpeg' => '.jpg',
+      'image/png' => '.png',
+      'image/gif' => '.gif',
+      'image/webp' => '.webp',
+      'application/json' => '.json',
+      'application/xml' => '.xml',
+      'text/html' => '.html',
+      _ => null,
+    };
+  }
 }

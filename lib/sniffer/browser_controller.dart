@@ -41,6 +41,17 @@ abstract interface class SnifferBrowserController {
   Future<double?> getZoomScale();
   Future<void> freeze();
   Future<void> thaw();
+
+  /// Pauses JavaScript timers, layout, and rendering on ALL browser
+  /// WebViews (global).  Called when leaving the Browser main tab so
+  /// the Dart event loop is freed for download HTTP stream processing.
+  /// Also hides the DOM on the active tab.
+  Future<void> pauseAllWebViews();
+
+  /// Resumes JavaScript timers, layout, and rendering (global).
+  /// Called when re-entering the Browser main tab.  Also restores
+  /// DOM visibility on the active tab.
+  Future<void> resumeActiveWebView();
   Future<int> fillForm(Map<String, String> values);
   Future<void> findAllAsync(String search);
   Future<void> findNext(bool forward);
@@ -849,6 +860,27 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   @override
+  Future<void> pauseAllWebViews() async {
+    // InAppWebViewController.pauseTimers() pauses JS timers, layout, and
+    // parsing for ALL WebViews in the process.  This frees the Dart event
+    // loop from WebView activity so download HTTP streams are processed
+    // without starvation.
+    try {
+      await _controller?.pauseTimers();
+    } catch (_) {}
+    // Also hide the DOM on the current tab as a best-effort signal.
+    await freeze();
+  }
+
+  @override
+  Future<void> resumeActiveWebView() async {
+    try {
+      await _controller?.resumeTimers();
+    } catch (_) {}
+    await thaw();
+  }
+
+  @override
   Future<int> fillForm(Map<String, String> values) async {
     if (values.isEmpty) return 0;
     final json = jsonEncode(values);
@@ -1289,6 +1321,12 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   Future<void> thaw() async {}
+
+  @override
+  Future<void> pauseAllWebViews() async {}
+
+  @override
+  Future<void> resumeActiveWebView() async {}
 
   @override
   Future<int> fillForm(Map<String, String> values) async => 0;

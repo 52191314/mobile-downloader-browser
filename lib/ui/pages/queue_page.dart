@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../downloader/downloader.dart';
 import '../../theme/aurora_colors.dart';
+import '../widgets/edge_swipe_card.dart';
 import '../widgets/empty_queue.dart';
 import '../widgets/download_task_row.dart';
 
@@ -32,6 +33,8 @@ class QueuePage extends StatefulWidget {
   final Future<bool> Function(DownloadTask task)? onForceMergeTask;
   final double speedLimitKbps;
   final void Function(String url)? onOpenUrlInBrowser;
+  final Future<void> Function(DownloadTask task)? onResniffAuto;
+  final Future<void> Function(DownloadTask task)? onResniffManual;
 
   const QueuePage({
     super.key,
@@ -48,6 +51,8 @@ class QueuePage extends StatefulWidget {
     this.onForceMergeTask,
     required this.speedLimitKbps,
     this.onOpenUrlInBrowser,
+    this.onResniffAuto,
+    this.onResniffManual,
   });
 
   @override
@@ -76,6 +81,9 @@ class _QueuePageState extends State<QueuePage> {
     _hasUrlText = widget.urlController.text.isNotEmpty;
     widget.urlController.addListener(_onUrlTextChanged);
     _searchController.addListener(_onSearchChanged);
+    // Wire the resniff duplicate callback so the queue can ask the user
+    // when a duplicate URL is detected during manual resniff.
+    widget.queue.onResniffDuplicate = _handleResniffDuplicate;
     _sub = widget.queue.onTaskUpdated.listen((task) {
       if (_rebuildTimer == null || !_rebuildTimer!.isActive) {
         _rebuildTimer = Timer(const Duration(milliseconds: 500), () {
@@ -115,6 +123,7 @@ class _QueuePageState extends State<QueuePage> {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _searchDebounceTimer?.cancel();
+    widget.queue.onResniffDuplicate = null;
     _urlFocusNode.dispose();
     _rebuildTimer?.cancel();
     _sub?.cancel();
@@ -160,9 +169,7 @@ class _QueuePageState extends State<QueuePage> {
     final completed = widget.queue.completedTasks;
     final failed = widget.queue.failedTasks;
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
+    return Scaffold(
         appBar: AppBar(
           title: const Text('Downloads'),
           actions: [
@@ -176,23 +183,11 @@ class _QueuePageState extends State<QueuePage> {
                 onPressed: () => setState(() => _viewMode = !_viewMode),
               ),
           ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(icon: Icon(Icons.download), text: 'Queue'),
-              Tab(icon: Icon(Icons.list_alt), text: 'Logs'),
-            ],
-          ),
         ),
         body: SafeArea(
-          child: TabBarView(
-            children: [
-              _buildQueueTab(context, tasks, completed, failed),
-              _buildLogsTab(context),
-            ],
-          ),
+          child: _buildQueueTab(context, tasks, completed, failed),
         ),
-      ),
-    );
+      );
   }
 
   String _speedLabel(double bytesPerSecond) {
@@ -956,33 +951,25 @@ class _QueuePageState extends State<QueuePage> {
         ? (task.downloadedBytes / task.totalBytes).clamp(0.0, 1.0)
         : null;
 
-    return Dismissible(
-      key: ValueKey('task_${task.id}'),
-      background: Container(
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.only(left: 20),
-        color: AuroraColors.accent.withValues(alpha: 0.2),
-        child: Icon(Icons.pause, color: AuroraColors.accent),
-      ),
-      secondaryBackground: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: AuroraColors.nordRed.withValues(alpha: 0.2),
-        child: const Icon(Icons.delete_outline, color: AuroraColors.nordRed),
-      ),
-      confirmDismiss: (direction) async {
-        if (direction == DismissDirection.startToEnd) {
-          // Swipe right → pause/resume
-          if (task.state == DownloadState.downloading ||
-              task.state == DownloadState.idle) {
-            widget.onPauseTask?.call(task)?.call();
-          } else if (task.state == DownloadState.paused) {
-            widget.onResumeTask?.call(task)?.call();
-          }
-          return false; // Don't actually dismiss
-        } else {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: EdgeSwipeCard(
+        leftBackground: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          color: AuroraColors.nordRed.withValues(alpha: 0.2),
+          child: const Icon(Icons.delete_outline, color: AuroraColors.nordRed),
+        ),
+        rightBackground: Container(
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.only(left: 20),
+          color: AuroraColors.accent.withValues(alpha: 0.2),
+          child: Icon(Icons.pause, color: AuroraColors.accent),
+        ),
+        onLeftSwipe: () {
           // Swipe left → delete
-          final confirm = await showDialog<bool>(
+          if (!mounted) return;
+          showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
               title: const Text('Remove download?'),
@@ -997,15 +984,21 @@ class _QueuePageState extends State<QueuePage> {
                 ),
               ],
             ),
-          );
-          if (confirm == true) {
-            widget.onCancelTask?.call(task)?.call();
+          ).then((confirm) {
+            if (confirm == true) {
+              widget.onCancelTask?.call(task)?.call();
+            }
+          });
+        },
+        onRightSwipe: () {
+          // Swipe right → pause/resume
+          if (task.state == DownloadState.downloading ||
+              task.state == DownloadState.idle) {
+            widget.onPauseTask?.call(task)?.call();
+          } else if (task.state == DownloadState.paused) {
+            widget.onResumeTask?.call(task)?.call();
           }
-          return false;
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 6),
+        },
         child: Container(
           constraints: const BoxConstraints(minHeight: 72),
           decoration: BoxDecoration(
@@ -1159,6 +1152,31 @@ class _QueuePageState extends State<QueuePage> {
       );
     }
 
+    // Resniff (Auto) — probe the URL for a fresher variant
+    if (widget.onResniffAuto != null &&
+        !task.url.startsWith('magnet:') &&
+        !task.url.startsWith('blob:')) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'resniff_auto',
+          child: _popupRow(
+              Icons.find_replace_rounded, AuroraColors.accent, 'Resniff (Auto)'),
+        ),
+      );
+    }
+
+    // Resniff (Manual) — open source page so user can re-sniff
+    if (widget.onResniffManual != null &&
+        (task.sourcePageUrl != null || !task.url.startsWith('magnet:'))) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'resniff_manual',
+          child: _popupRow(Icons.open_in_browser_rounded,
+              AuroraColors.accentPurple, 'Resniff (Manual)'),
+        ),
+      );
+    }
+
     // Open source page
     if (task.sourcePageUrl != null && widget.onOpenUrlInBrowser != null) {
       popupItems.add(
@@ -1224,6 +1242,10 @@ class _QueuePageState extends State<QueuePage> {
                       unawaited(widget.onForceMergeTask!(task));
                     case 'open_source':
                       widget.onOpenUrlInBrowser!(task.sourcePageUrl!);
+                    case 'resniff_auto':
+                      unawaited(widget.onResniffAuto?.call(task));
+                    case 'resniff_manual':
+                      unawaited(widget.onResniffManual?.call(task));
                     case 'delete':
                       final confirm = await showDialog<bool>(
                         context: context,
@@ -1386,146 +1408,6 @@ class _QueuePageState extends State<QueuePage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Logs tab (unchanged, same as before)
-  // ---------------------------------------------------------------------------
-
-  Widget _buildLogsTab(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return StreamBuilder<List<LogEntry>>(
-      stream: DownloadLogger.instance.onLogsChanged,
-      initialData: DownloadLogger.instance.logs,
-      builder: (context, snapshot) {
-        final logs = snapshot.data ?? [];
-        if (logs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.receipt_long_outlined,
-                  size: 48,
-                  color: scheme.onSurfaceVariant.withAlpha(128),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'No logs recorded yet',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: scheme.surfaceContainerLow,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${logs.length} logs',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        icon: const Icon(Icons.copy, size: 16),
-                        label:
-                            const Text('Copy All', style: TextStyle(fontSize: 12)),
-                        onPressed: () {
-                          final text = logs
-                              .map((e) =>
-                                  '[${e.formattedTime}] [${e.level}] ${e.message}')
-                              .join('\n');
-                          Clipboard.setData(ClipboardData(text: text));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Logs copied to clipboard')),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        icon: const Icon(Icons.delete_outline, size: 16),
-                        label:
-                            const Text('Clear', style: TextStyle(fontSize: 12)),
-                        style: TextButton.styleFrom(
-                          foregroundColor: scheme.error,
-                        ),
-                        onPressed: () => DownloadLogger.instance.clear(),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: logs.length,
-                itemBuilder: (context, index) {
-                  final entry = logs[index];
-                  Color levelColor = scheme.onSurface;
-                  IconData levelIcon = Icons.info_outline;
-                  if (entry.level == 'WARN') {
-                    levelColor = Colors.orange;
-                    levelIcon = Icons.warning_amber_outlined;
-                  } else if (entry.level == 'ERROR') {
-                    levelColor = scheme.error;
-                    levelIcon = Icons.error_outline;
-                  } else {
-                    levelColor = scheme.primary;
-                    levelIcon = Icons.info_outline;
-                  }
-
-                  return Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(levelIcon, size: 16, color: levelColor),
-                        const SizedBox(width: 8),
-                        Text(
-                          entry.formattedTime,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 11,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: SelectableText(
-                            entry.message,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: entry.level == 'ERROR'
-                                  ? scheme.error
-                                  : scheme.onSurface,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   void _showPartialMergeDialog(DownloadTask task) {
     if (!mounted) return;
     final match = RegExp(r'\[PARTIAL:([\d.]+)\]').firstMatch(task.errorMessage ?? '');
@@ -1570,6 +1452,82 @@ class _QueuePageState extends State<QueuePage> {
               }
             },
             child: const Text('Merge & Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Called by [DownloadQueue.onResniffDuplicate] when a duplicate URL is
+  /// detected while the queue is in manual-resniff mode.  Shows a dialog
+  /// asking whether to update the existing download or create a new one.
+  void _handleResniffDuplicate(String existingTaskId, String newUrl, String? contentType) {
+    if (!mounted) return;
+    widget.queue.resniffPendingTaskId = null; // exit resniff mode
+    _showResniffDuplicateDialog(existingTaskId, newUrl, contentType);
+  }
+
+  void _showResniffDuplicateDialog(String existingTaskId, String newUrl, String? contentType) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Duplicate Link Detected'),
+        content: Text(
+          'This media URL is already in your download queue.\n\n'
+          'The link may have changed (e.g. token refresh). Would you '
+          'like to update the existing download with the new link, '
+          'or create a separate new download?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // Create new download alongside existing one
+              final existing = widget.queue.getTask(existingTaskId);
+              if (existing != null) {
+                final newTask = DownloadTask(
+                  id: DateTime.now().microsecondsSinceEpoch.toString(),
+                  url: newUrl,
+                  headers: existing.headers,
+                  savePath: existing.savePath.replaceAll(
+                    _fileName(existing.savePath),
+                    '${_fileName(existing.savePath).replaceAll(RegExp(r'\.[^.]+$'), '')}_${DateTime.now().millisecondsSinceEpoch}${RegExp(r'\.[^.]+$').firstMatch(existing.savePath)?.group(0) ?? ''}',
+                  ),
+                  tempDir: '${existing.tempDir}_${DateTime.now().millisecondsSinceEpoch}',
+                  contentType: contentType ?? existing.contentType,
+                  sourcePageUrl: existing.sourcePageUrl,
+                );
+                widget.queue.addTask(newTask, force: true);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('New download added for refreshed link.')),
+                  );
+                }
+              }
+            },
+            child: const Text('Create New'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // Update existing task with new URL
+              final existing = widget.queue.getTask(existingTaskId);
+              if (existing != null) {
+                existing.url = newUrl;
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Download link updated. You can retry the download.')),
+                  );
+                  setState(() {});
+                }
+              }
+            },
+            child: const Text('Update Existing'),
           ),
         ],
       ),

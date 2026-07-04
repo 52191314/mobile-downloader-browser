@@ -49,4 +49,30 @@ class DownloadForegroundService {
       // Best-effort.
     }
   }
+
+  /// Requests the POST_NOTIFICATIONS runtime permission on Android 13+.
+  /// Shows the system permission dialog. Safe to call on older API levels
+  /// (no-op on the native side).
+  static Future<void> requestNotificationPermission() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestNotificationPermission');
+    } catch (e) {
+      // Best-effort.
+    }
+  }
+
+  /// Opens the Android system intent to let the user whitelist Aurora
+  /// from battery optimisations (ignores battery optimisation).
+  /// On Android 6+ this opens a system dialog; on older devices it is a
+  /// no-op.  Every Android manufacturer's doze / app-standby policy is
+  /// different, so this gives the user a fighting chance regardless of OEM.
+  static Future<void> requestBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestBatteryOpt');
+    } catch (e) {
+      // Best-effort.
+    }
+  }
 }

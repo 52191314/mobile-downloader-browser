@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../downloader/hls_playlist_parser.dart';
+import '../logging/aurora_log.dart';
 
 /// WebView-side WAF-bypass fetch methods.
 ///
@@ -128,7 +129,7 @@ class WebViewFetchDelegate {
       final result = await completer.future.timeout(
         const Duration(seconds: 20),
         onTimeout: () {
-          print('[BrowserController] fetchViaJavaScript timed out for $safeUrl');
+          AuroraLog.instance.debug('fetchViaJavaScript timed out for $safeUrl', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
           return null;
         },
       );
@@ -136,18 +137,18 @@ class WebViewFetchDelegate {
       // Clean up the one-shot handler.
       try { _controller!.removeJavaScriptHandler(handlerName: channelName); } catch (_) {}
 
-      print('[BrowserController] fetchViaJavaScript raw result: $result');
+      AuroraLog.instance.debug('fetchViaJavaScript raw result: $result', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       if (result is String && result.startsWith('OK:')) {
         final body = result.substring(3);
-        print('[BrowserController] fetchViaJavaScript SUCCESS, body length=${body.length}');
+        AuroraLog.instance.debug('fetchViaJavaScript SUCCESS, body length=${body.length}', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
         return body;
       }
       if (result is String) {
-        print('[BrowserController] fetchViaJavaScript failed: $result');
+        AuroraLog.instance.debug('fetchViaJavaScript failed: $result', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       }
       return null;
     } catch (e) {
-      print('[BrowserController] fetchViaJavaScript threw: $e');
+      AuroraLog.instance.debug('fetchViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       return null;
     }
   }
@@ -282,7 +283,7 @@ class WebViewFetchDelegate {
 
       return result;
     } catch (e) {
-      debugPrint('[BrowserController] fetchHeadersViaJavaScript threw: $e');
+      AuroraLog.instance.debug('fetchHeadersViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       return null;
     }
   }
@@ -360,7 +361,7 @@ class WebViewFetchDelegate {
       }
       return result;
     } catch (e) {
-      debugPrint('[BrowserController] fetchPlaylistBodyViaJavaScript threw: $e');
+      AuroraLog.instance.debug('fetchPlaylistBodyViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       return null;
     }
   }
@@ -424,9 +425,9 @@ class WebViewFetchDelegate {
 ''');
 
       final result = await completer.future.timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 6),
         onTimeout: () {
-          print('[BrowserController] fetchBinaryViaJavaScript timed out for $safeUrl');
+          AuroraLog.instance.debug('fetchBinaryViaJavaScript timed out for $safeUrl', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
           return null;
         },
       );
@@ -434,11 +435,11 @@ class WebViewFetchDelegate {
       try { _controller!.removeJavaScriptHandler(handlerName: channelName); } catch (_) {}
 
       if (result != null) {
-        print('[BrowserController] fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes');
+        AuroraLog.instance.debug('fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       }
       return result;
     } catch (e) {
-      print('[BrowserController] fetchBinaryViaJavaScript threw: $e');
+      AuroraLog.instance.debug('fetchBinaryViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
       return null;
     }
   }

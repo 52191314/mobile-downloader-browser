@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import 'models.dart';
-import 'download_logger.dart';
+import '../logging/aurora_log.dart';
 import 'hls_decryptor.dart';
 import 'hls_models.dart';
 import 'hls_playlist_parser.dart';
@@ -17,7 +17,13 @@ void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[HlsDownloader] $context: $error';
   debugPrint(message);
   print(message); // Also emit via print() which always reaches logcat
-  DownloadLogger.instance.error(message);
+  AuroraLog.instance.error(
+    message,
+    category: LogCategory.hls,
+    screen: LogScreen.background,
+    eventType: LogEventType.error,
+    stackTrace: stack,
+  );
 }
 
 class HlsDownloader implements BaseDownloader {
@@ -304,7 +310,7 @@ class HlsDownloader implements BaseDownloader {
     } catch (_) {}
 
     if (!headSupported) {
-      print('[HlsDownloader] HEAD request not supported by server/CDN, falling back to indeterminate mode.');
+      AuroraLog.instance.debug('HEAD request not supported by server/CDN, falling back to indeterminate mode.', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
       // Preserve the sniffer's estimated totalBytes if one was carried over
       // from SniffedMedia.contentLengthBytes (e.g. segment-sampling estimate).
       if (task.totalBytes > 0) {
@@ -451,7 +457,6 @@ class HlsDownloader implements BaseDownloader {
   /// CDN (which requires a same-origin Referer) from returning 403.
   Map<String, String> _requestHeaders(Uri uri) {
     if (task.headers != null && task.headers!.isNotEmpty) {
-      print('[HlsDownloader] using task.headers (${task.headers!.length} entries)');
       return task.headers!;
     }
     final origin = '${uri.scheme}://${uri.host}';
@@ -463,7 +468,6 @@ class HlsDownloader implements BaseDownloader {
       'Origin': origin,
       'Accept-Encoding': 'gzip, deflate, br',
     };
-    print('[HlsDownloader] _requestHeaders built with Referer=$origin/ Origin=$origin');
     return h;
   }
 
@@ -476,16 +480,16 @@ class HlsDownloader implements BaseDownloader {
       final urlStr = uri.toString();
       final cached = task.hlsPlaylistCache!(urlStr);
       if (cached != null && cached.isNotEmpty) {
-        print('[HlsDownloader] Using cached HLS playlist body for $uri (${cached.length} chars)');
+        AuroraLog.instance.debug('Using cached HLS playlist body for $uri (${cached.length} chars)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
         return HlsPlaylistParser.parse(cached, uri);
       }
-      print('[HlsDownloader] Cache MISS for $urlStr (hlsPlaylistCache is set but returned null)');
+      AuroraLog.instance.debug('Cache MISS for $urlStr (hlsPlaylistCache is set but returned null)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     } else {
-      print('[HlsDownloader] hlsPlaylistCache is null (task not created from browser tab)');
+      AuroraLog.instance.debug('hlsPlaylistCache is null (task not created from browser tab)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     }
 
     final headers = _requestHeaders(uri);
-    print('[HlsDownloader] _fetchPlaylist uri=$uri headers_count=${headers.length}');
+    AuroraLog.instance.debug('_fetchPlaylist uri=$uri headers_count=${headers.length}', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
 
     // 1st attempt: WebView JS fetch() when available — this is the ONLY
     // path that sees Cloudflare clearance cookies because it runs inside
@@ -497,27 +501,27 @@ class HlsDownloader implements BaseDownloader {
       try {
         final jsBody = await task.fetchViaWebView!(uri.toString(), headers: headers);
         if (jsBody != null && jsBody.isNotEmpty) {
-          print('[HlsDownloader] WebView JS fetch succeeded for $uri (${jsBody.length} chars)');
+          AuroraLog.instance.debug('WebView JS fetch succeeded for $uri (${jsBody.length} chars)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
           return HlsPlaylistParser.parse(jsBody, uri);
         }
-        print('[HlsDownloader] WebView JS fetch returned null/empty');
+        AuroraLog.instance.debug('WebView JS fetch returned null/empty', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
       } catch (e) {
-        print('[HlsDownloader] WebView JS fetch threw: $e');
+        AuroraLog.instance.debug('WebView JS fetch threw: $e', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
         _logError('WebView JS fetch threw', e);
       }
     } else {
-      print('[HlsDownloader] fetchViaWebView is null (no WebView context)');
+      AuroraLog.instance.debug('fetchViaWebView is null (no WebView context)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     }
 
     // 2nd attempt: Dart HTTP client.
-    print('[HlsDownloader] Trying Dart HTTP client for $uri');
+    AuroraLog.instance.debug('Trying Dart HTTP client for $uri', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     final response = await client
         .get(uri, headers: headers)
         .timeout(const Duration(seconds: 15));
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return HlsPlaylistParser.parse(response.body, uri);
     }
-    print('[HlsDownloader] Dart client returned ${response.statusCode}');
+    AuroraLog.instance.debug('Dart client returned ${response.statusCode}', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     var lastErrorDetail = 'Dart:${response.statusCode}';
 
     // 3rd attempt: Android native HttpURLConnection.
@@ -531,7 +535,7 @@ class HlsDownloader implements BaseDownloader {
         final body = nativeResult['body'] as String? ?? '';
         lastErrorDetail += ' Native:$sc';
         if (sc >= 200 && sc < 300 && body.isNotEmpty) {
-          print('[HlsDownloader] Native HTTP fallback succeeded for $uri (status $sc)');
+          AuroraLog.instance.debug('Native HTTP fallback succeeded for $uri (status $sc)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
           return HlsPlaylistParser.parse(body, uri);
         }
       } else {
@@ -542,7 +546,7 @@ class HlsDownloader implements BaseDownloader {
       _logError('Native HTTP fallback threw', e);
     }
 
-    print('[HlsDownloader] All fetch attempts failed for $uri. Detail: $lastErrorDetail');
+    AuroraLog.instance.debug('All fetch attempts failed for $uri. Detail: $lastErrorDetail', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
     throw HttpException(
       'HLS playlist request failed (403). Fallback results: $lastErrorDetail',
       uri: uri,
@@ -567,11 +571,11 @@ class HlsDownloader implements BaseDownloader {
       try {
         final data = await task.fetchBinaryViaWebView!(key.uri.toString());
         if (data != null && data.length == 16) {
-          print('[HlsDownloader] WebView binary fetch key OK (16 bytes)');
+          AuroraLog.instance.debug('WebView binary fetch key OK (16 bytes)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
           return Uint8List.fromList(data);
         }
       } catch (e) {
-        print('[HlsDownloader] WebView binary fetch key threw: $e');
+        AuroraLog.instance.debug('WebView binary fetch key threw: $e', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
       }
     }
 
@@ -734,11 +738,11 @@ class HlsDownloader implements BaseDownloader {
             task.totalBytes = task.downloadedBytes;
           }
           _taskUpdateController.add(task);
-          print('[HlsDownloader] WebView binary fetch segment $index OK (${data.length} bytes)');
+          AuroraLog.instance.debug('WebView binary fetch segment $index OK (${data.length} bytes)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
           return file;
         }
       } catch (e) {
-        print('[HlsDownloader] WebView binary fetch segment $index threw: $e');
+        AuroraLog.instance.debug('WebView binary fetch segment $index threw: $e', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
       }
     }
 

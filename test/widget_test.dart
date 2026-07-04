@@ -63,7 +63,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
 
-    expect(find.text('Queue'), findsOneWidget); // Tab label
+    expect(find.text('Downloads'), findsOneWidget); // AppBar title
     expect(find.text('No downloads yet'), findsOneWidget);
     expect(find.byIcon(Icons.add), findsNWidgets(2)); // Queue input + dock FAB (browser tab not yet built — lazy main tabs)
   });

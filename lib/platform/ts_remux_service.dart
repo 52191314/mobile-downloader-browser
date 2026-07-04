@@ -1,3 +1,4 @@
+import '../logging/aurora_log.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -18,6 +19,12 @@ class TsRemuxService {
       return result ?? false;
     } catch (e) {
       debugPrint('[TsRemuxService] remuxTsToMp4 failed: $e');
+      AuroraLog.instance.error(
+        'remuxTsToMp4 failed: $e',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+      );
       return false;
     }
   }

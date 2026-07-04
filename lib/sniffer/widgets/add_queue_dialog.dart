@@ -49,8 +49,18 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
     selectedMedia = widget.media;
     _variants = widget.variants;
     filenameController = TextEditingController(text: widget.suggestedName);
+    // Pre-populate the folder picker based on auto-classification.
+    _autoSelectFolder();
     // Try to resolve missing HLS variants after the frame is laid out.
     WidgetsBinding.instance.addPostFrameCallback((_) => _resolveVariants());
+  }
+
+  /// Sets [selectedFolder] to the auto-classified category folder for the
+  /// suggested filename, so the user sees the destined folder in the dialog
+  /// and can override it if desired.
+  void _autoSelectFolder() {
+    final category = FileClassifier.classify(widget.suggestedName);
+    selectedFolder = FileClassifier.categoryLabel(category);
   }
 
 
@@ -402,6 +412,13 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     }
 
                     widget.downloadQueue.addTask(task, force: force);
+                    AuroraLog.instance.info(
+                      'Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
+                      category: LogCategory.sniffer,
+                      screen: LogScreen.browser,
+                      eventType: LogEventType.sniff,
+                      taskId: task.id,
+                    );
 
                     if (!mounted) return;
                     navigator.pop();

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../logging/aurora_log.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -29,6 +30,12 @@ class NetworkBindingService {
           '[NetworkBindingService] bindProcessToNetwork -> ${result ?? false}',
         );
       }
+      AuroraLog.instance.debug(
+        'bindProcessToNetwork -> ${result ?? false}',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
       return result ?? false;
     } on PlatformException catch (e) {
       if (kDebugMode) {
@@ -37,6 +44,12 @@ class NetworkBindingService {
           'code=${e.code} message=${e.message}',
         );
       }
+      AuroraLog.instance.error(
+        'bindProcessToNetwork failed: code=${e.code} message=${e.message}',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+      );
       return false;
     } on MissingPluginException {
       return true;
@@ -44,6 +57,12 @@ class NetworkBindingService {
       if (kDebugMode) {
         debugPrint('[NetworkBindingService] unexpected error: $e');
       }
+      AuroraLog.instance.error(
+        'NetworkBindingService unexpected error: $e',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+      );
       return false;
     }
   }
@@ -83,6 +102,13 @@ class NetworkBindingService {
           'body=${(result?['body'] as String?)?.substring(0, 80).replaceAll('\n', ' ')}…',
         );
       }
+      AuroraLog.instance.debug(
+        'fetchUrl statusCode=${result?['statusCode']} '
+        'body=${(result?['body'] as String?)?.substring(0, 80).replaceAll('\n', ' ')}…',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
       return result;
     } on MissingPluginException {
       return null;
@@ -90,6 +116,12 @@ class NetworkBindingService {
       if (kDebugMode) {
         debugPrint('[NetworkBindingService] fetchUrl error: $e');
       }
+      AuroraLog.instance.error(
+        'NetworkBindingService fetchUrl error: $e',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+      );
       return null;
     }
   }

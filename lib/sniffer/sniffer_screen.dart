@@ -11,6 +11,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 import '../downloader/downloader.dart';
+import '../downloader/url_filename_resolver.dart';
+import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
 import '../platform/public_downloads_service.dart';
 import '../settings/download_settings.dart';
@@ -1515,8 +1517,11 @@ class _SnifferScreenState extends State<SnifferScreen>
         setState(() => _barsVisible = true);
       }
       _fetchedIframeSrcs.clear();
-      debugPrint(
-        '[SnifferScreen] onPageStarted for $url — preserving hlsPlaylistCache (${tab.hlsPlaylistCache.length} entries)',
+      AuroraLog.instance.info(
+        'Page started: $url',
+        category: LogCategory.browser,
+        screen: LogScreen.browser,
+        eventType: LogEventType.navigation,
       );
       tab.authHeaderCache.clear();
       _sniffIntakeController.clearCookieCache();
@@ -1526,6 +1531,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.controller.setOnPageFinished((url) {
       if (!mounted) return;
       setState(() => _isLoading = false);
+      AuroraLog.instance.info(
+        'Page finished: $url',
+        category: LogCategory.browser,
+        screen: LogScreen.browser,
+        eventType: LogEventType.navigation,
+      );
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
       _updateTabNavState(tab);
       unawaited(_refreshPageInfo(tab, recordHistory: true));
@@ -1679,16 +1690,16 @@ class _SnifferScreenState extends State<SnifferScreen>
               url.isNotEmpty &&
               body.isNotEmpty) {
             tab.hlsPlaylistCache[url] = body;
-            debugPrint(
-              '[SnifferScreen] HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${tab.hlsPlaylistCache.length})',
-            );
+            AuroraLog.instance.debug(
+    'HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${tab.hlsPlaylistCache.length})',
+            category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
           }
         } catch (e) {
-          debugPrint('[SnifferScreen] HlsPlaylistChannel error: $e');
+          AuroraLog.instance.error('HlsPlaylistChannel error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
         }
       },
-    );
-    tab.controller.addJavaScriptChannel(
+      );
+      tab.controller.addJavaScriptChannel(
       'NavigationSwipeChannel',
       onMessageReceived: (message) {
         // JS-based edge swipe detector fired. Debounce to prevent
@@ -1902,9 +1913,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         }
       }
     } catch (e) {
-      debugPrint(
-        '[SnifferScreen] Iframe content fetch failed for $iframeSrcUrl: $e',
-      );
+      AuroraLog.instance.error(
+    'Iframe content fetch failed for $iframeSrcUrl: $e',
+      category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
     }
   }
 
@@ -1957,7 +1968,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     try {
       safety = await _safeBrowsing.check(uri.toString());
     } catch (e) {
-      debugPrint('[SnifferScreen] Safe browsing check failed: $e');
+      AuroraLog.instance.error('Safe browsing check failed: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
       safety = const SafeBrowsingResult(verdict: SafeBrowsingVerdict.safe);
     }
     if (safety.verdict == SafeBrowsingVerdict.malicious) {
@@ -4121,10 +4132,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       try {
         final playlist = HlsPlaylistParser.parse(cached, uri);
         if (playlist.isMaster && playlist.variants.isNotEmpty) {
-          debugPrint(
-            '[SnifferScreen] Using cached playlist body for $url '
+          AuroraLog.instance.debug(
+    'Using cached playlist body for $url '
             '(${playlist.variants.length} variants)',
-          );
+          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
           return playlist.variants.map((v) {
             int? w;
             int? h;
@@ -4178,10 +4189,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       // full browser context with Cloudflare clearance cookies), then fall
       // back to Android's native HttpURLConnection.
       if (response.statusCode != 200) {
-        debugPrint(
-          '[SnifferScreen] _fetchMasterPlaylistVariants Dart client returned '
+        AuroraLog.instance.debug(
+    '_fetchMasterPlaylistVariants Dart client returned '
           '${response.statusCode}, trying WebView JS fetch…',
-        );
+        category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
         // 1st fallback: WebView JavaScript fetch() — it sends cookies and
         // has Cloudflare clearance from the page session.
         String? jsBody;
@@ -4191,7 +4202,7 @@ class _SnifferScreenState extends State<SnifferScreen>
             headers: headers,
           );
         } catch (e) {
-          debugPrint('[SnifferScreen] JS fetch error: $e');
+          AuroraLog.instance.error('JS fetch error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
         }
         if (jsBody != null && jsBody.isNotEmpty) {
           response = http.Response(
@@ -4199,13 +4210,13 @@ class _SnifferScreenState extends State<SnifferScreen>
             200,
             request: http.Request('GET', uri),
           );
-          debugPrint(
-            '[SnifferScreen] WebView JS fetch succeeded for variant fetch',
-          );
+          AuroraLog.instance.debug(
+    'WebView JS fetch succeeded for variant fetch',
+          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
         } else {
-          debugPrint(
-            '[SnifferScreen] WebView JS fetch failed, trying native Android HTTP…',
-          );
+          AuroraLog.instance.debug(
+    'WebView JS fetch failed, trying native Android HTTP…',
+          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
           // 2nd fallback: Android native HttpURLConnection
           try {
             final nativeResult = await NetworkBindingService.fetchUrl(
@@ -4221,14 +4232,14 @@ class _SnifferScreenState extends State<SnifferScreen>
                   sc,
                   request: http.Request('GET', uri),
                 );
-                debugPrint(
-                  '[SnifferScreen] Native fallback succeeded for variant fetch '
+                AuroraLog.instance.debug(
+    'Native fallback succeeded for variant fetch '
                   '(status $sc)',
-                );
+                category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
               }
             }
           } catch (e) {
-            debugPrint('[SnifferScreen] Native fallback error: $e');
+            AuroraLog.instance.error('Native fallback error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
           }
         }
       }
@@ -4482,6 +4493,21 @@ class _SnifferScreenState extends State<SnifferScreen>
       sourcePageUrl: media?.sourcePageUrl,
     );
 
+    // When the URL has no path extension, probe the server for a real
+    // filename and Content-Type (the WebView often sends a generic .bin).
+    String? resolvedContentType;
+    if (urlExt.isEmpty) {
+      final resolved = await resolveFilename(
+        url: url,
+        headers: headerMap,
+        suggestedFilename: suggestedFilename,
+      );
+      if (resolved.name.isNotEmpty) {
+        suggestedName = resolved.name;
+      }
+      resolvedContentType = resolved.contentType;
+    }
+
     final taskId = DateTime.now().millisecondsSinceEpoch.toString();
     final saveDir = '$_baseDir${Platform.pathSeparator}completed';
     final task = DownloadTask(
@@ -4491,7 +4517,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       savePath: '$saveDir${Platform.pathSeparator}$suggestedName',
       tempDir: '$_baseTemp${Platform.pathSeparator}temp_$taskId',
       priority: DownloadPriority.medium,
-      contentType: media?.contentType,
+      contentType: resolvedContentType ?? media?.contentType,
       headers: headerMap,
       totalBytes: media?.contentLengthBytes ?? -1,
     );

@@ -9,12 +9,18 @@ import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'magnet_link.dart';
 import 'torrent_metadata.dart';
-import 'download_logger.dart';
+import '../logging/aurora_log.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[TorrentDownloader] $context: $error';
   debugPrint(message);
-  DownloadLogger.instance.error(message);
+  AuroraLog.instance.error(
+    message,
+    category: LogCategory.torrent,
+    screen: LogScreen.background,
+    eventType: LogEventType.error,
+    stackTrace: stack,
+  );
 }
 
 class TorrentDownloader implements BaseDownloader {

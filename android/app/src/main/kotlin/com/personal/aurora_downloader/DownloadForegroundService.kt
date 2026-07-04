@@ -4,10 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
@@ -33,6 +35,7 @@ class DownloadForegroundService : Service() {
         private const val NOTIF_CHANNEL_ID = "aurora_download_service"
         private const val NOTIF_CHANNEL_NAME = "Download Service"
         private const val NOTIF_ID = 999
+        private const val WAKE_LOCK_TAG = "AuroraDownloader:DownloadWakeLock"
 
         // Intent action extras
         private const val EXTRA_ACTION = "action"
@@ -46,9 +49,16 @@ class DownloadForegroundService : Service() {
         private const val EXTRA_PERCENT = "percent"
     }
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,6 +103,10 @@ class DownloadForegroundService : Service() {
         } else {
             startForeground(NOTIF_ID, notif)
         }
+        // Acquire a partial wake lock so the CPU stays awake for the
+        // Dart isolate to process HTTP stream data while the screen is
+        // off.  The wake lock is released in handleStop.
+        acquireWakeLock()
         Log.d(TAG, "Started foreground service ($count active download(s))")
     }
 
@@ -106,6 +120,7 @@ class DownloadForegroundService : Service() {
     }
 
     private fun handleStop() {
+        releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Stopped foreground service")
@@ -139,5 +154,31 @@ class DownloadForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setSilent(true)
             .build()
+    }
+
+    // ─── WakeLock ───────────────────────────────────────────────────
+
+    /// Acquire a PARTIAL_WAKE_LOCK so the CPU stays awake for the Dart
+    /// isolate while the screen is off.  Released in [handleStop].
+    private fun acquireWakeLock() {
+        if (wakeLock != null) return // already held
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+            wakeLock?.acquire()
+            Log.d(TAG, "Acquired wake lock")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to acquire wake lock", e)
+        }
+    }
+
+    /// Release the wake lock if it is still held.
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to release wake lock", e)
+        }
+        wakeLock = null
     }
 }
