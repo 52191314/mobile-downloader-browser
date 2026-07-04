@@ -335,6 +335,7 @@ class SnifferScreen extends StatefulWidget {
 }
 
 class _SnifferScreenState extends State<SnifferScreen>
+    with WidgetsBindingObserver
     implements TabLifecycleHost {
   late final DownloadQueue _downloadQueue;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -450,6 +451,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _safeBrowsing = widget.safeBrowsing;
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -768,6 +770,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.libraryUpdateNotifier?.removeListener(_onLibraryUpdate);
     _tabManager.mediaRebuildTimer?.cancel();
     _tabManager.mediaSaveTimer?.cancel();
@@ -794,6 +797,37 @@ class _SnifferScreenState extends State<SnifferScreen>
     widget.controller?.setOnOpenUrlRequest(null);
     _tabManager.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      debugPrint('[SnifferScreen] App backgrounded — pausing WebViews and timers');
+      for (final tab in _tabs) {
+        tab.videoPollTimer?.cancel();
+        tab.videoPollTimer = null;
+        if (Platform.isAndroid) {
+          unawaited(tab.controller.freeze());
+          unawaited(tab.controller.pauseWebView());
+        }
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      debugPrint('[SnifferScreen] App resumed — resuming active WebView and timers');
+      for (final tab in _tabs) {
+        if (tab == _activeTab) {
+          if (Platform.isAndroid) {
+            unawaited(tab.controller.thaw());
+            unawaited(tab.controller.resumeWebView());
+          }
+          _startVideoPoll(tab);
+        } else {
+          if (Platform.isAndroid) {
+            unawaited(tab.controller.freeze());
+            unawaited(tab.controller.pauseWebView());
+          }
+        }
+      }
+    }
   }
 
   Future<void> _initPaths() async {
@@ -1496,7 +1530,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     final history = [
       BrowserHistoryEntry(title: title, url: url, visitedAt: DateTime.now()),
       ...existing,
-    ].take(100).toList(growable: false);
+    ].toList();
     await _saveLibrary(_library.copyWith(history: history));
   }
 
@@ -1975,7 +2009,14 @@ class _SnifferScreenState extends State<SnifferScreen>
       final proceed = await _showPhishingWarning(uri, safety);
       if (proceed != true) return;
     } else if (safety.verdict == SafeBrowsingVerdict.suspicious) {
-      _showSnack('Heads up: ${safety.reason ?? "suspicious URL"}');
+      _showSnack(
+        'Heads up: ${safety.reason ?? "suspicious URL"}',
+        actionLabel: 'Whitelist',
+        onAction: () async {
+          await _safeBrowsing.whitelistHost(host);
+          _showSnack('Whitelisted $host.');
+        },
+      );
     }
     final ua = _effectiveUserAgentFor(host);
     if (ua != null) {
@@ -3702,8 +3743,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     onLoadUrl: (url) => _loadUrlWithHostSettings(_activeTab, Uri.parse(url)),
     onFavoriteToggled: () => setState(() {}),
     onNewFolderCreated: () async {
-      Navigator.of(context).pop();
-      _showFavoritesSheet();
+      if (mounted) {
+        setState(() {});
+      }
     },
     onEditFavorite: (favorite) => _editFavoriteFolder(favorite),
   );
@@ -3723,11 +3765,15 @@ class _SnifferScreenState extends State<SnifferScreen>
     onSaveLibrary: _saveLibrary,
     onLoadUrl: (url) => _loadUrlWithHostSettings(tab, Uri.parse(url)),
     onFavoriteToggled: () => setState(() {}),
-    onNewFolderCreated: () async => _showFavoritesSheet(),
+    onNewFolderCreated: () async {
+      if (mounted) {
+        setState(() {});
+      }
+    },
     onEditFavorite: (favorite) => _editFavoriteFolder(favorite),
   );
 
-  Future<void> _editFavoriteFolder(BrowserFavorite favorite) async {
+  Future<BrowserLibrary?> _editFavoriteFolder(BrowserFavorite favorite) async {
     final folders = List<BookmarkFolder>.from(_library.folders);
     String? folderId = favorite.folderId;
     final tagsController = TextEditingController(
@@ -3792,7 +3838,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
     if (saved != true) {
       tagsController.dispose();
-      return;
+      return null;
     }
     final tags = tagsController.text
         .split(',')
@@ -3800,21 +3846,21 @@ class _SnifferScreenState extends State<SnifferScreen>
         .where((tag) => tag.isNotEmpty)
         .toList(growable: false);
     tagsController.dispose();
-    await _saveLibrary(
-      _library.copyWith(
-        favorites: _library.favorites
-            .map(
-              (fav) => fav.id == favorite.id
-                  ? fav.copyWith(
-                      folderId: folderId,
-                      clearFolder: folderId == null,
-                      tags: tags,
-                    )
-                  : fav,
-            )
-            .toList(growable: false),
-      ),
+    final updatedLib = _library.copyWith(
+      favorites: _library.favorites
+          .map(
+            (fav) => fav.id == favorite.id
+                ? fav.copyWith(
+                    folderId: folderId,
+                    clearFolder: folderId == null,
+                    tags: tags,
+                  )
+                : fav,
+          )
+          .toList(growable: false),
     );
+    await _saveLibrary(updatedLib);
+    return updatedLib;
   }
 
   void _showSavedPagesSheet() => showSavedPagesSheet(
@@ -3831,6 +3877,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       backgroundColor: AuroraColors.overlay,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -4949,6 +4996,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) {
         return SafeArea(
           child: Column(
@@ -5057,11 +5105,21 @@ class _SnifferScreenState extends State<SnifferScreen>
         },
       );
 
-  void _showSnack(String message) {
+  void _showSnack(
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: actionLabel != null && onAction != null
+            ? SnackBarAction(label: actionLabel, onPressed: onAction)
+            : null,
+      ),
+    );
   }
 
   void _showPickerSnack(String message, {required VoidCallback onCancel}) {

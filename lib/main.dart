@@ -297,6 +297,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         _requestBatteryOptOnce();
       }
     });
+    _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -345,7 +346,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _currentTabIndex = index;
       _visitedMainTabs.add(index);
     });
-    debugPrint('[AuroraHome] Tab switch: $previous → $index');
+    AuroraLog.instance.info(
+      'Tab switch: $previous → $index',
+      category: LogCategory.app,
+      screen: LogScreen.settings,
+      eventType: LogEventType.navigation,
+    );
     AuroraLog.instance.info(
       'Tab switch: $previous → $index',
       category: LogCategory.app,
@@ -641,6 +647,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   void _openUrlInBrowser(String url) {
+    AuroraLog.instance.info(
+      '_openUrlInBrowser("$url")',
+      category: LogCategory.app,
+      screen: LogScreen.queue,
+      eventType: LogEventType.userAction,
+    );
     _selectTab(1);
     _browserController.requestOpenUrl(url);
   }
@@ -731,9 +743,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   Future<void> _resniffManual(DownloadTask task) async {
     _downloadQueue.resniffPendingTaskId = task.id;
     final target = task.sourcePageUrl ?? task.url;
+    AuroraLog.instance.info(
+      '_resniffManual: target="$target", sourcePageUrl=${task.sourcePageUrl}',
+      category: LogCategory.app,
+      screen: LogScreen.queue,
+      eventType: LogEventType.userAction,
+    );
     _browserController.requestOpenUrl(target);
     _selectTab(1);
-    if (mounted) _showSnack('Opened source page — re-sniff the media. A dialog will appear if the link is detected as a duplicate.');
+    if (mounted) _showSnack('Opened source page — re-sniff the media...');
   }
 
   static String _normalizeForCompare(String url) {
@@ -750,6 +768,39 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       return Uri.parse(url).pathSegments.last;
     } catch (_) {
       return 'download_${DateTime.now().millisecondsSinceEpoch}';
+    }
+  }
+
+  void _initIntentChannel() {
+    const intentChannel = MethodChannel('aurora_downloader/intent');
+    // Get initial URL (cold start)
+    intentChannel.invokeMethod<String>('getInitialUrl').then((url) {
+      if (url != null && url.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _handleIncomingUrl(url);
+        });
+      }
+    });
+
+    // Listen for new URLs (hot start)
+    intentChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onNewUrl') {
+        final String? url = call.arguments as String?;
+        if (url != null && url.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _handleIncomingUrl(url);
+          });
+        }
+      }
+    });
+  }
+
+  void _handleIncomingUrl(String url) {
+    if (url.startsWith('magnet:') || url.contains('.torrent')) {
+      _urlController.text = url;
+      unawaited(_addDownloadFromUrl());
+    } else {
+      _openUrlInBrowser(url);
     }
   }
 

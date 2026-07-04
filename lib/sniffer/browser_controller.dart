@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../downloader/hls_models.dart';
+import '../logging/aurora_log.dart';
 import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'adblock_injector.dart';
@@ -41,17 +43,10 @@ abstract interface class SnifferBrowserController {
   Future<double?> getZoomScale();
   Future<void> freeze();
   Future<void> thaw();
-
-  /// Pauses JavaScript timers, layout, and rendering on ALL browser
-  /// WebViews (global).  Called when leaving the Browser main tab so
-  /// the Dart event loop is freed for download HTTP stream processing.
-  /// Also hides the DOM on the active tab.
   Future<void> pauseAllWebViews();
-
-  /// Resumes JavaScript timers, layout, and rendering (global).
-  /// Called when re-entering the Browser main tab.  Also restores
-  /// DOM visibility on the active tab.
   Future<void> resumeActiveWebView();
+  Future<void> pauseWebView();
+  Future<void> resumeWebView();
   Future<int> fillForm(Map<String, String> values);
   Future<void> findAllAsync(String search);
   Future<void> findNext(bool forward);
@@ -693,7 +688,13 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Future<void> loadFile(String path) async {
     _currentUrl = 'file://$path';
     await _ready.future;
-    await _controller?.loadFile(assetFilePath: path);
+    if (path.startsWith('/') || path.contains(':\\') || path.contains(':/')) {
+      await _controller?.loadUrl(
+        urlRequest: URLRequest(url: WebUri('file://$path')),
+      );
+    } else {
+      await _controller?.loadFile(assetFilePath: path);
+    }
   }
 
   @override
@@ -881,6 +882,26 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   @override
+  Future<void> pauseWebView() async {
+    try {
+      await _controller?.pauseTimers();
+      if (Platform.isAndroid) {
+        await _controller?.android.pause();
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> resumeWebView() async {
+    try {
+      await _controller?.resumeTimers();
+      if (Platform.isAndroid) {
+        await _controller?.android.resume();
+      }
+    } catch (_) {}
+  }
+
+  @override
   Future<int> fillForm(Map<String, String> values) async {
     if (values.isEmpty) return 0;
     final json = jsonEncode(values);
@@ -1013,7 +1034,15 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void Function(String)? _onOpenUrlRequest;
 
   @override
-  void requestOpenUrl(String url) => _onOpenUrlRequest?.call(url);
+  void requestOpenUrl(String url) {
+    AuroraLog.instance.info(
+      'requestOpenUrl("$url"), _onOpenUrlRequest=${_onOpenUrlRequest != null}',
+      category: LogCategory.app,
+      screen: LogScreen.browser,
+      eventType: LogEventType.navigation,
+    );
+    _onOpenUrlRequest?.call(url);
+  }
 
   @override
   void setOnOpenUrlRequest(void Function(String url)? callback) =>
@@ -1051,7 +1080,15 @@ class MockBrowserController implements SnifferBrowserController {
   void Function(String)? _onOpenUrlRequest;
 
   @override
-  void requestOpenUrl(String url) => _onOpenUrlRequest?.call(url);
+  void requestOpenUrl(String url) {
+    AuroraLog.instance.info(
+      '[Mock] requestOpenUrl("$url"), _onOpenUrlRequest=${_onOpenUrlRequest != null}',
+      category: LogCategory.app,
+      screen: LogScreen.browser,
+      eventType: LogEventType.navigation,
+    );
+    _onOpenUrlRequest?.call(url);
+  }
 
   @override
   void setOnOpenUrlRequest(void Function(String url)? callback) =>
@@ -1327,6 +1364,12 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   Future<void> resumeActiveWebView() async {}
+
+  @override
+  Future<void> pauseWebView() async {}
+
+  @override
+  Future<void> resumeWebView() async {}
 
   @override
   Future<int> fillForm(Map<String, String> values) async => 0;

@@ -6,29 +6,6 @@ import '../browser_library.dart';
 import '../models/browser_tab.dart';
 import '../../theme/aurora_colors.dart';
 
-/// Shows the favorites bottom sheet for the given [activeTab] and
-/// [library]. Favorites are grouped by folder (with an implicit
-/// "Unsorted" pseudo-folder for favorites with no folder).
-///
-/// Standalone library — all state-mutating side effects are delegated
-/// via callbacks so this function can be unit-tested in isolation.
-///
-/// Parameters in detail:
-/// - [isCurrentPageFavorited]: caller checks whether the active tab's
-///   current URL is already a favorite. Currently unused inside the
-///   sheet itself (kept for parity with the in-class implementation
-///   and future use).
-/// - [onFavoriteToggled]: caller rebuilds the host widget after a
-///   favorite was toggled. Currently unused inside the sheet itself
-///   (the sheet is rebuilt via [onNewFolderCreated] / [onEditFavorite]
-///   instead).
-/// - [onNewFolderCreated]: called when a new folder was just created
-///   or when the existing list changed (delete / move) and the sheet
-///   should pop itself and reopen to reflect the new state. Equivalent
-///   to the original `Navigator.pop(ctx); _showFavoritesSheet();`
-///   pattern in the host class.
-/// - [onEditFavorite]: called when the user picks "Move / edit tags"
-///   on a favorite. The host's `_editFavoriteFolder` is wired here.
 void showFavoritesSheet(
   BuildContext context, {
   required BrowserTab activeTab,
@@ -39,127 +16,227 @@ void showFavoritesSheet(
   required Future<void> Function(String url) onLoadUrl,
   required VoidCallback onFavoriteToggled,
   required Future<void> Function() onNewFolderCreated,
-  required Future<void> Function(BrowserFavorite favorite) onEditFavorite,
+  required Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite,
 }) {
-  final tab = activeTab;
-  final folders = <BookmarkFolder>[unsortedFolder, ...library.folders];
-  final folderItems = folders;
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
     useSafeArea: true,
     builder: (ctx) {
-      return SafeArea(
-        child: DefaultTabController(
-          length: folderItems.length,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.star, color: AuroraColors.accentAmber),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Favorites',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () async {
-                        // Show dialog on top of the sheet (sheet remains
-                        // stable so DefaultTabController's inherited element
-                        // stays alive during setState). Pop + reopen only
-                        // after the folder is created.
-                        final nameController = TextEditingController();
-                        final name = await showDialog<String>(
-                          context: ctx,
-                          builder: (dialogCtx) => AlertDialog(
-                            title: const Text('New folder'),
-                            content: TextField(
-                              controller: nameController,
-                              autofocus: true,
-                              decoration: const InputDecoration(
-                                hintText: 'Folder name',
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.of(dialogCtx).pop(),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.of(
-                                  dialogCtx,
-                                ).pop(nameController.text.trim()),
-                                child: const Text('Create'),
-                              ),
-                            ],
-                          ),
-                        );
-                        nameController.dispose();
-                        if (name == null || name.isEmpty) return;
-                        final folder = BookmarkFolder(
-                          id: DateTime.now().microsecondsSinceEpoch
-                              .toString(),
-                          name: name,
-                          createdAt: DateTime.now(),
-                        );
-                        await onSaveLibrary(
-                          library.copyWith(
-                            folders: [...library.folders, folder],
-                          ),
-                        );
-                        onNewFolderCreated();
-                      },
-                      icon: const Icon(Icons.create_new_folder_outlined),
-                      label: const Text('New folder'),
-                    ),
-                  ],
-                ),
-              ),
-              TabBar(
-                isScrollable: true,
-                tabs: [
-                  for (final folder in folderItems) Tab(text: folder.name),
-                ],
-              ),
-              SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.55,
-                child: TabBarView(
-                  children: [
-                    for (final folder in folderItems)
-                      buildFavoritesFolderList(
-                        ctx,
-                        tab,
-                        folder,
-                        library.favoritesInFolder(
-                          folder.id == '__unsorted__' ? null : folder.id,
-                        ),
-                        library: library,
-                        unsortedFolder: unsortedFolder,
-                        isCurrentPageFavorited: isCurrentPageFavorited,
-                        onSaveLibrary: onSaveLibrary,
-                        onLoadUrl: onLoadUrl,
-                        onFavoriteToggled: onFavoriteToggled,
-                        onNewFolderCreated: onNewFolderCreated,
-                        onEditFavorite: onEditFavorite,
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+      return FavoritesSheetContent(
+        activeTab: activeTab,
+        library: library,
+        unsortedFolder: unsortedFolder,
+        isCurrentPageFavorited: isCurrentPageFavorited,
+        onSaveLibrary: onSaveLibrary,
+        onLoadUrl: onLoadUrl,
+        onFavoriteToggled: onFavoriteToggled,
+        onNewFolderCreated: onNewFolderCreated,
+        onEditFavorite: onEditFavorite,
       );
     },
   );
+}
+
+class FavoritesSheetContent extends StatefulWidget {
+  final BrowserTab activeTab;
+  final BrowserLibrary library;
+  final BookmarkFolder unsortedFolder;
+  final bool Function(String url) isCurrentPageFavorited;
+  final Future<void> Function(BrowserLibrary) onSaveLibrary;
+  final Future<void> Function(String url) onLoadUrl;
+  final VoidCallback onFavoriteToggled;
+  final Future<void> Function() onNewFolderCreated;
+  final Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite;
+
+  const FavoritesSheetContent({
+    super.key,
+    required this.activeTab,
+    required this.library,
+    required this.unsortedFolder,
+    required this.isCurrentPageFavorited,
+    required this.onSaveLibrary,
+    required this.onLoadUrl,
+    required this.onFavoriteToggled,
+    required this.onNewFolderCreated,
+    required this.onEditFavorite,
+  });
+
+  @override
+  State<FavoritesSheetContent> createState() => _FavoritesSheetContentState();
+}
+
+class _FavoritesSheetContentState extends State<FavoritesSheetContent>
+    with TickerProviderStateMixin {
+  late BrowserLibrary _currentLibrary;
+  TabController? _tabController;
+  late List<BookmarkFolder> _folders;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentLibrary = widget.library;
+    _updateFoldersAndController();
+  }
+
+  @override
+  void didUpdateWidget(covariant FavoritesSheetContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.library != oldWidget.library) {
+      setState(() {
+        _currentLibrary = widget.library;
+        _updateFoldersAndController();
+      });
+    }
+  }
+
+  void _updateFoldersAndController() {
+    _folders = [widget.unsortedFolder, ..._currentLibrary.folders];
+    final oldController = _tabController;
+    _tabController = TabController(
+      length: _folders.length,
+      vsync: this,
+      initialIndex: oldController != null
+          ? oldController.index.clamp(0, _folders.length - 1)
+          : 0,
+    );
+    if (oldController != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        oldController.dispose();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createNewFolder() async {
+    final nameController = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Folder name',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogCtx).pop(nameController.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    nameController.dispose();
+    if (name == null || name.isEmpty) return;
+
+    final folder = BookmarkFolder(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      name: name,
+      createdAt: DateTime.now(),
+    );
+    final updatedLibrary = _currentLibrary.copyWith(
+      folders: [..._currentLibrary.folders, folder],
+    );
+    await widget.onSaveLibrary(updatedLibrary);
+
+    setState(() {
+      _currentLibrary = updatedLibrary;
+      _updateFoldersAndController();
+    });
+    widget.onFavoriteToggled();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        key: ValueKey('favorites_column_${_folders.length}'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.star, color: AuroraColors.accentAmber),
+                const SizedBox(width: 8),
+                const Text(
+                  'Favorites',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _createNewFolder,
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: const Text('New folder'),
+                ),
+              ],
+            ),
+          ),
+          TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabs: [
+              for (final folder in _folders) Tab(text: folder.name),
+            ],
+          ),
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.55,
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                for (final folder in _folders)
+                  buildFavoritesFolderList(
+                    context,
+                    widget.activeTab,
+                    folder,
+                    _currentLibrary.favoritesInFolder(
+                      folder.id == '__unsorted__' ? null : folder.id,
+                    ),
+                    library: _currentLibrary,
+                    unsortedFolder: widget.unsortedFolder,
+                    isCurrentPageFavorited: widget.isCurrentPageFavorited,
+                    onSaveLibrary: (updatedLib) async {
+                      await widget.onSaveLibrary(updatedLib);
+                      setState(() {
+                        _currentLibrary = updatedLib;
+                        _updateFoldersAndController();
+                      });
+                      widget.onFavoriteToggled();
+                    },
+                    onLoadUrl: widget.onLoadUrl,
+                    onFavoriteToggled: widget.onFavoriteToggled,
+                    onNewFolderCreated: () async {
+                      setState(() {
+                        _updateFoldersAndController();
+                      });
+                      widget.onFavoriteToggled();
+                    },
+                    onEditFavorite: widget.onEditFavorite,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 Widget buildFavoritesFolderList(
@@ -174,7 +251,7 @@ Widget buildFavoritesFolderList(
   required Future<void> Function(String url) onLoadUrl,
   required VoidCallback onFavoriteToggled,
   required Future<void> Function() onNewFolderCreated,
-  required Future<void> Function(BrowserFavorite favorite) onEditFavorite,
+  required Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite,
 }) {
   final isUnsorted = folder.id == '__unsorted__';
 
@@ -291,7 +368,10 @@ Widget buildFavoritesFolderList(
                   );
                 }
               } else if (action == 'edit') {
-                await onEditFavorite(fav);
+                final updatedLib = await onEditFavorite(fav);
+                if (updatedLib != null) {
+                  await onSaveLibrary(updatedLib);
+                }
               }
               onNewFolderCreated();
             },
@@ -364,9 +444,9 @@ Widget buildFavoritesFolderList(
                       : f;
                 }).toList();
 
-                await onSaveLibrary(library.copyWith(folders: updatedFolders));
-                onNewFolderCreated();
-              },
+                 await onSaveLibrary(library.copyWith(folders: updatedFolders));
+                 onNewFolderCreated();
+               },
             ),
             const SizedBox(width: 8),
             TextButton.icon(
@@ -406,14 +486,14 @@ Widget buildFavoritesFolderList(
                   return fav;
                 }).toList();
 
-                await onSaveLibrary(
-                  library.copyWith(
-                    folders: updatedFolders,
-                    favorites: updatedFavorites,
-                  ),
-                );
-                onNewFolderCreated();
-              },
+                 await onSaveLibrary(
+                   library.copyWith(
+                     folders: updatedFolders,
+                     favorites: updatedFavorites,
+                   ),
+                 );
+                 onNewFolderCreated();
+               },
             ),
           ],
         ),

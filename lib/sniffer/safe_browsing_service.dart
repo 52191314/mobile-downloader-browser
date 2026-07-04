@@ -23,6 +23,7 @@ class SafeBrowsingService {
   final http.Client _client;
   final Duration _timeout;
   List<String>? _memoryBlocklist;
+  Set<String>? _memoryWhitelist;
 
   SafeBrowsingService({http.Client? client, Duration? timeout})
       : _client = client ?? http.Client(),
@@ -30,6 +31,54 @@ class SafeBrowsingService {
 
   void dispose() {
     _client.close();
+  }
+
+  Future<File> _whitelistFile() async {
+    final dir = await getApplicationSupportDirectory();
+    return File('${dir.path}/safe_browsing_whitelist.json');
+  }
+
+  Future<Set<String>> _loadWhitelist() async {
+    if (_memoryWhitelist != null) return _memoryWhitelist!;
+    try {
+      final file = await _whitelistFile();
+      if (!await file.exists()) {
+        _memoryWhitelist = {};
+        return {};
+      }
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is List) {
+        _memoryWhitelist = decoded.whereType<String>().toSet();
+      } else {
+        _memoryWhitelist = {};
+      }
+    } catch (_) {
+      _memoryWhitelist = {};
+    }
+    return _memoryWhitelist!;
+  }
+
+  Future<void> whitelistHost(String host) async {
+    final wl = await _loadWhitelist();
+    wl.add(host.toLowerCase());
+    try {
+      final file = await _whitelistFile();
+      if (!await file.parent.exists()) {
+        await file.parent.create(recursive: true);
+      }
+      await file.writeAsString(jsonEncode(wl.toList()));
+    } catch (_) {}
+  }
+
+  Future<bool> isHostWhitelisted(String host) async {
+    final wl = await _loadWhitelist();
+    final h = host.toLowerCase();
+    for (final entry in wl) {
+      if (h == entry || h.endsWith('.$entry')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Checks a URL against the local blocklist first, then falls back to
@@ -43,6 +92,10 @@ class SafeBrowsingService {
       );
     }
     final host = uri.host.toLowerCase();
+
+    if (await isHostWhitelisted(host)) {
+      return const SafeBrowsingResult(verdict: SafeBrowsingVerdict.safe);
+    }
 
     final local = await _loadLocalBlocklist();
     for (final entry in local) {

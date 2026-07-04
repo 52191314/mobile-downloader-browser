@@ -121,8 +121,6 @@ class _EdgeSwipeCardState extends State<EdgeSwipeCard>
 
   @override
   Widget build(BuildContext context) {
-    final cardWidth = context.size?.width ?? 400;
-
     return Stack(
       clipBehavior: Clip.none,
       children: [
