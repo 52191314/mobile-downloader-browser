@@ -17,6 +17,18 @@ enum DarkModePreference {
   forced,
 }
 
+/// Proxy protocol type.
+enum ProxyType {
+  /// No proxy.
+  none,
+
+  /// HTTP / HTTPS proxy.
+  http,
+
+  /// SOCKS5 proxy.
+  socks5,
+}
+
 /// Controls what happens when a download link (<a download> or
 /// Content-Disposition: attachment) is clicked in the browser.
 enum DownloadLinkBehavior {
@@ -419,6 +431,7 @@ class DownloadSettings {
   final SearchEngine searchEngine;
   final bool adblockEnabled;
   final bool popupBlockingEnabled;
+  final bool invisibleRedirectBlockingEnabled;
   final List<AdblockFilterSource> adblockFilterSources;
   final List<ManualAdBlockRule> manualAdBlockRules;
   final List<CosmeticAdRule> manualCosmeticRules;
@@ -446,6 +459,14 @@ class DownloadSettings {
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
   final Map<String, String> siteUserAgents;
+
+  // --- Proxy settings ---
+  final ProxyType proxyType;
+  final String proxyHost;
+  final int proxyPort;
+  final String proxyUsername;
+  final String proxyPassword;
+
   final bool autoRetry;
   final int retryLimit;
   final int minSpeedThresholdKbps;
@@ -459,10 +480,18 @@ class DownloadSettings {
   /// (Videos, Audio, Images, Documents, etc.) under the completed/ folder.
   final bool autoClassifyEnabled;
 
+  /// When true, MPEG-TS files (.ts) are remuxed to MP4 after download
+  /// (no transcoding — just a fast container change). Only affects
+  /// direct .ts downloads; HLS streams already remux via HlsDownloader.
+  final bool remuxTsToMp4;
+
   /// Optional overrides: file extension → folder name.
   /// E.g. `{".mp4": "Movies", ".mkv": "Movies"}` routes all MP4s and MKVs
   /// into a "Movies" subfolder instead of the default "Videos" folder.
   final Map<String, String> autoClassifyMappings;
+
+  /// When true, temporary alert snackbars are shown at the bottom of the screen.
+  final bool showSnackbars;
 
   const DownloadSettings({
     required this.maxConcurrentDownloads,
@@ -471,6 +500,7 @@ class DownloadSettings {
     required this.searchEngine,
     required this.adblockEnabled,
     this.popupBlockingEnabled = true,
+    this.invisibleRedirectBlockingEnabled = true,
     required this.adblockFilterSources,
     this.manualAdBlockRules = const [],
     this.manualCosmeticRules = const [],
@@ -495,13 +525,20 @@ class DownloadSettings {
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
     this.siteUserAgents = const {},
+    this.proxyType = ProxyType.none,
+    this.proxyHost = '',
+    this.proxyPort = 8080,
+    this.proxyUsername = '',
+    this.proxyPassword = '',
     this.autoRetry = true,
     this.retryLimit = 3,
     this.minSpeedThresholdKbps = 0,
     this.stallTimeoutSeconds = 20,
     this.partialDownloadThreshold = 0.95,
     this.autoClassifyEnabled = true,
+    this.remuxTsToMp4 = true,
     this.autoClassifyMappings = const {},
+    this.showSnackbars = true,
   });
 
   static const trustedAdblockSources = [
@@ -518,6 +555,7 @@ class DownloadSettings {
     searchEngine: SearchEngine.google,
     adblockEnabled: true,
     popupBlockingEnabled: true,
+    invisibleRedirectBlockingEnabled: true,
     adblockFilterSources: AdblockFilterSource.disabledTrustedSources(),
     sniffedMediaSort: SniffedMediaSort.newest,
     sniffedMediaDisplayMode: SniffedMediaDisplayMode.both,
@@ -525,6 +563,8 @@ class DownloadSettings {
     autoRetry: true,
     retryLimit: 3,
     autoClassifyEnabled: true,
+    remuxTsToMp4: true,
+    showSnackbars: true,
   );
 
   DownloadSettings copyWith({
@@ -534,6 +574,7 @@ class DownloadSettings {
     SearchEngine? searchEngine,
     bool? adblockEnabled,
     bool? popupBlockingEnabled,
+    bool? invisibleRedirectBlockingEnabled,
     List<AdblockFilterSource>? adblockFilterSources,
     List<ManualAdBlockRule>? manualAdBlockRules,
     List<CosmeticAdRule>? manualCosmeticRules,
@@ -558,13 +599,20 @@ class DownloadSettings {
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
     Map<String, String>? siteUserAgents,
+    ProxyType? proxyType,
+    String? proxyHost,
+    int? proxyPort,
+    String? proxyUsername,
+    String? proxyPassword,
     bool? autoRetry,
     int? retryLimit,
     int? minSpeedThresholdKbps,
     int? stallTimeoutSeconds,
     double? partialDownloadThreshold,
     bool? autoClassifyEnabled,
+    bool? remuxTsToMp4,
     Map<String, String>? autoClassifyMappings,
+    bool? showSnackbars,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -576,8 +624,10 @@ class DownloadSettings {
           partialDownloadThreshold ?? this.partialDownloadThreshold,
       autoClassifyEnabled:
           autoClassifyEnabled ?? this.autoClassifyEnabled,
+      remuxTsToMp4: remuxTsToMp4 ?? this.remuxTsToMp4,
       autoClassifyMappings:
           autoClassifyMappings ?? this.autoClassifyMappings,
+      showSnackbars: showSnackbars ?? this.showSnackbars,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -585,6 +635,7 @@ class DownloadSettings {
       searchEngine: searchEngine ?? this.searchEngine,
       adblockEnabled: adblockEnabled ?? this.adblockEnabled,
       popupBlockingEnabled: popupBlockingEnabled ?? this.popupBlockingEnabled,
+      invisibleRedirectBlockingEnabled: invisibleRedirectBlockingEnabled ?? this.invisibleRedirectBlockingEnabled,
       adblockFilterSources: adblockFilterSources ?? this.adblockFilterSources,
       manualAdBlockRules: manualAdBlockRules ?? this.manualAdBlockRules,
       manualCosmeticRules: manualCosmeticRules ?? this.manualCosmeticRules,
@@ -615,6 +666,11 @@ class DownloadSettings {
           translateTargetLang ?? this.translateTargetLang,
       siteZoomLevels: siteZoomLevels ?? this.siteZoomLevels,
       siteUserAgents: siteUserAgents ?? this.siteUserAgents,
+      proxyType: proxyType ?? this.proxyType,
+      proxyHost: proxyHost ?? this.proxyHost,
+      proxyPort: proxyPort ?? this.proxyPort,
+      proxyUsername: proxyUsername ?? this.proxyUsername,
+      proxyPassword: proxyPassword ?? this.proxyPassword,
     );
   }
 
@@ -625,6 +681,7 @@ class DownloadSettings {
     'searchEngine': searchEngine.toJson(),
     'adblockEnabled': adblockEnabled,
     'popupBlockingEnabled': popupBlockingEnabled,
+    'invisibleRedirectBlockingEnabled': invisibleRedirectBlockingEnabled,
     'adblockFilterSources': [
       for (final source in adblockFilterSources) source.toJson(),
     ],
@@ -655,13 +712,20 @@ class DownloadSettings {
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
     'siteUserAgents': siteUserAgents,
+    'proxyType': proxyType.name,
+    'proxyHost': proxyHost,
+    'proxyPort': proxyPort,
+    'proxyUsername': proxyUsername,
+    'proxyPassword': proxyPassword,
     'autoRetry': autoRetry,
     'retryLimit': retryLimit,
     'minSpeedThresholdKbps': minSpeedThresholdKbps,
     'stallTimeoutSeconds': stallTimeoutSeconds,
     'partialDownloadThreshold': partialDownloadThreshold,
     'autoClassifyEnabled': autoClassifyEnabled,
+    'remuxTsToMp4': remuxTsToMp4,
     'autoClassifyMappings': autoClassifyMappings,
+    'showSnackbars': showSnackbars,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -685,6 +749,9 @@ class DownloadSettings {
       popupBlockingEnabled:
           json['popupBlockingEnabled'] as bool? ??
           defaults.popupBlockingEnabled,
+      invisibleRedirectBlockingEnabled:
+          json['invisibleRedirectBlockingEnabled'] as bool? ??
+          defaults.invisibleRedirectBlockingEnabled,
       adblockFilterSources:
           _parseFilterSources(
             json['adblockFilterSources'] as List? ??
@@ -743,6 +810,14 @@ class DownloadSettings {
         json['siteZoomLevels'] as Map?,
       ),
       siteUserAgents: _parseStringStringMap(json['siteUserAgents'] as Map?),
+      proxyType: ProxyType.values.firstWhere(
+        (e) => e.name == json['proxyType'],
+        orElse: () => ProxyType.none,
+      ),
+      proxyHost: json['proxyHost'] as String? ?? '',
+      proxyPort: (json['proxyPort'] as num?)?.round() ?? 8080,
+      proxyUsername: json['proxyUsername'] as String? ?? '',
+      proxyPassword: json['proxyPassword'] as String? ?? '',
       autoRetry: json['autoRetry'] as bool? ?? true,
       retryLimit: (json['retryLimit'] as num?)?.round() ?? defaults.retryLimit,
       minSpeedThresholdKbps:
@@ -753,6 +828,8 @@ class DownloadSettings {
           (json['partialDownloadThreshold'] as num?)?.toDouble() ?? 0.95,
       autoClassifyEnabled:
           json['autoClassifyEnabled'] as bool? ?? true,
+      remuxTsToMp4:
+          json['remuxTsToMp4'] as bool? ?? true,
       autoClassifyMappings:
           json['autoClassifyMappings'] is Map
               ? Map<String, String>.from(
@@ -761,6 +838,8 @@ class DownloadSettings {
                   ),
                 )
               : const {},
+      showSnackbars:
+          json['showSnackbars'] as bool? ?? true,
     );
   }
 

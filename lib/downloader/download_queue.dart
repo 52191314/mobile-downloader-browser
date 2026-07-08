@@ -10,9 +10,11 @@ import 'models.dart';
 import 'download_splitter.dart';
 import 'file_combiner.dart';
 import 'hls_downloader.dart';
+import 'speed_limiter.dart';
 import 'torrent_downloader.dart';
 import '../logging/aurora_log.dart';
 import '../platform/download_foreground_service.dart';
+import '../settings/download_settings.dart' show ProxyType;
 import 'file_classifier.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
@@ -54,6 +56,7 @@ class DownloadQueue {
   CompletedDownloadPublisher? completedDownloadPublisher;
   bool wifiOnly = false;
   bool autoClassifyEnabled = true;
+  bool remuxTsToMp4 = true;
   bool autoRetry = true;
   int retryLimit = 3;
   int minSpeedThresholdBytesPerSec = 0;
@@ -62,8 +65,21 @@ class DownloadQueue {
   int minBytesBeforeFullRetry = 10 * 1024 * 1024; // 10 MB default
   final Map<String, int> _autoRetryAttempts = {};
 
+  /// Global speed limiter shared across all active downloads.
+  /// Set via [setSpeedLimit]; 0 = unlimited (no-op).
+  final SpeedLimiter speedLimiter = SpeedLimiter();
+
+  /// Current proxy configuration, applied via [applyProxySettings].
+  ProxyType _proxyType = ProxyType.none;
+  String _proxyHost = '';
+  int _proxyPort = 8080;
+  String _proxyUsername = '';
+  String _proxyPassword = '';
+
   String? queuePath;
   bool _isLoading = false;
+  bool _isSaving = false;
+  Future<void>? _pendingSaveFuture;
 
   /// Debounce timer for persisting the queue to disk.  Without this the
   /// queue is written on every 500ms progress tick (from every active
@@ -86,6 +102,9 @@ class DownloadQueue {
   final StreamController<DownloadTask> _taskUpdateController =
       StreamController<DownloadTask>.broadcast();
   Stream<DownloadTask> get onTaskUpdated => _taskUpdateController.stream;
+  final StreamController<String> _taskRemovedController =
+      StreamController<String>.broadcast();
+  Stream<String> get onTaskRemoved => _taskRemovedController.stream;
   final StreamController<String> _warningController =
       StreamController<String>.broadcast();
   Stream<String> get onWarning => _warningController.stream;
@@ -115,11 +134,46 @@ class DownloadQueue {
     _client = httpClient ?? _createDefaultClient();
   }
 
-  static http.Client _createDefaultClient() {
+  static http.Client _createDefaultClient({ProxyType proxyType = ProxyType.none, String proxyHost = '', int proxyPort = 8080, String proxyUsername = '', String proxyPassword = ''}) {
     final inner = HttpClient()
       ..maxConnectionsPerHost = 32
-      ..connectionTimeout = const Duration(seconds: 15);
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 90);
+
+    if (proxyType != ProxyType.none && proxyHost.isNotEmpty) {
+      inner.findProxy = (uri) {
+        final scheme = proxyType == ProxyType.socks5 ? 'SOCKS5' : 'PROXY';
+        final auth = (proxyUsername.isNotEmpty && proxyPassword.isNotEmpty)
+            ? '$proxyUsername:$proxyPassword@'
+            : '';
+        return '$scheme ${auth}$proxyHost:$proxyPort';
+      };
+    }
+
     return IOClient(inner);
+  }
+
+  /// Applies proxy settings by recreating the shared HTTP client.
+  /// Called when the user changes proxy configuration in Settings.
+  void applyProxySettings(ProxyType type, String host, int port, String username, String password) {
+    _proxyType = type;
+    _proxyHost = host;
+    _proxyPort = port;
+    _proxyUsername = username;
+    _proxyPassword = password;
+    _client = _createDefaultClient(
+      proxyType: type,
+      proxyHost: host,
+      proxyPort: port,
+      proxyUsername: username,
+      proxyPassword: password,
+    );
+  }
+
+  /// Sets a global speed cap across all active HTTP/HLS downloads.
+  /// [kbps] — kilobytes per second. 0 disables the limiter (no overhead).
+  void setSpeedLimit(int kbps) {
+    speedLimiter.setLimit(kbps);
   }
 
   void configure({
@@ -127,6 +181,7 @@ class DownloadQueue {
     int? numChunksPerTask,
     CompletedDownloadPublisher? completedDownloadPublisher,
     bool? autoClassifyEnabled,
+    bool? remuxTsToMp4,
     bool? autoRetry,
     int? retryLimit,
     int? minSpeedThresholdBytesPerSec,
@@ -145,6 +200,9 @@ class DownloadQueue {
     }
     if (autoClassifyEnabled != null) {
       this.autoClassifyEnabled = autoClassifyEnabled;
+    }
+    if (remuxTsToMp4 != null) {
+      this.remuxTsToMp4 = remuxTsToMp4;
     }
     if (autoRetry != null) {
       this.autoRetry = autoRetry;
@@ -198,6 +256,9 @@ class DownloadQueue {
         return;
       }
     }
+    if (task.isBackupImport && task.state != DownloadState.completed) {
+      task.state = DownloadState.paused;
+    }
     _tasks[task.id] = task;
 
     // Completed tasks are kept for history only; no downloader needed.
@@ -238,6 +299,7 @@ class DownloadQueue {
           task: task,
           client: _client,
           maxConcurrentSegments: numChunksPerTask,
+          speedLimiter: speedLimiter,
         );
       } else {
         downloader = DownloadSplitter(
@@ -247,20 +309,55 @@ class DownloadQueue {
           minSpeedBytesPerSec: minSpeedThresholdBytesPerSec,
           stallTimeoutSeconds: stallTimeoutSeconds,
           partialDownloadThreshold: partialDownloadThreshold,
+          remuxTsToMp4: remuxTsToMp4,
+          speedLimiter: speedLimiter,
         );
       }
       _splitters[task.id] = downloader;
 
       _downloaderSubscriptions[task.id] = downloader.onTaskUpdated.listen((
         updatedTask,
-      ) {
+      ) async {
         _emitTask(updatedTask);
         if (updatedTask.state == DownloadState.completed ||
             updatedTask.state == DownloadState.failed) {
-          _activeTasks.remove(updatedTask.id);
+          final wasActive = _activeTasks.remove(updatedTask.id);
           if (updatedTask.state == DownloadState.completed) {
             _autoRetryAttempts.remove(updatedTask.id);
-            unawaited(_publishCompletedTask(updatedTask));
+            if (wasActive) {
+              if (autoClassifyEnabled) {
+                final oldPath = updatedTask.savePath;
+                _applyAutoClassification(updatedTask);
+                final newPath = updatedTask.savePath;
+                if (oldPath != newPath) {
+                  try {
+                    final oldFile = File(oldPath);
+                    if (await oldFile.exists()) {
+                      final newFile = File(newPath);
+                      await newFile.parent.create(recursive: true);
+                      await oldFile.rename(newPath);
+                      AuroraLog.instance.info(
+                        'Auto-classified completed file moved from $oldPath to $newPath',
+                        category: LogCategory.download,
+                        screen: LogScreen.background,
+                        eventType: LogEventType.fileIo,
+                        taskId: updatedTask.id,
+                      );
+                    }
+                  } catch (e) {
+                    updatedTask.savePath = oldPath;
+                    AuroraLog.instance.error(
+                      'Failed to move auto-classified file: $e',
+                      category: LogCategory.download,
+                      screen: LogScreen.background,
+                      eventType: LogEventType.error,
+                      taskId: updatedTask.id,
+                    );
+                  }
+                }
+              }
+              unawaited(_publishCompletedTask(updatedTask));
+            }
           }
           _schedule();
 
@@ -272,7 +369,7 @@ class DownloadQueue {
               eventType: LogEventType.error,
               taskId: updatedTask.id,
             );
-            if (autoRetry) {
+            if (autoRetry && !updatedTask.isBackupImport) {
               final isStallOrTruncation =
                   (updatedTask.errorMessage ?? '').contains('Speed stall') ||
                       (updatedTask.errorMessage ?? '')
@@ -436,6 +533,7 @@ class DownloadQueue {
     }
 
     _tasks.remove(taskId);
+    if (!_taskRemovedController.isClosed) _taskRemovedController.add(taskId);
     _schedule();
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
@@ -474,48 +572,88 @@ class DownloadQueue {
       );
     }
 
-    // Pull chunks from in-memory task (loaded from meta.json in _loadMeta
-    // or already on the in-memory model).
-    final result = await FileCombiner.combinePartial(
-      chunks: task.chunks,
-      tempDir: task.tempDir,
-      destination: File(task.savePath),
-    );
+    task.state = DownloadState.merging;
+    task.downloadedBytes = 0;
+    task.totalBytes = task.chunks.length;
+    _emitTask(task);
 
-    if (!result.hasData) {
-      task.errorMessage =
-          '[Force merge failed] No chunk data on disk to merge.';
+    try {
+      // Pull chunks from in-memory task (loaded from meta.json in _loadMeta
+      // or already on the in-memory model).
+      final result = await FileCombiner.combinePartial(
+        chunks: task.chunks,
+        tempDir: task.tempDir,
+        destination: File(task.savePath),
+        onProgress: (chunkIndex, totalChunks) {
+          task.downloadedBytes = chunkIndex;
+          task.totalBytes = totalChunks;
+          _emitTask(task);
+        },
+      );
+
+      if (!result.hasData) {
+        task.state = DownloadState.failed;
+        task.errorMessage =
+            '[Force merge failed] No chunk data on disk to merge.';
+        _emitTask(task);
+        return false;
+      }
+
+      task.state = DownloadState.completed;
+      task.downloadedBytes = result.bytesWritten;
+      task.totalBytes = result.bytesWritten;
+      task.actualHash = null;
+      task.errorMessage = null;
+
+      if (autoClassifyEnabled) {
+        final oldPath = task.savePath;
+        _applyAutoClassification(task);
+        final newPath = task.savePath;
+        if (oldPath != newPath) {
+          try {
+            final oldFile = File(oldPath);
+            if (await oldFile.exists()) {
+              final newFile = File(newPath);
+              await newFile.parent.create(recursive: true);
+              await oldFile.rename(newPath);
+            }
+          } catch (_) {
+            task.savePath = oldPath;
+          }
+        }
+      }
+
+      _activeTasks.remove(taskId);
+      _executionQueue.remove(taskId);
+      _autoRetryAttempts.remove(taskId);
+
+      // Clean up the temp directory now that the merge succeeded.
+      try {
+        final tempDir = Directory(task.tempDir);
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      } catch (e, s) {
+        _logError('Failed to clean temp dir after force merge', e, s);
+      }
+
       _emitTask(task);
+      syncForegroundService();
+      unawaited(_publishCompletedTask(task));
+      if (queuePath != null && !_isLoading) {
+        unawaited(saveToFile(queuePath!));
+      }
+      return true;
+    } catch (e, s) {
+      _logError('Exception during force merge', e, s);
+      task.state = DownloadState.failed;
+      task.errorMessage = '[Force merge failed] Error: $e';
+      _emitTask(task);
+      if (queuePath != null && !_isLoading) {
+        unawaited(saveToFile(queuePath!));
+      }
       return false;
     }
-
-    task.state = DownloadState.completed;
-    if (task.totalBytes <= 0) {
-      task.totalBytes = result.bytesWritten;
-    }
-    task.actualHash = null;
-    task.errorMessage = null;
-    _activeTasks.remove(taskId);
-    _executionQueue.remove(taskId);
-    _autoRetryAttempts.remove(taskId);
-
-    // Clean up the temp directory now that the merge succeeded.
-    try {
-      final tempDir = Directory(task.tempDir);
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
-      }
-    } catch (e, s) {
-      _logError('Failed to clean temp dir after force merge', e, s);
-    }
-
-    _emitTask(task);
-    syncForegroundService();
-    unawaited(_publishCompletedTask(task));
-    if (queuePath != null && !_isLoading) {
-      unawaited(saveToFile(queuePath!));
-    }
-    return true;
   }
 
   /// Retry a failed HLS download by asking the sniffer to refresh the token
@@ -587,30 +725,66 @@ class DownloadQueue {
     _schedule();
   }
 
+  Future<void> _waitAndSave(String path) async {
+    while (_isSaving) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    _pendingSaveFuture = null;
+    await saveToFile(path);
+  }
+
   Future<void> saveToFile(String path) async {
+    if (_isSaving) {
+      if (_pendingSaveFuture == null) {
+        _pendingSaveFuture = _waitAndSave(path);
+      }
+      return _pendingSaveFuture;
+    }
+
+    _isSaving = true;
     try {
       final file = File(path);
-      await file.parent.create(recursive: true);
+      final fileDir = file.parent;
+      if (!await fileDir.exists()) {
+        await fileDir.create(recursive: true);
+      }
       final tempFile = File('$path.tmp');
+      final tempDir = tempFile.parent;
+      if (!await tempDir.exists()) {
+        await tempDir.create(recursive: true);
+      }
       final backupFile = File('$path.bak');
       // Persist all tasks, including completed history, so the queue survives
       // app restarts and ADB installs.
       final data = _tasks.values.map((t) => t.toJson()).toList(growable: false);
       final jsonString = await Isolate.run(() => jsonEncode(data));
       await tempFile.writeAsString(jsonString, flush: true);
-      if (await backupFile.exists()) {
-        await backupFile.delete();
+      // Backup existing file (best-effort).
+      try {
+        if (await file.exists()) {
+          await file.rename(backupFile.path);
+        }
+      } catch (_) {
+        // Backup failure is non-fatal — the new file can still be written.
       }
-      if (await file.exists()) {
-        await file.rename(backupFile.path);
+      // Atomically replace with the new data.
+      try {
+        await tempFile.rename(file.path);
+      } catch (renameError) {
+        // If the rename fails, the temp file is left behind and will be
+        // picked up on the next save attempt.
       }
-      await tempFile.rename(file.path);
-      if (await backupFile.exists()) {
-        await backupFile.delete();
-      }
+      // Clean up backup (best-effort).
+      try {
+        if (await backupFile.exists()) {
+          await backupFile.delete();
+        }
+      } catch (_) {}
     } catch (e, s) {
       _logError('Failed to save queue to file', e, s);
       _warn('Failed to save download queue: $e');
+    } finally {
+      _isSaving = false;
     }
   }
 
@@ -628,16 +802,42 @@ class DownloadQueue {
         await _preserveCorruptQueueFile(file, 'Queue file was not a list.');
         return;
       }
+      // Derive the persistent downloads_tmp directory from the queue file
+      // path (e.g. /data/data/.../files/download_queue.json → downloads_tmp).
+      final appSupportDir = file.parent.path;
+      final persistentDownloadsTmp = '$appSupportDir/downloads_tmp';
+
       for (final item in decoded) {
         if (item is! Map) continue;
         try {
+          // Re-base tempDir from the old getTemporaryDirectory() (non-persistent)
+          // to the persistent getApplicationSupportDirectory()/downloads_tmp so
+          // partial download bytes survive OS cache clearing.
+          final tempDirStr = (item as Map)['tempDir'] as String? ?? '';
+          if (tempDirStr.isNotEmpty) {
+            final normalized = tempDirStr.replaceAll('\\', '/');
+            if (!normalized.contains('downloads_tmp')) {
+              // Extract basename (e.g. 'temp_1783417343907' or '1783417343907')
+              final lastSlash = normalized.lastIndexOf('/');
+              final basename = lastSlash != -1
+                  ? normalized.substring(lastSlash + 1)
+                  : normalized;
+              (item as Map)['tempDir'] =
+                  '$persistentDownloadsTmp/$basename';
+            }
+          }
+
           final task = DownloadTask.fromJson(Map<String, dynamic>.from(item));
           // Reset in-flight states to idle so _schedule() re-queues them.
           // Without this, tasks saved as 'downloading' are never re-started
           // because addTask only puts 'idle' tasks into the execution queue.
-          if (task.state == DownloadState.downloading ||
-              task.state == DownloadState.paused) {
+          if (task.isBackupImport && task.state != DownloadState.completed) {
+            task.state = DownloadState.paused;
+          } else if (task.state == DownloadState.downloading) {
             task.state = DownloadState.idle;
+          } else if (task.state == DownloadState.merging) {
+            task.state = DownloadState.failed;
+            task.errorMessage = '[Merge interrupted] Rename the task to a shorter name and retry.';
           }
           addTask(task);
         } catch (e, s) {
@@ -1055,9 +1255,15 @@ class DownloadQueue {
     final idx = normalized.lastIndexOf(sep);
     // Not under completed/ – skip (torrents, custom exports, etc.)
     if (idx == -1) return;
-    final after = normalized.substring(idx + sep.length);
-    // Already has a subfolder (user's manual choice) – skip
-    if (after.contains('/')) return;
+    var after = normalized.substring(idx + sep.length);
+    // Already has a subfolder (user's manual choice) – skip, EXCEPT if the
+    // subfolder is "Other" (the fallback category), in which case we allow
+    // re-classifying it when the download completes with a valid extension.
+    if (after.contains('/')) {
+      final parts = after.split('/');
+      if (parts.first != 'Other') return;
+      after = parts.last;
+    }
 
     final category = FileClassifier.classify(after);
     final label = FileClassifier.categoryLabel(category);
@@ -1092,6 +1298,7 @@ class DownloadQueue {
         continue;
       }
       _tasks.remove(id);
+      if (!_taskRemovedController.isClosed) _taskRemovedController.add(id);
       _splitters.remove(id);
       _downloaderSubscriptions.remove(id)?.cancel();
       _autoRetryAttempts.remove(id);
@@ -1113,6 +1320,15 @@ class DownloadQueue {
         task.publicUri = published.uri;
         task.publicPathLabel = published.pathLabel;
         task.publishErrorMessage = null;
+        // Delete the internal copy — the file is now in public Downloads.
+        try {
+          final internalFile = File(task.savePath);
+          if (await internalFile.exists()) {
+            await internalFile.delete();
+          }
+        } catch (_) {
+          // Non-fatal — file may be in use or already deleted.
+        }
       }
     } catch (error) {
       task.publishErrorMessage = error.toString();
@@ -1157,6 +1373,9 @@ class DownloadQueue {
     _saveDebounceTimer?.cancel();
     if (!_taskUpdateController.isClosed) {
       await _taskUpdateController.close();
+    }
+    if (!_taskRemovedController.isClosed) {
+      await _taskRemovedController.close();
     }
     if (!_warningController.isClosed) {
       await _warningController.close();
@@ -1203,7 +1422,10 @@ class DownloadQueue {
     await downloader.pause(targetState: targetState);
   }
 
+  void emitTask(DownloadTask task) => _emitTask(task);
+
   void _emitTask(DownloadTask task) {
+    if (_isLoading) return;
     if (!_taskUpdateController.isClosed) {
       _taskUpdateController.add(task);
     }

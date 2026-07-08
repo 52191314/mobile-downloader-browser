@@ -3,10 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'range_calculator.dart';
 import 'file_combiner.dart';
 import '../logging/aurora_log.dart';
+import '../platform/ts_remux_service.dart';
+import 'speed_limiter.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[DownloadSplitter] $context: $error';
@@ -36,6 +39,11 @@ class DownloadSplitter implements BaseDownloader {
   final int stallTimeoutSeconds;
   bool _isPaused = false;
   bool _started = false;
+
+  /// Optional global speed limiter injected by [DownloadQueue].
+  /// When non-null and active, individual chunk writes are throttled
+  /// to stay within the configured rate.
+  final SpeedLimiter? _speedLimiter;
   bool _stallDetected = false;
   double _stallAccumSeconds = 0.0;
   Future<void>? _runningFuture;
@@ -49,6 +57,10 @@ class DownloadSplitter implements BaseDownloader {
   /// Diagnostic: counts consecutive 500ms ticks where speed was 0 while
   /// the task is in downloading state.  Reset to 0 whenever data flows.
   int _zeroSpeedTickCount = 0;
+
+  /// Dirty flag — set true whenever a chunk writes bytes.
+  /// Cleared by [_updateProgress] so it can skip summing chunks when idle.
+  bool _progressDirty = false;
 
   final StreamController<DownloadTask> _taskUpdateController =
       StreamController<DownloadTask>.broadcast();
@@ -65,12 +77,19 @@ class DownloadSplitter implements BaseDownloader {
     this.minSpeedBytesPerSec = 0,
     this.stallTimeoutSeconds = 20,
     this.partialDownloadThreshold = 0.95,
+    this.remuxTsToMp4 = true,
+    SpeedLimiter? speedLimiter,
   }) : _ownsClient = client == null,
-       client = client ?? http.Client();
+       client = client ?? http.Client(),
+       _speedLimiter = speedLimiter;
 
   /// When a download stalls and exceeds this ratio (0.0–1.0), the task
   /// is flagged as a partial download candidate instead of a plain failure.
   final double partialDownloadThreshold;
+
+  /// When true, MPEG-TS (.ts) output is remuxed to MP4 after completion
+  /// via Android's native MediaExtractor + MediaMuxer.
+  final bool remuxTsToMp4;
 
   Future<void> _saveMeta() async {
     final dir = Directory(task.tempDir);
@@ -249,6 +268,10 @@ class DownloadSplitter implements BaseDownloader {
     final currentRunFuture = () async {
       task.state = DownloadState.downloading;
       task.errorMessage = null;
+      // Reset stall state so retry after a stall actually re-downloads
+      // instead of silently no-oping (every chunk checks _stallDetected).
+      _stallDetected = false;
+      _stallAccumSeconds = 0.0;
 
       _emitTask();
 
@@ -345,6 +368,9 @@ class DownloadSplitter implements BaseDownloader {
 
         if (_isPaused || _stallDetected) return;
 
+        // Update progress/downloaded bytes immediately before run-end checks
+        _updateProgress();
+
         // --- Defensive checks: reject clearly bad downloads ---
         // Run these BEFORE the allComplete check so a 0-byte response
         // surfaces as a clear "0 bytes" error rather than the generic
@@ -388,6 +414,28 @@ class DownloadSplitter implements BaseDownloader {
             .toList();
         final finalFile = File(task.savePath);
 
+        // Pre-merge validation: clamp any oversized chunk files to their
+        // expected size.  This is a belt-and-suspenders defense: even if
+        // a chunk file somehow grew beyond its range (e.g. server bugs,
+        // 206-with-full-body through Content-Range gap), the merge output
+        // will not contain duplicate/corrupt data.
+        for (int ci = 0; ci < task.chunks.length; ci++) {
+          final ch = task.chunks[ci];
+          if (ch.isOpenEnded || ch.size <= 0) continue;
+          final cf = chunkFiles[ci];
+          if (!await cf.exists()) continue;
+          final actualSize = await cf.length();
+          if (actualSize > ch.size) {
+            final raf = await cf.open(mode: FileMode.append);
+            await raf.truncate(ch.size);
+            await raf.close();
+            debugPrint(
+              '[DownloadSplitter] Pre-merge clamped chunk ${ch.index} '
+              'from $actualSize to ${ch.size} bytes.',
+            );
+          }
+        }
+
         final actualHash = await FileCombiner.combineAndHash(
           chunks: chunkFiles,
           destination: finalFile,
@@ -420,6 +468,23 @@ class DownloadSplitter implements BaseDownloader {
         if (task.totalBytes <= 0) {
           task.totalBytes = task.downloadedBytes;
         }
+
+        // Remux .ts → .mp4 for direct MPEG-TS downloads.
+        final mergedPath = task.savePath;
+        if (remuxTsToMp4 && p.extension(mergedPath).toLowerCase() == '.ts') {
+          final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
+          task.errorMessage = 'Converting to MP4...';
+          _emitTask();
+          final ok = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
+          if (ok) {
+            try {
+              await File(mergedPath).delete();
+            } catch (_) {}
+            task.savePath = mp4Path;
+          }
+          task.errorMessage = null;
+        }
+
         task.state = DownloadState.completed;
         _emitTask();
       } catch (e) {
@@ -629,6 +694,66 @@ class DownloadSplitter implements BaseDownloader {
           'Server returned status ${response.statusCode} instead of 206 Partial Content',
         );
       }
+      // Content-Range verification: when resuming (diskBytes > 0),
+      // verify the server actually started at the requested byte offset
+      // and didn't send the full body from byte 0 under a 206 status
+      // (which would cause the full body to be appended after existing
+      // partial data, producing a doubled, corrupt chunk).
+      if (diskBytes > 0 && !chunk.isOpenEnded) {
+        final contentRange = response.headers['content-range'] ??
+            response.headers['Content-Range'];
+        if (contentRange != null) {
+          final match = RegExp(r'bytes (\d+)-').firstMatch(contentRange);
+          if (match != null) {
+            final responseStart = int.tryParse(match.group(1)!) ?? -1;
+            if (responseStart != rangeStart) {
+              if (responseStart == chunk.start) {
+                // Server sent the full chunk from byte 0 (ignored our
+                // Range header despite returning 206).  Truncate the
+                // existing partial file and set diskBytes=0 so the
+                // response body (full chunk) is written fresh — do NOT
+                // cancel the stream, we will use the full body.
+                await chunkFile.writeAsBytes([], flush: true);
+                diskBytes = 0;
+                debugPrint(
+                  '[DownloadSplitter] 206 Content-Range started at '
+                  '${chunk.start} instead of $rangeStart for chunk '
+                  '${chunk.index}; truncated file for fresh re-download.',
+                );
+                AuroraLog.instance.warn(
+                  '206 Content-Range started at ${chunk.start} '
+                  'instead of $rangeStart for chunk ${chunk.index}; '
+                  'truncated file for fresh re-download.',
+                  category: LogCategory.download,
+                  screen: LogScreen.background,
+                  eventType: LogEventType.network,
+                  taskId: task.id,
+                );
+              } else {
+                // Server returned 206 from a completely different
+                // offset — cannot safely use this response.
+                await response.stream.listen((_) {}).cancel();
+                throw Exception(
+                  'Server returned 206 with Content-Range starting at '
+                  '$responseStart, but expected byte $rangeStart for '
+                  'chunk ${chunk.index}. Cannot safely resume.',
+                );
+              }
+            }
+          } else {
+            // Unparseable Content-Range header — log and proceed
+            // with normal append; the merge-time clamping (Fix 2)
+            // will reject oversized chunks.
+            debugPrint(
+              '[DownloadSplitter] Unparseable Content-Range header '
+              '"$contentRange" for chunk ${chunk.index}.',
+            );
+          }
+        }
+        // No Content-Range header on a 206 — technically malformed,
+        // but some CDNs omit it.  Proceed with normal append; the
+        // merge-time clamping (Fix 2) catches any resulting oversize.
+      }
     } else {
       if (response.statusCode >= 400) {
         await response.stream.listen((_) {}).cancel();
@@ -672,6 +797,22 @@ class DownloadSplitter implements BaseDownloader {
         .listen(
           (data) {
             if (_isPaused || _stallDetected || completer.isCompleted) return;
+
+            // Global speed limiter gate.
+            // Always write this chunk (leaky-bucket burst), but pause the
+            // stream when over budget so future chunks are backpressured.
+            final limiter = _speedLimiter;
+            if (limiter != null && limiter.isActive) {
+              if (!limiter.tryConsume(data.length)) {
+                subscription?.pause();
+                limiter.onCapacityAvailable.then((_) {
+                  if (!_isPaused && !_stallDetected && !completer.isCompleted) {
+                    subscription?.resume();
+                  }
+                });
+              }
+            }
+
             try {
               sink.add(data);
             } catch (e, s) {
@@ -680,6 +821,8 @@ class DownloadSplitter implements BaseDownloader {
             }
             diskBytes += data.length;
             chunk.bytesDownloaded = diskBytes;
+            task.downloadedBytes += data.length;
+            _progressDirty = true;
           },
           onError: (Object error) {
             if (!completer.isCompleted) {
@@ -698,6 +841,44 @@ class DownloadSplitter implements BaseDownloader {
 
     try {
       await completer.future;
+
+      // Defense-in-depth: clamp oversized chunk to expected size.
+      // If the server sent more bytes than the chunk should hold
+      // (e.g. a 206 response that ignored the Range header and
+      // sent from byte 0, but Content-Range was missing/wrong),
+      // truncate the file to prevent doubled data from flowing
+      // into the merge step.
+      if (!chunk.isOpenEnded && chunk.size > 0) {
+        // Skip clamping if the file was never created on disk.
+        if (!await chunkFile.exists()) {
+          diskBytes = 0;
+          chunk.bytesDownloaded = 0;
+        } else {
+          final actualSize = await chunkFile.length();
+          if (actualSize > chunk.size) {
+            final raf = await chunkFile.open(mode: FileMode.append);
+            await raf.truncate(chunk.size);
+            await raf.close();
+            final excess = actualSize - chunk.size;
+            diskBytes = chunk.size;
+            chunk.bytesDownloaded = chunk.size;
+            task.downloadedBytes -= excess;
+            debugPrint(
+              '[DownloadSplitter] Clamped oversized chunk ${chunk.index} '
+              'from $actualSize to ${chunk.size} bytes (excess $excess).',
+            );
+            AuroraLog.instance.warn(
+              'Clamped oversized chunk ${chunk.index} '
+              'from $actualSize to ${chunk.size} bytes (excess $excess).',
+              category: LogCategory.download,
+              screen: LogScreen.background,
+              eventType: LogEventType.network,
+              taskId: task.id,
+            );
+          }
+        }
+      }
+
       if (!_isPaused) {
         if (diskBytes >= chunk.size || chunk.end == -1) {
           // If the server didn't report a total size (chunk.end == -1)
@@ -720,6 +901,8 @@ class DownloadSplitter implements BaseDownloader {
 
 
   void _updateProgress() {
+    if (!_progressDirty) return;
+    _progressDirty = false;
     int total = 0;
     for (final chunk in task.chunks) {
       total += chunk.bytesDownloaded;

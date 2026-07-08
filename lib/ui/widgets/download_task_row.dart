@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../downloader/downloader.dart';
+import '../../platform/public_downloads_service.dart';
+import '../notifications/aurora_snackbar.dart';
 import 'panel.dart';
+import 'settings_formatters.dart';
 
 class DownloadTaskRow extends StatelessWidget {
   final DownloadTask task;
   final Future<void> Function(DownloadTask task) onOpenDownload;
-  final Future<void> Function(DownloadTask task) onShareDownload;
-  final Future<void> Function(DownloadTask task)? onExport;
   final VoidCallback? onRetry;
   final VoidCallback? onPause;
   final VoidCallback? onResume;
@@ -21,8 +22,6 @@ class DownloadTaskRow extends StatelessWidget {
     super.key,
     required this.task,
     required this.onOpenDownload,
-    required this.onShareDownload,
-    this.onExport,
     this.onRetry,
     this.onPause,
     this.onResume,
@@ -36,8 +35,6 @@ class DownloadTaskRow extends StatelessWidget {
       builder: (context) => DownloadPropertiesDialog(
         task: task,
         onOpenDownload: onOpenDownload,
-        onShareDownload: onShareDownload,
-        onExport: onExport,
       ),
     );
   }
@@ -56,11 +53,9 @@ class DownloadTaskRow extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      _taskName(task),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                    child: _buildTaskNameWidget(
+                      task,
+                      const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                     ),
                   ),
                   IconButton(
@@ -86,7 +81,7 @@ class DownloadTaskRow extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '•  ${_formatBytes(task.downloadedBytes)}',
+                    '•  ${formatBytes(task.downloadedBytes)}',
                     style: TextStyle(
                       fontSize: 12,
                       color: scheme.onSurfaceVariant,
@@ -117,11 +112,9 @@ class DownloadTaskRow extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _taskName(task),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  child: _buildTaskNameWidget(
+                    task,
+                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                   ),
                 ),
                 if (onForceMerge != null && task.state == DownloadState.failed)
@@ -178,8 +171,8 @@ class DownloadTaskRow extends StatelessWidget {
                               title: Text(isCompleted ? 'Remove Download?' : 'Cancel Download?'),
                               content: Text(
                                 isCompleted
-                                    ? 'Are you sure you want to remove "${_taskName(task)}" from the download list?'
-                                    : 'Are you sure you want to cancel and remove "${_taskName(task)}" from your queue?\nThis will delete any temporary or downloaded files.',
+                                    ? 'Are you sure you want to remove "${taskDisplayName(task)}" from the download list?'
+                                    : 'Are you sure you want to cancel and remove "${taskDisplayName(task)}" from your queue?\nThis will delete any temporary or downloaded files.',
                               ),
                               actions: [
                                 TextButton(
@@ -210,23 +203,25 @@ class DownloadTaskRow extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    _bytesLabel(task.downloadedBytes, task.totalBytes),
+                    formatBytesPair(task.downloadedBytes, task.totalBytes),
                     style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                   Text(
                     task.state == DownloadState.downloading
-                        ? _speedLabel(task.speed)
-                        : _stateLabel(task.state),
+                        ? formatSpeed(task.speed)
+                        : stateLabel(task.state),
                     style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: LinearProgressIndicator(
-                  value: isIndeterminate ? null : progress,
-                  minHeight: 6,
+              RepaintBoundary(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: isIndeterminate ? null : progress,
+                    minHeight: 6,
+                  ),
                 ),
               ),
             ],
@@ -262,28 +257,41 @@ class DownloadTaskRow extends StatelessWidget {
     );
   }
 
-  static String _taskName(DownloadTask task) {
-    final uri = Uri.tryParse(task.url);
-    if (uri != null && uri.pathSegments.isNotEmpty) {
-      return Uri.decodeComponent(uri.pathSegments.last);
+  /// Renders the task filename with middle-ellipsis: the base name
+  /// is end-ellipsized inside an Expanded, while the file extension
+  /// sits in a separate non-shrinking Text so it is always visible.
+  /// For filenames without a recognizable extension, falls back to a
+  /// plain Text with end-ellipsis.
+  Widget _buildTaskNameWidget(DownloadTask task, TextStyle style) {
+    final name = taskDisplayName(task);
+    final dotIdx = name.lastIndexOf('.');
+    if (dotIdx > 0 && name.length - dotIdx <= 6) {
+      final base = name.substring(0, dotIdx);
+      final ext = name.substring(dotIdx); // includes the dot
+      return Row(
+        children: [
+          Expanded(
+            child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+          ),
+          Text(ext, maxLines: 1, style: style),
+        ],
+      );
     }
-    return task.url;
+    return Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
   }
 }
 
 class DownloadPropertiesDialog extends StatefulWidget {
   final DownloadTask task;
   final Future<void> Function(DownloadTask task) onOpenDownload;
-  final Future<void> Function(DownloadTask task) onShareDownload;
-  final Future<void> Function(DownloadTask task)? onExport;
   final void Function(String url)? onOpenUrlInBrowser;
+  final void Function(DownloadTask task)? onTaskUpdated;
 
   const DownloadPropertiesDialog({
     required this.task,
     required this.onOpenDownload,
-    required this.onShareDownload,
-    required this.onExport,
     this.onOpenUrlInBrowser,
+    this.onTaskUpdated,
   });
 
   @override
@@ -322,9 +330,19 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
 
     if (widget.task.state == DownloadState.completed) {
       try {
-        final file = File(widget.task.savePath);
-        if (await file.exists()) {
-          await file.rename(newPath);
+        if (widget.task.publicUri != null) {
+          // Published file — rename via MediaStore on the public copy.
+          final ok = await const PublicDownloadsService().renamePublishedFile(
+            publicUri: widget.task.publicUri!,
+            newDisplayName: newName,
+          );
+          if (!ok) throw Exception('MediaStore rename returned false');
+        } else {
+          // Not yet published — rename the internal file directly.
+          final file = File(widget.task.savePath);
+          if (await file.exists()) {
+            await file.rename(newPath);
+          }
         }
         if (!mounted) return;
         setState(() {
@@ -332,23 +350,19 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
           widget.task.publicPathLabel = newPath;
           _currentName = newName;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File renamed successfully')),
-        );
+        widget.onTaskUpdated?.call(widget.task);
+        AuroraSnackbar.show(context, 'File renamed successfully');
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Rename failed: $e')),
-        );
+        AuroraSnackbar.show(context, 'Rename failed: $e');
       }
     } else {
       setState(() {
         widget.task.savePath = newPath;
         _currentName = newName;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Download target path renamed')),
-      );
+      widget.onTaskUpdated?.call(widget.task);
+      AuroraSnackbar.show(context, 'Download target path renamed');
     }
   }
 
@@ -405,9 +419,7 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                   tooltip: 'Copy URL',
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: widget.task.url));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('URL copied to clipboard')),
-                    );
+                    AuroraSnackbar.show(context, 'URL copied to clipboard');
                   },
                 ),
               ],
@@ -436,9 +448,7 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                     tooltip: 'Copy Source Page',
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: widget.task.sourcePageUrl!));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Source page URL copied')),
-                      );
+                      AuroraSnackbar.show(context, 'Source page URL copied');
                     },
                   ),
                   if (widget.onOpenUrlInBrowser != null)
@@ -473,27 +483,6 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                             widget.onOpenDownload(widget.task);
                           },
                   ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
-                    icon: const Icon(Icons.share, size: 16),
-                    label: const Text('Share'),
-                    onPressed: widget.task.publicUri == null
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            widget.onShareDownload(widget.task);
-                          },
-                  ),
-                  if (widget.onExport != null)
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
-                      icon: const Icon(Icons.save_alt, size: 16),
-                      label: const Text('Export'),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        widget.onExport!(widget.task);
-                      },
-                    ),
                 ],
               ),
             ],
@@ -508,36 +497,4 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
       ],
     );
   }
-}
-
-String _stateLabel(DownloadState state) {
-  return switch (state) {
-    DownloadState.completed => 'Completed',
-    DownloadState.failed => 'Failed',
-    DownloadState.paused => 'Paused',
-    DownloadState.downloading => 'Downloading',
-    DownloadState.idle => 'Waiting',
-  };
-}
-
-String _bytesLabel(int downloaded, int total) {
-  if (total <= 0) return '${_formatBytes(downloaded)} downloaded';
-  return '${_formatBytes(downloaded)} / ${_formatBytes(total)}';
-}
-
-String _speedLabel(double bytesPerSecond) {
-  if (bytesPerSecond <= 0) return '0 KB/s';
-  if (bytesPerSecond >= 1024 * 1024) {
-    return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(1)} MB/s';
-  }
-  return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
-}
-
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
 }

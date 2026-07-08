@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../downloader/downloader.dart';
 import '../../platform/public_downloads_service.dart';
+import '../../platform/download_foreground_service.dart';
 import '../../sniffer/browser_library.dart';
 import '../../sniffer/idm_backup_parser.dart';
 
@@ -16,6 +17,7 @@ import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
 import '../../theme/aurora_colors.dart';
+import '../notifications/aurora_snackbar.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
@@ -272,7 +274,28 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _openPage(Widget page) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => page,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.3, 0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            )),
+            child: FadeTransition(
+              opacity: animation,
+              child: child,
+            ),
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 250),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -345,6 +368,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
                 contentPadding: EdgeInsets.zero,
               ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text('Convert .ts to .mp4'),
+                subtitle: const Text('Remux MPEG-TS downloads to MP4 container after completion (faster than transcoding).'),
+                value: local.remuxTsToMp4,
+                onChanged: (v) {
+                  setLocal(() => local = local.copyWith(remuxTsToMp4: v));
+                  _update(local);
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
               const SizedBox(height: 16),
               _label('Max detected media'),
               _slider(local.maxDetectedMedia.toDouble(), 20, 150, 13,
@@ -388,7 +422,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ]),
               const SizedBox(height: 20),
               Slider(
-                  value: localSpeed,
+                  value: localSpeed.clamp(0.0, 2048.0),
                   min: 0, max: 2048, divisions: 16,
                   activeColor: AuroraColors.accent,
                   inactiveColor: AuroraColors.surfaceVariant,
@@ -434,6 +468,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: local.popupBlockingEnabled,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(popupBlockingEnabled: v));
+                    _update(local);
+                  },
+                  contentPadding: EdgeInsets.zero),
+              SwitchListTile(
+                  title: const Text('Block invisible redirects'),
+                  subtitle: Text(
+                      local.invisibleRedirectBlockingEnabled
+                          ? 'Script redirects (location, meta-refresh) ask before navigating'
+                          : 'Script redirects navigate normally',
+                      style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                  value: local.invisibleRedirectBlockingEnabled,
+                  onChanged: (v) {
+                    setLocal(() => local = local.copyWith(invisibleRedirectBlockingEnabled: v));
                     _update(local);
                   },
                   contentPadding: EdgeInsets.zero),
@@ -726,6 +773,17 @@ class _SettingsPageState extends State<SettingsPage> {
                   _update(_settings.copyWith(darkModePreference: pref));
                 },
               ),
+              const SizedBox(height: 16),
+              SwitchListTile(
+                title: const Text('In-app snackbar alerts'),
+                subtitle: const Text('Show slide-up temporary notifications at the bottom of the screen'),
+                value: _settings.showSnackbars,
+                onChanged: (v) {
+                  setLocal(() {});
+                  _update(_settings.copyWith(showSnackbars: v));
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
             ])),
           ],
         ),
@@ -734,19 +792,257 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildNetworkPage() {
+    var localProxyType = _settings.proxyType;
+    var localProxyHost = _settings.proxyHost;
+    var localProxyPort = _settings.proxyPort;
+    var localProxyUser = _settings.proxyUsername;
+    var localProxyPass = _settings.proxyPassword;
+    var localUaProfile = _settings.userAgentProfile;
+    // Mutable copy of per-site UA overrides for the list editor.
+    final localSiteUas = Map<String, String>.from(_settings.siteUserAgents);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Network')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          PanelHeader(icon: Icons.wifi_rounded, title: 'Network'),
+          // ── Proxy section ──
+          PanelHeader(icon: Icons.wifi_rounded, title: 'Proxy'),
           const SizedBox(height: 8),
           Panel(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Proxy and user-agent settings coming soon.',
-                  style: TextStyle(fontSize: 13, color: AuroraColors.mutedText)),
+              DropdownButtonFormField<ProxyType>(
+                value: localProxyType,
+                decoration: const InputDecoration(
+                  labelText: 'Proxy type',
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: ProxyType.none,
+                    child: Text('None'),
+                  ),
+                  const DropdownMenuItem(
+                    value: ProxyType.http,
+                    child: Text('HTTP / HTTPS'),
+                  ),
+                  const DropdownMenuItem(
+                    value: ProxyType.socks5,
+                    child: Text('SOCKS5'),
+                  ),
+                ],
+                onChanged: (v) {
+                  localProxyType = v ?? ProxyType.none;
+                  _update(_settings.copyWith(
+                    proxyType: localProxyType,
+                  ));
+                },
+              ),
+              if (localProxyType != ProxyType.none) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  initialValue: localProxyHost,
+                  decoration: const InputDecoration(
+                    labelText: 'Host',
+                    hintText: '192.168.1.1 or proxy.example.com',
+                    isDense: true,
+                  ),
+                  onChanged: (v) {
+                    localProxyHost = v;
+                    _update(_settings.copyWith(
+                      proxyType: localProxyType,
+                      proxyHost: localProxyHost,
+                    ));
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: localProxyPort.toString(),
+                  decoration: const InputDecoration(
+                    labelText: 'Port',
+                    hintText: '8080',
+                    isDense: true,
+                  ),
+                  keyboardType: TextInputType.number,
+                  onChanged: (v) {
+                    localProxyPort = int.tryParse(v) ?? 0;
+                    _update(_settings.copyWith(
+                      proxyType: localProxyType,
+                      proxyHost: localProxyHost,
+                      proxyPort: localProxyPort,
+                    ));
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: localProxyUser,
+                  decoration: const InputDecoration(
+                    labelText: 'Username (optional)',
+                    isDense: true,
+                  ),
+                  onChanged: (v) {
+                    localProxyUser = v;
+                    _update(_settings.copyWith(
+                      proxyType: localProxyType,
+                      proxyHost: localProxyHost,
+                      proxyPort: localProxyPort,
+                      proxyUsername: localProxyUser,
+                      proxyPassword: localProxyPass,
+                    ));
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: localProxyPass,
+                  decoration: const InputDecoration(
+                    labelText: 'Password (optional)',
+                    isDense: true,
+                  ),
+                  obscureText: true,
+                  onChanged: (v) {
+                    localProxyPass = v;
+                    _update(_settings.copyWith(
+                      proxyType: localProxyType,
+                      proxyHost: localProxyHost,
+                      proxyPort: localProxyPort,
+                      proxyUsername: localProxyUser,
+                      proxyPassword: localProxyPass,
+                    ));
+                  },
+                ),
+              ],
             ],
           )),
+          const SizedBox(height: 24),
+
+          // ── User-Agent section ──
+          PanelHeader(icon: Icons.devices_rounded, title: 'User-Agent'),
+          const SizedBox(height: 8),
+          Panel(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                value: localUaProfile,
+                decoration: const InputDecoration(
+                  labelText: 'Global User-Agent profile',
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'mobile', child: Text('Mobile (default)')),
+                  DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),
+                  DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),
+                  DropdownMenuItem(value: 'safari', child: Text('Safari')),
+                ],
+                onChanged: (v) {
+                  localUaProfile = v ?? 'mobile';
+                  _update(_settings.copyWith(
+                    userAgentProfile: localUaProfile,
+                  ));
+                },
+              ),
+              const SizedBox(height: 16),
+              Text('Per-site UA overrides',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AuroraColors.accent)),
+              const SizedBox(height: 8),
+              // List of current overrides
+              if (localSiteUas.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text('No overrides configured.',
+                      style: TextStyle(fontSize: 13, color: AuroraColors.mutedText)),
+                )
+              else
+                ...localSiteUas.entries.map((entry) {
+                  final host = entry.key;
+                  final profile = entry.value;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(host,
+                              style: TextStyle(fontSize: 13, color: AuroraColors.text)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(': $profile',
+                            style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 16),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: () {
+                            localSiteUas.remove(host);
+                            _update(_settings.copyWith(
+                              siteUserAgents: Map<String, String>.from(localSiteUas),
+                            ));
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              const SizedBox(height: 8),
+              // Add new override button
+              TextButton.icon(
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add override'),
+                onPressed: () => _showAddSiteUaDialog(localSiteUas),
+              ),
+            ],
+          )),
+        ],
+      ),
+    );
+  }
+
+  void _showAddSiteUaDialog(Map<String, String> currentOverrides) {
+    var host = '';
+    var profile = 'mobile';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add UA Override'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              decoration: const InputDecoration(labelText: 'Host (e.g. example.com)'),
+              onChanged: (v) => host = v.trim(),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: profile,
+              decoration: const InputDecoration(
+                labelText: 'User-Agent',
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(value: 'mobile', child: Text('Mobile')),
+                DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),
+                DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),
+                DropdownMenuItem(value: 'safari', child: Text('Safari')),
+              ],
+              onChanged: (v) => profile = v ?? 'mobile',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (host.isEmpty) return;
+              currentOverrides[host] = profile;
+              _update(_settings.copyWith(
+                siteUserAgents: Map<String, String>.from(currentOverrides),
+              ));
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Add'),
+          ),
         ],
       ),
     );
@@ -777,6 +1073,8 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 16),
           Panel(child: Column(
             children: [
+              const BatteryOptimizationTile(),
+              const Divider(height: 1, indent: 56),
               ListTile(
                 leading: Icon(Icons.monitor_heart_outlined, color: AuroraColors.accent),
                 title: const Text('Diagnostics'),
@@ -865,7 +1163,7 @@ class _SettingsPageState extends State<SettingsPage> {
               thumbColor: AuroraColors.accent,
               overlayColor: AuroraColors.accent.withValues(alpha: 0.14)),
           child: Slider(
-              value: value,
+              value: value.clamp(min, max),
               min: min,
               max: max,
               divisions: divisions,
@@ -1053,9 +1351,11 @@ class _BackupPageState extends State<BackupPage> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: const TextStyle(color: AuroraColors.text)),
+    AuroraSnackbar.show(
+      context,
+      message,
+      builder: (text) => SnackBar(
+        content: Text(text, style: const TextStyle(color: AuroraColors.text)),
         backgroundColor: AuroraColors.surfaceVariant,
       ),
     );
@@ -1236,7 +1536,11 @@ class _BackupPageState extends State<BackupPage> {
       if (!proceed) return;
 
       final baseDir = (await getApplicationSupportDirectory()).path;
-      final baseTemp = (await getTemporaryDirectory()).path;
+      final downloadsTmpDir = Directory('$baseDir/downloads_tmp');
+      if (!await downloadsTmpDir.exists()) {
+        await downloadsTmpDir.create(recursive: true);
+      }
+      final baseTemp = downloadsTmpDir.path;
       int importedFavoritesCount = 0;
       int importedHistoryCount = 0;
       int importedSavedPagesCount = 0;
@@ -1299,7 +1603,11 @@ class _BackupPageState extends State<BackupPage> {
                     '$baseTemp${Platform.pathSeparator}temp_${DateTime.now().millisecondsSinceEpoch}_$importedQueueCount';
               }
 
+              taskMap['isBackupImport'] = true;
               final task = DownloadTask.fromJson(taskMap);
+              if (task.state != DownloadState.completed) {
+                task.state = DownloadState.paused;
+              }
               widget.downloadQueue.addTask(task);
               importedQueueCount++;
             } catch (_) {}
@@ -1319,7 +1627,16 @@ class _BackupPageState extends State<BackupPage> {
                   )
                   .toList()
             : updatedLibrary.folders;
-        final known = {for (final folder in importedFolders) folder.id};
+
+        final folderMap = {for (final f in updatedLibrary.folders) f.id: f};
+        for (final f in importedFolders) {
+          if (!folderMap.containsKey(f.id)) {
+            folderMap[f.id] = f;
+          }
+        }
+        final mergedFolders = folderMap.values.toList();
+        final known = {for (final folder in mergedFolders) folder.id};
+
         final importedFavorites = (decoded['favorites'] as List? ?? const [])
             .whereType<Map>()
             .map(
@@ -1335,11 +1652,21 @@ class _BackupPageState extends State<BackupPage> {
             })
             .toList();
 
+        final favMap = {for (final f in updatedLibrary.favorites) f.url: f};
+        var addedFavoritesCount = 0;
+        for (final f in importedFavorites) {
+          if (!favMap.containsKey(f.url)) {
+            favMap[f.url] = f;
+            addedFavoritesCount++;
+          }
+        }
+        final mergedFavorites = favMap.values.toList();
+
         updatedLibrary = updatedLibrary.copyWith(
-          favorites: importedFavorites,
-          folders: importedFolders,
+          favorites: mergedFavorites,
+          folders: mergedFolders,
         );
-        importedFavoritesCount = importedFavorites.length;
+        importedFavoritesCount = addedFavoritesCount;
       }
 
       // 4. Browser Library - History
@@ -1351,8 +1678,22 @@ class _BackupPageState extends State<BackupPage> {
                   BrowserHistoryEntry.fromJson(Map<String, dynamic>.from(item)),
             )
             .toList();
-        updatedLibrary = updatedLibrary.copyWith(history: importedHistory);
-        importedHistoryCount = importedHistory.length;
+
+        final historyMap = {for (final h in updatedLibrary.history) h.url: h};
+        var addedHistoryCount = 0;
+        for (final h in importedHistory) {
+          final existing = historyMap[h.url];
+          if (existing == null) {
+            historyMap[h.url] = h;
+            addedHistoryCount++;
+          } else if (h.visitedAt.isAfter(existing.visitedAt)) {
+            historyMap[h.url] = h;
+          }
+        }
+        final mergedHistory = historyMap.values.toList();
+
+        updatedLibrary = updatedLibrary.copyWith(history: mergedHistory);
+        importedHistoryCount = addedHistoryCount;
       }
 
       // 5. Browser Library - Saved Pages
@@ -1361,10 +1702,21 @@ class _BackupPageState extends State<BackupPage> {
             .whereType<Map>()
             .map((item) => SavedPage.fromJson(Map<String, dynamic>.from(item)))
             .toList();
+
+        final savedPagesMap = {for (final p in updatedLibrary.savedPages) p.sourceUrl: p};
+        var addedSavedPagesCount = 0;
+        for (final p in importedSavedPages) {
+          if (!savedPagesMap.containsKey(p.sourceUrl)) {
+            savedPagesMap[p.sourceUrl] = p;
+            addedSavedPagesCount++;
+          }
+        }
+        final mergedSavedPages = savedPagesMap.values.toList();
+
         updatedLibrary = updatedLibrary.copyWith(
-          savedPages: importedSavedPages,
+          savedPages: mergedSavedPages,
         );
-        importedSavedPagesCount = importedSavedPages.length;
+        importedSavedPagesCount = addedSavedPagesCount;
       }
 
       if (importFavorites || importHistory || importSavedPages) {
@@ -1372,30 +1724,71 @@ class _BackupPageState extends State<BackupPage> {
             !decoded.containsKey('history') &&
             !decoded.containsKey('savedPages')) {
           final legacyLib = BrowserLibrary.fromJson(decoded);
-          List<BrowserFavorite>? favs;
-          List<BookmarkFolder>? folders;
-          List<BrowserHistoryEntry>? hist;
-          List<SavedPage>? saved;
+
+          List<BrowserFavorite>? mergedFavs;
+          List<BookmarkFolder>? mergedFolders;
+          List<BrowserHistoryEntry>? mergedHist;
+          List<SavedPage>? mergedSaved;
 
           if (importFavorites) {
-            favs = legacyLib.favorites;
-            folders = legacyLib.folders;
-            importedFavoritesCount = legacyLib.favorites.length;
+            final folderMap = {for (final f in updatedLibrary.folders) f.id: f};
+            for (final f in legacyLib.folders) {
+              if (!folderMap.containsKey(f.id)) {
+                folderMap[f.id] = f;
+              }
+            }
+            mergedFolders = folderMap.values.toList();
+            final known = {for (final folder in mergedFolders) folder.id};
+
+            final favMap = {for (final f in updatedLibrary.favorites) f.url: f};
+            var addedFavoritesCount = 0;
+            for (final f in legacyLib.favorites) {
+              if (!favMap.containsKey(f.url)) {
+                final cleaned = f.folderId != null && !known.contains(f.folderId)
+                    ? f.copyWith(clearFolder: true)
+                    : f;
+                favMap[f.url] = cleaned;
+                addedFavoritesCount++;
+              }
+            }
+            mergedFavs = favMap.values.toList();
+            importedFavoritesCount = addedFavoritesCount;
           }
+
           if (importHistory) {
-            hist = legacyLib.history;
-            importedHistoryCount = legacyLib.history.length;
+            final historyMap = {for (final h in updatedLibrary.history) h.url: h};
+            var addedHistoryCount = 0;
+            for (final h in legacyLib.history) {
+              final existing = historyMap[h.url];
+              if (existing == null) {
+                historyMap[h.url] = h;
+                addedHistoryCount++;
+              } else if (h.visitedAt.isAfter(existing.visitedAt)) {
+                historyMap[h.url] = h;
+              }
+            }
+            mergedHist = historyMap.values.toList();
+            importedHistoryCount = addedHistoryCount;
           }
+
           if (importSavedPages) {
-            saved = legacyLib.savedPages;
-            importedSavedPagesCount = legacyLib.savedPages.length;
+            final savedPagesMap = {for (final p in updatedLibrary.savedPages) p.sourceUrl: p};
+            var addedSavedPagesCount = 0;
+            for (final p in legacyLib.savedPages) {
+              if (!savedPagesMap.containsKey(p.sourceUrl)) {
+                savedPagesMap[p.sourceUrl] = p;
+                addedSavedPagesCount++;
+              }
+            }
+            mergedSaved = savedPagesMap.values.toList();
+            importedSavedPagesCount = addedSavedPagesCount;
           }
 
           updatedLibrary = updatedLibrary.copyWith(
-            favorites: favs,
-            folders: folders,
-            history: hist,
-            savedPages: saved,
+            favorites: mergedFavs,
+            folders: mergedFolders,
+            history: mergedHist,
+            savedPages: mergedSaved,
           );
         }
         await const BrowserLibraryStore().save(updatedLibrary);
@@ -1552,6 +1945,58 @@ class _BackupPageState extends State<BackupPage> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class BatteryOptimizationTile extends StatefulWidget {
+  const BatteryOptimizationTile({super.key});
+
+  @override
+  State<BatteryOptimizationTile> createState() => _BatteryOptimizationTileState();
+}
+
+class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
+  bool _isExempt = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStatus();
+  }
+
+  Future<void> _checkStatus() async {
+    final exempt =
+        await DownloadForegroundService.isIgnoringBatteryOptimizations();
+    if (mounted) {
+      setState(() {
+        _isExempt = exempt;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isExempt) {
+      return ListTile(
+        leading: const Icon(Icons.battery_saver_rounded, color: AuroraColors.accent),
+        title: const Text('Battery Optimization'),
+        subtitle: const Text('Aurora is optimized for background downloads'),
+        trailing: const Icon(Icons.check_circle_outline, color: AuroraColors.accent),
+      );
+    }
+
+    return ListTile(
+      leading: const Icon(Icons.battery_alert_rounded, color: AuroraColors.accentAmber),
+      title: const Text('Never Sleep / Background Downloader'),
+      subtitle: const Text('Aurora may be killed in background. Tap to fix'),
+      trailing: const Icon(Icons.warning_amber_rounded, color: AuroraColors.accentAmber),
+      onTap: () async {
+        await DownloadForegroundService.requestBatteryOptimizationExemption();
+        // Check again after a delay in case the user approved it
+        await Future.delayed(const Duration(seconds: 1));
+        await _checkStatus();
+      },
     );
   }
 }

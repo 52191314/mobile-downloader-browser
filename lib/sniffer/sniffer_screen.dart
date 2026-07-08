@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:http/http.dart' as http;
 
@@ -14,6 +15,7 @@ import '../downloader/downloader.dart';
 import '../downloader/url_filename_resolver.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
+import '../ui/notifications/aurora_snackbar.dart';
 import '../platform/public_downloads_service.dart';
 import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
@@ -349,8 +351,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// Convenience accessors delegated to [_tabManager].
   List<BrowserTab> get _tabs => _tabManager.tabs;
   int get _activeTabIndex => _tabManager.activeTabIndex;
-  bool get _isLoading => _tabManager.isLoading;
-  set _isLoading(bool v) => _tabManager.isLoading = v;
   BrowserTab get _activeTab => _tabManager.activeTab;
   Set<String> get _fetchedIframeSrcs => _tabManager.fetchedIframeSrcs;
 
@@ -411,15 +411,13 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   final SessionRecovery _sessionRecovery = const SessionRecovery();
 
-  String? _selectedText;
-  bool _selectionToolbarVisible = false;
-
   final AutofillStore _autofillStore = const AutofillStore();
   List<AutofillProfile> _autofillProfiles = const [];
 
   late final SafeBrowsingService _safeBrowsing;
 
   double _lastScrollY = 0.0;
+  int _lastBarsToggleAtMs = 0;
   bool _barsVisible = true;
   bool _isContextMenuShowing = false;
 
@@ -431,12 +429,28 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// placeholder to avoid creating expensive native WebViews at launch.
   final Set<String> _builtWebViewTabIds = {};
 
+  /// Maximum number of native WebViews to keep alive simultaneously.
+  /// Tabs beyond this limit are evicted (their WebView is destroyed) using
+  /// LRU order. When the user switches back, the WebView is recreated and
+  /// the saved URL is reloaded.
+  ///
+  /// Increased from 5 to 10 on 2026-07-07 to reduce eviction frequency,
+  /// keeping more tabs' back-forward caches alive so back/forward navigation
+  /// stays instant (matching Chrome/Firefox mobile behavior).
+  static const int _maxLiveWebViews = 10;
+
+  /// LRU activation order — most recently activated tab ID is at the front.
+  /// Used to decide which tabs to evict when `_builtWebViewTabIds.length`
+  /// exceeds [_maxLiveWebViews].
+  final List<String> _tabActivationOrder = [];
+
   /// Whether `_loadTabsAndMedia` has finished restoring tabs.
   /// When `false`, the lazy Stack shows an empty placeholder for real WebViews
   /// so that the default blank tab (created in `initState`) does not trigger an
   /// expensive native WebView that would be immediately disposed.  Mock
   /// (test) controllers always build immediately regardless of this flag.
   bool _tabsLoaded = false;
+  String? _pendingOpenUrlAfterTabsLoaded;
 
   // Cookie cache is owned by [_sniffIntakeController] (see
   // `SniffIntakeController.cookieCache`). Cleared on each page
@@ -473,9 +487,8 @@ class _SnifferScreenState extends State<SnifferScreen>
       onSettingsChanged: widget.onSettingsChanged,
       showSnack: _showSnack,
     );
-    _libraryController = LibraryController(
-      libraryStore: widget.libraryStore,
-    )..onLibraryChanged = () {
+    _libraryController = LibraryController(libraryStore: widget.libraryStore)
+      ..onLibraryChanged = () {
         if (mounted) setState(() {});
       };
     _sniffIntakeController = SniffIntakeController(
@@ -507,7 +520,28 @@ class _SnifferScreenState extends State<SnifferScreen>
       injectedSnifferEngine: widget.snifferEngine,
     );
     widget.controller?.setOnOpenUrlRequest((url) {
+      if (!_tabsLoaded) {
+        _pendingOpenUrlAfterTabsLoaded = url;
+        return;
+      }
       _tabLifecycleController.openNewTab(url: url);
+    });
+    widget.controller?.setOnOpenUrlInNewTab((url) {
+      if (!_tabsLoaded) {
+        _pendingOpenUrlAfterTabsLoaded = url;
+        return;
+      }
+      _tabLifecycleController.openNewTab(url: url);
+    });
+    widget.controller?.setOnSystemBackRequested(() async {
+      if (!mounted) return false;
+      final tab = _activeTab;
+      if (tab.controller.historyIndex > 0) {
+        await tab.controller.goBack();
+        _updateTabNavState(tab);
+        return true;
+      }
+      return false;
     });
     _desktopMode = widget.settings.desktopMode;
     _privateMode = widget.settings.privateMode;
@@ -549,6 +583,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (oldWidget.settings.adblockEnabled != widget.settings.adblockEnabled ||
         oldWidget.settings.popupBlockingEnabled !=
             widget.settings.popupBlockingEnabled ||
+        oldWidget.settings.invisibleRedirectBlockingEnabled !=
+            widget.settings.invisibleRedirectBlockingEnabled ||
         oldWidget.settings.adblockFilterSources !=
             widget.settings.adblockFilterSources ||
         oldWidget.settings.manualAdBlockRules !=
@@ -616,6 +652,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       cosmeticRules: widget.settings.manualCosmeticRules,
     );
     tab.controller.updateAdblockAllowlist(widget.settings.adblockAllowlist);
+    await tab.controller.setInvisibleRedirectBlocking(
+      widget.settings.invisibleRedirectBlockingEnabled,
+    );
     await _applyCosmeticRules(tab);
   }
 
@@ -633,7 +672,34 @@ class _SnifferScreenState extends State<SnifferScreen>
     _lastScrollY = 0.0;
     _clearAddressSuggestions();
     _startVideoPoll(_activeTab);
+
+    // --- LRU tracking & WebView eviction ---
+    final activeId = _activeTab.id;
+    _tabActivationOrder.remove(activeId);
+    _tabActivationOrder.insert(0, activeId);
+    _evictStaleTabs();
+
     setState(() {});
+  }
+
+  /// Evict the least-recently-used tabs' native WebViews when the number
+  /// of live WebViews exceeds [_maxLiveWebViews]. Evicted tabs become
+  /// `SizedBox.shrink()` placeholders; their URL is preserved in
+  /// `tab.currentUrl` and reloaded on re-activation.
+  void _evictStaleTabs() {
+    if (_builtWebViewTabIds.length <= _maxLiveWebViews) return;
+    // Build a set of tab IDs that should stay alive (the N most recent).
+    final keep = _tabActivationOrder
+        .where((id) => _builtWebViewTabIds.contains(id))
+        .take(_maxLiveWebViews)
+        .toSet();
+    final toEvict = _builtWebViewTabIds.difference(keep);
+    if (toEvict.isEmpty) return;
+    debugPrint('[TabEviction] Evicting ${toEvict.length} WebView(s): $toEvict');
+    _builtWebViewTabIds.removeAll(toEvict);
+    // No need to explicitly dispose controllers — removing the tab ID from
+    // _builtWebViewTabIds causes the build method to render SizedBox.shrink()
+    // instead of BrowserWidget, which tears down the native WebView widget.
   }
 
   // ---------------------------------------------------------------------------
@@ -664,8 +730,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     BrowserTab tab,
     Uri uri, {
     bool addToHistory = true,
-  }) =>
-      _loadUrlWithHostSettings(tab, uri, addToHistory: addToHistory);
+  }) => _loadUrlWithHostSettings(tab, uri, addToHistory: addToHistory);
 
   @override
   Future<void> applyCosmeticRules([BrowserTab? tab]) =>
@@ -675,10 +740,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<void> configureTabAdblock(BrowserTab tab) => _configureTabAdblock(tab);
 
   @override
-  Future<void> refreshPageInfo(
-    BrowserTab tab, {
-    bool recordHistory = false,
-  }) =>
+  Future<void> refreshPageInfo(BrowserTab tab, {bool recordHistory = false}) =>
       _refreshPageInfo(tab, recordHistory: recordHistory);
 
   @override
@@ -715,12 +777,22 @@ class _SnifferScreenState extends State<SnifferScreen>
   Set<String> get builtWebViewTabIds => _builtWebViewTabIds;
 
   @override
+  List<String> get tabActivationOrder => _tabActivationOrder;
+
+  @override
   SniffIntakeController get sniffIntakeController => _sniffIntakeController;
 
   @override
   void markTabsLoaded() {
     if (!_tabsLoaded) {
       _tabsLoaded = true;
+      final pending = _pendingOpenUrlAfterTabsLoaded;
+      if (pending != null && pending.isNotEmpty) {
+        _pendingOpenUrlAfterTabsLoaded = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tabLifecycleController.openNewTab(url: pending);
+        });
+      }
     }
   }
 
@@ -754,12 +826,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     List<String>? restoredHistory,
     int restoredHistoryIndex = -1,
   }) => _tabLifecycleController.openNewTab(
-        url: url,
-        switchToTab: switchToTab,
-        restoredId: restoredId,
-        restoredHistory: restoredHistory,
-        restoredHistoryIndex: restoredHistoryIndex,
-      );
+    url: url,
+    switchToTab: switchToTab,
+    restoredId: restoredId,
+    restoredHistory: restoredHistory,
+    restoredHistoryIndex: restoredHistoryIndex,
+  );
 
   void _startVideoPoll(BrowserTab tab) =>
       _tabLifecycleController.startVideoPoll(tab);
@@ -795,6 +867,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       tab.detachAddressListener(_onAddressChanged);
     }
     widget.controller?.setOnOpenUrlRequest(null);
+    widget.controller?.setOnOpenUrlInNewTab(null);
     _tabManager.dispose();
     super.dispose();
   }
@@ -802,26 +875,30 @@ class _SnifferScreenState extends State<SnifferScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      debugPrint('[SnifferScreen] App backgrounded — pausing WebViews and timers');
+      debugPrint(
+        '[SnifferScreen] App backgrounded — pausing WebViews and timers',
+      );
       for (final tab in _tabs) {
         tab.videoPollTimer?.cancel();
         tab.videoPollTimer = null;
-        if (Platform.isAndroid) {
+        if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
           unawaited(tab.controller.freeze());
           unawaited(tab.controller.pauseWebView());
         }
       }
     } else if (state == AppLifecycleState.resumed) {
-      debugPrint('[SnifferScreen] App resumed — resuming active WebView and timers');
+      debugPrint(
+        '[SnifferScreen] App resumed — resuming active WebView and timers',
+      );
       for (final tab in _tabs) {
         if (tab == _activeTab) {
-          if (Platform.isAndroid) {
+          if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
             unawaited(tab.controller.thaw());
             unawaited(tab.controller.resumeWebView());
           }
           _startVideoPoll(tab);
         } else {
-          if (Platform.isAndroid) {
+          if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
             unawaited(tab.controller.freeze());
             unawaited(tab.controller.pauseWebView());
           }
@@ -830,10 +907,39 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
+  @override
+  void didHaveMemoryPressure() {
+    debugPrint(
+      '[SnifferScreen] Low memory warning — evicting oldest background WebViews',
+    );
+    // Keep up to 3 tabs' WebViews alive even under memory pressure so the
+    // user can immediately go back/forward to the most recent pages.
+    const int keepCount = 3;
+    if (_builtWebViewTabIds.length > keepCount) {
+      final keep = _tabActivationOrder
+          .where((id) => _builtWebViewTabIds.contains(id))
+          .take(keepCount)
+          .toSet();
+      final toEvict = _builtWebViewTabIds.difference(keep);
+      if (toEvict.isNotEmpty) {
+        debugPrint('[MemoryPressure] Evicting background WebViews: $toEvict');
+        _builtWebViewTabIds.removeAll(toEvict);
+        setState(() {});
+      }
+    }
+  }
+
+
   Future<void> _initPaths() async {
     try {
       final baseDir = (await getApplicationSupportDirectory()).path;
-      final baseTemp = (await getTemporaryDirectory()).path;
+      // Use persistent storage for temp files so partial download bytes
+      // survive OS cache clearing (matching _tempWorkspaceDirectory in main.dart).
+      final downloadsTmpDir = Directory('$baseDir/downloads_tmp');
+      if (!await downloadsTmpDir.exists()) {
+        await downloadsTmpDir.create(recursive: true);
+      }
+      final baseTemp = downloadsTmpDir.path;
       if (mounted) {
         setState(() {
           _baseDir = baseDir;
@@ -1061,13 +1167,26 @@ class _SnifferScreenState extends State<SnifferScreen>
         decoded = await widget.libraryStore.readImportMap(filePath);
       }
 
-      final hasFavorites = decoded.containsKey('favorites') && (decoded['favorites'] is List) && (decoded['favorites'] as List).isNotEmpty;
-      final hasHistory = decoded.containsKey('history') && (decoded['history'] is List) && (decoded['history'] as List).isNotEmpty;
-      final hasSavedPages = decoded.containsKey('savedPages') && (decoded['savedPages'] is List) && (decoded['savedPages'] as List).isNotEmpty;
-      final hasQueue = decoded.containsKey('downloadQueue') && (decoded['downloadQueue'] is List) && (decoded['downloadQueue'] as List).isNotEmpty;
+      final hasFavorites =
+          decoded.containsKey('favorites') &&
+          (decoded['favorites'] is List) &&
+          (decoded['favorites'] as List).isNotEmpty;
+      final hasHistory =
+          decoded.containsKey('history') &&
+          (decoded['history'] is List) &&
+          (decoded['history'] as List).isNotEmpty;
+      final hasSavedPages =
+          decoded.containsKey('savedPages') &&
+          (decoded['savedPages'] is List) &&
+          (decoded['savedPages'] as List).isNotEmpty;
+      final hasQueue =
+          decoded.containsKey('downloadQueue') &&
+          (decoded['downloadQueue'] is List) &&
+          (decoded['downloadQueue'] as List).isNotEmpty;
       final hasSettings = decoded.containsKey('settings');
 
-      final isLegacy = decoded.containsKey('favorites') ||
+      final isLegacy =
+          decoded.containsKey('favorites') ||
           decoded.containsKey('history') ||
           decoded.containsKey('savedPages') ||
           (!decoded.containsKey('settings') &&
@@ -1123,15 +1242,22 @@ class _SnifferScreenState extends State<SnifferScreen>
                       const SizedBox(height: 16),
                       SwitchListTile(
                         activeColor: AuroraColors.accent,
-                        title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text)),
+                        title: const Text(
+                          'Favorites / Bookmarks',
+                          style: TextStyle(color: AuroraColors.text),
+                        ),
                         value: importFavorites,
                         onChanged: (hasFavorites || isLegacy)
-                            ? (val) => setModalState(() => importFavorites = val)
+                            ? (val) =>
+                                  setModalState(() => importFavorites = val)
                             : null,
                       ),
                       SwitchListTile(
                         activeColor: AuroraColors.accent,
-                        title: const Text('Web History', style: TextStyle(color: AuroraColors.text)),
+                        title: const Text(
+                          'Web History',
+                          style: TextStyle(color: AuroraColors.text),
+                        ),
                         value: importHistory,
                         onChanged: (hasHistory || isLegacy)
                             ? (val) => setModalState(() => importHistory = val)
@@ -1139,15 +1265,22 @@ class _SnifferScreenState extends State<SnifferScreen>
                       ),
                       SwitchListTile(
                         activeColor: AuroraColors.accent,
-                        title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text)),
+                        title: const Text(
+                          'Saved Pages',
+                          style: TextStyle(color: AuroraColors.text),
+                        ),
                         value: importSavedPages,
                         onChanged: (hasSavedPages || isLegacy)
-                            ? (val) => setModalState(() => importSavedPages = val)
+                            ? (val) =>
+                                  setModalState(() => importSavedPages = val)
                             : null,
                       ),
                       SwitchListTile(
                         activeColor: AuroraColors.accent,
-                        title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text)),
+                        title: const Text(
+                          'Download History (Queue)',
+                          style: TextStyle(color: AuroraColors.text),
+                        ),
                         value: importQueue,
                         onChanged: hasQueue
                             ? (val) => setModalState(() => importQueue = val)
@@ -1155,7 +1288,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                       ),
                       SwitchListTile(
                         activeColor: AuroraColors.accent,
-                        title: const Text('App Settings', style: TextStyle(color: AuroraColors.text)),
+                        title: const Text(
+                          'App Settings',
+                          style: TextStyle(color: AuroraColors.text),
+                        ),
                         value: importSettings,
                         onChanged: hasSettings
                             ? (val) => setModalState(() => importSettings = val)
@@ -1167,7 +1303,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Cancel', style: TextStyle(color: AuroraColors.mutedText)),
+                            child: const Text(
+                              'Cancel',
+                              style: TextStyle(color: AuroraColors.mutedText),
+                            ),
                           ),
                           const SizedBox(width: 8),
                           ElevatedButton(
@@ -1175,7 +1314,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                               backgroundColor: AuroraColors.accent,
                               foregroundColor: AuroraColors.background,
                             ),
-                            onPressed: (!importFavorites &&
+                            onPressed:
+                                (!importFavorites &&
                                     !importHistory &&
                                     !importSavedPages &&
                                     !importQueue &&
@@ -1389,8 +1529,15 @@ class _SnifferScreenState extends State<SnifferScreen>
     BrowserTab tab, {
     required bool recordHistory,
   }) async {
-    final title = await tab.controller.pageTitle();
-    final url = await tab.controller.currentUrl();
+    String? title;
+    String? url;
+    try {
+      title = await tab.controller.pageTitle();
+      url = await tab.controller.currentUrl();
+    } on MissingPluginException {
+      // WebView was evicted (e.g. LRU background eviction). Bail out gracefully.
+      return;
+    }
     if (!mounted) return;
     setState(() {
       tab.title = _cleanTitle(title, url);
@@ -1432,15 +1579,19 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
     // Ignore small jitters
     if ((y - _lastScrollY).abs() < 5) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastBarsToggleAtMs < 180) return;
 
     if (y > _lastScrollY && y > 80) {
       if (_barsVisible) {
+        _lastBarsToggleAtMs = now;
         setState(() {
           _barsVisible = false;
         });
       }
     } else if (y < _lastScrollY || y <= 15) {
       if (!_barsVisible) {
+        _lastBarsToggleAtMs = now;
         setState(() {
           _barsVisible = true;
         });
@@ -1473,6 +1624,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _tabLifecycleController.closeAllTabs();
       setState(() {});
     },
+    builtWebViewTabIds: _builtWebViewTabIds,
   );
 
   Widget _buildTabCard(
@@ -1496,6 +1648,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       setState(() {});
     },
     getTabLabel: _tabLabel,
+    builtWebViewTabIds: _builtWebViewTabIds,
   );
 
   void _showTabGroupMenu(
@@ -1537,6 +1690,9 @@ class _SnifferScreenState extends State<SnifferScreen>
   void _setupTabCallbacks(BrowserTab tab) {
     tab.controller.setOnUrlChanged((url) {
       if (!mounted) return;
+      final changed =
+          tab.currentUrl != url || tab.addressController.text != url;
+      if (!changed) return;
       tab.addressController.text = url;
       tab.currentUrl = url;
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
@@ -1545,7 +1701,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     });
     tab.controller.setOnPageStarted((url) {
       if (!mounted) return;
-      setState(() => _isLoading = true);
+      tab.isLoading = true;
+      tab.progress = 0;
+      setState(() {});
       _lastScrollY = 0.0;
       if (!_barsVisible) {
         setState(() => _barsVisible = true);
@@ -1561,10 +1719,13 @@ class _SnifferScreenState extends State<SnifferScreen>
       _sniffIntakeController.clearCookieCache();
       tab.snifferEngine.clearCache();
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
+      _updateTabNavState(tab);
     });
     tab.controller.setOnPageFinished((url) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      tab.isLoading = false;
+      tab.progress = 0;
+      setState(() {});
       AuroraLog.instance.info(
         'Page finished: $url',
         category: LogCategory.browser,
@@ -1580,10 +1741,35 @@ class _SnifferScreenState extends State<SnifferScreen>
       _applyZoomForPage(tab, url);
       unawaited(_applyDarkModeForPage(tab, url));
     });
+    tab.controller.setOnProgressChanged((progress) {
+      if (!mounted) return;
+      tab.progress = progress;
+      if (tab == _activeTab) {
+        setState(() {});
+      }
+    });
     tab.controller.setOnScrollPositionChange((x, y) {
       if (tab == _activeTab) {
         _onScroll(x, y);
       }
+    });
+    tab.controller.setOnRecreated(() {
+      final url = tab.currentUrl ?? tab.addressController.text;
+      if (url.isNotEmpty && url != 'about:blank') {
+        unawaited(
+          _loadUrlWithHostSettings(tab, Uri.parse(url), addToHistory: false),
+        );
+      }
+    });
+    // Synchronous nav-state callback — fires whenever the controller's
+    // historyIndex changes, so the toolbar back/forward buttons update
+    // instantly without an async round-trip to the WebView.
+    tab.controller.setOnNavStateChanged(() {
+      if (!mounted) return;
+      tab.canGoBack = tab.controller.historyIndex > 0;
+      tab.canGoForward =
+          tab.controller.historyIndex < tab.controller.historyUrls.length - 1;
+      if (mounted) setState(() {});
     });
     tab.controller.addJavaScriptChannel(
       'MediaSnifferChannel',
@@ -1625,6 +1811,12 @@ class _SnifferScreenState extends State<SnifferScreen>
       },
     );
     tab.controller.addJavaScriptChannel(
+      'InvisibleRedirectChannel',
+      onMessageReceived: (message) {
+        _handleInvisibleRedirect(tab, message);
+      },
+    );
+    tab.controller.addJavaScriptChannel(
       'ElementPickerChannel',
       onMessageReceived: (message) {
         unawaited(_handlePickedElement(tab, message));
@@ -1639,24 +1831,28 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.controller.addJavaScriptChannel(
       'MediaMetaChannel',
       onMessageReceived: (message) {
-        try {
-          final data = jsonDecode(message) as Map;
+        final capturedTab = tab;
+        final pageUrl = capturedTab.addressController.text;
+        _decodeJsInBackground(message).then((data) {
+          if (data == null || !mounted) return;
           final src = data['src'] as String?;
           if (src != null && src.isNotEmpty) {
             _sniffIntakeController.sniffBrowserUrl(
-              tab,
+              capturedTab,
               src,
-              sourcePageUrl: tab.addressController.text,
+              sourcePageUrl: pageUrl,
             );
           }
-        } catch (_) {}
+        });
       },
     );
     tab.controller.addJavaScriptChannel(
       'MediaSnifferDataChannel',
       onMessageReceived: (message) {
-        try {
-          final data = jsonDecode(message) as Map;
+        final capturedTab = tab;
+        final pageUrl = capturedTab.addressController.text;
+        _decodeJsInBackground(message).then((data) {
+          if (data == null || !mounted) return;
           final url = data['url'] as String?;
           final ct = data['contentType'] as String?;
           final clStr = data['contentLength'] as String?;
@@ -1665,24 +1861,25 @@ class _SnifferScreenState extends State<SnifferScreen>
               : null;
           if (url != null && url.isNotEmpty) {
             _sniffIntakeController.sniffBrowserUrl(
-              tab,
+              capturedTab,
               url,
-              sourcePageUrl: tab.addressController.text,
+              sourcePageUrl: pageUrl,
               contentType: ct,
               contentLength: cl,
             );
           }
-        } catch (_) {}
+        });
       },
     );
     tab.controller.addJavaScriptChannel(
       'PageMetaChannel',
       onMessageReceived: (message) {
-        try {
-          final data = Map<String, dynamic>.from(jsonDecode(message));
+        final capturedTab = tab;
+        _decodeJsInBackground(message).then((data) {
+          if (data == null || !mounted) return;
           final ogTitle = data['ogTitle'] as String?;
           final ldName = data['ldName'] as String?;
-          tab.pageMeta = PageMeta(
+          capturedTab.pageMeta = PageMeta(
             title: (ogTitle != null && ogTitle.trim().isNotEmpty)
                 ? ogTitle.trim()
                 : (data['title'] as String? ?? ''),
@@ -1691,7 +1888,7 @@ class _SnifferScreenState extends State<SnifferScreen>
             structuredName: ldName,
           );
           if (mounted) setState(() {});
-        } catch (_) {}
+        });
       },
     );
     tab.controller.addJavaScriptChannel(
@@ -1703,58 +1900,37 @@ class _SnifferScreenState extends State<SnifferScreen>
         }
       },
     );
-    tab.controller.addJavaScriptChannel(
-      'TextSelectionChannel',
-      onMessageReceived: (message) {
-        final text = message.trim();
-        if (text.isNotEmpty) {
-          _onWebPageTextSelected(text);
-        }
-      },
-    );
+
     tab.controller.addJavaScriptChannel(
       'HlsPlaylistChannel',
       onMessageReceived: (message) {
-        try {
-          final data = jsonDecode(message) as Map;
-          final url = data['url'] as String?;
-          final body = data['body'] as String?;
-          if (url != null &&
-              body != null &&
-              url.isNotEmpty &&
-              body.isNotEmpty) {
-            tab.hlsPlaylistCache[url] = body;
-            AuroraLog.instance.debug(
-    'HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${tab.hlsPlaylistCache.length})',
-            category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
-          }
-        } catch (e) {
-          AuroraLog.instance.error('HlsPlaylistChannel error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
-        }
-      },
-      );
-      tab.controller.addJavaScriptChannel(
-      'NavigationSwipeChannel',
-      onMessageReceived: (message) {
-        // JS-based edge swipe detector fired. Debounce to prevent
-        // double-navigation when the Flutter-side GestureDetector
-        // in the edge overlay also fires and wins the race.
-        final now = DateTime.now();
-        if (message == 'back') {
-          if (tab.lastSwipeBack != null &&
-              now.difference(tab.lastSwipeBack!).inMilliseconds < 500) {
-            return;
-          }
-          tab.lastSwipeBack = now;
-          unawaited(tab.controller.goBack());
-        } else if (message == 'forward') {
-          if (tab.lastSwipeForward != null &&
-              now.difference(tab.lastSwipeForward!).inMilliseconds < 500) {
-            return;
-          }
-          tab.lastSwipeForward = now;
-          unawaited(tab.controller.goForward());
-        }
+        final capturedTab = tab;
+        _decodeJsInBackground(message)
+            .then((data) {
+              if (data == null || !mounted) return;
+              final url = data['url'] as String?;
+              final body = data['body'] as String?;
+              if (url != null &&
+                  body != null &&
+                  url.isNotEmpty &&
+                  body.isNotEmpty) {
+                capturedTab.hlsPlaylistCache[url] = body;
+                AuroraLog.instance.debug(
+                  'HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${capturedTab.hlsPlaylistCache.length})',
+                  category: LogCategory.sniffer,
+                  screen: LogScreen.browser,
+                  eventType: LogEventType.sniff,
+                );
+              }
+            })
+            .catchError((e) {
+              AuroraLog.instance.error(
+                'HlsPlaylistChannel error: $e',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
+              );
+            });
       },
     );
     tab.controller.setOnIframeMediaDetected((url) {
@@ -1786,18 +1962,10 @@ class _SnifferScreenState extends State<SnifferScreen>
           );
         case DownloadLinkBehavior.autoDownload:
           // Add directly to the download queue without prompting.
-          await _enqueueDirectDownload(
-            tab,
-            url,
-            suggestedFilename,
-          );
+          await _enqueueDirectDownload(tab, url, suggestedFilename);
         case DownloadLinkBehavior.ask:
           // Show a dialog asking what to do.
-          _showDownloadBehaviorPrompt(
-            tab,
-            url,
-            suggestedFilename,
-          );
+          _showDownloadBehaviorPrompt(tab, url, suggestedFilename);
         case DownloadLinkBehavior.block:
           // Silently ignore — no snack, no queue entry.
           break;
@@ -1863,7 +2031,9 @@ class _SnifferScreenState extends State<SnifferScreen>
 
     try {
       final pageUrl = tab.addressController.text;
-      final cookieHeaders = await _sniffIntakeController.getCookiesForUrl(iframeSrcUrl);
+      final cookieHeaders = await _sniffIntakeController.getCookiesForUrl(
+        iframeSrcUrl,
+      );
       final headers = <String, String>{
         ...tab.controller.currentHeaders,
         ...cookieHeaders,
@@ -1948,8 +2118,11 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     } catch (e) {
       AuroraLog.instance.error(
-    'Iframe content fetch failed for $iframeSrcUrl: $e',
-      category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
+        'Iframe content fetch failed for $iframeSrcUrl: $e',
+        category: LogCategory.sniffer,
+        screen: LogScreen.browser,
+        eventType: LogEventType.error,
+      );
     }
   }
 
@@ -2002,7 +2175,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     try {
       safety = await _safeBrowsing.check(uri.toString());
     } catch (e) {
-      AuroraLog.instance.error('Safe browsing check failed: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
+      AuroraLog.instance.error(
+        'Safe browsing check failed: $e',
+        category: LogCategory.sniffer,
+        screen: LogScreen.browser,
+        eventType: LogEventType.error,
+      );
       safety = const SafeBrowsingResult(verdict: SafeBrowsingVerdict.safe);
     }
     if (safety.verdict == SafeBrowsingVerdict.malicious) {
@@ -2026,14 +2204,20 @@ class _SnifferScreenState extends State<SnifferScreen>
       ..._baseRequestHeaders(),
       if (extraHeaders != null) ...extraHeaders,
     };
-    if (headers.isEmpty) {
-      await tab.controller.loadRequest(uri, addToHistory: addToHistory);
-    } else {
-      await tab.controller.loadRequest(
-        uri,
-        headers: headers,
-        addToHistory: addToHistory,
-      );
+    try {
+      if (headers.isEmpty) {
+        await tab.controller.loadRequest(uri, addToHistory: addToHistory);
+      } else {
+        await tab.controller.loadRequest(
+          uri,
+          headers: headers,
+          addToHistory: addToHistory,
+        );
+      }
+    } on MissingPluginException {
+      // WebView was evicted (LRU or memory pressure). Navigation will be
+      // retried when the tab is re-activated and a new WebView is created.
+      return;
     }
     final zoom = _effectiveZoomFor(host);
     if ((zoom - 1.0).abs() > 0.01) {
@@ -2185,6 +2369,71 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
+  void _handleInvisibleRedirect(BrowserTab tab, String rawMessage) {
+    if (!mounted) return;
+    Map<String, dynamic> data = {};
+    try {
+      final decoded = jsonDecode(rawMessage);
+      if (decoded is Map) data = Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    final url = (data['url'] as String?)?.trim();
+    if (url == null || url.isEmpty) return;
+    tab.controller.incrementBlockedInvisibleRedirects();
+    setState(() {});
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Redirect from ${data['method'] ?? 'script'}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: AuroraColors.nordGreen,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () {
+                messenger.hideCurrentSnackBar();
+                _tabLifecycleController.openNewTab(url: url);
+              },
+              child: const Text('New tab', style: TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(width: 4),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: AuroraColors.nordRed,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () {
+                messenger.hideCurrentSnackBar();
+              },
+              child: const Text('Block', style: TextStyle(fontSize: 13)),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'Open here',
+          onPressed: () {
+            final uri = Uri.tryParse(url);
+            if (uri != null && uri.hasScheme) {
+              unawaited(_loadUrlWithHostSettings(tab, uri));
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _startElementPicker() async {
     await _elementPickerController.startPicker();
     _showPickerSnack(
@@ -2254,14 +2503,18 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<void> _applyCosmeticRules(
     BrowserTab tab, {
     DownloadSettings? settings,
-  }) =>
-      _elementPickerController.applyCosmeticRules(
-        tab,
-        settings: settings ?? widget.settings,
-      );
+  }) => _elementPickerController.applyCosmeticRules(
+    tab,
+    settings: settings ?? widget.settings,
+  );
 
   Future<void> _resetPageElementBlocks() =>
       _elementPickerController.resetPageElementBlocks(widget.settings);
+
+  Future<void> _rescanPageMedia() async {
+    await _activeTab.controller.rescanPage();
+    _showSnack('Page rescanned for media');
+  }
 
   String _tabLabel(BrowserTab tab) {
     final title = tab.title;
@@ -2365,9 +2618,13 @@ class _SnifferScreenState extends State<SnifferScreen>
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 120),
                     margin: const EdgeInsets.symmetric(
-                        horizontal: 2, vertical: 4),
+                      horizontal: 2,
+                      vertical: 4,
+                    ),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: isActive
                           ? activeColor.withValues(alpha: 0.15)
@@ -2450,9 +2707,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         color: AuroraColors.overlay,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_findVisible) _buildFindBar(),
-          ],
+          children: [if (_findVisible) _buildFindBar()],
         ),
       ),
     );
@@ -2488,113 +2743,207 @@ class _SnifferScreenState extends State<SnifferScreen>
                 // Address bar pill
                 Container(
                   height: addressBarHeight,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: AuroraColors.glassSurface,
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(color: AuroraColors.glassBorder),
                     ),
-                    child: Row(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(left: 12),
-                          child: IconButton(
-                            key: const Key('browser_star_button'),
-                            icon: Icon(
-                              _isCurrentPageFavorited()
-                                  ? Icons.star
-                                  : Icons.star_border,
-                              color: _isCurrentPageFavorited()
-                                  ? AuroraColors.accentAmber
-                                  : AuroraColors.mutedText,
-                              size: 18,
-                            ),
-                            onPressed: _toggleFavorite,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                                minWidth: 32, minHeight: 32),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.lock, size: 12,
-                            color: AuroraColors.mutedText),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _addressExpanded
-                              ? TextField(
-                                  key: const Key('sniffer_address_bar'),
-                                  controller: tab.addressController,
-                                  focusNode: _addressFocusNode,
-                                  autofocus: true,
-                                  decoration: const InputDecoration(
-                                    isDense: true,
-                                    hintText: 'Search or enter URL',
-                                    border: InputBorder.none,
-                                    contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Stack(
+                        children: [
+                          Row(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(left: 12),
+                                child: IconButton(
+                                  key: const Key('browser_star_button'),
+                                  icon: Icon(
+                                    _isCurrentPageFavorited()
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: _isCurrentPageFavorited()
+                                        ? AuroraColors.accentAmber
+                                        : AuroraColors.mutedText,
+                                    size: 18,
                                   ),
-                                  keyboardType: TextInputType.url,
-                                  textInputAction: TextInputAction.go,
-                                  onSubmitted: _loadAddress,
-                                )
-                              : GestureDetector(
-                                  key: const Key('browser_address_chip'),
-                                  onTap: () {
-                                    setState(() => _addressExpanded = true);
-                                    // Select all text and focus the field after
-                                    // the TextField has been built in the current
-                                    // frame so the user can immediately overwrite
-                                    // the URL.
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                      if (!mounted) return;
-                                      tab.addressController.selection =
-                                          TextSelection(
-                                        baseOffset: 0,
-                                        extentOffset:
-                                            tab.addressController.text.length,
-                                      );
-                                      _addressFocusNode.requestFocus();
-                                    });
-                                  },
-                                  child: Container(
-                                    height: 36,
-                                    alignment: Alignment.centerLeft,
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8),
-                                    child: Text(
-                                      _addressLabel().isEmpty
-                                          ? 'Search or enter URL'
-                                          : _addressLabel(),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AuroraColors.text,
-                                        fontSize: 13,
-                                      ),
-                                    ),
+                                  onPressed: _toggleFavorite,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 32,
+                                    minHeight: 32,
                                   ),
                                 ),
-                        ),
-                        if (_addressExpanded)
-                          IconButton(
-                            key: const Key('sniffer_go_button'),
-                            icon: const Icon(Icons.arrow_forward, size: 18),
-                            onPressed: () => _loadAddress(),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                                minWidth: 36, minHeight: 36),
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () {
+                                  final url = tab.currentUrl;
+                                  if (url != null && url.isNotEmpty) {
+                                    final host = Uri.tryParse(url)?.host ?? '';
+                                    showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Site Data'),
+                                        content: Text(
+                                          host.isNotEmpty
+                                              ? 'Clear cookies, localStorage, and cache for $host?'
+                                              : 'Clear cookies, localStorage, and cache for this site?',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, true),
+                                            child: const Text(
+                                              'Clear',
+                                              style: TextStyle(
+                                                color: Colors.red,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ).then((confirmed) {
+                                      if (confirmed == true && mounted) {
+                                        unawaited(_clearDataForSite(url));
+                                      }
+                                    });
+                                  }
+                                },
+                                child: const Icon(
+                                  Icons.lock,
+                                  size: 12,
+                                  color: AuroraColors.mutedText,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _addressExpanded
+                                    ? TextField(
+                                        key: const Key('sniffer_address_bar'),
+                                        controller: tab.addressController,
+                                        focusNode: _addressFocusNode,
+                                        autofocus: true,
+                                        decoration: const InputDecoration(
+                                          isDense: true,
+                                          hintText: 'Search or enter URL',
+                                          border: InputBorder.none,
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 8,
+                                          ),
+                                        ),
+                                        keyboardType: TextInputType.url,
+                                        textInputAction: TextInputAction.go,
+                                        onSubmitted: _loadAddress,
+                                      )
+                                    : GestureDetector(
+                                        key: const Key('browser_address_chip'),
+                                        onTap: () {
+                                          setState(
+                                            () => _addressExpanded = true,
+                                          );
+                                          // Select all text and focus the field after
+                                          // the TextField has been built in the current
+                                          // frame so the user can immediately overwrite
+                                          // the URL.
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                                if (!mounted) return;
+                                                tab
+                                                    .addressController
+                                                    .selection = TextSelection(
+                                                  baseOffset: 0,
+                                                  extentOffset: tab
+                                                      .addressController
+                                                      .text
+                                                      .length,
+                                                );
+                                                _addressFocusNode
+                                                    .requestFocus();
+                                              });
+                                        },
+                                        child: Container(
+                                          height: 36,
+                                          alignment: Alignment.centerLeft,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          child: Text(
+                                            _addressLabel().isEmpty
+                                                ? 'Search or enter URL'
+                                                : _addressLabel(),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: AuroraColors.text,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                              if (_addressExpanded)
+                                IconButton(
+                                  key: const Key('sniffer_go_button'),
+                                  icon: const Icon(
+                                    Icons.arrow_forward,
+                                    size: 18,
+                                  ),
+                                  onPressed: () => _loadAddress(),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 36,
+                                    minHeight: 36,
+                                  ),
+                                ),
+                              tab.isLoading
+                                  ? IconButton(
+                                      icon: const Icon(Icons.close, size: 18),
+                                      onPressed: () => tab.controller.stop(),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 36,
+                                        minHeight: 36,
+                                      ),
+                                    )
+                                  : IconButton(
+                                      key: const Key('sniffer_reload_button'),
+                                      icon: const Icon(Icons.refresh, size: 18),
+                                      onPressed: () => tab.controller.reload(),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 36,
+                                        minHeight: 36,
+                                      ),
+                                    ),
+                            ],
                           ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh, size: 18),
-                          onPressed: () => tab.controller.reload(),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                              minWidth: 36, minHeight: 36),
-                        ),
-                      ],
+                          if (tab.isLoading)
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              child: RepaintBoundary(
+                                child: LinearProgressIndicator(
+                                  value: tab.progress / 100.0,
+                                  minHeight: 2,
+                                  backgroundColor: Colors.transparent,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -2662,36 +3011,23 @@ class _SnifferScreenState extends State<SnifferScreen>
                       ? BrowserWidget(
                           key: ValueKey(t.id),
                           controller: t.controller,
-                          onSwipeBack: () => t.controller.goBack(),
-                          onSwipeForward: () => t.controller.goForward(),
+                          onSwipeForward: () {
+                            // Forward navigation via right-edge swipe.
+                            // No debounce needed — there is only one forward
+                            // detector (the right-edge GestureDetector) now.
+                            unawaited(t.controller.goForward());
+                          },
                           onRefresh: () => t.controller.reload(),
+                          onTranslateSelection: _translateSelectedText,
+                          onSearchSelection: _searchSelectedText,
                         )
                       : const SizedBox.shrink(),
                 ),
               );
             }).toList(),
           ),
-          if (_isLoading)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: LinearProgressIndicator(
-                minHeight: 2,
-                backgroundColor: Colors.grey[300],
-              ),
-            ),
         ],
       ),
-    );
-
-    final selectionToolbar = AnimatedPositioned(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeInOut,
-      bottom: _selectionToolbarVisible ? 56.0 : -120.0,
-      left: 16,
-      right: 16,
-      child: _buildSelectionToolbar(),
     );
 
     return PopScope(
@@ -2709,7 +3045,6 @@ class _SnifferScreenState extends State<SnifferScreen>
               webView,
               topBar,
               bottomBar,
-              selectionToolbar,
               if (_elementPickerActive) _buildPickerCancelButton(),
             ],
           ),
@@ -2775,7 +3110,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                   icon: Icons.home_outlined,
                   enabled: true,
                   onTap: () => unawaited(
-                      _loadUrlWithHostSettings(tab, Uri.parse(homeUrl))),
+                    _loadUrlWithHostSettings(tab, Uri.parse(homeUrl)),
+                  ),
                 ),
                 _CompactNavButton(
                   key: const Key('browser_tabs_button'),
@@ -2809,13 +3145,27 @@ class _SnifferScreenState extends State<SnifferScreen>
                       width: 40,
                       height: 40,
                       alignment: Alignment.center,
-                      child: Icon(
-                        badgeCount > 0 ? Icons.radar : Icons.add,
-                        size: 22,
-                        color: AuroraColors.background,
+                      child: Badge(
+                        label: Text('$badgeCount'),
+                        isLabelVisible: badgeCount > 0,
+                        backgroundColor: Colors.red,
+                        textColor: Colors.white,
+                        child: Icon(
+                          badgeCount > 0 ? Icons.radar : Icons.add,
+                          size: 22,
+                          color: AuroraColors.background,
+                        ),
                       ),
                     ),
                   ),
+                ),
+                const SizedBox(width: 6),
+                _miniDockTab(
+                  key: const Key('browser_menu_button'),
+                  icon: Icons.menu_rounded,
+                  label: 'Menu',
+                  compact: true,
+                  onTap: _showBrowserMenuSheet,
                 ),
                 const SizedBox(width: 6),
                 _miniDockTab(
@@ -2824,14 +3174,6 @@ class _SnifferScreenState extends State<SnifferScreen>
                   label: 'Settings',
                   compact: true,
                   onTap: () => widget.onOpenSettings?.call(),
-                ),
-                const SizedBox(width: 6),
-                _miniDockTab(
-                  key: const Key('mini_dock_menu'),
-                  icon: Icons.menu_rounded,
-                  label: 'Menu',
-                  compact: true,
-                  onTap: _showBrowserMenuSheet,
                 ),
                 const SizedBox(width: 2),
               ],
@@ -2874,8 +3216,9 @@ class _SnifferScreenState extends State<SnifferScreen>
                     Text(
                       label,
                       style: TextStyle(
-                          fontSize: 12,
-                          color: AuroraColors.mutedText),
+                        fontSize: 12,
+                        color: AuroraColors.mutedText,
+                      ),
                     ),
                   ],
                 ),
@@ -2896,7 +3239,8 @@ class _SnifferScreenState extends State<SnifferScreen>
   Widget _buildAdblockShieldButton(BrowserTab tab) {
     final settings = widget.settings;
     final host = Uri.tryParse(tab.currentUrl ?? '')?.host ?? '';
-    final isAllowlisted = host.isNotEmpty && settings.adblockAllowlist.contains(host);
+    final isAllowlisted =
+        host.isNotEmpty && settings.adblockAllowlist.contains(host);
     final blocked = tab.controller.blockedRequestCount;
     final IconData icon;
     final Color color;
@@ -2938,7 +3282,9 @@ class _SnifferScreenState extends State<SnifferScreen>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     constraints: const BoxConstraints(
-                        minWidth: 14, minHeight: 14),
+                      minWidth: 14,
+                      minHeight: 14,
+                    ),
                     child: Text(
                       blocked > 99 ? '99+' : '$blocked',
                       style: const TextStyle(
@@ -2963,9 +3309,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     final settings = widget.settings;
     final host = Uri.tryParse(tab.currentUrl ?? '')?.host ?? '';
     if (host.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No site loaded')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No site loaded')));
       return;
     }
     final isAllowlisted = settings.adblockAllowlist.contains(host);
@@ -2973,43 +3319,47 @@ class _SnifferScreenState extends State<SnifferScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(children: [
-          const Icon(Icons.shield, color: Colors.green),
-          const SizedBox(width: 8),
-          const Text('Adblock'),
-        ]),
+        title: Row(
+          children: [
+            const Icon(Icons.shield, color: Colors.green),
+            const SizedBox(width: 8),
+            const Text('Adblock'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(host,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(host, style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
-            Text(settings.adblockEnabled
-                ? (isAllowlisted
-                    ? 'Status: disabled for this site'
-                    : 'Status: active')
-                : 'Status: globally disabled'),
+            Text(
+              settings.adblockEnabled
+                  ? (isAllowlisted
+                        ? 'Status: disabled for this site'
+                        : 'Status: active')
+                  : 'Status: globally disabled',
+            ),
             const SizedBox(height: 4),
             Text('Blocked: $blocked requests on this page'),
             const Divider(),
             SwitchListTile(
-              title: Text(isAllowlisted
-                  ? 'Block ads on $host'
-                  : 'Allow ads on $host'),
-              subtitle: Text(isAllowlisted
-                  ? 'Re-enable adblock for this site'
-                  : 'Temporarily disable adblock for this site'),
+              title: Text(
+                isAllowlisted ? 'Block ads on $host' : 'Allow ads on $host',
+              ),
+              subtitle: Text(
+                isAllowlisted
+                    ? 'Re-enable adblock for this site'
+                    : 'Temporarily disable adblock for this site',
+              ),
               value: !isAllowlisted,
               contentPadding: EdgeInsets.zero,
               onChanged: (v) {
                 final List<String> updated = v
-                    ? settings.adblockAllowlist
-                        .where((h) => h != host)
-                        .toList()
+                    ? settings.adblockAllowlist.where((h) => h != host).toList()
                     : [...settings.adblockAllowlist, host];
-                final newSettings =
-                    settings.copyWith(adblockAllowlist: updated);
+                final newSettings = settings.copyWith(
+                  adblockAllowlist: updated,
+                );
                 widget.onSettingsChanged?.call(newSettings);
                 tab.controller.updateAdblockAllowlist(updated);
                 Navigator.pop(ctx);
@@ -3027,62 +3377,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  Widget _buildSelectionToolbar() {
-    final text = _selectedText;
-    if (text == null) return const SizedBox.shrink();
-    return Material(
-      color: AuroraColors.overlaySurface,
-      elevation: 8,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          children: [
-            const Icon(Icons.text_fields, size: 18, color: AuroraColors.accent),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: AuroraColors.text),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Translate',
-              icon: const Icon(Icons.translate, size: 18),
-              onPressed: _selectionActionTranslate,
-            ),
-            IconButton(
-              tooltip: 'Search',
-              icon: const Icon(Icons.search, size: 18),
-              onPressed: _selectionActionSearch,
-            ),
-            IconButton(
-              tooltip: 'Copy',
-              icon: const Icon(Icons.copy, size: 18),
-              onPressed: _selectionActionCopy,
-            ),
-            IconButton(
-              tooltip: 'Share',
-              icon: const Icon(Icons.ios_share, size: 18),
-              onPressed: _selectionActionShare,
-            ),
-            IconButton(
-              tooltip: 'Close',
-              icon: const Icon(Icons.close, size: 18),
-              onPressed: _closeSelectionToolbar,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ARCHIVED: The bottom download queue strip was here (removed 2026-06-27).
 
-  String _addressLabel() =>
-      _addressBarController.addressLabel(_activeTab);
+  String _addressLabel() => _addressBarController.addressLabel(_activeTab);
 
   Widget _buildFindBar() {
     return SizedBox(
@@ -3159,8 +3456,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     onCopyText: (value, message) => _copyText(value, message),
     onOpenNewTab: ({String? url, bool switchToTab = true}) {
       // Background opens insert right after the current tab.
-      final insertAtIndex =
-          !switchToTab ? _activeTabIndex + 1 : null;
+      final insertAtIndex = !switchToTab ? _activeTabIndex + 1 : null;
       _tabLifecycleController.openNewTab(
         url: url,
         switchToTab: switchToTab,
@@ -3208,22 +3504,14 @@ class _SnifferScreenState extends State<SnifferScreen>
         baseDir: _baseDir,
         baseTemp: _baseTemp,
         downloadFilenameFor: _downloadFilenameFor,
-    getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+        getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
         urlExists: (url) => _downloadQueue.urlExists(url),
         addTask: (task, {bool force = false}) =>
             _downloadQueue.addTask(task, force: force),
         showDuplicatePrompt: _showDuplicatePrompt,
         showSnack: _showSnack,
-        reloadForFreshUrl: (
-          tab,
-          sourcePageUrl, {
-          bool forceReload = false,
-        }) =>
-            _reloadForFreshUrl(
-          tab,
-          sourcePageUrl,
-          forceReload: forceReload,
-        ),
+        reloadForFreshUrl: (tab, sourcePageUrl, {bool forceReload = false}) =>
+            _reloadForFreshUrl(tab, sourcePageUrl, forceReload: forceReload),
         isMounted: mounted,
       );
 
@@ -3306,6 +3594,23 @@ class _SnifferScreenState extends State<SnifferScreen>
     return null;
   }
 
+  String _truncateFilename(String name, {int maxLength = 120}) {
+    return truncateFilename(name, maxLength: maxLength);
+  }
+
+  static String truncateFilename(String name, {int maxLength = 120}) {
+    if (name.length <= maxLength) return name;
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex != -1 && dotIndex > name.length - 10) {
+      final ext = name.substring(dotIndex);
+      final baseLen = maxLength - ext.length;
+      if (baseLen > 0) {
+        return name.substring(0, baseLen).trim() + ext;
+      }
+    }
+    return name.substring(0, maxLength).trim();
+  }
+
   String _downloadFilenameFor(String? label, String targetUrl) {
     // Extract quality label from URL pattern like "1080p.mp4" or "1080p"
     final qualityMatch = RegExp(r'(\d+)p').firstMatch(targetUrl);
@@ -3336,7 +3641,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (!filename.contains('.') && segments.isEmpty) {
       filename = '$filename.html';
     }
-    return '$filename$qualityLabel';
+    return _truncateFilename('$filename$qualityLabel');
   }
 
   Future<void> _toggleFavorite() async {
@@ -3884,114 +4189,149 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Browser Tools',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Browser Tools',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.1,
-                  children: [
-                    _buildMenuItem(
-                      icon: Icons.star_rounded,
-                      label: 'Favorites',
-                      color: AuroraColors.accentAmber,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _showFavoritesSheet();
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.offline_pin_rounded,
-                      label: 'Saved Pages',
-                      color: Colors.green,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _showSavedPagesSheet();
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.save_alt_rounded,
-                      label: 'Save Page',
-                      color: Colors.green,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_saveCurrentPage());
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.history_rounded,
-                      label: 'History',
-                      color: Colors.blue,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _showHistorySheet();
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.find_in_page_rounded,
-                      label: 'Find in Page',
-                      color: Colors.purple,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        setState(() => _findVisible = true);
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.assignment_ind_rounded,
-                      label: 'Autofill',
-                      color: Colors.teal,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_showAutofillMenu());
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.chrome_reader_mode_rounded,
-                      label: 'Reader Mode',
-                      color: Colors.orange,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_showReaderMode());
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.ads_click,
-                      label: 'Block Element',
-                      color: Colors.redAccent,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_startElementPicker());
-                      },
-                    ),
-                    _buildMenuItem(
-                      icon: Icons.undo,
-                      label: 'Reset Blocks',
+                  const SizedBox(height: 4),
+                  Text(
+                    'Blocked popups: ${_activeTab.controller.blockedPopupsCount}',
+                    style: TextStyle(
+                      fontSize: 12,
                       color: AuroraColors.mutedText,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _resetPageElementBlocks();
-                      },
                     ),
-                  ],
-                ),
-              ],
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.1,
+                    children: [
+                      _buildMenuItem(
+                        icon: Icons.star_rounded,
+                        label: 'Favorites',
+                        color: AuroraColors.accentAmber,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showFavoritesSheet();
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.offline_pin_rounded,
+                        label: 'Saved Pages',
+                        color: Colors.green,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showSavedPagesSheet();
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.save_alt_rounded,
+                        label: 'Save Page',
+                        color: Colors.green,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(_saveCurrentPage());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.history_rounded,
+                        label: 'History',
+                        color: Colors.blue,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showHistorySheet();
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.find_in_page_rounded,
+                        label: 'Find in Page',
+                        color: Colors.purple,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          setState(() => _findVisible = true);
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.assignment_ind_rounded,
+                        label: 'Autofill',
+                        color: Colors.teal,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(_showAutofillMenu());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.chrome_reader_mode_rounded,
+                        label: 'Reader Mode',
+                        color: Colors.orange,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(_showReaderMode());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.ads_click,
+                        label: 'Block Element',
+                        color: Colors.redAccent,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(_startElementPicker());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.undo,
+                        label: 'Reset Blocks',
+                        color: AuroraColors.mutedText,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _resetPageElementBlocks();
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.refresh_rounded,
+                        label: 'Re-scan',
+                        color: Colors.cyanAccent,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(_rescanPageMedia());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.cookie_rounded,
+                        label: 'Clear Cookies',
+                        color: Colors.redAccent,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(
+                            _activeTab.controller.currentUrl().then((url) {
+                              if (url != null && url.isNotEmpty) {
+                                unawaited(_clearDataForSite(url));
+                              }
+                            }),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -4075,19 +4415,19 @@ class _SnifferScreenState extends State<SnifferScreen>
     media,
     activeTab: _activeTab,
     isMounted: mounted,
-          getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
-    buildSniffedDownloadHeaders: ({
-      required BrowserTab tab,
-      required SniffedMedia media,
-      required Map<String, String> cookieHeaders,
-      String? currentUrl,
-    }) =>
-        _buildSniffedDownloadHeaders(
-      tab: tab,
-      media: media,
-      cookieHeaders: cookieHeaders,
-      currentUrl: currentUrl,
-    ),
+    getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+    buildSniffedDownloadHeaders:
+        ({
+          required BrowserTab tab,
+          required SniffedMedia media,
+          required Map<String, String> cookieHeaders,
+          String? currentUrl,
+        }) => _buildSniffedDownloadHeaders(
+          tab: tab,
+          media: media,
+          cookieHeaders: cookieHeaders,
+          currentUrl: currentUrl,
+        ),
     refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
     onAddToQueue: (m) async => _showAddQueueDialog(context, m),
   );
@@ -4180,9 +4520,12 @@ class _SnifferScreenState extends State<SnifferScreen>
         final playlist = HlsPlaylistParser.parse(cached, uri);
         if (playlist.isMaster && playlist.variants.isNotEmpty) {
           AuroraLog.instance.debug(
-    'Using cached playlist body for $url '
+            'Using cached playlist body for $url '
             '(${playlist.variants.length} variants)',
-          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
           return playlist.variants.map((v) {
             int? w;
             int? h;
@@ -4237,9 +4580,12 @@ class _SnifferScreenState extends State<SnifferScreen>
       // back to Android's native HttpURLConnection.
       if (response.statusCode != 200) {
         AuroraLog.instance.debug(
-    '_fetchMasterPlaylistVariants Dart client returned '
+          '_fetchMasterPlaylistVariants Dart client returned '
           '${response.statusCode}, trying WebView JS fetch…',
-        category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
+          category: LogCategory.sniffer,
+          screen: LogScreen.browser,
+          eventType: LogEventType.sniff,
+        );
         // 1st fallback: WebView JavaScript fetch() — it sends cookies and
         // has Cloudflare clearance from the page session.
         String? jsBody;
@@ -4249,7 +4595,12 @@ class _SnifferScreenState extends State<SnifferScreen>
             headers: headers,
           );
         } catch (e) {
-          AuroraLog.instance.error('JS fetch error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
+          AuroraLog.instance.error(
+            'JS fetch error: $e',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.error,
+          );
         }
         if (jsBody != null && jsBody.isNotEmpty) {
           response = http.Response(
@@ -4258,12 +4609,18 @@ class _SnifferScreenState extends State<SnifferScreen>
             request: http.Request('GET', uri),
           );
           AuroraLog.instance.debug(
-    'WebView JS fetch succeeded for variant fetch',
-          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
+            'WebView JS fetch succeeded for variant fetch',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
         } else {
           AuroraLog.instance.debug(
-    'WebView JS fetch failed, trying native Android HTTP…',
-          category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
+            'WebView JS fetch failed, trying native Android HTTP…',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
           // 2nd fallback: Android native HttpURLConnection
           try {
             final nativeResult = await NetworkBindingService.fetchUrl(
@@ -4280,13 +4637,21 @@ class _SnifferScreenState extends State<SnifferScreen>
                   request: http.Request('GET', uri),
                 );
                 AuroraLog.instance.debug(
-    'Native fallback succeeded for variant fetch '
+                  'Native fallback succeeded for variant fetch '
                   '(status $sc)',
-                category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.sniff);
+                  category: LogCategory.sniffer,
+                  screen: LogScreen.browser,
+                  eventType: LogEventType.sniff,
+                );
               }
             }
           } catch (e) {
-            AuroraLog.instance.error('Native fallback error: $e', category: LogCategory.sniffer, screen: LogScreen.browser, eventType: LogEventType.error);
+            AuroraLog.instance.error(
+              'Native fallback error: $e',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
           }
         }
       }
@@ -4360,10 +4725,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       showMediaInfoSheet(
         context,
         item,
-        formatSize: (
-          int bytes, {
-          bool isEstimated = false,
-        }) =>
+        formatSize: (int bytes, {bool isEstimated = false}) =>
             _formatSize(bytes, isEstimated: isEstimated),
       );
 
@@ -4391,12 +4753,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     sortMedia: _sortedMedia,
     onPreview: (media) => _showMediaPreview(media),
     onInfo: (ctx, item) => _showMediaInfoSheet(ctx, item),
-    onAddToQueue: (
-      ctx,
-      media, {
-      List<SniffedMedia> variants = const [],
-    }) =>
+    onAddToQueue: (ctx, media, {List<SniffedMedia> variants = const []}) =>
         _showAddQueueDialog(ctx, media, variants: variants),
+    onRescan: () => unawaited(_activeTab.controller.rescanPage()),
   );
 
   /// Header row shown above the segmented filter in the rich catch sheet.
@@ -4416,9 +4775,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         _mediaCatchController.selectedIndices.addAll(
           _recommendedCaptureIndices(
             _mediaCatchController.filteredGroups(
-              _mediaCatchController.analyze(
-                _sortedMedia(_activeTab.snifferEngine.detectedMedia),
-              ).groups,
+              _mediaCatchController
+                  .analyze(_sortedMedia(_activeTab.snifferEngine.detectedMedia))
+                  .groups,
             ),
           ),
         );
@@ -4430,6 +4789,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         _mediaCatchController.clearSelection();
       });
     },
+    onRescan: () => unawaited(_activeTab.controller.rescanPage()),
   );
 
   Widget _compactFilterChip(
@@ -4462,7 +4822,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (uri == null) return '';
     final path = uri.path;
     // Strip trailing slashes, then find last segment.
-    final segments = path.endsWith('/') ? path.substring(0, path.length - 1).split('/') : path.split('/');
+    final segments = path.endsWith('/')
+        ? path.substring(0, path.length - 1).split('/')
+        : path.split('/');
     final last = segments.last;
     final dot = last.lastIndexOf('.');
     if (dot <= 0 || dot >= last.length - 1) return '';
@@ -4496,7 +4858,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       // No suggested filename — derive one from the URL or sniffed media.
       final parsed = Uri.tryParse(url);
       final nameFromUrl = parsed != null
-          ? parsed.path.split('/').lastWhere((s) => s.isNotEmpty, orElse: () => '')
+          ? parsed.path
+                .split('/')
+                .lastWhere((s) => s.isNotEmpty, orElse: () => '')
           : url.split('/').last;
       suggestedName = _buildSuggestedFilename(
         media?.name ?? (nameFromUrl.isNotEmpty ? nameFromUrl : 'download'),
@@ -4574,6 +4938,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     task.hlsPlaylistCache = (cacheUrl) => tab.hlsPlaylistCache[cacheUrl];
     task.fetchBinaryViaWebView = (binaryUrl) =>
         tab.controller.fetchBinaryViaJavaScript(binaryUrl);
+    task.cookieProvider = (url) => tab.controller.getCookiesForDomain(url: url);
 
     // Check for duplicates.
     bool force = false;
@@ -4600,9 +4965,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Download detected'),
-        content: Text(
-          name.isNotEmpty ? 'File: $name' : 'URL: $url',
-        ),
+        content: Text(name.isNotEmpty ? 'File: $name' : 'URL: $url'),
         actions: [
           TextButton(
             onPressed: () {
@@ -4654,7 +5017,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           suggestedName: suggestedName,
           baseDir: _baseDir,
           baseTemp: _baseTemp,
-        getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+          getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
           downloadQueue: _downloadQueue,
           refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
           fetchMasterPlaylistVariants: _fetchMasterPlaylistVariants,
@@ -4700,19 +5063,19 @@ class _SnifferScreenState extends State<SnifferScreen>
           .trim();
       if (sanitized.isNotEmpty) {
         if (qualityLabel.isNotEmpty) {
-          return '$sanitized (${qualityLabel}p)$ext';
+          return _truncateFilename('$sanitized (${qualityLabel}p)$ext');
         }
         // Append base name when title is generic (e.g., domain)
         final baseSuffix = base.isNotEmpty && base != sanitized ? '_$base' : '';
-        return '$sanitized$baseSuffix$ext';
+        return _truncateFilename('$sanitized$baseSuffix$ext');
       }
     }
 
     if (qualityLabel.isNotEmpty) {
       final qBase = base.isNotEmpty ? base : 'video';
-      return '${qBase}_${qualityLabel}p$ext';
+      return _truncateFilename('${qBase}_${qualityLabel}p$ext');
     }
-    return base.isNotEmpty ? '$base$ext' : 'download$ext';
+    return _truncateFilename(base.isNotEmpty ? '$base$ext' : 'download$ext');
   }
 
   List<SniffedMedia> _sortedMedia(List<SniffedMedia> media) {
@@ -4812,6 +5175,25 @@ class _SnifferScreenState extends State<SnifferScreen>
       MediaType.executable => Icons.insert_drive_file,
       MediaType.playlist => Icons.queue_music,
     };
+  }
+
+  /// Decodes a JSON string off the UI isolate.
+  /// Returns a [Map] on success, null on parse failure.
+  Future<Map?> _decodeJsInBackground(String message) async {
+    try {
+      if (isRunningInTest()) {
+        final decoded = jsonDecode(message);
+        if (decoded is Map) return decoded;
+        return <String, dynamic>{};
+      }
+      return await Isolate.run<Map>(() {
+        final decoded = jsonDecode(message);
+        if (decoded is Map) return decoded;
+        return <String, dynamic>{};
+      });
+    } catch (_) {
+      return null;
+    }
   }
 
   String _cleanTitle(String? title, String? url) {
@@ -4918,61 +5300,18 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
-  void _onWebPageTextSelected(String text) {
-    if (!mounted) return;
-    setState(() {
-      _selectedText = text;
-      _selectionToolbarVisible = true;
-    });
-  }
-
-  void _closeSelectionToolbar() {
-    if (!mounted) return;
-    setState(() {
-      _selectionToolbarVisible = false;
-      _selectedText = null;
-    });
-  }
-
-  Future<void> _selectionActionTranslate() async {
-    final text = _selectedText;
-    if (text == null || text.isEmpty) return;
+  Future<void> _translateSelectedText(String text) async {
     final target = translateLanguageById(widget.settings.translateTargetLang);
     final url = Uri.parse(
       'https://translate.google.com/translate?sl=auto&tl=${target.id}&text='
       '${Uri.encodeQueryComponent(text)}',
     );
     unawaited(_loadUrlWithHostSettings(_activeTab, url));
-    _closeSelectionToolbar();
   }
 
-  Future<void> _selectionActionSearch() async {
-    final text = _selectedText;
-    if (text == null || text.isEmpty) return;
+  Future<void> _searchSelectedText(String text) async {
     final url = Uri.parse(widget.settings.searchEngine.buildSearchUrl(text));
     unawaited(_loadUrlWithHostSettings(_activeTab, url));
-    _closeSelectionToolbar();
-  }
-
-  Future<void> _selectionActionCopy() async {
-    final text = _selectedText;
-    if (text == null || text.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: text));
-    _showSnack('Selection copied.');
-    _closeSelectionToolbar();
-  }
-
-  Future<void> _selectionActionShare() async {
-    final text = _selectedText;
-    if (text == null || text.isEmpty) return;
-    try {
-      final url = await _activeTab.controller.currentUrl() ?? '';
-      final payload = url.isEmpty ? text : '"$text"\n\n— $url';
-      await PublicDownloadsService.shareUrl(payload);
-    } catch (error) {
-      _showSnack('Could not share: $error');
-    }
-    _closeSelectionToolbar();
   }
 
   Future<void> _clearDataForSite(String url) async {
@@ -5111,10 +5450,26 @@ class _SnifferScreenState extends State<SnifferScreen>
     VoidCallback? onAction,
   }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
+    if (!widget.settings.showSnackbars) return;
+    final media = MediaQuery.of(context);
+    final topPadding = media.padding.top;
+    final screenHeight = media.size.height;
+    final bottomMargin = (screenHeight - topPadding - 90).clamp(
+      0.0,
+      screenHeight,
+    );
+
+    AuroraSnackbar.show(
+      context,
+      message,
+      actionLabel: actionLabel,
+      onAction: onAction,
+      builder: (text) => SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(bottom: bottomMargin, left: 16, right: 16),
+        duration: const Duration(milliseconds: 1500),
+        dismissDirection: DismissDirection.up,
         action: actionLabel != null && onAction != null
             ? SnackBarAction(label: actionLabel, onPressed: onAction)
             : null,
@@ -5124,11 +5479,22 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   void _showPickerSnack(String message, {required VoidCallback onCancel}) {
     if (!mounted) return;
+    final media = MediaQuery.of(context);
+    final topPadding = media.padding.top;
+    final screenHeight = media.size.height;
+    final bottomMargin = (screenHeight - topPadding - 90).clamp(
+      0.0,
+      screenHeight,
+    );
+
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(bottom: bottomMargin, left: 16, right: 16),
         duration: const Duration(seconds: 30),
+        dismissDirection: DismissDirection.up,
         action: SnackBarAction(label: 'Cancel', onPressed: onCancel),
       ),
     );

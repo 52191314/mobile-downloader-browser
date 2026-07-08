@@ -1,55 +1,66 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 
-/// A card wrapper that only accepts horizontal swipe from the left and
-/// right edge zones (default 32 px).  The entire center area passes
-/// touches through to the parent scroll view, preventing the "swipe too
-/// sensitive — can barely scroll" problem inherent to [Dismissible].
+/// A card wrapper that only activates horizontal swipe after a deliberate
+/// long-press hold (default 400 ms).  This prevents accidental swipe
+/// triggers during normal vertical scrolling while still allowing the
+/// entire card surface to be swipeable.
 ///
-/// [leftBackground] is revealed when swiping right (drag from left edge).
-/// [rightBackground] is revealed when swiping left (drag from right edge).
+/// **How it works** — Long-press-into-drag:
+/// 1. The user presses and holds still on the card for [holdDurationMillis].
+/// 2. A haptic tick + subtle scale-up signals "swipe armed".
+/// 3. The user then drags horizontally to reveal action backgrounds.
+/// 4. Releasing past [actionThreshold] fires the corresponding callback.
+/// 5. Releasing early snaps the card back to rest.
+///
+/// Because vertical scrolling resolves before the long-press timeout,
+/// scroll-to-swipe interference is eliminated — no edge-zone hacks needed.
+///
+/// [leftBackground] is revealed when swiping right (drag from left side).
+/// [rightBackground] is revealed when swiping left (drag from right side).
 ///
 /// Both callbacks receive the active [DownloadTask] via their closure.
 /// Unlike [Dismissible], this widget never removes the card — callers
 /// must handle task removal themselves if desired.
-class EdgeSwipeCard extends StatefulWidget {
+class HoldSwipeCard extends StatefulWidget {
   final Widget child;
   final Widget? leftBackground;
   final Widget? rightBackground;
   final VoidCallback? onLeftSwipe;
   final VoidCallback? onRightSwipe;
 
-  /// Width in logical pixels of the swipe-trigger zone on each edge.
-  /// Larger values make swipe easier to trigger but shrink the
-  /// scroll-friendly center area.
-  final double edgeWidth;
-
   /// Fraction of the card's width the user must drag before the action
-  /// fires on release.  0.3 means 30% of card width.
+  /// fires on release. 0.3 means 30% of card width.
   final double actionThreshold;
 
-  const EdgeSwipeCard({
+  /// How long (in milliseconds) the user must hold still before the
+  /// swipe is armed.  Default 400 ms.
+  final int holdDurationMillis;
+
+  const HoldSwipeCard({
     super.key,
     required this.child,
     this.leftBackground,
     this.rightBackground,
     this.onLeftSwipe,
     this.onRightSwipe,
-    this.edgeWidth = 32.0,
     this.actionThreshold = 0.3,
+    this.holdDurationMillis = 400,
   });
 
   @override
-  State<EdgeSwipeCard> createState() => _EdgeSwipeCardState();
+  State<HoldSwipeCard> createState() => _HoldSwipeCardState();
 }
 
-class _EdgeSwipeCardState extends State<EdgeSwipeCard>
+class _HoldSwipeCardState extends State<HoldSwipeCard>
     with SingleTickerProviderStateMixin {
   double _dragOffset = 0;
-  bool _isDragging = false;
+  bool _armed = false;
 
   // Snaps the card back to rest with a spring-like animation.
   late final AnimationController _snapController;
-  late final Animation<double> _snapAnimation;
+  late Animation<double> _snapAnimation;
 
   @override
   void initState() {
@@ -84,47 +95,78 @@ class _EdgeSwipeCardState extends State<EdgeSwipeCard>
     _snapController.forward();
   }
 
-  void _startDrag(bool isLeftEdge) {
-    _snapController.stop();
-    _isDragging = true;
+  /// Spring-powered snap that replaces [Curves.decelerate] with realistic
+  /// physics for a more natural feel.
+  void _snapToSpring(double target) {
+    if (_snapController.isAnimating) _snapController.stop();
+    final simulation = SpringSimulation(
+      const SpringDescription(mass: 1, stiffness: 200, damping: 20),
+      _dragOffset,
+      target,
+      0, // initial velocity
+    );
+    _snapController.animateWith(simulation);
   }
 
-  void _updateDrag(double dx) {
-    // Clamp so the card cannot go past 1.1× the card width in either direction.
+  // ── Long-press gesture handlers ────────────────────────────────────
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    HapticFeedback.mediumImpact();
+    setState(() => _armed = true);
+  }
+
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    if (!_armed) return;
+    final dx = details.localOffsetFromOrigin.dx;
     final maxOffset = context.size!.width * 1.1;
     setState(() {
-      _dragOffset = (_dragOffset + dx).clamp(-maxOffset, maxOffset);
+      _dragOffset = dx.clamp(-maxOffset, maxOffset);
     });
   }
 
-  void _endDrag() {
-    _isDragging = false;
+  void _onLongPressEnd(LongPressEndDetails details) {
+    if (!_armed) return;
     final cardWidth = context.size!.width;
     if (cardWidth <= 0) {
-      _snapTo(0);
+      _disarm();
       return;
     }
     final threshold = cardWidth * widget.actionThreshold;
 
     if (_dragOffset > threshold) {
-      // Swiped right far enough — trigger left-edge action.
+      // Swiped right far enough — right action.
       widget.onRightSwipe?.call();
       _snapTo(0);
     } else if (_dragOffset < -threshold) {
-      // Swiped left far enough — trigger right-edge action.
+      // Swiped left far enough — left action.
       widget.onLeftSwipe?.call();
       _snapTo(0);
     } else {
       _snapTo(0);
     }
+    _disarm();
   }
+
+  void _onLongPressCancel() {
+    if (_armed) {
+      _snapTo(0);
+      _disarm();
+    }
+  }
+
+  void _disarm() {
+    _armed = false;
+    _dragOffset = 0;
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        // --- Backgrounds revealed during swipe ---
+        // ── Backgrounds revealed during swipe ──
         if (widget.leftBackground != null && _dragOffset > 0)
           Positioned.fill(
             child: ClipRRect(
@@ -140,46 +182,22 @@ class _EdgeSwipeCardState extends State<EdgeSwipeCard>
             ),
           ),
 
-        // --- Card content + edge gesture zones ---
-        Transform.translate(
-          offset: Offset(_dragOffset, 0),
-          child: SizedBox(
-            width: double.infinity,
-            child: Stack(
-              children: [
-                // Card body (passes scroll through)
-                widget.child,
-
-                // Left edge: swipe-right gesture zone
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: widget.edgeWidth,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragStart: (_) => _startDrag(true),
-                    onHorizontalDragUpdate: (d) => _updateDrag(d.delta.dx),
-                    onHorizontalDragEnd: (_) => _endDrag(),
-                    child: Container(color: Colors.transparent),
-                  ),
-                ),
-
-                // Right edge: swipe-left gesture zone
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: widget.edgeWidth,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragStart: (_) => _startDrag(false),
-                    onHorizontalDragUpdate: (d) => _updateDrag(d.delta.dx),
-                    onHorizontalDragEnd: (_) => _endDrag(),
-                    child: Container(color: Colors.transparent),
-                  ),
-                ),
-              ],
+        // ── Card content with long-press-to-arm swipe detection ──
+        AnimatedScale(
+          scale: _armed ? 1.02 : 1.0,
+          duration: const Duration(milliseconds: 100),
+          child: Transform.translate(
+            offset: Offset(_dragOffset, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onLongPressStart: _onLongPressStart,
+                onLongPressMoveUpdate: _onLongPressMoveUpdate,
+                onLongPressEnd: _onLongPressEnd,
+                onLongPressCancel: _onLongPressCancel,
+                child: widget.child,
+              ),
             ),
           ),
         ),

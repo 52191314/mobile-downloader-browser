@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 
 import '../../theme/aurora_colors.dart';
 
@@ -11,14 +12,14 @@ class AuroraDock extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTabSelected;
   final VoidCallback onAddPressed;
-  final int sniffedBadgeCount;
+  final ValueNotifier<int> sniffedBadgeCountNotifier;
 
   const AuroraDock({
     super.key,
     required this.currentIndex,
     required this.onTabSelected,
     required this.onAddPressed,
-    this.sniffedBadgeCount = 0,
+    required this.sniffedBadgeCountNotifier,
   });
 
   @override
@@ -45,7 +46,14 @@ class _AuroraDockState extends State<AuroraDock>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentIndex != widget.currentIndex) {
       _previousIndex = oldWidget.currentIndex;
-      _springController.forward(from: 0);
+      _springController.animateWith(
+        SpringSimulation(
+          const SpringDescription(mass: 1, stiffness: 300, damping: 15),
+          0, // from
+          1, // to
+          0, // initial velocity
+        ),
+      );
     }
   }
 
@@ -65,7 +73,6 @@ class _AuroraDockState extends State<AuroraDock>
       alignment: Alignment.topCenter,
       child: GestureDetector(
         onHorizontalDragEnd: (details) {
-          // Swipe left → next tab, swipe right → previous tab
           if (details.primaryVelocity != null) {
             final newIndex = details.primaryVelocity! < 0
                 ? (widget.currentIndex + 1).clamp(0, 2)
@@ -75,71 +82,76 @@ class _AuroraDockState extends State<AuroraDock>
             }
           }
         },
-        child: Container(
-          height: tabSize,
-          constraints: const BoxConstraints(maxWidth: 280),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: AuroraColors.dockSurface,
-            borderRadius: BorderRadius.circular(tabSize / 2),
-            border: Border.all(
-              color: widget.sniffedBadgeCount > 0
-                  ? AuroraColors.accent.withValues(alpha: 0.4)
-                  : AuroraColors.glassBorder,
-            ),
-            boxShadow: widget.sniffedBadgeCount > 0
-                ? [
-                    BoxShadow(
-                      color: AuroraColors.accent.withValues(alpha: 0.15),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _DockTab(
-              key: const Key('dock_tab_queue'),
-              icon: Icons.download_rounded,
-              label: 'Queue',
-              isActive: widget.currentIndex == 0,
-              springValue: widget.currentIndex == 0
-                  ? _springController
-                  : null,
-              onTap: () => widget.onTabSelected(0),
-            ),
-            const SizedBox(width: 4),
-            _DockFab(
-              key: const Key('dock_fab_add'),
-              onTap: widget.onAddPressed,
-              badgeCount: widget.sniffedBadgeCount,
-            ),
-            const SizedBox(width: 4),
-            _DockTab(
-              key: const Key('dock_tab_browser'),
-              icon: Icons.language_rounded,
-              label: 'Browser',
-              isActive: widget.currentIndex == 1,
-              springValue: widget.currentIndex == 1
-                  ? _springController
-                  : null,
-              onTap: () => widget.onTabSelected(1),
-            ),
-            const SizedBox(width: 4),
-            _DockTab(
-              key: const Key('dock_tab_settings'),
-              icon: Icons.tune_rounded,
-              label: 'Settings',
-              isActive: widget.currentIndex == 2,
-              springValue: widget.currentIndex == 2
-                  ? _springController
-                  : null,
-              onTap: () => widget.onTabSelected(2),
-            ),
-          ],
-        ),
+        child: ValueListenableBuilder<int>(
+          valueListenable: widget.sniffedBadgeCountNotifier,
+          builder: (context, badgeCount, _) {
+            return Container(
+              height: tabSize,
+              constraints: const BoxConstraints(maxWidth: 280),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: AuroraColors.dockSurface,
+                borderRadius: BorderRadius.circular(tabSize / 2),
+                border: Border.all(
+                  color: badgeCount > 0
+                      ? AuroraColors.accent.withValues(alpha: 0.4)
+                      : AuroraColors.glassBorder,
+                ),
+                boxShadow: badgeCount > 0
+                    ? [
+                        BoxShadow(
+                          color: AuroraColors.accent.withValues(alpha: 0.15),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _DockTab(
+                    key: const Key('dock_tab_queue'),
+                    icon: Icons.download_rounded,
+                    label: 'Queue',
+                    isActive: widget.currentIndex == 0,
+                    springValue: widget.currentIndex == 0
+                        ? _springController
+                        : null,
+                    onTap: () => widget.onTabSelected(0),
+                  ),
+                  const SizedBox(width: 4),
+                  _DockFab(
+                    key: const Key('dock_fab_add'),
+                    onTap: widget.onAddPressed,
+                    badgeCount: badgeCount,
+                  ),
+                  const SizedBox(width: 4),
+                  _DockTab(
+                    key: const Key('dock_tab_browser'),
+                    icon: Icons.language_rounded,
+                    label: 'Browser',
+                    isActive: widget.currentIndex == 1,
+                    springValue: widget.currentIndex == 1
+                        ? _springController
+                        : null,
+                    onTap: () => widget.onTabSelected(1),
+                  ),
+                  const SizedBox(width: 4),
+                  _DockTab(
+                    key: const Key('dock_tab_settings'),
+                    icon: Icons.tune_rounded,
+                    label: 'Settings',
+                    isActive: widget.currentIndex == 2,
+                    springValue: widget.currentIndex == 2
+                        ? _springController
+                        : null,
+                    onTap: () => widget.onTabSelected(2),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -147,6 +159,8 @@ class _AuroraDockState extends State<AuroraDock>
 }
 
 class _DockTab extends StatelessWidget {
+  static const double tabSize = 44.0;
+
   final IconData icon;
   final String label;
   final bool isActive;
@@ -166,33 +180,35 @@ class _DockTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final scale = isActive
         ? (springValue != null
-            ? CurvedAnimation(
-                parent: springValue!,
-                curve: Curves.elasticOut,
-              ).drive(Tween(begin: 1.0, end: 1.1))
+            ? springValue!.drive(Tween(begin: 1.0, end: 1.1))
             : const AlwaysStoppedAnimation(1.1))
         : const AlwaysStoppedAnimation(1.0);
 
     return AnimatedBuilder(
       animation: scale,
       builder: (context, _) {
-        return Transform.scale(
-          scale: scale.value,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: onTap,
-              child: Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                child: Icon(
-                  icon,
-                  size: 20,
-                  color: isActive
-                      ? AuroraColors.accent
-                      : AuroraColors.mutedText.withValues(alpha: 0.4),
+        return Semantics(
+          label: label,
+          button: true,
+          selected: isActive,
+          child: Transform.scale(
+            scale: scale.value,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => onTap(),
+                child: Container(
+                  width: tabSize,
+                  height: tabSize,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    icon,
+                    size: 20,
+                    color: isActive
+                        ? AuroraColors.accent
+                        : AuroraColors.mutedText.withValues(alpha: 0.4),
+                  ),
                 ),
               ),
             ),
@@ -277,3 +293,4 @@ class _DockFab extends StatelessWidget {
     );
   }
 }
+

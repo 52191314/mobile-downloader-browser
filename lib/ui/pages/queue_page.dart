@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../downloader/downloader.dart';
+import '../../platform/public_downloads_service.dart';
 import '../../theme/aurora_colors.dart';
+import '../notifications/aurora_snackbar.dart';
 import '../widgets/edge_swipe_card.dart';
 import '../widgets/empty_queue.dart';
 import '../widgets/download_task_row.dart';
+import '../widgets/settings_formatters.dart';
 
 /// Describes a state-filter chip option in the queue page.
 /// [states] is `null` to show all tasks; otherwise only tasks whose
@@ -19,13 +22,30 @@ final class _StateFilterOption {
   const _StateFilterOption(this.states, this.label, this.icon);
 }
 
+/// Holds closure-typed callbacks from a [DownloadTask] that are lost during
+/// JSON serialization/deserialization.  Used by the undo-delete flow to
+/// faithfully restore a cancelled task.
+final class _TaskCallbacks {
+  final Future<String?> Function(String url, {Map<String, String>? headers})?
+      fetchViaWebView;
+  final Future<List<int>?> Function(String url)? fetchBinaryViaWebView;
+  final String? Function(String url)? hlsPlaylistCache;
+  final Future<Map<String, String>> Function(String url)? cookieProvider;
+  final Future<String?> Function({bool forceReload})? onTokenExpired;
+
+  _TaskCallbacks._(DownloadTask task)
+      : fetchViaWebView = task.fetchViaWebView,
+        fetchBinaryViaWebView = task.fetchBinaryViaWebView,
+        hlsPlaylistCache = task.hlsPlaylistCache,
+        cookieProvider = task.cookieProvider,
+        onTokenExpired = task.onTokenExpired;
+}
+
 class QueuePage extends StatefulWidget {
   final DownloadQueue queue;
   final TextEditingController urlController;
   final Future<void> Function() onAddDownload;
   final Future<void> Function(DownloadTask task) onOpenDownload;
-  final Future<void> Function(DownloadTask task) onShareDownload;
-  final Future<void> Function(DownloadTask task)? onExportDownload;
   final Future<void> Function(DownloadTask task)? onRetryTask;
   final VoidCallback? Function(DownloadTask task)? onPauseTask;
   final VoidCallback? Function(DownloadTask task)? onResumeTask;
@@ -42,8 +62,6 @@ class QueuePage extends StatefulWidget {
     required this.urlController,
     required this.onAddDownload,
     required this.onOpenDownload,
-    required this.onShareDownload,
-    this.onExportDownload,
     this.onRetryTask,
     this.onPauseTask,
     this.onResumeTask,
@@ -61,6 +79,7 @@ class QueuePage extends StatefulWidget {
 
 class _QueuePageState extends State<QueuePage> {
   StreamSubscription<DownloadTask>? _sub;
+  StreamSubscription<String>? _removedSub;
   Timer? _rebuildTimer;
   String _selectedFolderFilter = 'All';
   bool _viewMode = false; // false = list, true = grid
@@ -97,6 +116,9 @@ class _QueuePageState extends State<QueuePage> {
         _showPartialMergeDialog(task);
       }
     });
+    _removedSub = widget.queue.onTaskRemoved.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onUrlTextChanged() {
@@ -127,22 +149,11 @@ class _QueuePageState extends State<QueuePage> {
     _urlFocusNode.dispose();
     _rebuildTimer?.cancel();
     _sub?.cancel();
+    _removedSub?.cancel();
     super.dispose();
   }
 
   String? _getTaskFolder(DownloadTask task) {
-    if (task.exportDirectoryUri != null && task.exportDirectoryUri!.isNotEmpty) {
-      final uri = task.exportDirectoryUri!;
-      try {
-        final decoded = Uri.decodeFull(uri);
-        final segments = decoded.split(':');
-        if (segments.length > 1) {
-          final folderPart = segments.last.split('/').last;
-          if (folderPart.isNotEmpty) return folderPart;
-        }
-      } catch (_) {}
-      return 'Custom Folder';
-    }
     try {
       final normalized = task.savePath.replaceAll('\\', '/');
       final pathParts = normalized.split('/');
@@ -188,14 +199,6 @@ class _QueuePageState extends State<QueuePage> {
           child: _buildQueueTab(context, tasks, completed, failed),
         ),
       );
-  }
-
-  String _speedLabel(double bytesPerSecond) {
-    if (bytesPerSecond <= 0) return '0 KB/s';
-    if (bytesPerSecond < 1024 * 1024) {
-      return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
-    }
-    return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(2)} MB/s';
   }
 
   // ---------------------------------------------------------------------------
@@ -386,13 +389,11 @@ class _QueuePageState extends State<QueuePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.search_off, size: 48, color: AuroraColors.mutedDeep),
-              const SizedBox(height: 12),
-              Text(
-                _searchQuery.isNotEmpty
+              EmptyQueue(
+                icon: Icons.search_off,
+                message: _searchQuery.isNotEmpty
                     ? 'No results for "$_searchQuery"'
                     : 'No tasks match the current filter',
-                style: TextStyle(color: AuroraColors.mutedText, fontSize: 13),
               ),
               const SizedBox(height: 4),
               TextButton.icon(
@@ -413,7 +414,7 @@ class _QueuePageState extends State<QueuePage> {
         ),
       );
     }
-    return const SizedBox(height: 280, child: EmptyQueue());
+    return SizedBox(height: 280, child: const EmptyQueue());
   }
 
   // ---------------------------------------------------------------------------
@@ -589,7 +590,7 @@ class _QueuePageState extends State<QueuePage> {
 
   static const _stateFilterOptions = <_StateFilterOption>{
     _StateFilterOption(null, 'All', Icons.all_inclusive),
-    _StateFilterOption({DownloadState.downloading, DownloadState.idle}, 'Active', Icons.bolt),
+    _StateFilterOption({DownloadState.downloading, DownloadState.idle, DownloadState.merging}, 'Active', Icons.bolt),
     _StateFilterOption({DownloadState.paused}, 'Paused', Icons.pause_circle_outline),
     _StateFilterOption({DownloadState.completed}, 'Done', Icons.done_all),
     _StateFilterOption({DownloadState.failed}, 'Failed', Icons.error_outline),
@@ -658,6 +659,7 @@ class _QueuePageState extends State<QueuePage> {
   void _showSortPicker(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      useSafeArea: true,
       backgroundColor: AuroraColors.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -870,7 +872,7 @@ class _QueuePageState extends State<QueuePage> {
                 Icon(Icons.speed, size: 14, color: AuroraColors.mutedText),
                 const SizedBox(width: 4),
                 Text(
-                  _speedLabel(totalSpeed),
+                  formatSpeed(totalSpeed),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -941,7 +943,48 @@ class _QueuePageState extends State<QueuePage> {
         return AuroraColors.nordGreen; // Green (Nord)
       case DownloadState.failed:
         return AuroraColors.nordRed; // Red (Nord)
+      case DownloadState.merging:
+        return Colors.orange;
     }
+  }
+
+  /// Called when the user left-swipes a task — immediately removes the task
+  /// from the queue and shows an Undo snackbar.  If the user taps Undo
+  /// within 5 seconds the task is restored (with callbacks reattached).
+  Future<void> _deleteTaskWithUndo(DownloadTask task) async {
+    // Snapshot the task data (toJson loses closure-typed fields).
+    final taskJson = task.toJson();
+    final callbacks = _TaskCallbacks._(task);
+
+    // Await the actual cancellation (file cleanup, removal from queue).
+    await widget.queue.cancelTaskAsync(task.id);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Removed "${_taskDisplayName(task)}"'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            final restored = DownloadTask.fromJson(taskJson);
+            // Reattach closure-typed callbacks that toJson/fromJson loses.
+            restored.fetchViaWebView = callbacks.fetchViaWebView;
+            restored.fetchBinaryViaWebView = callbacks.fetchBinaryViaWebView;
+            restored.hlsPlaylistCache = callbacks.hlsPlaylistCache;
+            restored.cookieProvider = callbacks.cookieProvider;
+            restored.onTokenExpired = callbacks.onTokenExpired;
+            // Non-completed tasks are set to paused so they don't auto-start.
+            if (restored.state != DownloadState.completed) {
+              restored.state = DownloadState.paused;
+              restored.downloadedBytes = 0;
+            }
+            widget.queue.addTask(restored, force: true);
+          },
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   Widget _buildTaskRow(BuildContext context, DownloadTask task) {
@@ -951,54 +994,84 @@ class _QueuePageState extends State<QueuePage> {
         ? (task.downloadedBytes / task.totalBytes).clamp(0.0, 1.0)
         : null;
 
+    // ── Swipe backgrounds ──────────────────────────────────────────────
+    //
+    // HoldSwipeCard conventions:
+    //   * leftBackground  — revealed when swiping RIGHT (offset > 0)
+    //   * rightBackground — revealed when swiping LEFT  (offset < 0)
+    //   * onRightSwipe    — fired after a RIGHT swipe completes
+    //   * onLeftSwipe     — fired after a LEFT  swipe completes
+    //
+    // User decision:  Right = pause/resume/retry/open  ·  Left = delete
+
+    final isMerging = task.state == DownloadState.merging;
+
+    // Right-swipe background  (teal, adaptive icon)
+    Widget? _rightSwipeBackground() {
+      Widget icon;
+      switch (task.state) {
+        case DownloadState.idle:
+        case DownloadState.downloading:
+          icon = const Icon(Icons.pause, color: AuroraColors.accent);
+        case DownloadState.paused:
+          icon = const Icon(Icons.play_arrow, color: AuroraColors.accent);
+        case DownloadState.failed:
+          icon = const Icon(Icons.refresh, color: AuroraColors.accent);
+        case DownloadState.completed:
+          icon = const Icon(Icons.open_in_new, color: AuroraColors.accent);
+        case DownloadState.merging:
+          return null; // not swipeable
+      }
+      return Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: AuroraColors.accent.withValues(alpha: 0.2),
+        child: icon,
+      );
+    }
+
+    // Left-swipe background  (red, delete icon)
+    Widget? _leftSwipeBackground() {
+      if (isMerging) return null;
+      return Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        color: AuroraColors.nordRed.withValues(alpha: 0.2),
+        child: const Icon(Icons.delete_outline, color: AuroraColors.nordRed),
+      );
+    }
+
+    // Right-swipe action  (state-aware)
+    VoidCallback? _onRightSwipe() {
+      if (isMerging) return null;
+      switch (task.state) {
+        case DownloadState.idle:
+        case DownloadState.downloading:
+          return () => widget.onPauseTask?.call(task)?.call();
+        case DownloadState.paused:
+          return () => widget.onResumeTask?.call(task)?.call();
+        case DownloadState.failed:
+          return () => widget.onRetryTask?.call(task);
+        case DownloadState.completed:
+          return () => widget.onOpenDownload?.call(task);
+        case DownloadState.merging:
+          return null;
+      }
+    }
+
+    // Left-swipe action  (delete with undo)
+    VoidCallback? _onLeftSwipe() {
+      if (isMerging) return null;
+      return () => unawaited(_deleteTaskWithUndo(task));
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: EdgeSwipeCard(
-        leftBackground: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 20),
-          color: AuroraColors.nordRed.withValues(alpha: 0.2),
-          child: const Icon(Icons.delete_outline, color: AuroraColors.nordRed),
-        ),
-        rightBackground: Container(
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.only(left: 20),
-          color: AuroraColors.accent.withValues(alpha: 0.2),
-          child: Icon(Icons.pause, color: AuroraColors.accent),
-        ),
-        onLeftSwipe: () {
-          // Swipe left → delete
-          if (!mounted) return;
-          showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Remove download?'),
-              content: Text('Remove "${_fileName(task.savePath)}"?'),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel')),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Remove'),
-                ),
-              ],
-            ),
-          ).then((confirm) {
-            if (confirm == true) {
-              widget.onCancelTask?.call(task)?.call();
-            }
-          });
-        },
-        onRightSwipe: () {
-          // Swipe right → pause/resume
-          if (task.state == DownloadState.downloading ||
-              task.state == DownloadState.idle) {
-            widget.onPauseTask?.call(task)?.call();
-          } else if (task.state == DownloadState.paused) {
-            widget.onResumeTask?.call(task)?.call();
-          }
-        },
+      child: HoldSwipeCard(
+        leftBackground: _rightSwipeBackground(),   // revealed on RIGHT swipe
+        rightBackground: _leftSwipeBackground(),    // revealed on LEFT  swipe
+        onLeftSwipe: _onLeftSwipe(),                // LEFT  swipe → delete
+        onRightSwipe: _onRightSwipe(),              // RIGHT swipe → adaptive
         child: Container(
           constraints: const BoxConstraints(minHeight: 72),
           decoration: BoxDecoration(
@@ -1025,11 +1098,9 @@ class _QueuePageState extends State<QueuePage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _fileName(task.savePath),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                      _buildNameWidget(
+                        task,
+                        const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                           color: AuroraColors.text,
@@ -1042,14 +1113,16 @@ class _QueuePageState extends State<QueuePage> {
                       // download is actively receiving data.
                       if (task.state == DownloadState.downloading ||
                           task.state == DownloadState.idle)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(1),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 2,
-                            backgroundColor:
-                                AuroraColors.surfaceVariant,
-                            valueColor: AlwaysStoppedAnimation<Color>(color),
+                        RepaintBoundary(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(1),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 2,
+                              backgroundColor:
+                                  AuroraColors.surfaceVariant,
+                              valueColor: AlwaysStoppedAnimation<Color>(color),
+                            ),
                           ),
                         ),
                       if (task.state == DownloadState.completed ||
@@ -1120,6 +1193,18 @@ class _QueuePageState extends State<QueuePage> {
         tooltip: 'Resume',
         onPressed: () => widget.onResumeTask?.call(task)?.call(),
       );
+    } else if (task.state == DownloadState.merging) {
+      primaryAction = const SizedBox(
+        width: 32,
+        height: 32,
+        child: Padding(
+          padding: EdgeInsets.all(6),
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(AuroraColors.accent),
+          ),
+        ),
+      );
     } else if (task.state == DownloadState.failed) {
       primaryAction = _compactButton(
         icon: Icons.refresh_rounded,
@@ -1128,21 +1213,16 @@ class _QueuePageState extends State<QueuePage> {
         onPressed: () => widget.onRetryTask?.call(task),
       );
     } else if (task.state == DownloadState.completed) {
-      if (widget.onExportDownload != null) {
-        primaryAction = _compactButton(
-          icon: Icons.drive_file_move_outlined,
-          color: AuroraColors.nordGreen,
-          tooltip: 'Export',
-          onPressed: () => widget.onExportDownload!(task),
-        );
-      }
+      // No primary action needed — file is already in public Downloads.
     }
 
     // ── Overflow popup menu with all secondary actions ──────────
     final popupItems = <PopupMenuEntry<String>>[];
 
-    // Force merge (failed only)
-    if (task.state == DownloadState.failed &&
+    // Force merge (non-completed, non-active/downloading, non-merging tasks)
+    if (task.state != DownloadState.completed &&
+        task.state != DownloadState.downloading &&
+        task.state != DownloadState.merging &&
         widget.onForceMergeTask != null) {
       popupItems.add(
         PopupMenuItem(
@@ -1211,88 +1291,68 @@ class _QueuePageState extends State<QueuePage> {
 
     if (!hasPrimary && !hasOverflow) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (primaryAction != null) ...[
-            primaryAction,
-            const SizedBox(width: 4),
-          ],
-          if (hasOverflow)
-            SizedBox(
-              width: 26,
-              height: 26,
-              child: PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, size: 14,
-                    color: AuroraColors.mutedText),
-                padding: EdgeInsets.zero,
-                splashRadius: 14,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                color: AuroraColors.surfaceCard,
-                elevation: 4,
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'force_merge':
-                      unawaited(widget.onForceMergeTask!(task));
-                    case 'open_source':
-                      widget.onOpenUrlInBrowser!(task.sourcePageUrl!);
-                    case 'resniff_auto':
-                      unawaited(widget.onResniffAuto?.call(task));
-                    case 'resniff_manual':
-                      unawaited(widget.onResniffManual?.call(task));
-                    case 'delete':
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: Text(isCompleted
-                              ? 'Remove download?'
-                              : 'Cancel download?'),
-                          content: Text(
-                            isCompleted
-                                ? 'Remove "${_fileName(task.savePath)}" from the download list?'
-                                : 'Cancel and remove "${_fileName(task.savePath)}" from your queue?\nThis will delete any temporary or downloaded files.',
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: (_) {},
+      onLongPressMoveUpdate: (_) {},
+      onLongPressEnd: (_) {},
+      onLongPressCancel: () {},
+      child: Padding(
+        padding: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (primaryAction != null) ...[
+              primaryAction,
+              const SizedBox(width: 4),
+            ],
+            if (hasOverflow)
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: PopupMenuButton<String>(
+                  icon: Icon(Icons.more_vert, size: 14,
+                      color: AuroraColors.mutedText),
+                  padding: EdgeInsets.zero,
+                  splashRadius: 14,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  color: AuroraColors.surfaceCard,
+                  elevation: 4,
+                  onSelected: (value) async {
+                    switch (value) {
+                      case 'force_merge':
+                        unawaited(widget.onForceMergeTask!(task));
+                      case 'open_source':
+                        widget.onOpenUrlInBrowser!(task.sourcePageUrl!);
+                      case 'resniff_auto':
+                        unawaited(widget.onResniffAuto?.call(task));
+                      case 'resniff_manual':
+                        unawaited(widget.onResniffManual?.call(task));
+                      case 'delete':
+                        unawaited(_deleteTaskWithUndo(task));
+                      case 'properties':
+                        showDialog(
+                          context: context,
+                          builder: (context) => DownloadPropertiesDialog(
+                            task: task,
+                            onOpenDownload: widget.onOpenDownload,
+                            onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
+                            onTaskUpdated: (t) => widget.queue.emitTask(t),
                           ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Keep'),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child:
-                                  Text(isCompleted ? 'Remove' : 'Cancel'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirm == true) {
-                        widget.onCancelTask?.call(task)?.call();
-                      }
-                    case 'properties':
-                      showDialog(
-                        context: context,
-                        builder: (context) => DownloadPropertiesDialog(
-                          task: task,
-                          onOpenDownload: widget.onOpenDownload,
-                          onShareDownload: widget.onShareDownload,
-                          onExport: widget.onExportDownload,
-                          onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
-                        ),
-                      ).then((_) {
-                        if (mounted) setState(() {});
-                      });
-                  }
-                },
-                itemBuilder: (_) => popupItems,
+                        ).then((_) {
+                          if (mounted) setState(() {});
+                        });
+                    }
+                  },
+                  itemBuilder: (_) => popupItems,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1312,46 +1372,129 @@ class _QueuePageState extends State<QueuePage> {
     return normalized.split('/').last;
   }
 
+  String _taskDisplayName(DownloadTask task) {
+    final filename = _fileName(task.savePath);
+    final dotIdx = filename.lastIndexOf('.');
+    if (dotIdx != -1 && dotIdx > 0 && filename.length - dotIdx <= 6) {
+      return filename;
+    }
+
+    String? ext;
+    if (task.contentType != null && task.contentType!.isNotEmpty) {
+      final cleanMime = task.contentType!.split(';').first.trim().toLowerCase();
+      if (cleanMime == 'application/vnd.apple.mpegurl' || cleanMime == 'application/x-mpegurl') {
+        ext = '.mp4';
+      } else if (cleanMime == 'application/dash+xml') {
+        ext = '.mp4';
+      } else {
+        ext = PublicDownloadsService.extensionForMime(cleanMime);
+      }
+    }
+
+    if (ext == null || ext.isEmpty) {
+      final parsedUri = Uri.tryParse(task.url);
+      if (parsedUri != null && parsedUri.pathSegments.isNotEmpty) {
+        final lastSeg = parsedUri.pathSegments.last;
+        final lastDot = lastSeg.lastIndexOf('.');
+        if (lastDot != -1 && lastDot > 0 && lastSeg.length - lastDot <= 6) {
+          final urlExt = lastSeg.substring(lastDot).toLowerCase();
+          if (urlExt == '.m3u8' || urlExt == '.mpd') {
+            ext = '.mp4';
+          } else {
+            ext = urlExt;
+          }
+        }
+      }
+    }
+
+    if (ext == null || ext.isEmpty) {
+      if (task.url.toLowerCase().contains('.m3u8')) {
+        ext = '.mp4';
+      } else if (task.url.toLowerCase().contains('.mpd')) {
+        ext = '.mp4';
+      } else if (task.url.startsWith('magnet:')) {
+        ext = '.torrent';
+      }
+    }
+
+    if (ext != null && ext.isNotEmpty) {
+      return '$filename$ext';
+    }
+    return filename;
+  }
+
+  /// Renders the task filename with middle-ellipsis: the base name
+  /// is end-ellipsized inside an Expanded (or Flexible when centered),
+  /// while the file extension sits in a separate non-shrinking Text
+  /// so it is always visible. For filenames without a recognizable
+  /// extension, falls back to a plain Text with end-ellipsis.
+  Widget _buildNameWidget(DownloadTask task, TextStyle style, {bool centered = false}) {
+    final name = _taskDisplayName(task);
+    final dotIdx = name.lastIndexOf('.');
+    if (dotIdx > 0 && name.length - dotIdx <= 6) {
+      final base = name.substring(0, dotIdx);
+      final ext = name.substring(dotIdx); // includes the dot
+      if (centered) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+            ),
+            Text(ext, maxLines: 1, style: style),
+          ],
+        );
+      }
+      return Row(
+        children: [
+          Expanded(
+            child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+          ),
+          Text(ext, maxLines: 1, style: style),
+        ],
+      );
+    }
+    return Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+  }
+
   String _metadataLabel(DownloadTask task) {
     final parts = <String>[];
     if (task.state == DownloadState.downloading ||
         task.state == DownloadState.idle) {
       if (task.totalBytes > 0) {
-        parts.add('${_formatBytes(task.downloadedBytes)} / ${_formatBytes(task.totalBytes)}');
+        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
       } else if (task.downloadedBytes > 0) {
-        parts.add('${_formatBytes(task.downloadedBytes)} downloaded');
+        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
       }
-      parts.add(_speedLabel(task.speed));
+      parts.add(formatSpeed(task.speed));
       final elapsed = DateTime.now().difference(task.createdAt);
       final m = elapsed.inMinutes;
       final s = elapsed.inSeconds % 60;
       parts.add('${m}m ${s}s');
     } else if (task.state == DownloadState.completed && task.totalBytes > 0) {
-      parts.add(_formatBytes(task.totalBytes));
+      parts.add(formatBytes(task.totalBytes));
     } else if (task.state == DownloadState.completed && task.downloadedBytes > 0) {
-      parts.add('${_formatBytes(task.downloadedBytes)} downloaded');
+      parts.add('${formatBytes(task.downloadedBytes)} downloaded');
     } else if (task.state == DownloadState.failed && task.errorMessage != null) {
       parts.add(task.errorMessage!.length > 40
           ? '${task.errorMessage!.substring(0, 40)}…'
           : task.errorMessage!);
     } else if (task.state == DownloadState.paused) {
       if (task.totalBytes > 0) {
-        parts.add('${_formatBytes(task.downloadedBytes)} / ${_formatBytes(task.totalBytes)}');
+        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
       } else if (task.downloadedBytes > 0) {
-        parts.add('${_formatBytes(task.downloadedBytes)} downloaded');
+        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
       }
       parts.add('Paused');
+    } else if (task.state == DownloadState.merging) {
+      if (task.totalBytes > 0 && task.downloadedBytes > 0) {
+        parts.add('Merging chunk ${task.downloadedBytes} of ${task.totalBytes}');
+      } else {
+        parts.add('Merging…');
+      }
     }
     return parts.join(' · ');
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   // ---------------------------------------------------------------------------
@@ -1363,7 +1506,7 @@ class _QueuePageState extends State<QueuePage> {
   Widget _buildGridTile(DownloadTask task) {
     return GestureDetector(
       onTap: () => widget.onOpenDownload(task),
-      onLongPress: () => widget.onShareDownload(task),
+      onLongPress: () => widget.onOpenDownload(task),
       child: Container(
         decoration: BoxDecoration(
           color: AuroraColors.surfaceCard,
@@ -1380,21 +1523,19 @@ class _QueuePageState extends State<QueuePage> {
               color: AuroraColors.nordGreen,
             ),
             const SizedBox(height: 8),
-            Text(
-              _fileName(task.savePath),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
+            _buildNameWidget(
+              task,
+              const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
                 color: AuroraColors.text,
               ),
+              centered: true,
             ),
             if (task.totalBytes > 0) ...[
               const SizedBox(height: 4),
               Text(
-                _formatBytes(task.totalBytes),
+                formatBytes(task.totalBytes),
                 style: TextStyle(
                   fontSize: 10,
                   color: AuroraColors.mutedDeep,
@@ -1439,14 +1580,11 @@ class _QueuePageState extends State<QueuePage> {
               if (widget.onForceMergeTask != null) {
                 final ok = await widget.onForceMergeTask!(task);
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        ok
-                            ? 'Partial file merged successfully.'
-                            : 'Failed to merge partial file.',
-                      ),
-                    ),
+                  AuroraSnackbar.show(
+                    context,
+                    ok
+                        ? 'Partial file merged successfully.'
+                        : 'Failed to merge partial file.',
                   );
                 }
               }
@@ -1504,9 +1642,7 @@ class _QueuePageState extends State<QueuePage> {
                 );
                 widget.queue.addTask(newTask, force: true);
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('New download added for refreshed link.')),
-                  );
+                  AuroraSnackbar.show(context, 'New download added for refreshed link.');
                 }
               }
             },
@@ -1520,9 +1656,7 @@ class _QueuePageState extends State<QueuePage> {
               if (existing != null) {
                 existing.url = newUrl;
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Download link updated. You can retry the download.')),
-                  );
+                  AuroraSnackbar.show(context, 'Download link updated. You can retry the download.');
                   setState(() {});
                 }
               }

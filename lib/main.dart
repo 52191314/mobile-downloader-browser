@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,6 +20,7 @@ import 'theme/aurora_colors.dart';
 import 'theme/aurora_glass_background.dart';
 import 'ui/pages/queue_page.dart';
 import 'ui/widgets/aurora_dock.dart';
+import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
@@ -30,36 +30,44 @@ import 'ui/pages/settings_page.dart';
 const _snifferDownloadUserAgent =
     'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
+/// Top-level notifier for the app theme mode.  Updated by [_AuroraHomeState]
+/// whenever the user changes [DownloadSettings.darkModePreference].
+final ValueNotifier<ThemeMode> appThemeModeNotifier =
+    ValueNotifier(ThemeMode.system);
+
 void main() {
   // Global error handlers: catch any uncaught Dart/async errors so a single
   // plugin failure does not silently kill the app (which Android reports as
   // a crash to the user).  On the S23 Ultra this is especially important
   // because Samsung's One UI aggressively kills apps that hit an uncaught
   // error during init.
-  runZonedGuarded(() {
-    WidgetsFlutterBinding.ensureInitialized();
-    FlutterError.onError = (details) {
-      FlutterError.presentError(details);
-      AuroraLog.instance.error(
-        '[FlutterError] ${details.exceptionAsString()}',
+  runZonedGuarded(
+    () {
+      WidgetsFlutterBinding.ensureInitialized();
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+        AuroraLog.instance.error(
+          '[FlutterError] ${details.exceptionAsString()}',
+          category: LogCategory.app,
+          screen: LogScreen.unknown,
+          eventType: LogEventType.error,
+          stackTrace: details.stack,
+        );
+        debugPrint('[AuroraFlutterError] ${details.exceptionAsString()}');
+      };
+      runApp(const MyApp());
+    },
+    (error, stack) {
+      AuroraLog.instance.fatal(
+        '[ZoneError] $error',
         category: LogCategory.app,
-        screen: LogScreen.unknown,
+        screen: LogScreen.background,
         eventType: LogEventType.error,
-        stackTrace: details.stack,
+        stackTrace: stack,
       );
-      debugPrint('[AuroraFlutterError] ${details.exceptionAsString()}');
-    };
-    runApp(const MyApp());
-  }, (error, stack) {
-    AuroraLog.instance.fatal(
-      '[ZoneError] $error',
-      category: LogCategory.app,
-      screen: LogScreen.background,
-      eventType: LogEventType.error,
-      stackTrace: stack,
-    );
-    debugPrint('[AuroraZoneError] $error\n$stack');
-  });
+      debugPrint('[AuroraZoneError] $error\n$stack');
+    },
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -78,25 +86,95 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        return MaterialApp(
-          title: 'Aurora Downloader',
-          debugShowCheckedModeBanner: false,
-          theme: _buildTheme(),
-          home: AuroraHome(
-            browserController: browserController,
-            downloadQueue: downloadQueue,
-            driveSyncService: driveSyncService,
-            initialTabIndex: initialTabIndex,
-          ),
-        );
-      },
+    // ListenableBuilder watches the top-level theme-mode notifier so that
+    // MaterialApp is rebuilt when the user changes dark/light/system preference
+    // in Settings.  The home widget (AuroraHome) retains its State because it
+    // stays at the same position in the tree with the same widget type.
+    return ListenableBuilder(
+      listenable: appThemeModeNotifier,
+      builder: (context, _) => MaterialApp(
+        title: 'Aurora Downloader',
+        debugShowCheckedModeBanner: false,
+        themeMode: appThemeModeNotifier.value,
+        theme: _buildLightTheme(),
+        darkTheme: _buildDarkTheme(isOled: false),
+        home: AuroraHome(
+          browserController: browserController,
+          downloadQueue: downloadQueue,
+          driveSyncService: driveSyncService,
+          initialTabIndex: initialTabIndex,
+        ),
+      ),
     );
   }
 }
 
-ThemeData _buildTheme() {
+/// Builds the light-mode theme (Nord-inspired inverted palette).
+ThemeData _buildLightTheme() {
+  final colorScheme = ColorScheme.fromSeed(
+    seedColor: AuroraColorsLight.accent,
+    brightness: Brightness.light,
+  );
+  return ThemeData(
+    useMaterial3: true,
+    colorScheme: colorScheme,
+    scaffoldBackgroundColor: AuroraColorsLight.background,
+    appBarTheme: AppBarTheme(
+      backgroundColor: AuroraColorsLight.surface,
+      foregroundColor: AuroraColorsLight.text,
+      centerTitle: false,
+      elevation: 0,
+      titleTextStyle: TextStyle(
+        color: AuroraColorsLight.text,
+        fontSize: 20,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: AuroraColorsLight.surfaceVariant,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide.none,
+      ),
+      hintStyle: TextStyle(color: AuroraColorsLight.mutedText),
+    ),
+    cardTheme: CardThemeData(
+      color: AuroraColorsLight.glassSurface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: AuroraColorsLight.glassBorder, width: 1),
+      ),
+    ),
+    bottomAppBarTheme: BottomAppBarThemeData(
+      color: AuroraColorsLight.dockSurface,
+      elevation: 0,
+      shape: const CircularNotchedRectangle(),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: AuroraColorsLight.accent,
+      linearTrackColor: AuroraColorsLight.surfaceVariant,
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: AuroraColorsLight.accent,
+      inactiveTrackColor: AuroraColorsLight.surfaceVariant,
+      thumbColor: AuroraColorsLight.accent,
+      overlayColor: AuroraColorsLight.accent.withValues(alpha: 0.14),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: AuroraColorsLight.dockSurface,
+      indicatorColor: colorScheme.primaryContainer,
+    ),
+  );
+}
+
+/// Builds the dark-mode theme (Nord Aurora Glass palette).
+///
+/// When [isOled] is true the scaffold background is pure black
+/// for OLED power savings.
+ThemeData _buildDarkTheme({bool isOled = false}) {
+  final bg = isOled ? AuroraColors.oledBlack : AuroraColors.background;
   final colorScheme = ColorScheme.fromSeed(
     seedColor: AuroraColors.accent,
     brightness: Brightness.dark,
@@ -104,7 +182,7 @@ ThemeData _buildTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: colorScheme,
-    scaffoldBackgroundColor: AuroraColors.background,
+    scaffoldBackgroundColor: bg,
     appBarTheme: AppBarTheme(
       backgroundColor: AuroraColors.surface,
       foregroundColor: AuroraColors.text,
@@ -196,11 +274,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   DownloadSettings _settings = DownloadSettings.defaults();
   double _speedLimitKbps = 0;
   int _currentTabIndex = 1; // Start on Browser tab; overridden in initState
+
   /// Tracks which top-level tabs have been visited.  Only visited tabs are
   /// built — prevents creating QueuePage + SettingsPage at launch when the
   /// user starts on the Browser tab.  Populated in initState.
   final Set<int> _visitedMainTabs = <int>{};
   int _sniffedCount = 0;
+  late final ValueNotifier<int> _sniffedCountNotifier;
   DateTime? _lastBackPress;
   Timer? _adblockRefreshTimer;
   Timer? _queueRebuildTimer;
@@ -265,11 +345,18 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           ? _settings.searchEngine.templateUrl
           : '',
     );
+    _sniffedCountNotifier = ValueNotifier<int>(0);
     _startAdblockAutoRefresh();
     unawaited(_loadSettings());
     unawaited(_initNotifications());
     _queueSubscription = _downloadQueue.onTaskUpdated.listen((task) {
-      if (_queueRebuildTimer == null || !_queueRebuildTimer!.isActive) {
+      // QueuePage listens to task updates and throttles its own rebuilds.
+      // The shell only needs a rebuild for visible queue UI or when the queue
+      // tab has not been constructed yet.
+      final shouldRebuildShell =
+          _currentTabIndex == 0 || !_visitedMainTabs.contains(0);
+      if (shouldRebuildShell &&
+          (_queueRebuildTimer == null || !_queueRebuildTimer!.isActive)) {
         _queueRebuildTimer = Timer(const Duration(milliseconds: 500), () {
           if (mounted) setState(() {});
         });
@@ -358,13 +445,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       screen: LogScreen.settings,
       eventType: LogEventType.navigation,
     );
-    if (previous == 1 && index != 1) {
-      // Leaving Browser tab → pause WebView JS timers globally.
-      unawaited(_browserController.pauseAllWebViews());
-    } else if (index == 1 && previous != 1) {
-      // Entering Browser tab → resume WebView JS timers.
-      unawaited(_browserController.resumeActiveWebView());
-    }
   }
 
   @override
@@ -375,6 +455,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _queueSubscription?.cancel();
     _driveSubscription?.cancel();
     _urlController.dispose();
+    _sniffedCountNotifier.dispose();
     _libraryUpdateNotifier.dispose();
     _folderController.dispose();
     _adblockSourceController.dispose();
@@ -390,7 +471,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       // App going to background — log it so we can trace kills.
-      debugPrint('[AuroraHome] App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}');
+      debugPrint(
+        '[AuroraHome] App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}',
+      );
       AuroraLog.instance.info(
         'App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}',
         category: LogCategory.app,
@@ -401,6 +484,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       // Force-sync the foreground service so Android sees the persistent
       // notification immediately and is less likely to kill us.
       _downloadQueue.syncForegroundService();
+      // Persist the queue immediately so the latest state survives
+      // any subsequent process kill.
+      if (_downloadQueue.queuePath != null) {
+        unawaited(_downloadQueue.saveToFile(_downloadQueue.queuePath!));
+      }
     } else if (state == AppLifecycleState.resumed) {
       debugPrint('[AuroraHome] App resumed');
       AuroraLog.instance.info(
@@ -435,22 +523,23 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         onPopInvokedWithResult: (didPop, _) async {
           if (didPop) return;
           if (_currentTabIndex == 1) {
-            final canGoBack = await _browserController.canGoBack();
-            if (canGoBack) {
-              await _browserController.goBack();
-              return;
+            // Browser tab: delegate to the active tab's controller via the
+            // system-back handler registered by SnifferScreen.
+            final handled = await _browserController.handleSystemBack();
+            if (handled) return;
+            // WebView is at history root → double-press-to-exit.
+            final now = DateTime.now();
+            if (_lastBackPress == null ||
+                now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+              _lastBackPress = now;
+              _showSnack('Press back again to exit');
+            } else {
+              await SystemNavigator.pop();
             }
-          }
-          if (_currentTabIndex != 1) {
-            _selectTab(1);
             return;
           }
-          final now = DateTime.now();
-          if (_lastBackPress == null ||
-              now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
-            _lastBackPress = now;
-            _showSnack('Press back again to exit');
-          }
+          // Queue/Settings: exit the app immediately (Firefox/Samsung behavior).
+          await SystemNavigator.pop();
         },
         child: Scaffold(
           body: Stack(
@@ -471,8 +560,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             urlController: _urlController,
                             onAddDownload: _addDownloadFromUrl,
                             onOpenDownload: _openDownload,
-                            onShareDownload: _shareDownload,
-                            onExportDownload: _exportCompletedFile,
                             onRetryTask: (task) async {
                               await _downloadQueue.retryHlsTaskWithRefreshAsync(
                                 task.id,
@@ -480,11 +567,17 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                               );
                             },
                             onPauseTask: (task) =>
-                                () => unawaited(_downloadQueue.pauseTaskAsync(task.id)),
+                                () => unawaited(
+                                  _downloadQueue.pauseTaskAsync(task.id),
+                                ),
                             onResumeTask: (task) =>
-                                () => unawaited(_downloadQueue.resumeTaskAsync(task.id)),
+                                () => unawaited(
+                                  _downloadQueue.resumeTaskAsync(task.id),
+                                ),
                             onCancelTask: (task) =>
-                                () => unawaited(_downloadQueue.cancelTaskAsync(task.id)),
+                                () => unawaited(
+                                  _downloadQueue.cancelTaskAsync(task.id),
+                                ),
                             onForceMergeTask: (task) =>
                                 _downloadQueue.forceMergeTask(task.id),
                             speedLimitKbps: _speedLimitKbps,
@@ -509,8 +602,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             onOpenQueue: () => _selectTab(0),
                             onOpenSettings: () => _selectTab(2),
-                            onSniffedCountChanged: (count) =>
-                                setState(() => _sniffedCount = count),
+                            onSniffedCountChanged: (count) {
+                              if (_sniffedCount == count) return;
+                              _sniffedCount = count;
+                              if (mounted) {
+                                _sniffedCountNotifier.value = count;
+                              }
+                            },
                           ),
                         ),
                       ),
@@ -533,6 +631,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
+                              _downloadQueue.setSpeedLimit(value.round());
                               TorrentDownloader.setNativeDownloadLimit(
                                 (value * 1024).round(),
                               );
@@ -553,7 +652,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                     currentIndex: _currentTabIndex,
                     onTabSelected: (index) => _selectTab(index),
                     onAddPressed: _addDownloadFromUrl,
-                    sniffedBadgeCount: _sniffedCount,
+                    sniffedBadgeCountNotifier: _sniffedCountNotifier,
                   ),
                 ),
               ),
@@ -615,10 +714,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
 
     // Probe the URL for a real filename, Content-Type, and size.
-    final resolved = await resolveFilename(
-      url: rawUrl,
-      headers: headers,
-    );
+    final resolved = await resolveFilename(url: rawUrl, headers: headers);
     final fileName = resolved.name;
     final task = DownloadTask(
       id: id,
@@ -653,7 +749,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       screen: LogScreen.queue,
       eventType: LogEventType.userAction,
     );
-    _selectTab(1);
+    _openUrlInBrowserAfterTabReady(url);
+  }
+
+  void _openUrlInBrowserAfterTabReady(String url) {
+    if (_currentTabIndex != 1 || !_visitedMainTabs.contains(1)) {
+      _selectTab(1);
+    }
     _browserController.requestOpenUrl(url);
   }
 
@@ -663,15 +765,33 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   /// a dialog asking the user whether to update or create a new download.
   Future<void> _resniffAuto(DownloadTask task) async {
     try {
+      final sourcePage = task.sourcePageUrl;
+      if (sourcePage != null && sourcePage.isNotEmpty) {
+        if (_currentTabIndex != 1 || !_visitedMainTabs.contains(1)) {
+          _selectTab(1);
+        }
+        final sourceUri = Uri.tryParse(sourcePage);
+        if (sourceUri != null && sourceUri.hasScheme) {
+          await _browserController.loadRequest(sourceUri, addToHistory: false);
+          // Let page JS kick off player/playlist requests before probing.
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
+      }
+
       // Try the HLS playlist refresh path first (handles token expiry).
-      String? freshUrl = await _browserController.fetchFreshPlaylistUrl(task.url);
+      String? freshUrl = await _browserController.fetchFreshPlaylistUrl(
+        task.url,
+      );
       // Fall back to a head-fetch through the WebView's JS context.
       if (freshUrl == null || freshUrl == task.url) {
-        final headers =
-            await _browserController.fetchHeadersViaJavaScript(task.url);
+        final headers = await _browserController.fetchHeadersViaJavaScript(
+          task.url,
+        );
         // The URL itself hasn't changed; nothing to update.
         if (headers == null || headers.isEmpty) {
-          if (mounted) _showSnack('No updated link found — the URL is still valid.');
+          if (mounted) {
+            _showSnack('No updated link found — the URL is still valid.');
+          }
           return;
         }
         freshUrl = task.url;
@@ -711,7 +831,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       );
       if (choice == 'update') {
         task.url = freshUrl;
-        if (mounted) _showSnack('Download link updated. You can retry the download.');
+        if (mounted) {
+          _showSnack('Download link updated. You can retry the download.');
+        }
         setState(() {});
       } else if (choice == 'new') {
         final newId = DateTime.now().microsecondsSinceEpoch.toString();
@@ -749,9 +871,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       screen: LogScreen.queue,
       eventType: LogEventType.userAction,
     );
-    _browserController.requestOpenUrl(target);
-    _selectTab(1);
-    if (mounted) _showSnack('Opened source page — re-sniff the media...');
+    _openUrlInBrowserAfterTabReady(target);
+    if (mounted) {
+      _showSnack(
+        'Opened source page — re-sniff the media. A dialog will appear if the link is detected as a duplicate.',
+      );
+    }
   }
 
   static String _normalizeForCompare(String url) {
@@ -860,13 +985,19 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     try {
       final docs = await getApplicationSupportDirectory();
-      final lPath = '${docs.path}/aurora_logs.json';
-      final verbosity = await LogSettingsStore.instance.load(docs.path);
-      await AuroraLog.instance.initialize(lPath, verbosity: verbosity);
+      final path = docs.path;
+      _downloadQueue.queuePath = '$path/download_queue.json';
 
-      final qPath = '${docs.path}/download_queue.json';
-      _downloadQueue.queuePath = qPath;
-      await _downloadQueue.loadFromFile(qPath);
+      await Future.wait([
+        _driveSyncService.loadSyncedTasks(path),
+        LogSettingsStore.instance.load(path).then((verbosity) {
+          return AuroraLog.instance.initialize(
+            '$path/aurora_logs.json',
+            verbosity: verbosity,
+          );
+        }),
+        _downloadQueue.loadFromFile('$path/download_queue.json'),
+      ]);
       if (mounted) setState(() {});
     } catch (e, s) {
       _logError('Failed to load download queue/logs', e, s);
@@ -891,6 +1022,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       numChunksPerTask: settings.chunksPerTask,
       completedDownloadPublisher: _publicDownloadsService,
       autoClassifyEnabled: settings.autoClassifyEnabled,
+      remuxTsToMp4: settings.remuxTsToMp4,
       autoRetry: settings.autoRetry,
       retryLimit: settings.retryLimit,
       minSpeedThresholdBytesPerSec: settings.minSpeedThresholdKbps * 1024,
@@ -912,6 +1044,27 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         cosmeticRules: settings.manualCosmeticRules,
       ),
     );
+    // Apply proxy settings (recreates HTTP client if needed).
+    _downloadQueue.applyProxySettings(
+      settings.proxyType,
+      settings.proxyHost,
+      settings.proxyPort,
+      settings.proxyUsername,
+      settings.proxyPassword,
+    );
+    // Update the app theme mode based on the user's preference.
+    appThemeModeNotifier.value = _themeModeFromPreference(
+      settings.darkModePreference,
+    );
+  }
+
+  /// Maps [DarkModePreference] to the Flutter [ThemeMode] used by MaterialApp.
+  static ThemeMode _themeModeFromPreference(DarkModePreference pref) {
+    return switch (pref) {
+      DarkModePreference.system => ThemeMode.system,
+      DarkModePreference.off => ThemeMode.light,
+      DarkModePreference.forced => ThemeMode.dark,
+    };
   }
 
   void _startAdblockAutoRefresh() {
@@ -938,43 +1091,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _shareDownload(DownloadTask task) async {
-    try {
-      await _publicDownloadsService.share(task);
-    } catch (error) {
-      _showSnack('Could not share file: $error');
-    }
-  }
-
-  Future<void> _exportCompletedFile(DownloadTask task) async {
-    try {
-      final displayName = task.savePath.split('/').last;
-      final mimeType = PublicDownloadsService.mimeTypeForName(task.savePath);
-      final success = await _publicDownloadsService.exportFile(
-        sourcePath: task.savePath,
-        displayName: displayName,
-        mimeType: mimeType,
-      );
-      if (!mounted) return;
-      if (success) {
-        _showSnack('File exported successfully.');
-      } else {
-        _showSnack('Export cancelled.');
-      }
-    } catch (error) {
-      _showSnack('Could not export file: $error');
-    }
-  }
-
   bool _isTorrentFileUrl(Uri uri) {
     return uri.path.toLowerCase().endsWith('.torrent');
   }
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    AuroraSnackbar.show(context, message);
   }
 
   /// Builds browser-like HTTP headers for a user-pasted URL so the HLS
@@ -1001,7 +1124,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     };
   }
 
-  Future<bool> _showDuplicatePrompt(BuildContext context, String filename) async {
+  Future<bool> _showDuplicatePrompt(
+    BuildContext context,
+    String filename,
+  ) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
