@@ -4,14 +4,12 @@ import 'browser_controller.dart';
 
 class BrowserWidget extends StatelessWidget {
   final SnifferBrowserController controller;
-  final VoidCallback? onSwipeBack;
   final VoidCallback? onSwipeForward;
   final VoidCallback? onRefresh;
 
   const BrowserWidget({
     super.key,
     required this.controller,
-    this.onSwipeBack,
     this.onSwipeForward,
     this.onRefresh,
   });
@@ -50,8 +48,8 @@ class BrowserWidget extends StatelessWidget {
           onScrollChanged: (c, x, y) => ctrl.onScrollChanged(x, y),
           onDownloadStartRequest: (c, request) =>
               ctrl.onDownloadStartRequestCallback(request),
+          onRenderProcessGone: (c, detail) => ctrl.onRenderProcessGone(),
         ),
-        onSwipeBack: onSwipeBack,
         onSwipeForward: onSwipeForward,
         onRefresh: onRefresh,
       );
@@ -62,7 +60,6 @@ class BrowserWidget extends StatelessWidget {
           color: Colors.grey[200],
           child: const Center(child: Text('Mock WebView Placeholder')),
         ),
-        onSwipeBack: onSwipeBack,
         onSwipeForward: onSwipeForward,
         onRefresh: onRefresh,
       );
@@ -72,13 +69,11 @@ class BrowserWidget extends StatelessWidget {
 
 class _GestureWrappedWebView extends StatefulWidget {
   final Widget webView;
-  final VoidCallback? onSwipeBack;
   final VoidCallback? onSwipeForward;
   final VoidCallback? onRefresh;
 
   const _GestureWrappedWebView({
     required this.webView,
-    this.onSwipeBack,
     this.onSwipeForward,
     this.onRefresh,
   });
@@ -88,78 +83,61 @@ class _GestureWrappedWebView extends StatefulWidget {
 }
 
 class _GestureWrappedWebViewState extends State<_GestureWrappedWebView> {
-  // Edge zone width — touches starting here are captured by the overlay's
-  // GestureDetector, which claims them via the gesture arena so the native
-  // WebView never receives them (a translucent Listener wrapping the WebView
-  // always lost the arena to the PlatformView).
-  static const double _edgeWidth = 44.0;
+  // Right-edge zone width. The left edge is intentionally left free so the
+  // system back gesture can fire normally (navigating the active WebView back
+  // via the PopScope handler). Only the right edge is claimed for forward
+  // navigation (swipe left → go forward), matching Samsung Internet's pattern.
+  static const double _edgeWidth = 24.0;
 
   @override
   Widget build(BuildContext context) {
-    // Use a Stack with opaque edge overlays whose GestureDetector
+    // Use a Stack with a right-edge overlay whose GestureDetector
     // participates in Flutter's gesture arena and wins, preventing the
-    // native WebView from ever seeing touches at the screen edges.
+    // native WebView from ever seeing touches at the right edge.
+    // The left edge is left unclaimed — system back gesture handles back.
     return Stack(
       children: [
         widget.webView,
-        // Left edge zone — swipe right → go back
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: _edgeWidth,
-          child: _EdgeSwipeZone(
-            isLeft: true,
-            onSwipe: widget.onSwipeBack,
-          ),
-        ),
         // Right edge zone — swipe left → go forward
         Positioned(
           right: 0,
           top: 0,
           bottom: 0,
           width: _edgeWidth,
-          child: _EdgeSwipeZone(
-            isLeft: false,
-            onSwipe: widget.onSwipeForward,
-          ),
+          child: _ForwardSwipeZone(onSwipe: widget.onSwipeForward),
         ),
       ],
     );
   }
 }
 
-/// Detects horizontal edge-swipes in a single edge zone.
+/// Detects a right-edge horizontal swipe-to-left (forward navigation).
 ///
-/// Each zone uses a [GestureDetector] (not [Listener]) so its
+/// Uses a [GestureDetector] (not [Listener]) so its
 /// [HorizontalDragGestureRecognizer] competes in Flutter's gesture arena
 /// and wins, preventing the native WebView from receiving the touch at all.
 /// This eliminates the race condition that occurs when both Flutter and
 /// the native view process the same touch simultaneously.
 ///
-/// Thresholds are tuned to reject accidental swipes: 60px minimum travel,
-/// 50px max vertical drift, 200 px/s minimum velocity.
-class _EdgeSwipeZone extends StatefulWidget {
-  final bool isLeft;
+/// Thresholds are tuned to feel natural alongside the system back gesture:
+/// 60px minimum travel, 50px max vertical drift, 120 px/s minimum velocity.
+class _ForwardSwipeZone extends StatefulWidget {
   final VoidCallback? onSwipe;
 
-  const _EdgeSwipeZone({
-    required this.isLeft,
-    required this.onSwipe,
-  });
+  const _ForwardSwipeZone({required this.onSwipe});
 
   @override
-  State<_EdgeSwipeZone> createState() => _EdgeSwipeZoneState();
+  State<_ForwardSwipeZone> createState() => _ForwardSwipeZoneState();
 }
 
-class _EdgeSwipeZoneState extends State<_EdgeSwipeZone> {
+class _ForwardSwipeZoneState extends State<_ForwardSwipeZone> {
   double _netDx = 0;
   double _netDy = 0;
   double _peakAbsDx = 0;
 
   static const double _minSwipeDistance = 60.0;
   static const double _maxVerticalDrift = 50.0;
-  static const double _minVelocity = 200.0;
+  static const double _minVelocity = 120.0;
 
   @override
   Widget build(BuildContext context) {
@@ -184,9 +162,8 @@ class _EdgeSwipeZoneState extends State<_EdgeSwipeZone> {
         if (_peakAbsDx < _minSwipeDistance) return;
         // Reject swipes with excessive vertical drift.
         if (_netDy.abs() > _maxVerticalDrift) return;
-        // Direction check: left edge → must go right, right edge → must go left.
-        if (widget.isLeft && _netDx <= 0) return;
-        if (!widget.isLeft && _netDx >= 0) return;
+        // Right edge → must go left (negative dx) for forward navigation.
+        if (_netDx >= 0) return;
         // Velocity check (from the recognizer, not manual calculation).
         final velocity = details.primaryVelocity ?? 0;
         if (velocity.abs() < _minVelocity) return;

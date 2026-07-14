@@ -27,6 +27,51 @@ String? _contextString(Object? value) {
   return text == null || text.isEmpty ? null : text;
 }
 
+enum ContextMenuTargetKind {
+  ignored,
+  page,
+  textSelection,
+  link,
+  media,
+  linkedMedia,
+}
+
+ContextMenuTargetKind classifyContextMenuPayload(Map<String, dynamic> data) {
+  final href = _contextString(data['href']);
+  final src = _contextString(data['src']);
+  final selectedText = _contextString(data['selectedText']);
+  final tagName = _contextString(data['tagName']);
+  final selector = _contextString(data['selector']);
+
+  // Defense-in-depth for the old popup path. `postLinkContext()` emitted an
+  // anchor-shaped payload without a real selector; popups must never open the
+  // element context sheet.
+  if (href != null && src == null && selectedText == null && tagName == 'a' && selector == null) {
+    return ContextMenuTargetKind.ignored;
+  }
+
+  if (href != null && src != null) return ContextMenuTargetKind.linkedMedia;
+  if (href != null) return ContextMenuTargetKind.link;
+  if (src != null) return ContextMenuTargetKind.media;
+  if (selectedText != null) return ContextMenuTargetKind.textSelection;
+  return ContextMenuTargetKind.page;
+}
+
+/// Truncates a URL for display, showing host and the tail of the path.
+String _truncateUrl(String url, {int maxLength = 35}) {
+  if (url.length <= maxLength) return url;
+  final uri = Uri.tryParse(url);
+  if (uri != null && uri.host.isNotEmpty) {
+    final host = uri.host;
+    final path = uri.path;
+    if (path.length > 15) {
+      return '$host/...${path.substring(path.length - 12)}';
+    }
+    return '$host$path';
+  }
+  return '${url.substring(0, maxLength - 3)}...';
+}
+
 /// Case-insensitive header-name lookup, matching `_hasHeader` in the
 /// original state class.
 bool _hasHeader(Map<String, String> headers, String name) {
@@ -54,6 +99,8 @@ void showElementContextMenu(
   required void Function(String message) onShowSnack,
   required Future<void> Function(Uri uri) onLoadUrl,
   required void Function(String targetUrl, String? label) onAddToQueue,
+  required Future<void> Function(String text) onTranslateText,
+  required Future<void> Function(String text) onSearchText,
   required bool isCurrentPageFavorited,
   required bool isMounted,
 }) {
@@ -76,10 +123,18 @@ void showElementContextMenu(
   final selector = _contextString(data['selector']);
   final pageUrl = _contextString(data['pageUrl']);
   final pageTitle = _contextString(data['pageTitle']);
+  final targetKind = classifyContextMenuPayload(data);
+  if (targetKind == ContextMenuTargetKind.ignored) return;
   final targetUrl = href ?? src;
   final label =
       text ?? selectedText ?? pageTitle ?? tagName ?? 'Page element';
   final isFavorite = isCurrentPageFavorited;
+  final hasLink = targetKind == ContextMenuTargetKind.link ||
+      targetKind == ContextMenuTargetKind.linkedMedia;
+  final hasMedia = targetKind == ContextMenuTargetKind.media ||
+      targetKind == ContextMenuTargetKind.linkedMedia;
+  final hasTextSelection = selectedText != null;
+  final isPageOnly = targetKind == ContextMenuTargetKind.page;
 
   if (isContextMenuShowing) return;
   onContextMenuShowingChanged(true);
@@ -97,6 +152,149 @@ void showElementContextMenu(
         'selector': selector ?? '',
         'host': Uri.tryParse(pageUrl ?? '')?.host ?? '',
       };
+
+      Widget section(String title, List<Widget> tiles) {
+        if (tiles.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
+              child: Text(
+                title,
+                style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
+              ),
+            ),
+            ...tiles,
+            const Divider(height: 8),
+          ],
+        );
+      }
+
+      Widget item(
+        IconData icon,
+        String title,
+        VoidCallback onTap,
+      ) {
+        return ListTile(
+          dense: true,
+          leading: Icon(icon),
+          title: Text(title),
+          onTap: () {
+            Navigator.pop(ctx);
+            onTap();
+          },
+        );
+      }
+
+      void openTarget(String url) {
+        openContextTarget(
+          context,
+          tab: tab,
+          targetUrl: url,
+          onLoadUrl: onLoadUrl,
+          onShowSnack: onShowSnack,
+          isMounted: isMounted,
+        );
+      }
+
+      final textActions = <Widget>[
+        if (selectedText != null) ...[
+          item(
+            Icons.content_copy,
+            'Copy text',
+            () => unawaited(
+              onCopyText(selectedText, 'Selected text copied.'),
+            ),
+          ),
+          item(
+            Icons.search,
+            'Web Search',
+            () => unawaited(onSearchText(selectedText)),
+          ),
+          item(
+            Icons.translate,
+            'Translate',
+            () => unawaited(onTranslateText(selectedText)),
+          ),
+        ],
+      ];
+
+      final linkActions = <Widget>[
+        if (href != null) ...[
+          item(Icons.open_in_browser, 'Open link', () => openTarget(href)),
+          item(
+            Icons.tab,
+            'Open in new tab',
+            () => onOpenNewTab(url: href, switchToTab: true),
+          ),
+          item(
+            Icons.tab_unselected,
+            'Open in background tab',
+            () => onOpenNewTab(url: href, switchToTab: false),
+          ),
+          item(
+            Icons.copy,
+            'Copy link URL',
+            () => unawaited(onCopyText(href, 'Link URL copied.')),
+          ),
+          item(Icons.open_in_new, 'Open in system browser', () {
+            PublicDownloadsService.openUrl(href);
+          }),
+          item(Icons.history, 'Add link to queue', () {
+            onAddToQueue(href, text ?? pageTitle);
+          }),
+        ],
+      ];
+
+      final mediaActions = <Widget>[
+        if (src != null) ...[
+          item(Icons.image, 'Open media', () => openTarget(src)),
+          item(
+            Icons.tab,
+            'Open media in new tab',
+            () => onOpenNewTab(url: src, switchToTab: true),
+          ),
+          item(
+            Icons.copy,
+            'Copy media URL',
+            () => unawaited(onCopyText(src, 'Media URL copied.')),
+          ),
+          item(Icons.download, 'Download media', () {
+            onAddToQueue(src, text ?? pageTitle);
+          }),
+        ],
+      ];
+
+      final pageActions = <Widget>[
+        item(
+          Icons.copy,
+          'Copy page URL',
+          () => unawaited(onCopyCurrentUrl()),
+        ),
+        item(
+          isFavorite ? Icons.star : Icons.star_border,
+          isFavorite ? 'Remove favorite' : 'Add favorite',
+          () => unawaited(onToggleFavorite()),
+        ),
+        item(
+          Icons.save_alt,
+          'Save page',
+          () => unawaited(onSaveCurrentPage()),
+        ),
+      ];
+
+      final elementTools = <Widget>[
+        if (selector != null || href != null || src != null)
+          item(Icons.ads_click, 'Block this element', () {
+            unawaited(onHandlePickedElement(jsonEncode(blockPayload)));
+          }),
+      ];
+
       return SafeArea(
         child: ListView(
           shrinkWrap: true,
@@ -115,7 +313,7 @@ void showElementContextMenu(
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    targetUrl ?? pageUrl ?? 'Page element',
+                    _truncateUrl(targetUrl ?? selectedText ?? pageUrl ?? 'Page element'),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(ctx).textTheme.bodySmall,
@@ -123,126 +321,11 @@ void showElementContextMenu(
                 ],
               ),
             ),
-            if (targetUrl != null) ...[
-              ListTile(
-                leading: const Icon(Icons.open_in_browser),
-                title: const Text('Open in Browser'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  openContextTarget(
-                    context,
-                    tab: tab,
-                    targetUrl: targetUrl,
-                    onLoadUrl: onLoadUrl,
-                    onShowSnack: onShowSnack,
-                    isMounted: isMounted,
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.ads_click),
-                title: const Text('Block This Element'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  unawaited(
-                    onHandlePickedElement(jsonEncode(blockPayload)),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy Target URL'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  unawaited(onCopyText(targetUrl, 'Target URL copied.'));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.tab),
-                title: const Text('Open in New Tab'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onOpenNewTab(url: targetUrl, switchToTab: true);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.tab_unselected),
-                title: const Text('Open in Background Tab'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onOpenNewTab(url: targetUrl, switchToTab: false);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.open_in_new),
-                title: const Text('Open in System Browser'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  PublicDownloadsService.openUrl(targetUrl);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.history),
-                title: const Text('Add to Queue'),
-                subtitle: Text(
-                  src == null
-                      ? 'Download page for later'
-                      : 'Download target URL',
-                ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onAddToQueue(targetUrl, text ?? pageTitle);
-                },
-              ),
-              const Divider(),
-            ],
-            if (selectedText != null)
-              ListTile(
-                leading: const Icon(Icons.content_copy),
-                title: const Text('Copy Selected Text'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  unawaited(
-                    onCopyText(selectedText, 'Selected text copied.'),
-                  );
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('Copy Page URL'),
-              subtitle: pageUrl == null ? null : Text(pageUrl),
-              onTap: () {
-                Navigator.pop(ctx);
-                unawaited(onCopyCurrentUrl());
-              },
-            ),
-            ListTile(
-              leading: Icon(isFavorite ? Icons.star : Icons.star_border),
-              title: Text(isFavorite ? 'Remove Favorite' : 'Add Favorite'),
-              onTap: () {
-                Navigator.pop(ctx);
-                unawaited(onToggleFavorite());
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.save_alt),
-              title: const Text('Save Page'),
-              onTap: () {
-                Navigator.pop(ctx);
-                unawaited(onSaveCurrentPage());
-              },
-            ),
-            if (targetUrl == null)
-              ListTile(
-                leading: const Icon(Icons.ads_click),
-                title: const Text('Block This Element'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  unawaited(
-                    onHandlePickedElement(jsonEncode(blockPayload)),
-                  );
-                },
-              ),
+            if (hasTextSelection) section('Text selection', textActions),
+            if (hasLink) section('Link', linkActions),
+            if (hasMedia) section('Media', mediaActions),
+            if (isPageOnly) section('Page', pageActions),
+            section('Tools', elementTools),
           ],
         ),
       );
@@ -343,6 +426,8 @@ Future<void> addContextTargetToQueue(
     task.hlsPlaylistCache = (url) => tab.hlsPlaylistCache[url];
     task.fetchBinaryViaWebView =
         (url) => tab.controller.fetchBinaryViaJavaScript(url);
+    task.cookieProvider = (url) =>
+        tab.controller.getCookiesForDomain(url: url);
 
     bool force = false;
     if (urlExists(targetUrl)) {

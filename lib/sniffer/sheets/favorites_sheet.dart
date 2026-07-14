@@ -164,7 +164,6 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
   Widget build(BuildContext context) {
     return SafeArea(
       child: Column(
-        key: ValueKey('favorites_column_${_folders.length}'),
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
@@ -202,33 +201,36 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
               controller: _tabController,
               children: [
                 for (final folder in _folders)
-                  buildFavoritesFolderList(
-                    context,
-                    widget.activeTab,
-                    folder,
-                    _currentLibrary.favoritesInFolder(
-                      folder.id == '__unsorted__' ? null : folder.id,
+                  KeyedSubtree(
+                    key: ValueKey('folder_tab_${folder.id}'),
+                    child: buildFavoritesFolderList(
+                      context,
+                      widget.activeTab,
+                      folder,
+                      _currentLibrary.favoritesInFolder(
+                        folder.id == '__unsorted__' ? null : folder.id,
+                      ),
+                      library: _currentLibrary,
+                      unsortedFolder: widget.unsortedFolder,
+                      isCurrentPageFavorited: widget.isCurrentPageFavorited,
+                      onSaveLibrary: (updatedLib) async {
+                        await widget.onSaveLibrary(updatedLib);
+                        setState(() {
+                          _currentLibrary = updatedLib;
+                          _updateFoldersAndController();
+                        });
+                        widget.onFavoriteToggled();
+                      },
+                      onLoadUrl: widget.onLoadUrl,
+                      onFavoriteToggled: widget.onFavoriteToggled,
+                      onNewFolderCreated: () async {
+                        setState(() {
+                          _updateFoldersAndController();
+                        });
+                        widget.onFavoriteToggled();
+                      },
+                      onEditFavorite: widget.onEditFavorite,
                     ),
-                    library: _currentLibrary,
-                    unsortedFolder: widget.unsortedFolder,
-                    isCurrentPageFavorited: widget.isCurrentPageFavorited,
-                    onSaveLibrary: (updatedLib) async {
-                      await widget.onSaveLibrary(updatedLib);
-                      setState(() {
-                        _currentLibrary = updatedLib;
-                        _updateFoldersAndController();
-                      });
-                      widget.onFavoriteToggled();
-                    },
-                    onLoadUrl: widget.onLoadUrl,
-                    onFavoriteToggled: widget.onFavoriteToggled,
-                    onNewFolderCreated: () async {
-                      setState(() {
-                        _updateFoldersAndController();
-                      });
-                      widget.onFavoriteToggled();
-                    },
-                    onEditFavorite: widget.onEditFavorite,
                   ),
               ],
             ),

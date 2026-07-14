@@ -19,8 +19,6 @@ class _FolderSelectorState extends State<FolderSelector> {
   String? _selectedFolder;
   final TextEditingController _newFolderController = TextEditingController();
   bool _showNewFolderInput = false;
-  String? _customDirUri;
-  String? _customDirName;
 
   @override
   void initState() {
@@ -85,14 +83,6 @@ class _FolderSelectorState extends State<FolderSelector> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 )),
-            if (_customDirUri != null)
-              DropdownMenuItem<String>(
-                value: _customDirUri,
-                child: Text(
-                  'Custom: $_customDirName',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
             const DropdownMenuItem<String>(
               value: '_new_',
               child: Text(
@@ -100,59 +90,16 @@ class _FolderSelectorState extends State<FolderSelector> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const DropdownMenuItem<String>(
-              value: '_custom_location_',
-              child: Text(
-                '[Select custom location on storage...]',
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
           ],
-          onChanged: (val) async {
-            if (val == '_custom_location_') {
-              try {
-                final publicService = const PublicDownloadsService();
-                final uri = await publicService.selectExportDirectory();
-                if (uri != null) {
-                  var name = 'Selected Folder';
-                  try {
-                    final decoded = Uri.decodeFull(uri);
-                    final segments = decoded.split(':');
-                    if (segments.length > 1) {
-                      name = segments.last.split('/').last;
-                    }
-                  } catch (_) {}
-                  setState(() {
-                    _customDirUri = uri;
-                    _customDirName = name;
-                    _selectedFolder = uri;
-                    _showNewFolderInput = false;
-                  });
-                  widget.onChanged(uri);
-                } else {
-                  setState(() {
-                    _selectedFolder = null;
-                    _showNewFolderInput = false;
-                  });
-                  widget.onChanged(null);
-                }
-              } catch (_) {
-                setState(() {
-                  _selectedFolder = null;
-                  _showNewFolderInput = false;
-                });
-                widget.onChanged(null);
-              }
+          onChanged: (val) {
+            setState(() {
+              _selectedFolder = val;
+              _showNewFolderInput = val == '_new_';
+            });
+            if (val != '_new_') {
+              widget.onChanged(val);
             } else {
-              setState(() {
-                _selectedFolder = val;
-                _showNewFolderInput = val == '_new_';
-              });
-              if (val != '_new_') {
-                widget.onChanged(val);
-              } else {
-                widget.onChanged(_newFolderController.text.trim());
-              }
+              widget.onChanged(_newFolderController.text.trim());
             }
           },
         ),

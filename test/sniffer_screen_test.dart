@@ -189,8 +189,10 @@ void main() {
         await tester.pump();
 
         expect(mockController.blockedPopupsCount, 1);
-        expect(find.text('Popup blocked.'), findsOneWidget);
-        expect(find.text('Open once'), findsOneWidget);
+        expect(find.text('Popup blocked'), findsOneWidget);
+        expect(find.text('New page'), findsOneWidget);
+        expect(find.text('Background'), findsOneWidget);
+        expect(find.text('Ignore'), findsOneWidget);
       },
     );
 
@@ -225,7 +227,7 @@ void main() {
         '{"href":"https://example.com/second","text":"Second page","pageUrl":"https://example.com","pageTitle":"Example"}',
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Open in Background Tab'));
+      await tester.tap(find.text('Open in background tab'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('browser_tab_close_1')));
@@ -253,9 +255,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Block This Element'), findsOneWidget);
-      expect(find.text('Copy Page URL'), findsOneWidget);
-      expect(find.text('Open in Browser'), findsNothing);
+      expect(find.text('Block this element'), findsOneWidget);
+      expect(find.text('Copy page URL'), findsOneWidget);
+      expect(find.text('Open link'), findsNothing);
     });
 
     testWidgets('link context menu exposes target actions', (tester) async {
@@ -275,10 +277,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Open in Browser'), findsOneWidget);
-      expect(find.text('Open in New Tab'), findsOneWidget);
-      expect(find.text('Copy Target URL'), findsOneWidget);
-      expect(find.text('Block This Element'), findsOneWidget);
+      expect(find.text('Open link'), findsOneWidget);
+      expect(find.text('Open in new tab'), findsOneWidget);
+      expect(find.text('Copy link URL'), findsOneWidget);
+      expect(find.text('Block this element'), findsOneWidget);
     });
 
     testWidgets('media context menu can add target URL to queue', (
@@ -300,8 +302,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Copy Target URL'), findsOneWidget);
-      await tester.tap(find.text('Add to Queue'));
+      expect(find.text('Copy media URL'), findsOneWidget);
+      await tester.tap(find.text('Download media'));
       await tester.pumpAndSettle();
 
       final allTasks = [
@@ -348,9 +350,12 @@ void main() {
         await tester.tap(find.byKey(const Key('download_item_0')));
         await tester.pumpAndSettle();
 
-         // Verify "Add to Download Queue" dialog opened
+        // Verify "Add to Download Queue" dialog opened
         expect(find.text('Add to Download Queue'), findsOneWidget);
-        expect(find.byKey(const Key('dialog_rename_pencil_button')), findsOneWidget);
+        expect(
+          find.byKey(const Key('dialog_rename_pencil_button')),
+          findsOneWidget,
+        );
         expect(find.text('example.com_lecture.pdf'), findsOneWidget);
 
         // Tap rename pencil button to spawn child dialog
@@ -564,7 +569,7 @@ void main() {
         '{"href":"https://example.com/second","text":"Second","pageUrl":"https://example.com","pageTitle":"Example"}',
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Open in Background Tab'));
+      await tester.tap(find.text('Open in background tab'));
       await tester.pumpAndSettle();
 
       // Sniff something in the first tab
@@ -578,6 +583,5 @@ void main() {
       expect(snifferEngine.detectedMedia.length, 1);
       expect(snifferEngine.detectedMedia.first.name, 'video1.mp4');
     });
-
   });
 }

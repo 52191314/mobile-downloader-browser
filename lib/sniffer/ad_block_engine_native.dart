@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:collection';
+import 'dart:io';
 import 'dart:isolate';
+
+import 'package:path_provider/path_provider.dart';
 
 import 'package:http/http.dart' as http;
 
@@ -150,6 +154,10 @@ class AdBlockEngine {
   final AdBlockNativeEngine? _nativeEngine;
   final String? rawRulesText;
 
+  static final Map<String, Future<AdBlockEngine>> _engineCache = {};
+  final LinkedHashMap<String, bool> _blockCache = LinkedHashMap<String, bool>();
+  static const int _maxCacheSize = 5000;
+
   AdBlockEngine({
     required this.enabled,
     required this.rules,
@@ -175,6 +183,31 @@ class AdBlockEngine {
         nativeEngine.loadRules(rulesText);
       }
     }
+  }
+
+  static String _computeCacheKey({
+    required bool enabled,
+    required List<AdblockFilterSource> sources,
+    required List<ManualAdBlockRule> manualRules,
+    required List<CosmeticAdRule> manualCosmeticRules,
+  }) {
+    final sb = StringBuffer();
+    sb.write('enabled:$enabled;');
+    for (final src in sources) {
+      sb.write('src:${src.name}:${src.url}:${src.enabled};');
+    }
+    for (final rule in manualRules) {
+      sb.write('rule:${rule.pattern}:${rule.domainRule};');
+    }
+    for (final rule in manualCosmeticRules) {
+      sb.write('cosmetic:${rule.host}:${rule.selector};');
+    }
+    return sb.toString();
+  }
+
+  static Future<File> _getCacheFile(String url) async {
+    final docs = await getApplicationSupportDirectory();
+    return File('${docs.path}/adblock_filter_${url.hashCode}.txt');
   }
 
   static String serializeRules(
@@ -245,6 +278,33 @@ class AdBlockEngine {
     required List<AdblockFilterSource> sources,
     List<ManualAdBlockRule> manualRules = const [],
     List<CosmeticAdRule> manualCosmeticRules = const [],
+    http.Client? client,
+  }) {
+    final key = _computeCacheKey(
+      enabled: enabled,
+      sources: sources,
+      manualRules: manualRules,
+      manualCosmeticRules: manualCosmeticRules,
+    );
+    if (_engineCache.containsKey(key)) {
+      return _engineCache[key]!;
+    }
+    final future = _buildEngine(
+      enabled: enabled,
+      sources: sources,
+      manualRules: manualRules,
+      manualCosmeticRules: manualCosmeticRules,
+      client: client,
+    );
+    _engineCache[key] = future;
+    return future;
+  }
+
+  static Future<AdBlockEngine> _buildEngine({
+    required bool enabled,
+    required List<AdblockFilterSource> sources,
+    required List<ManualAdBlockRule> manualRules,
+    required List<CosmeticAdRule> manualCosmeticRules,
     http.Client? client,
   }) async {
     final ownsClient = client == null;
@@ -329,17 +389,62 @@ class AdBlockEngine {
           continue;
         }
 
+        String? filterText;
+        File? cacheFile;
+
         try {
-          final response = await httpClient
-              .get(uri)
-              .timeout(_filterSourceTimeout);
-          if (response.statusCode >= 200 && response.statusCode < 300) {
-            final parsed = await _parseFilterTextResponsive(response.body);
+          cacheFile = await _getCacheFile(source.url);
+          if (await cacheFile.exists()) {
+            filterText = await cacheFile.readAsString();
+          }
+        } catch (_) {}
+
+        bool shouldUpdate = false;
+        if (filterText == null) {
+          shouldUpdate = true;
+        } else if (cacheFile != null) {
+          try {
+            final lastModified = await cacheFile.lastModified();
+            if (DateTime.now().difference(lastModified).inHours > 24) {
+              shouldUpdate = true;
+            }
+          } catch (_) {
+            shouldUpdate = true;
+          }
+        }
+
+        String? errorMessage;
+        if (shouldUpdate) {
+          try {
+            final response = await httpClient
+                .get(uri)
+                .timeout(_filterSourceTimeout);
+            if (response.statusCode >= 200 && response.statusCode < 300) {
+              filterText = response.body;
+              if (cacheFile != null) {
+                try {
+                  await cacheFile.parent.create(recursive: true);
+                  await cacheFile.writeAsString(filterText);
+                } catch (_) {}
+              }
+            } else {
+              errorMessage = 'HTTP ${response.statusCode}';
+            }
+          } on TimeoutException {
+            errorMessage = 'Timed out';
+          } catch (error) {
+            errorMessage = '$error';
+          }
+        }
+
+        if (filterText != null) {
+          try {
+            final parsed = await _parseFilterTextResponsive(filterText);
             rules.addAll(parsed.networkRules);
             cosmetics.addAll(parsed.cosmeticRules);
             scriptlets.addAll(parsed.scriptletRules);
             cssInjections.addAll(parsed.cssInjectionRules);
-            rawSb.writeln(response.body);
+            rawSb.writeln(filterText);
             statuses.add(
               AdblockSourceStatus(
                 url: source.url,
@@ -348,29 +453,21 @@ class AdBlockEngine {
                     parsed.networkRules.length + parsed.cosmeticRules.length,
               ),
             );
-          } else {
+          } catch (error) {
             statuses.add(
               AdblockSourceStatus(
                 url: source.url,
                 state: AdblockSourceLoadState.failed,
-                errorMessage: 'HTTP ${response.statusCode}',
+                errorMessage: 'Parse failed: $error',
               ),
             );
           }
-        } on TimeoutException {
+        } else {
           statuses.add(
             AdblockSourceStatus(
               url: source.url,
               state: AdblockSourceLoadState.failed,
-              errorMessage: 'Timed out',
-            ),
-          );
-        } catch (error) {
-          statuses.add(
-            AdblockSourceStatus(
-              url: source.url,
-              state: AdblockSourceLoadState.failed,
-              errorMessage: '$error',
+              errorMessage: errorMessage ?? 'Failed to load',
             ),
           );
         }
@@ -421,25 +518,47 @@ class AdBlockEngine {
     bool isThirdParty = false,
   }) {
     if (!enabled) return false;
+
+    final cacheKey = '$rawUrl|$sourceHost|$requestType|$isThirdParty';
+    final cached = _blockCache[cacheKey];
+    if (cached != null) {
+      _blockCache.remove(cacheKey);
+      _blockCache[cacheKey] = cached;
+      return cached;
+    }
+
+    bool result = false;
     final nativeEngine = _nativeEngine;
     if (nativeEngine != null) {
-      return nativeEngine.shouldBlockUrlEx(
+      result = nativeEngine.shouldBlockUrlEx(
         rawUrl,
         sourceHost: sourceHost,
         requestType: requestType,
         isThirdParty: isThirdParty,
       );
+    } else {
+      final uri = Uri.tryParse(rawUrl);
+      if (uri == null) {
+        result = false;
+      } else {
+        var blocked = false;
+        for (final rule in rules) {
+          if (!rule.matches(uri, rawUrl)) continue;
+          if (rule.isException) {
+            blocked = false;
+            break;
+          }
+          blocked = true;
+        }
+        result = blocked;
+      }
     }
-    final uri = Uri.tryParse(rawUrl);
-    if (uri == null) return false;
 
-    var blocked = false;
-    for (final rule in rules) {
-      if (!rule.matches(uri, rawUrl)) continue;
-      if (rule.isException) return false;
-      blocked = true;
+    _blockCache[cacheKey] = result;
+    if (_blockCache.length > _maxCacheSize) {
+      _blockCache.remove(_blockCache.keys.first);
     }
-    return blocked;
+    return result;
   }
 
   bool shouldSuppressSniffedUrl(String rawUrl) {

@@ -54,7 +54,7 @@ class HoldSwipeCard extends StatefulWidget {
 }
 
 class _HoldSwipeCardState extends State<HoldSwipeCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   double _dragOffset = 0;
   bool _armed = false;
 

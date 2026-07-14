@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,11 +11,13 @@ import 'downloader/downloader.dart';
 import 'downloader/url_filename_resolver.dart';
 import 'logging/aurora_log.dart';
 import 'logging/log_settings_store.dart';
+import 'utils/log_server.dart';
 import 'notifications/download_notification_service.dart';
 import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
 import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
+import 'sniffer/browser_library.dart';
 import 'sniffer/sniffer_screen.dart';
 import 'sync/sync.dart';
 import 'theme/aurora_colors.dart';
@@ -44,6 +48,9 @@ void main() {
   runZonedGuarded(
     () {
       WidgetsFlutterBinding.ensureInitialized();
+      if (kDebugMode) {
+        LogServer.start();
+      }
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
         AuroraLog.instance.error(
@@ -284,6 +291,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   DateTime? _lastBackPress;
   Timer? _adblockRefreshTimer;
   Timer? _queueRebuildTimer;
+  Timer? _resniffModeTimer;
   final Map<String, DownloadState> _prevTaskStates = {};
   bool _isDisposed = false;
 
@@ -452,6 +460,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _isDisposed = true;
     _adblockRefreshTimer?.cancel();
     _queueRebuildTimer?.cancel();
+    _resniffModeTimer?.cancel();
     _queueSubscription?.cancel();
     _driveSubscription?.cancel();
     _urlController.dispose();
@@ -830,9 +839,24 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         ),
       );
       if (choice == 'update') {
+        final urlChanged =
+            _normalizeForCompare(task.url) != _normalizeForCompare(freshUrl);
         task.url = freshUrl;
+        // A refreshed URL means the previously downloaded bytes no longer
+        // match — reset progress so the download restarts cleanly.
+        if (urlChanged) {
+          task.downloadedBytes = 0;
+          task.totalBytes = 0;
+        }
+        if (task.state == DownloadState.failed ||
+            task.state == DownloadState.paused) {
+          task.state = DownloadState.idle;
+        }
+        task.failureReason = null;
+        task.errorMessage = null;
+        await _downloadQueue.resumeTaskAsync(task.id);
         if (mounted) {
-          _showSnack('Download link updated. You can retry the download.');
+          _showSnack('Download link updated. The download will retry.');
         }
         setState(() {});
       } else if (choice == 'new') {
@@ -864,6 +888,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   /// instead of being silently skipped.
   Future<void> _resniffManual(DownloadTask task) async {
     _downloadQueue.resniffPendingTaskId = task.id;
+    // Auto-expire resniff mode so a stale pending task doesn't surprise the
+    // user with a dialog later if they never re-sniff a matching URL.
+    _resniffModeTimer?.cancel();
+    _resniffModeTimer = Timer(const Duration(minutes: 5), () {
+      if (_downloadQueue.resniffPendingTaskId == task.id) {
+        _downloadQueue.resniffPendingTaskId = null;
+      }
+    });
     final target = task.sourcePageUrl ?? task.url;
     AuroraLog.instance.info(
       '_resniffManual: target="$target", sourcePageUrl=${task.sourcePageUrl}',
@@ -999,8 +1031,90 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         _downloadQueue.loadFromFile('$path/download_queue.json'),
       ]);
       if (mounted) setState(() {});
+      unawaited(_performAutoBackupIfNeeded());
     } catch (e, s) {
       _logError('Failed to load download queue/logs', e, s);
+    }
+  }
+
+  Future<void> _performAutoBackupIfNeeded() async {
+    final settings = _settings;
+    if (!settings.autoBackupEnabled) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final intervalMs = settings.autoBackupFrequencyHours * 60 * 60 * 1000;
+    if (now > settings.lastBackupTimestamp + intervalMs) {
+      try {
+        final library = await const BrowserLibraryStore().load();
+        final List<Map<String, dynamic>>? downloadQueueJson = settings.autoBackupQueue
+            ? _downloadQueue.allTasks.map((t) => t.toJson()).toList()
+            : null;
+        final Map<String, dynamic>? settingsJson = settings.autoBackupSettings
+            ? settings.toJson()
+            : null;
+
+        final baseDir = await getApplicationSupportDirectory();
+        final tempFile = File('${baseDir.path}/temp_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json');
+        
+        final Map<String, dynamic> exportData = {};
+        if (settings.autoBackupFavorites) {
+          exportData['favorites'] = library.favorites.map((f) => f.toJson()).toList();
+          exportData['folders'] = library.folders.map((f) => f.toJson()).toList();
+        }
+        if (settings.autoBackupHistory) {
+          exportData['history'] = library.history.map((h) => h.toJson()).toList();
+        }
+        if (settings.autoBackupSavedPages) {
+          exportData['savedPages'] = library.savedPages.map((p) => p.toJson()).toList();
+        }
+        if (downloadQueueJson != null) {
+          exportData['downloadQueue'] = downloadQueueJson;
+        }
+        if (settingsJson != null) {
+          exportData['settings'] = settingsJson;
+        }
+        await tempFile.writeAsString(jsonEncode(exportData));
+
+        // Publish to public Downloads
+        final displayName = 'aurora_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+        await const MethodChannel('aurora_downloader/public_downloads').invokeMapMethod<String, Object?>('publishFile', {
+          'sourcePath': tempFile.path,
+          'displayName': displayName,
+          'mimeType': 'application/json',
+          'relativePath': 'Download/Aurora Downloads/Backups',
+        });
+
+        // Clean up local temp file
+        try {
+          await tempFile.delete();
+        } catch (_) {}
+
+        // Clean up old auto-backups in public Downloads to keep only the 5 most recent ones
+        final files = await PublicDownloadsService.listBackupFiles(
+          relativePath: 'Download/Aurora Downloads/Backups',
+        );
+        final autoBackups = files
+            .where((f) => (f['displayName'] as String? ?? '').startsWith('aurora_auto_backup_'))
+            .toList();
+        if (autoBackups.length > 5) {
+          // Sort oldest first (ascending dateModified)
+          autoBackups.sort((a, b) {
+            final da = a['dateModified'] as int? ?? 0;
+            final db = b['dateModified'] as int? ?? 0;
+            return da.compareTo(db);
+          });
+          for (int i = 0; i < autoBackups.length - 5; i++) {
+            final uri = autoBackups[i]['uri'] as String?;
+            if (uri != null) {
+              await PublicDownloadsService.deleteBackupFile(uri);
+            }
+          }
+        }
+
+        _updateSettings(settings.copyWith(lastBackupTimestamp: now));
+        debugPrint('[AutoBackup] Auto backup completed successfully.');
+      } catch (e) {
+        debugPrint('[AutoBackup] Auto backup failed: $e');
+      }
     }
   }
 

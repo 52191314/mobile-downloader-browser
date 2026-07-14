@@ -10,6 +10,28 @@ Before searching broadly, read:
 
 When changing Aurora structure, major features, important classes, or important methods, update `../docs/code-maps/projects/aurora_downloader.md` in the same session.
 
+## Document Sniffer & Download changes
+
+The Sniffer flow (capture → `SniffIntakeController` → `MediaSnifferEngine` → `MediaEnricher` → `MediaCaptureAnalyzer` → UI sheet) and the Download flow (queue → `DownloadSplitter` / `HlsDownloader` / `TorrentDownloader` → publish) are documented in `../docs/code-maps/projects/aurora_downloader_sniffer_download_flows.md`.
+
+When you change any class, method, or behavior in either flow (including HLS playlist body capture / WAF bypass, disguised-playlist detection, page-lifecycle cache guards, or download routing), you MUST:
+
+1. Update the relevant section of `aurora_downloader_sniffer_download_flows.md` (exact file/line anchors) in the same session.
+2. Update the matching method/class tables in `../docs/code-maps/projects/aurora_downloader.md`.
+3. Add a dated "Last verified" note at the top of both files summarizing what changed.
+
+Keep the two docs in sync — the flow doc is the narrative companion to the code map.
+
+## Use Subagents with High Thinking
+
+To maximize speed and accuracy during development, **always parallelize tasks using subagents** (like `cheap-scout` for read-only lookups or `task` for active changes). 
+
+* **Preferred Models:** Use **Tencent Hunyuan 3 (`Hy3`)** or **DeepSeek V4 Flash (`DSV4 Flash`)** as the engine for these subagents.
+* **Reasoning Level:** Always run these subagents with the **highest thinking/reasoning tier** (e.g. configuring `"reasoningEffort": "high"` or executing `/effort high` inside the subagent context). This ensures they fully think through the codebase architecture and trace edge cases before executing tools.
+* **Prefer subagents for:** grepping many patterns, reading multiple files, searching across the codebase, or any combination of independent lookups.
+* **Avoid subagents for:** trivial single-file reads or lookups that a single tool call can satisfy faster.
+* When in doubt, parallelize with subagents — the overhead is minimal and the speedup is significant.
+
 ## Build (incremental — fast)
 
 To keep development iteration fast, **always build and install in debug mode** for testing changes. Debug builds compile almost instantly and skip Proguard/R8 code shrinking:

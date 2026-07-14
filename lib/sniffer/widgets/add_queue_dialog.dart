@@ -48,7 +48,11 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
     super.initState();
     selectedMedia = widget.media;
     _variants = widget.variants;
-    filenameController = TextEditingController(text: widget.suggestedName);
+    var name = widget.suggestedName;
+    if (name.length > 120) {
+      name = _SnifferScreenState.truncateFilename(name, maxLength: 120);
+    }
+    filenameController = TextEditingController(text: name);
     // Pre-populate the folder picker based on auto-classification.
     _autoSelectFolder();
     // Try to resolve missing HLS variants after the frame is laid out.
@@ -152,6 +156,13 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
   }
 
   Future<void> _showRenameDialog() async {
+    final originalName = filenameController.text;
+    String ext = '';
+    final dotIndex = originalName.lastIndexOf('.');
+    if (dotIndex != -1 && dotIndex > originalName.length - 10) {
+      ext = originalName.substring(dotIndex);
+    }
+
     final newName = await showDialog<String>(
       context: context,
       builder: (context) => _RenameFileDialog(
@@ -160,9 +171,18 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
         okButtonKey: const Key('dialog_rename_ok_button'),
       ),
     );
+
     if (newName != null && mounted) {
+      var finalName = newName;
+      if (ext.isNotEmpty && !newName.toLowerCase().endsWith(ext.toLowerCase())) {
+        finalName = '$newName$ext';
+      }
+      if (finalName.length > 120) {
+        finalName = _SnifferScreenState.truncateFilename(finalName, maxLength: 120);
+      }
       setState(() {
-        filenameController.text = newName;
+        filenameController.text = finalName;
+        _autoSelectFolder();
       });
     }
   }
@@ -234,6 +254,17 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (widget.suggestedName.length > 120 || filenameController.text.length >= 120) ...[
+                        const SizedBox(height: 6),
+                        const Text(
+                          '⚠️ Filename is too long and was auto-truncated to 120 characters. You can rename it yourself, or the app will use this truncated name.',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -311,10 +342,12 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
           onPressed: isResolving
               ? null
               : () async {
-                  final filename = filenameController.text.trim();
+                  var filename = filenameController.text.trim();
                   if (filename.isEmpty) return;
+                  if (filename.length > 120) {
+                    filename = _SnifferScreenState.truncateFilename(filename, maxLength: 120);
+                  }
                   final navigator = Navigator.of(context);
-                  final messenger = ScaffoldMessenger.of(context);
 
                   setState(() => isResolving = true);
 
@@ -339,13 +372,9 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
 
                     final taskId = DateTime.now().millisecondsSinceEpoch
                         .toString();
-                    final bool isCustomDirectory =
-                        selectedFolder.startsWith('content://');
-                    final saveDir = isCustomDirectory
-                        ? '$baseDir${Platform.pathSeparator}completed'
-                        : (selectedFolder.isNotEmpty
-                            ? '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$selectedFolder'
-                            : '$baseDir${Platform.pathSeparator}completed');
+                    final saveDir = selectedFolder.isNotEmpty
+                        ? '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$selectedFolder'
+                        : '$baseDir${Platform.pathSeparator}completed';
                     final task = DownloadTask(
                       id: taskId,
                       url: refreshedUrl,
@@ -355,7 +384,6 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                       priority: selectedPriority,
                       contentType: selectedMedia.contentType,
                       headers: taskHeaders,
-                      exportDirectoryUri: isCustomDirectory ? selectedFolder : null,
                       totalBytes: selectedMedia.contentLengthBytes ?? -1,
                     );
                     // Wire up the token-refresh hook so the HLS downloader
@@ -376,6 +404,8 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         widget.tab.hlsPlaylistCache[url];
                     task.fetchBinaryViaWebView = (url) =>
                         widget.tab.controller.fetchBinaryViaJavaScript(url);
+                    task.cookieProvider = (url) =>
+                        widget.tab.controller.getCookiesForDomain(url: url);
 
                     bool force = false;
                     if (widget.downloadQueue.urlExists(refreshedUrl)) {
@@ -422,19 +452,14 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
 
                     if (!mounted) return;
                     navigator.pop();
-                    messenger.showSnackBar(
-                      SnackBar(content: Text('Added "$filename" to queue.')),
-                    );
+                    AuroraSnackbar.show(context, 'Added "$filename" to queue.');
                   } catch (e) {
                     if (mounted) {
                       setState(() => isResolving = false);
                     }
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
-                        ),
-                      ),
+                    AuroraSnackbar.show(
+                      context,
+                      'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
                     );
                   }
                 },

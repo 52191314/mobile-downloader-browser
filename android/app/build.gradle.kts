@@ -34,6 +34,11 @@ android {
         }
     }
 
+    // Native adblock engine — C++ implementation with domain trie + Aho-Corasick.
+    // Uses a RE2 stub (re2_stub/) with HAVE_RE2=0 since re2 is not bundled with
+    // the Android NDK. Falls back to std::regex for regex rule matching.
+    // The Dart side auto-detects libaurora_adblock.so at runtime and falls
+    // back to pure-Dart matching if the native library is unavailable.
     externalNativeBuild {
         cmake {
             path = file("CMakeLists.txt")
@@ -42,9 +47,13 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
@@ -55,4 +64,5 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

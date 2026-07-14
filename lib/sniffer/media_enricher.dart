@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../downloader/hls_playlist_parser.dart';
+import '../logging/aurora_log.dart';
 import 'dash_playlist_parser.dart';
 import 'media_sniffer_engine.dart';
 import 'models/sniffed_media.dart';
 import 'sniffed_media_cache.dart';
+import 'sniffer_url_utils.dart';
 
 /// Host interface that [MediaEnricher] uses to access the owning
 /// [MediaSnifferEngine]'s state. Defined as a class so it can be unit
@@ -37,6 +40,12 @@ abstract class MediaEnricherHost {
 
   /// Optional WebView JS body fetch callback for protected HLS playlists.
   Future<String?> Function(String url)? get fetchPlaylistBodyViaWebView;
+
+  /// Optional headless-WebView body fetch callback that uses same-origin XHR
+  /// from the CDN's domain to bypass both CORS (same origin) and Cloudflare
+  /// WAF (real Chrome TLS fingerprint + cf_clearance cookie).
+  /// Used as the last-resort tier (4th attempt) for playlist body fetching.
+  Future<String?> Function(String url)? get fetchPlaylistBodyViaHeadlessWebView;
 
   /// Optional per-tab HLS playlist body cache.
   String? Function(String url)? get hlsPlaylistCache;
@@ -133,7 +142,9 @@ class MediaEnricher {
       try {
         final cookies = await host.cookieProvider!(url: item.url);
         headers.addAll(cookies);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[MediaEnricher] Cookie provider threw for ${item.url}: $e');
+      }
     }
 
     try {
@@ -239,7 +250,9 @@ class MediaEnricher {
           }
         }
       }
-    } catch (_) {}
+    } catch (e, s) {
+      debugPrint('[MediaEnricher] enrich() threw for ${item.url}: $e\n$s');
+    }
 
     // Tier 4: WebView JS fetch (bypasses Cloudflare WAF). Only useful when
     // contentLength is still null after Tiers 1-3 all failed.
@@ -292,39 +305,10 @@ class MediaEnricher {
             .catchError((_) => http.Response('', 500));
         if (imgResp.statusCode == 206 || imgResp.statusCode == 200) {
           final b = imgResp.bodyBytes;
-          int? w, h;
-          if (b.length > 6 && b[0] == 0xFF && b[1] == 0xD8) {
-            for (var i = 0; i < b.length - 5; i++) {
-              if (b[i] == 0xFF && (b[i + 1] & 0xF0) == 0xC0) {
-                h = (b[i + 5] << 8) | b[i + 6];
-                w = (b[i + 7] << 8) | b[i + 8];
-                break;
-              }
-            }
-          } else if (b.length > 8 &&
-              b[0] == 0x89 &&
-              b[1] == 0x50 &&
-              b[2] == 0x4E &&
-              b[3] == 0x47) {
-            w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
-            h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
-          } else if (b.length > 6 &&
-              b[0] == 0x47 &&
-              b[1] == 0x49 &&
-              b[2] == 0x46) {
-            w = b[6] | (b[7] << 8);
-            h = b[8] | (b[9] << 8);
-          } else if (b.length > 20 &&
-              b[0] == 0x52 &&
-              b[1] == 0x49 &&
-              b[2] == 0x46 &&
-              b[3] == 0x46) {
-            w = ((b[26] & 0x3F) << 8) | b[27];
-            h = (((b[26] >> 6) | (b[28] << 2)) << 8) | b[29];
-          }
-          if (w != null && h != null && w > 0 && h > 0) {
-            videoWidth = w;
-            videoHeight = h;
+          final dims = await _parseImageDimensionsInIsolate(b);
+          if (dims != null) {
+            videoWidth = dims['width'] as int;
+            videoHeight = dims['height'] as int;
           } else {
             // No valid image dimensions — the body might be a disguised HLS
             // playlist (#EXTM3U) hosted under a non-.m3u8 URL path that
@@ -363,137 +347,15 @@ class MediaEnricher {
             .catchError((_) => http.Response('', 500));
         if (aResp.statusCode == 206 || aResp.statusCode == 200) {
           final b = aResp.bodyBytes;
-          if (b.length >= 4) {
-            // -- MP3 / ID3v2 -- skip ID3 header if present, then look for
-            // the first MPEG audio frame sync (0xFF 0xE_).
-            var scanFrom = 0;
-            if (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33) {
-              // ID3v2 tag: 4-byte "ID3" + 1 byte major + 1 byte revision
-              // + 1 byte flags + 4-byte synchsafe size.
-              if (b.length >= 10) {
-                final tagSize = (b[6] << 21) |
-                    (b[7] << 14) |
-                    (b[8] << 7) |
-                    b[9];
-                scanFrom = 10 + tagSize;
-              }
-            }
-            if (scanFrom < b.length - 4 &&
-                b[scanFrom] == 0xFF &&
-                (b[scanFrom + 1] & 0xE0) == 0xE0) {
-              final mp3Header =
-                  (b[scanFrom] << 24) |
-                  (b[scanFrom + 1] << 16) |
-                  (b[scanFrom + 2] << 8) |
-                  b[scanFrom + 3];
-              final mp3Parsed = _parseMp3FrameHeader(mp3Header);
-              if (mp3Parsed != null) {
-                audioCodec = 'mp3';
-                containerFormat ??= 'mp3';
-                sampleRate = mp3Parsed.sampleRate;
-                channels = mp3Parsed.channels;
-                if (contentLength != null && mp3Parsed.bitrateKbps > 0) {
-                  final seconds =
-                      (contentLength * 8) / (mp3Parsed.bitrateKbps * 1000);
-                  if (seconds > 0 && seconds < 24 * 3600) {
-                    duration = Duration(milliseconds: (seconds * 1000).round());
-                  }
-                }
-              }
-            } else if (b[0] == 0x66 &&
-                b[1] == 0x4C &&
-                b[2] == 0x61 &&
-                b[3] == 0x43) {
-              // -- FLAC "fLaC" magic + STREAMINFO block (34 bytes) --
-              if (b.length >= 42) {
-                final sr = (b[18] << 12) | (b[19] << 4) | (b[20] >> 4);
-                final ch = ((b[20] >> 1) & 0x07) + 1;
-                // 36-bit total samples at bytes 21..25 (lower 4 bits of
-                // byte 21 carry total_samples[35..32] after bps is split
-                // across the upper nibble of b[21] and the LSB of b[20]).
-                var totalSamples = (b[21] & 0x0F);
-                for (var k = 0; k < 4; k++) {
-                  totalSamples = (totalSamples << 8) | b[22 + k];
-                }
-                audioCodec = 'flac';
-                containerFormat ??= 'flac';
-                sampleRate = sr > 0 ? sr : null;
-                channels = ch;
-                if (sr > 0 && totalSamples > 0) {
-                  final seconds = totalSamples / sr;
-                  if (seconds > 0 && seconds < 24 * 3600) {
-                    duration =
-                        Duration(milliseconds: (seconds * 1000).round());
-                  }
-                }
-              }
-            } else if (b[0] == 0x4F &&
-                b[1] == 0x67 &&
-                b[2] == 0x67 &&
-                b[3] == 0x53) {
-              // -- OGG container + Vorbis identification header --
-              // The identification packet is the first complete packet in
-              // the first OGG page. Layout: "OggS"(4) + ver(1) + flag(1) +
-              // granule(8) + serial(4) + seq(4) + crc(4) + segments(1) +
-              // segment_table[segments].
-              if (b.length >= 30) {
-                final segCount = b[26];
-                var payloadStart = 27 + segCount;
-                if (payloadStart + 1 < b.length &&
-                    b[payloadStart] == 0x01) {
-                  // Vorbis identification header packet
-                  // 1 byte type + 6 bytes "vorbis" + 4 bytes version +
-                  // 1 byte channels + 4 bytes sample rate + ...
-                  if (payloadStart + 30 <= b.length &&
-                      _startsWithAscii(
-                        b,
-                        payloadStart + 1,
-                        'vorbis',
-                      )) {
-                    final ch = b[payloadStart + 11];
-                    // OGG Vorbis sample rate and bitrates are stored in
-                    // little-endian order.
-                    final sr = b[payloadStart + 12] |
-                        (b[payloadStart + 13] << 8) |
-                        (b[payloadStart + 14] << 16) |
-                        (b[payloadStart + 15] << 24);
-                    // bitrate_nominal at payloadStart+20..23
-                    final nominalBps = b[payloadStart + 20] |
-                        (b[payloadStart + 21] << 8) |
-                        (b[payloadStart + 22] << 16) |
-                        (b[payloadStart + 23] << 24);
-                    audioCodec = 'vorbis';
-                    containerFormat ??= 'ogg';
-                    sampleRate = sr > 0 ? sr : null;
-                    channels = ch > 0 ? ch : null;
-                    if (nominalBps > 0 && contentLength != null) {
-                      final seconds = (contentLength * 8) / nominalBps;
-                      if (seconds > 0 && seconds < 24 * 3600) {
-                        duration = Duration(
-                          milliseconds: (seconds * 1000).round(),
-                        );
-                      }
-                    }
-                  }
-                }
-              }
-            } else if (b.length > 8 &&
-                b[4] == 0x66 &&
-                b[5] == 0x74 &&
-                b[6] == 0x79 &&
-                b[7] == 0x70) {
-              // -- M4A / ISO BMFF audio: scan for "moov" then "mvhd" and
-              // "mp4a" atoms using the same shape as the video probe. --
-              final audioMp4 = _parseMp4AudioAtoms(b);
-              if (audioMp4 != null) {
-                audioCodec = audioMp4.codec ?? 'aac';
-                containerFormat ??= 'mp4';
-                sampleRate = audioMp4.sampleRate;
-                channels = audioMp4.channels;
-                if (audioMp4.duration != null) {
-                  duration = audioMp4.duration;
-                }
-              }
+          final audioResult = await _parseAudioHeadersInIsolate(b);
+          if (audioResult != null) {
+            audioCodec = audioResult['codec'] as String?;
+            containerFormat ??= audioResult['container'] as String?;
+            sampleRate = audioResult['sampleRate'] as int?;
+            channels = audioResult['channels'] as int?;
+            final durMs = audioResult['durationMs'] as int?;
+            if (durMs != null && durMs > 0) {
+              duration = Duration(milliseconds: durMs);
             }
           }
         }
@@ -509,154 +371,56 @@ class MediaEnricher {
             .catchError((_) => http.Response('', 500));
         if (vResp.statusCode == 206 || vResp.statusCode == 200) {
           final b = vResp.bodyBytes;
-          int? vw, vh;
-          String? vCodec, aCodec;
-          Duration? movieDuration;
-          int? trackTimescale;
-          int? firstSampleDelta;
-          for (var i = 0; i < b.length - 80; i++) {
-            if (b[i] == 0x74 &&
-                b[i + 1] == 0x6B &&
-                b[i + 2] == 0x68 &&
-                b[i + 3] == 0x64) {
-              final ver = b[i + 4];
-              final wOff = ver == 1 ? i + 92 : i + 80;
-              final hOff = wOff + 4;
-              if (hOff + 4 <= b.length) {
-                final vwRaw =
-                    (b[wOff] << 24) |
-                    (b[wOff + 1] << 16) |
-                    (b[wOff + 2] << 8) |
-                    b[wOff + 3];
-                final vhRaw =
-                    (b[hOff] << 24) |
-                    (b[hOff + 1] << 16) |
-                    (b[hOff + 2] << 8) |
-                    b[hOff + 3];
-                vw = vwRaw >> 16;
-                vh = vhRaw >> 16;
-              }
+          final videoResult = await _parseVideoMp4AtomsInIsolate(b);
+          if (videoResult != null) {
+            final vw = videoResult['width'] as int?;
+            final vh = videoResult['height'] as int?;
+            final vCodec = videoResult['videoCodec'] as String?;
+            final aCodec = videoResult['audioCodec'] as String?;
+            final rawFps = videoResult['frameRate'] as double?;
+            final durMs = videoResult['durationMs'] as int?;
+            if (vw != null && vh != null && vw > 0 && vh > 0) {
+              videoWidth = vw;
+              videoHeight = vh;
+              videoCodec = vCodec;
+              audioCodec = aCodec;
             }
-            if (b[i] == 0x6D &&
-                b[i + 1] == 0x76 &&
-                b[i + 2] == 0x68 &&
-                b[i + 3] == 0x64) {
-              final ver = b[i + 4];
-              if (ver == 1) {
-                if (i + 36 <= b.length) {
-                  final timescale =
-                      (b[i + 24] << 24) |
-                      (b[i + 25] << 16) |
-                      (b[i + 26] << 8) |
-                      b[i + 27];
-                  var durationRaw = 0;
-                  for (var j = 0; j < 8; j++) {
-                    durationRaw = (durationRaw << 8) | b[i + 28 + j];
-                  }
-                  if (timescale > 0 && durationRaw > 0) {
-                    movieDuration = Duration(
-                      milliseconds: ((durationRaw * 1000) / timescale).round(),
-                    );
-                  }
-                }
-              } else {
-                if (i + 24 <= b.length) {
-                  final timescale =
-                      (b[i + 16] << 24) |
-                      (b[i + 17] << 16) |
-                      (b[i + 18] << 8) |
-                      (b[i + 19]);
-                  final durationRaw =
-                      (b[i + 20] << 24) |
-                      (b[i + 21] << 16) |
-                      (b[i + 22] << 8) |
-                      b[i + 23];
-                  if (timescale > 0 && durationRaw > 0) {
-                    movieDuration = Duration(
-                      milliseconds: ((durationRaw * 1000) / timescale).round(),
-                    );
-                  }
-                }
-              }
+            if (rawFps != null) {
+              // Round to 2 decimal places; clamp to a sane upper bound
+              final clamped = rawFps.clamp(1.0, 240.0);
+              frameRate = (clamped * 100).round() / 100.0;
             }
-            // mdhd (media header) — gives the per-track timescale used to
-            // interpret stts sample_delta values into a real frame rate.
-            // For v0: timescale lives at i+16 (after size+type+ver+flags+
-            // creation(4)+modification(4)). For v1: at i+28 (the same
-            // fields but with 8-byte creation/modification times).
-            if (b[i] == 0x6D &&
-                b[i + 1] == 0x64 &&
-                b[i + 2] == 0x68 &&
-                b[i + 3] == 0x64) {
-              final ver = b[i + 4];
-              final tsOff = ver == 1 ? i + 28 : i + 16;
-              if (tsOff + 4 <= b.length) {
-                final ts =
-                    (b[tsOff] << 24) |
-                    (b[tsOff + 1] << 16) |
-                    (b[tsOff + 2] << 8) |
-                    b[tsOff + 3];
-                if (ts > 0) trackTimescale = ts;
-              }
+            if (durMs != null && durMs > 0) {
+              duration = Duration(milliseconds: durMs);
             }
-            // stts (time-to-sample) — first entry's sample_delta combined
-            // with mdhd timescale yields the video frame rate.
-            // Layout: size(4) + "stts"(4) + ver(1) + flags(3) +
-            //   entry_count(4) + sample_count(4) + sample_delta(4).
-            if (b[i] == 0x73 &&
-                b[i + 1] == 0x74 &&
-                b[i + 2] == 0x74 &&
-                b[i + 3] == 0x73) {
-              if (i + 20 <= b.length) {
-                final sampleDelta =
-                    (b[i + 16] << 24) |
-                    (b[i + 17] << 16) |
-                    (b[i + 18] << 8) |
-                    b[i + 19];
-                if (sampleDelta > 0) firstSampleDelta = sampleDelta;
-              }
-            }
-          }
-          if (trackTimescale != null && firstSampleDelta != null) {
-            final rawFps = trackTimescale / firstSampleDelta;
-            // Round to 2 decimal places; clamp to a sane upper bound so a
-            // corrupt stts can't claim a 10k fps video.
-            final clamped = rawFps.clamp(1.0, 240.0);
-            frameRate = (clamped * 100).round() / 100.0;
-          }
-          final bodyStr = String.fromCharCodes(b);
-          if (bodyStr.contains('avcC')) {
-            vCodec = 'h264';
-          } else if (bodyStr.contains('hvcC')) {
-            vCodec = 'h265';
-          } else if (bodyStr.contains('vpcC')) {
-            vCodec = 'vp9';
-          }
-          if (bodyStr.contains('mp4a')) {
-            aCodec = 'aac';
-          } else if (bodyStr.contains('Opus')) {
-            aCodec = 'opus';
-          }
-          if (vw != null && vh != null && vw > 0 && vh > 0) {
-            videoWidth = vw;
-            videoHeight = vh;
-            videoCodec = vCodec;
-            audioCodec = aCodec;
-          }
-          if (movieDuration != null && movieDuration.inMilliseconds > 0) {
-            duration = movieDuration;
           }
         }
       } catch (_) {}
     }
 
     if (_isHlsUri(uri, item)) {
+      debugPrint('[MediaEnricher] HLS enrichment entered for ${item.url}');
+      AuroraLog.instance.debug(
+        'HLS enrichment entered for ${item.url}',
+        category: LogCategory.sniffer,
+        screen: LogScreen.browser,
+        eventType: LogEventType.sniff,
+      );
       try {
         String? playlistBody;
         try {
           final cached = host.hlsPlaylistCache?.call(item.url);
           if (cached != null && cached.trim().isNotEmpty) {
             playlistBody = cached;
+            debugPrint(
+              '[MediaEnricher] HLS cache hit for ${item.url} (${cached.length} chars)',
+            );
+            AuroraLog.instance.debug(
+              'HLS cache hit for ${item.url} (${cached.length} chars)',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
           }
         } catch (_) {}
 
@@ -664,54 +428,319 @@ class MediaEnricher {
           debugPrint(
             '[MediaEnricher] HLS enrichment cache miss for ${item.url}',
           );
+          AuroraLog.instance.debug(
+            'HLS enrichment cache miss for ${item.url}',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
+          // Race-condition mitigation: the browser_guard.js fetch hook may
+          // still be cloning the response body into hlsPlaylistCache. Wait
+          // briefly and re-check before falling through to network tiers.
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+          try {
+            final retryCached = host.hlsPlaylistCache?.call(item.url);
+            if (retryCached != null && retryCached.trim().isNotEmpty) {
+              playlistBody = retryCached;
+              debugPrint(
+                '[MediaEnricher] HLS body available after 600ms retry for ${item.url}',
+              );
+              AuroraLog.instance.debug(
+                'HLS body available after 600ms retry for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
+            }
+          } catch (_) {}
         }
 
         // WebView JS fetch: bypasses Cloudflare WAF that blocks Dart's
         // http.Client. The browser has already passed the WAF (it loaded
         // the page) so its XHR shares the same TLS fingerprint / cookies /
         // IP reputation and can reach the protected playlist.
+        // NOTE: cross-origin XHR is still subject to CORS — this tier may
+        // fail for CDNs served from a different origin than the page.
         if (playlistBody == null && host.fetchPlaylistBodyViaWebView != null) {
           try {
             debugPrint(
               '[MediaEnricher] Trying WebView JS fetch for HLS body: ${item.url}',
+            );
+            AuroraLog.instance.debug(
+              'Trying WebView JS fetch for HLS body: ${item.url}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
             );
             final jsBody = await host.fetchPlaylistBodyViaWebView!(item.url);
             if (jsBody != null && jsBody.isNotEmpty) {
               debugPrint(
                 '[MediaEnricher] Fetched HLS playlist body via WebView for ${item.url} (${jsBody.length} chars)',
               );
+              AuroraLog.instance.debug(
+                'Fetched HLS playlist body via WebView for ${item.url} (${jsBody.length} chars)',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
               playlistBody = jsBody;
             } else {
               debugPrint(
                 '[MediaEnricher] WebView playlist fetch returned null/empty for ${item.url}',
+              );
+              AuroraLog.instance.warn(
+                'WebView playlist fetch returned null/empty for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
               );
             }
           } catch (e) {
             debugPrint(
               '[MediaEnricher] WebView playlist fetch threw: $e',
             );
-          }
-        }
-
-        if (playlistBody == null) {
-          final response = await host.client
-              .get(uri, headers: headers)
-              .timeout(const Duration(seconds: 10))
-              .catchError((_) => http.Response('', 500));
-          if (response.statusCode >= 200 && response.statusCode < 400) {
-            playlistBody = response.body;
-          } else {
-            debugPrint(
-              '[MediaEnricher] Dart HLS GET failed for ${item.url}, status ${response.statusCode}',
+            AuroraLog.instance.warn(
+              'WebView playlist fetch threw for ${item.url}: $e',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
             );
           }
         }
 
+        // Dart HTTP: may be blocked by Cloudflare WAF (TLS fingerprint
+        // detection) on protected CDNs.
+        bool wasNetworkError = false;
+        if (playlistBody == null) {
+          final response = await host.client
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 10))
+              .catchError((e) {
+                wasNetworkError = true;
+                return http.Response('', 600); // 600 indicates socket/DNS/timeout error
+              });
+          if (response.statusCode >= 200 && response.statusCode < 400) {
+            playlistBody = response.body;
+            debugPrint(
+               '[MediaEnricher] Dart HLS GET succeeded for ${item.url} (${response.body.length} chars)',
+            );
+            AuroraLog.instance.debug(
+               'Dart HLS GET succeeded for ${item.url} (${response.body.length} chars)',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
+          } else {
+            debugPrint(
+               '[MediaEnricher] Dart HLS GET failed for ${item.url}, status ${response.statusCode}',
+            );
+            AuroraLog.instance.warn(
+               'Dart HLS GET failed for ${item.url}, status ${response.statusCode}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
+          }
+        }
+
+        // Headless WebView same-origin fetch (4th tier): navigates a
+        // headless WebView to the CDN origin and issues a same-origin XHR.
+        // This bypasses both CORS (same origin) and Cloudflare WAF (real
+        // Chrome TLS fingerprint + cf_clearance cookie). It is the most
+        // reliable fallback but the heaviest (creates a headless WebView).
+        if (playlistBody == null &&
+            !wasNetworkError &&
+            host.fetchPlaylistBodyViaHeadlessWebView != null) {
+          try {
+            debugPrint(
+              '[MediaEnricher] Trying headless WebView fetch for HLS body: ${item.url}',
+            );
+            AuroraLog.instance.debug(
+              'Trying headless WebView fetch for HLS body: ${item.url}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
+            final headlessBody =
+                await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
+            if (headlessBody != null && headlessBody.isNotEmpty) {
+              debugPrint(
+                '[MediaEnricher] Fetched HLS playlist body via headless WebView for ${item.url} (${headlessBody.length} chars)',
+              );
+              AuroraLog.instance.debug(
+                'Fetched HLS playlist body via headless WebView for ${item.url} (${headlessBody.length} chars)',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
+              playlistBody = headlessBody;
+            } else {
+              debugPrint(
+                '[MediaEnricher] Headless WebView playlist fetch returned null/empty for ${item.url}',
+              );
+              AuroraLog.instance.warn(
+                'Headless WebView playlist fetch returned null/empty for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
+              );
+            }
+          } catch (e) {
+            debugPrint(
+              '[MediaEnricher] Headless WebView playlist fetch threw: $e',
+            );
+            AuroraLog.instance.warn(
+              'Headless WebView playlist fetch threw for ${item.url}: $e',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
+          }
+        }
+
+        // --- All-tiers-failed summary ---
+        if (playlistBody == null || playlistBody.trim().isEmpty) {
+          debugPrint(
+            '[MediaEnricher] ⚠ ALL HLS body-fetch tiers failed for ${item.url} — '
+            'variants will NOT be expanded',
+          );
+          AuroraLog.instance.warn(
+            'ALL HLS body-fetch tiers failed for ${item.url} — '
+            'variants NOT expanded',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.error,
+          );
+        }
+
         if (playlistBody != null && playlistBody.isNotEmpty) {
-          final playlist = HlsPlaylistParser.parse(playlistBody, uri);
+          var playlist = HlsPlaylistParser.parse(playlistBody, uri);
+          final bodyPreview = playlistBody.length > 200
+              ? playlistBody.substring(0, 200)
+              : playlistBody;
+          debugPrint(
+            '[MediaEnricher] HLS body parsed for ${item.url}: '
+            'isMaster=${playlist.isMaster}, ${playlist.variants.length} variants, '
+            '${playlist.segments.length} segments, body[:200]=${bodyPreview.replaceAll('\n', '\\n')}',
+          );
+          AuroraLog.instance.debug(
+            'HLS body parsed for ${item.url}: isMaster=${playlist.isMaster}, '
+            '${playlist.variants.length} variants, ${playlist.segments.length} segments',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
+
+          // --- Simplified-master re-fetch (Phase 2) ---
+          // Some CDNs (e.g. mycloudz.cc, cloudwish.xyz on javhd.today) serve a
+          // reduced 1-variant master to the browser's <video> element (client
+          // detection via Sec-Fetch-Dest: video / media-player Accept headers).
+          // The headless WebView's XHR sends different request headers and should
+          // get the full multi-variant master that other downloaders see.
+          if (playlist.isMaster &&
+              playlist.variants.length <= 1 &&
+              host.fetchPlaylistBodyViaHeadlessWebView != null) {
+            try {
+              debugPrint(
+                '[MediaEnricher] Master has only ${playlist.variants.length} variant(s)'
+                ' — re-fetching via headless WebView: ${item.url}',
+              );
+              AuroraLog.instance.debug(
+                'Master has only ${playlist.variants.length} variant(s)'
+                ' — re-fetching via headless WebView: ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
+              final headlessMasterBody =
+                  await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
+              if (headlessMasterBody != null &&
+                  headlessMasterBody.isNotEmpty &&
+                  headlessMasterBody.length > playlistBody.length) {
+                final fullPlaylist =
+                    HlsPlaylistParser.parse(headlessMasterBody, uri);
+                if (fullPlaylist.variants.length > playlist.variants.length) {
+                  debugPrint(
+                    '[MediaEnricher] Master re-fetched via headless WebView: '
+                    '${playlist.variants.length}→${fullPlaylist.variants.length}'
+                    ' variants for ${item.url}',
+                  );
+                  AuroraLog.instance.info(
+                    'Master re-fetched via headless WebView: '
+                    '${playlist.variants.length}→${fullPlaylist.variants.length}'
+                    ' variants for ${item.url}',
+                    category: LogCategory.sniffer,
+                    screen: LogScreen.browser,
+                    eventType: LogEventType.sniff,
+                  );
+                  // Log the full-master body preview for diagnostics
+                  final fullPreview = headlessMasterBody.length > 200
+                      ? headlessMasterBody.substring(0, 200)
+                      : headlessMasterBody;
+                  debugPrint(
+                    '[MediaEnricher] Full master body[:200]=${fullPreview.replaceAll('\n', '\\n')}',
+                  );
+                  playlist = fullPlaylist;
+                  playlistBody = headlessMasterBody;
+                } else {
+                  debugPrint(
+                    '[MediaEnricher] Headless re-fetch did not yield more variants'
+                    ' (${fullPlaylist.variants.length} vs ${playlist.variants.length})'
+                    ' for ${item.url}',
+                  );
+                  AuroraLog.instance.debug(
+                    'Headless re-fetch did not yield more variants for ${item.url}',
+                    category: LogCategory.sniffer,
+                    screen: LogScreen.browser,
+                    eventType: LogEventType.sniff,
+                  );
+                }
+              } else if (headlessMasterBody != null) {
+                debugPrint(
+                  '[MediaEnricher] Headless re-fetch returned same/smaller body'
+                  ' for ${item.url}',
+                );
+              } else {
+                debugPrint(
+                  '[MediaEnricher] Headless master re-fetch returned null/empty for ${item.url}',
+                );
+                AuroraLog.instance.warn(
+                  'Headless master re-fetch returned null/empty for ${item.url}',
+                  category: LogCategory.sniffer,
+                  screen: LogScreen.browser,
+                  eventType: LogEventType.error,
+                );
+              }
+            } catch (e) {
+              debugPrint(
+                '[MediaEnricher] Headless master re-fetch threw for ${item.url}: $e',
+              );
+              AuroraLog.instance.warn(
+                'Headless master re-fetch threw for ${item.url}: $e',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
+              );
+            }
+          }
+
           if (playlist.isMaster) {
+            var createdCount = 0;
+            var skippedCount = 0;
+            // Build a URL set once (O(n)) so the per-variant dedup check is
+            // O(1) instead of O(n*v) over the whole detected-media list.
+            final existingUrls = {for (final m in host.mutableDetectedMedia) m.url};
             for (final variant in playlist.variants) {
               final vUri = variant.uri;
+              final vUrl = vUri.toString();
+              // Skip if this variant URL already exists in the detected
+              // media list (e.g. from a previous enrichment pass or from
+              // sniff() capturing the active variant URL).  Prevents
+              // duplicate items when the enricher re-runs on rescan.
+              if (existingUrls.contains(vUrl)) {
+                skippedCount++;
+                continue;
+              }
               int? vWidth;
               int? vHeight;
               final resStr = variant.resolution;
@@ -723,7 +752,7 @@ class MediaEnricher {
                 }
               }
               final vItem = SniffedMedia(
-                url: vUri.toString(),
+                url: vUrl,
                 name: '${item.name} (${MediaSnifferEngine.bandwidthLabel(variant.bandwidth)})',
                 type: item.type,
                 contentType: 'application/vnd.apple.mpegurl',
@@ -732,11 +761,25 @@ class MediaEnricher {
                 bandwidth: variant.bandwidth,
                 width: vWidth,
                 height: vHeight,
+                masterUrl: item.url,
               );
               host.mutableDetectedMedia.add(vItem);
               host.mediaChangedController.add(vItem);
               enqueue(vItem);
+              createdCount++;
             }
+            debugPrint(
+              '[MediaEnricher] Master playlist expanded: '
+              '$createdCount variants created, $skippedCount skipped (duplicates)'
+              ' for ${item.url}',
+            );
+            AuroraLog.instance.info(
+              'Master playlist expanded for ${item.url}: '
+              '$createdCount variants created, $skippedCount skipped (duplicates)',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
           } else {
             duration = Duration(
               milliseconds: (playlist.durationSeconds * 1000).round(),
@@ -748,9 +791,11 @@ class MediaEnricher {
               // Sample up to 3 segments (first, middle, last) and average
               // their sizes for a more accurate VBR estimate.
               final segs = playlist.segments;
-              final sampleIndices = <int>{0};
-              if (segs.length > 2) sampleIndices.add(segs.length ~/ 2);
-              if (segs.length > 1) sampleIndices.add(segs.length - 1);
+              final sampleIndices = <int>{};
+              if (segs.length > 0) sampleIndices.add(segs.length ~/ 4);
+              if (segs.length > 1) sampleIndices.add(segs.length ~/ 2);
+              if (segs.length > 2) sampleIndices.add(segs.length * 3 ~/ 4);
+              if (sampleIndices.isEmpty) sampleIndices.add(0);
               final sampleSizes = <int>[];
 
               for (final si in sampleIndices) {
@@ -832,43 +877,214 @@ class MediaEnricher {
           }
           contentType ??= 'application/vnd.apple.mpegurl';
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[MediaEnricher] HLS enrichment threw for ${item.url}: $e');
+      }
     }
 
     if (uri.path.toLowerCase().endsWith('.mpd') ||
         (item.contentType?.toLowerCase().contains('dash+xml') ?? false)) {
+      debugPrint('[MediaEnricher] DASH enrichment entered for ${item.url}');
+      AuroraLog.instance.debug(
+        'DASH enrichment entered for ${item.url}',
+        category: LogCategory.sniffer,
+        screen: LogScreen.browser,
+        eventType: LogEventType.sniff,
+      );
       try {
         String? manifestBody;
         try {
           final cached = host.hlsPlaylistCache?.call(item.url);
           if (cached != null && cached.trim().isNotEmpty) {
             manifestBody = cached;
+            debugPrint(
+              '[MediaEnricher] DASH cache hit for ${item.url} (${cached.length} chars)',
+            );
+            AuroraLog.instance.debug(
+              'DASH cache hit for ${item.url} (${cached.length} chars)',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
           }
         } catch (_) {}
+
+        if (manifestBody == null) {
+          debugPrint(
+            '[MediaEnricher] DASH enrichment cache miss for ${item.url}',
+          );
+          AuroraLog.instance.debug(
+            'DASH enrichment cache miss for ${item.url}',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
+        }
 
         if (manifestBody == null &&
             host.fetchPlaylistBodyViaWebView != null) {
           try {
+            debugPrint(
+              '[MediaEnricher] Trying WebView JS fetch for DASH body: ${item.url}',
+            );
+            AuroraLog.instance.debug(
+              'Trying WebView JS fetch for DASH body: ${item.url}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
             final jsBody =
                 await host.fetchPlaylistBodyViaWebView!(item.url);
             if (jsBody != null && jsBody.isNotEmpty) {
+              debugPrint(
+                '[MediaEnricher] Fetched DASH manifest via WebView for ${item.url} (${jsBody.length} chars)',
+              );
+              AuroraLog.instance.debug(
+                'Fetched DASH manifest via WebView for ${item.url} (${jsBody.length} chars)',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
               manifestBody = jsBody;
+            } else {
+              debugPrint(
+                '[MediaEnricher] WebView DASH fetch returned null/empty for ${item.url}',
+              );
+              AuroraLog.instance.warn(
+                'WebView DASH fetch returned null/empty for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
+              );
             }
-          } catch (_) {}
+          } catch (e) {
+            debugPrint(
+              '[MediaEnricher] WebView DASH fetch threw: $e',
+            );
+            AuroraLog.instance.warn(
+              'WebView DASH fetch threw for ${item.url}: $e',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
+          }
         }
 
+        bool wasNetworkError = false;
         if (manifestBody == null) {
           final response = await host.client
               .get(uri, headers: headers)
               .timeout(const Duration(seconds: 10))
-              .catchError((_) => http.Response('', 500));
+              .catchError((e) {
+                wasNetworkError = true;
+                return http.Response('', 600);
+              });
           if (response.statusCode >= 200 && response.statusCode < 400) {
             manifestBody = response.body;
+            debugPrint(
+               '[MediaEnricher] Dart DASH GET succeeded for ${item.url} (${response.body.length} chars)',
+            );
+            AuroraLog.instance.debug(
+               'Dart DASH GET succeeded for ${item.url} (${response.body.length} chars)',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
+          } else {
+            debugPrint(
+               '[MediaEnricher] Dart DASH GET failed for ${item.url}, status ${response.statusCode}',
+            );
+            AuroraLog.instance.warn(
+               'Dart DASH GET failed for ${item.url}, status ${response.statusCode}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
           }
+        }
+
+        // Headless WebView same-origin fetch for DASH manifest body.
+        if (manifestBody == null &&
+            !wasNetworkError &&
+            host.fetchPlaylistBodyViaHeadlessWebView != null) {
+          try {
+            debugPrint(
+              '[MediaEnricher] Trying headless WebView fetch for DASH body: ${item.url}',
+            );
+            AuroraLog.instance.debug(
+              'Trying headless WebView fetch for DASH body: ${item.url}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
+            final headlessBody =
+                await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
+            if (headlessBody != null && headlessBody.isNotEmpty) {
+              debugPrint(
+                '[MediaEnricher] Fetched DASH manifest via headless WebView for ${item.url} (${headlessBody.length} chars)',
+              );
+              AuroraLog.instance.debug(
+                'Fetched DASH manifest via headless WebView for ${item.url} (${headlessBody.length} chars)',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
+              manifestBody = headlessBody;
+            } else {
+              debugPrint(
+                '[MediaEnricher] Headless WebView DASH fetch returned null/empty for ${item.url}',
+              );
+              AuroraLog.instance.warn(
+                'Headless WebView DASH fetch returned null/empty for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.error,
+              );
+            }
+          } catch (e) {
+            debugPrint(
+              '[MediaEnricher] Headless WebView DASH fetch threw: $e',
+            );
+            AuroraLog.instance.warn(
+              'Headless WebView DASH fetch threw for ${item.url}: $e',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.error,
+            );
+          }
+        }
+
+        // --- All-tiers-failed summary ---
+        if (manifestBody == null || manifestBody.trim().isEmpty) {
+          debugPrint(
+            '[MediaEnricher] ⚠ ALL DASH body-fetch tiers failed for ${item.url} — '
+            'variants will NOT be expanded',
+          );
+          AuroraLog.instance.warn(
+            'ALL DASH body-fetch tiers failed for ${item.url} — '
+            'variants NOT expanded',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.error,
+          );
         }
 
         if (manifestBody != null && manifestBody.isNotEmpty) {
           final playlist = DashPlaylistParser.parse(manifestBody, uri);
+          debugPrint(
+            '[MediaEnricher] DASH manifest parsed for ${item.url}: '
+            'isMultiVariant=${playlist.isMultiVariant}, '
+            '${playlist.representations.length} representations, '
+            'duration=${playlist.durationSeconds}s',
+          );
+          AuroraLog.instance.debug(
+            'DASH manifest parsed for ${item.url}: '
+            'isMultiVariant=${playlist.isMultiVariant}, '
+            '${playlist.representations.length} representations',
+            category: LogCategory.sniffer,
+            screen: LogScreen.browser,
+            eventType: LogEventType.sniff,
+          );
           if (playlist.durationSeconds > 0) {
             duration = playlist.duration;
             isLive = playlist.isLive;
@@ -879,6 +1095,7 @@ class MediaEnricher {
             // so the user gets a useful byte count without us having to
             // probe each segment.
             final baseDuration = duration ?? playlist.duration;
+            var variantCount = 0;
             for (final rep in playlist.representations) {
               final variantUrl =
                   rep.mediaTemplate?.toString() ?? item.url;
@@ -904,6 +1121,7 @@ class MediaEnricher {
                 videoCodec: rep.codecs,
                 audioCodec: rep.isAudio ? rep.codecs : null,
                 sampleRate: rep.audioSamplingRate,
+                masterUrl: item.url,
                 channels: rep.isAudio ? 2 : null,
                 containerFormat: 'mp4',
                 isLive: isLive,
@@ -913,11 +1131,23 @@ class MediaEnricher {
               host.mutableDetectedMedia.add(vItem);
               host.mediaChangedController.add(vItem);
               enqueue(vItem);
+              variantCount++;
             }
+            debugPrint(
+              '[MediaEnricher] DASH variants created: $variantCount for ${item.url}',
+            );
+            AuroraLog.instance.info(
+              'DASH variants created: $variantCount for ${item.url}',
+              category: LogCategory.sniffer,
+              screen: LogScreen.browser,
+              eventType: LogEventType.sniff,
+            );
           }
           contentType ??= 'application/dash+xml';
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[MediaEnricher] DASH enrichment threw for ${item.url}: $e');
+      }
     }
 
     // Flag short clips: TS segments with estimated duration < 10 seconds.
@@ -989,12 +1219,7 @@ class MediaEnricher {
   /// Returns true when the URI path contains hints that a URL might be a
   /// disguised playlist (e.g. .../hls/.../index.jpg).
   static bool _hasPlaylistPathHint(Uri uri) {
-    final path = uri.path.toLowerCase();
-    return path.contains('/hls/') ||
-        path.contains('/master') ||
-        path.contains('/playlist') ||
-        path.contains('/manifest') ||
-        path.contains('/dash/');
+    return isPlaylistPathHint(uri.toString());
   }
 
   /// Checks if [bodyBytes] starts with #EXTM3U and, if so, reclassifies the
@@ -1316,4 +1541,263 @@ _Mp4AudioInfo? _parseMp4AudioAtoms(List<int> b) {
     channels: mp4aChannels,
     duration: dur,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Isolate-parsing helpers — each runs binary header/atom analysis off the UI
+// isolate so that media enrichment does not block the render thread.
+// ---------------------------------------------------------------------------
+
+/// Parse image dimensions (JPEG/PNG/GIF/WEBP) from raw bytes on a background
+/// isolate. Returns `{width, height}` or null.
+Future<Map<String, int>?> _parseImageDimensionsInIsolate(Uint8List bytes) async {
+  return Isolate.run<Map<String, int>?>(() {
+    int? w, h;
+    if (bytes.length > 6 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      for (var i = 0; i < bytes.length - 5; i++) {
+        if (bytes[i] == 0xFF && (bytes[i + 1] & 0xF0) == 0xC0) {
+          h = (bytes[i + 5] << 8) | bytes[i + 6];
+          w = (bytes[i + 7] << 8) | bytes[i + 8];
+          break;
+        }
+      }
+    } else if (bytes.length > 8 &&
+        bytes[0] == 0x89 && bytes[1] == 0x50 &&
+        bytes[2] == 0x4E && bytes[3] == 0x47) {
+      w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+      h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+    } else if (bytes.length > 6 &&
+        bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
+      w = bytes[6] | (bytes[7] << 8);
+      h = bytes[8] | (bytes[9] << 8);
+    } else if (bytes.length > 20 &&
+        bytes[0] == 0x52 && bytes[1] == 0x49 &&
+        bytes[2] == 0x46 && bytes[3] == 0x46) {
+      w = ((bytes[26] & 0x3F) << 8) | bytes[27];
+      h = (((bytes[26] >> 6) | (bytes[28] << 2)) << 8) | bytes[29];
+    }
+    if (w != null && h != null && w > 0 && h > 0) {
+      return {'width': w, 'height': h};
+    }
+    return null;
+  });
+}
+
+/// Parse audio binary headers (MP3/ID3v2, FLAC, OGG Vorbis, M4A/mp4a) on a
+/// background isolate. Returns a map with keys: codec, container, sampleRate,
+/// channels, durationMs — any may be null.
+Future<Map<String, dynamic>?> _parseAudioHeadersInIsolate(Uint8List b) async {
+  return Isolate.run<Map<String, dynamic>?>(() {
+    if (b.length < 4) return null;
+    String? audioCodec;
+    String? containerFormat;
+    int? sampleRate;
+    int? channels;
+    int? durationMs;
+
+    // -- MP3 / ID3v2 --
+    var scanFrom = 0;
+    if (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33) {
+      if (b.length >= 10) {
+        final tagSize = (b[6] << 21) | (b[7] << 14) | (b[8] << 7) | b[9];
+        scanFrom = 10 + tagSize;
+      }
+    }
+    if (scanFrom < b.length - 4 &&
+        b[scanFrom] == 0xFF && (b[scanFrom + 1] & 0xE0) == 0xE0) {
+      final mp3Header = (b[scanFrom] << 24) |
+          (b[scanFrom + 1] << 16) |
+          (b[scanFrom + 2] << 8) |
+          b[scanFrom + 3];
+      final mp3Parsed = _parseMp3FrameHeader(mp3Header);
+      if (mp3Parsed != null) {
+        audioCodec = 'mp3';
+        containerFormat ??= 'mp3';
+        sampleRate = mp3Parsed.sampleRate;
+        channels = mp3Parsed.channels;
+      }
+    } else if (b[0] == 0x66 && b[1] == 0x4C &&
+        b[2] == 0x61 && b[3] == 0x43) {
+      // -- FLAC --
+      if (b.length >= 42) {
+        final sr = (b[18] << 12) | (b[19] << 4) | (b[20] >> 4);
+        final ch = ((b[20] >> 1) & 0x07) + 1;
+        var totalSamples = (b[21] & 0x0F);
+        for (var k = 0; k < 4; k++) {
+          totalSamples = (totalSamples << 8) | b[22 + k];
+        }
+        audioCodec = 'flac';
+        containerFormat ??= 'flac';
+        sampleRate = sr > 0 ? sr : null;
+        channels = ch;
+        if (sr > 0 && totalSamples > 0) {
+          final seconds = totalSamples / sr;
+          if (seconds > 0 && seconds < 24 * 3600) {
+            durationMs = (seconds * 1000).round();
+          }
+        }
+      }
+    } else if (b[0] == 0x4F && b[1] == 0x67 &&
+        b[2] == 0x67 && b[3] == 0x53) {
+      // -- OGG Vorbis --
+      if (b.length >= 30) {
+        final segCount = b[26];
+        var payloadStart = 27 + segCount;
+        if (payloadStart + 1 < b.length && b[payloadStart] == 0x01) {
+          if (payloadStart + 30 <= b.length &&
+              _startsWithAscii(b, payloadStart + 1, 'vorbis')) {
+            channels = b[payloadStart + 11];
+            sampleRate = b[payloadStart + 12] |
+                (b[payloadStart + 13] << 8) |
+                (b[payloadStart + 14] << 16) |
+                (b[payloadStart + 15] << 24);
+            audioCodec = 'vorbis';
+            containerFormat ??= 'ogg';
+            sampleRate = sampleRate > 0 ? sampleRate : null;
+            channels = channels > 0 ? channels : null;
+          }
+        }
+      }
+    } else if (b.length > 8 &&
+        b[4] == 0x66 && b[5] == 0x74 &&
+        b[6] == 0x79 && b[7] == 0x70) {
+      // -- M4A / ISO BMFF audio --
+      final audioMp4 = _parseMp4AudioAtoms(b);
+      if (audioMp4 != null) {
+        audioCodec = audioMp4.codec ?? 'aac';
+        containerFormat ??= 'mp4';
+        sampleRate = audioMp4.sampleRate;
+        channels = audioMp4.channels;
+        if (audioMp4.duration != null) {
+          durationMs = audioMp4.duration!.inMilliseconds;
+        }
+      }
+    }
+
+    if (audioCodec == null && sampleRate == null && channels == null) {
+      return null;
+    }
+    return {
+      'codec': audioCodec,
+      'container': containerFormat,
+      'sampleRate': sampleRate,
+      'channels': channels,
+      'durationMs': durationMs,
+    };
+  });
+}
+
+/// Parse MP4 atoms (tkhd, mvhd, mdhd, stts) on a background isolate to
+/// extract video dimensions, framerate, duration, and codec hints.
+/// Returns a map with keys: width, height, videoCodec, audioCodec, frameRate,
+/// durationMs — any may be null.
+Future<Map<String, dynamic>?> _parseVideoMp4AtomsInIsolate(Uint8List b) async {
+  return Isolate.run<Map<String, dynamic>?>(() {
+    int? vw, vh;
+    Duration? movieDuration;
+    int? trackTimescale;
+    int? firstSampleDelta;
+
+    for (var i = 0; i < b.length - 80; i++) {
+      // tkhd
+      if (b[i] == 0x74 && b[i + 1] == 0x6B &&
+          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
+        final ver = b[i + 4];
+        final wOff = ver == 1 ? i + 92 : i + 80;
+        final hOff = wOff + 4;
+        if (hOff + 4 <= b.length) {
+          final vwRaw = (b[wOff] << 24) | (b[wOff + 1] << 16) |
+              (b[wOff + 2] << 8) | b[wOff + 3];
+          final vhRaw = (b[hOff] << 24) | (b[hOff + 1] << 16) |
+              (b[hOff + 2] << 8) | b[hOff + 3];
+          vw = vwRaw >> 16;
+          vh = vhRaw >> 16;
+        }
+      }
+      // mvhd
+      if (b[i] == 0x6D && b[i + 1] == 0x76 &&
+          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
+        final ver = b[i + 4];
+        if (ver == 1) {
+          if (i + 36 <= b.length) {
+            final timescale = (b[i + 24] << 24) | (b[i + 25] << 16) |
+                (b[i + 26] << 8) | b[i + 27];
+            var durationRaw = 0;
+            for (var j = 0; j < 8; j++) {
+              durationRaw = (durationRaw << 8) | b[i + 28 + j];
+            }
+            if (timescale > 0 && durationRaw > 0) {
+              movieDuration = Duration(
+                milliseconds: ((durationRaw * 1000) / timescale).round(),
+              );
+            }
+          }
+        } else {
+          if (i + 24 <= b.length) {
+            final timescale = (b[i + 16] << 24) | (b[i + 17] << 16) |
+                (b[i + 18] << 8) | b[i + 19];
+            final durationRaw = (b[i + 20] << 24) | (b[i + 21] << 16) |
+                (b[i + 22] << 8) | b[i + 23];
+            if (timescale > 0 && durationRaw > 0) {
+              movieDuration = Duration(
+                milliseconds: ((durationRaw * 1000) / timescale).round(),
+              );
+            }
+          }
+        }
+      }
+      // mdhd
+      if (b[i] == 0x6D && b[i + 1] == 0x64 &&
+          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
+        final ver = b[i + 4];
+        final tsOff = ver == 1 ? i + 28 : i + 16;
+        if (tsOff + 4 <= b.length) {
+          final ts = (b[tsOff] << 24) | (b[tsOff + 1] << 16) |
+              (b[tsOff + 2] << 8) | b[tsOff + 3];
+          if (ts > 0) trackTimescale = ts;
+        }
+      }
+      // stts
+      if (b[i] == 0x73 && b[i + 1] == 0x74 &&
+          b[i + 2] == 0x74 && b[i + 3] == 0x73) {
+        if (i + 20 <= b.length) {
+          final sampleDelta = (b[i + 16] << 24) | (b[i + 17] << 16) |
+              (b[i + 18] << 8) | b[i + 19];
+          if (sampleDelta > 0) firstSampleDelta = sampleDelta;
+        }
+      }
+    }
+
+    double? frameRate;
+    if (trackTimescale != null && firstSampleDelta != null) {
+      final rawFps = trackTimescale / firstSampleDelta;
+      final clamped = rawFps.clamp(1.0, 240.0);
+      frameRate = (clamped * 100).round() / 100.0;
+    }
+
+    // Codec detection from string patterns in bytes
+    String? vCodec, aCodec;
+    final bodyStr = String.fromCharCodes(b);
+    if (bodyStr.contains('avcC')) {
+      vCodec = 'h264';
+    } else if (bodyStr.contains('hvcC')) {
+      vCodec = 'h265';
+    } else if (bodyStr.contains('vpcC')) {
+      vCodec = 'vp9';
+    }
+    if (bodyStr.contains('mp4a')) {
+      aCodec = 'aac';
+    } else if (bodyStr.contains('Opus')) {
+      aCodec = 'opus';
+    }
+
+    return {
+      'width': vw,
+      'height': vh,
+      'videoCodec': vCodec,
+      'audioCodec': aCodec,
+      'frameRate': frameRate,
+      'durationMs': movieDuration?.inMilliseconds,
+    };
+  });
 }

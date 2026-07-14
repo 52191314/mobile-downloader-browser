@@ -1,4 +1,100 @@
-enum DownloadState { idle, downloading, paused, completed, failed }
+enum DownloadState { idle, downloading, paused, completed, failed, merging }
+
+/// Classifies the reason a download failed.
+/// Used for programmatic error handling (different retry strategies,
+/// UI icons, actionable suggestions) instead of string-matching.
+enum DownloadFailure {
+  // ── Network ──
+  /// Device has no network connectivity.
+  noInternet,
+  /// Could not resolve hostname (DNS failure).
+  dnsLookupFailed,
+  /// Server refused the TCP connection.
+  connectionRefused,
+  /// TCP connect timed out before the server responded.
+  connectionTimeout,
+  /// Server accepted the connection but never sent a response.
+  responseTimeout,
+  /// TCP connection was reset mid-stream (ISP/CDN killed it).
+  connectionReset,
+
+  // ── HTTP ──
+  /// 401 — credentials or authentication required.
+  httpUnauthorized,
+  /// 403 — access denied, WAF blocked, or IP rate-limited.
+  httpForbidden,
+  /// 404 — resource not found or removed.
+  httpNotFound,
+  /// 429 — too many requests / rate-limited.
+  httpRateLimited,
+  /// 500/502/503/504 — server-side problem.
+  httpServerError,
+  /// Any other non-2xx status code.
+  httpUnexpectedStatus,
+
+  // ── Content ──
+  /// Signed URL or authentication token has expired.
+  urlExpired,
+  /// Malformed, unsupported, or invalid URL (blob:, empty, etc.).
+  urlInvalid,
+  /// Server returned an HTML error page instead of the media file.
+  contentMismatch,
+  /// SHA-256 hash verification failed after download.
+  hashMismatch,
+  /// Server returned 0 bytes — the response was empty.
+  emptyResponse,
+  /// ETag or Last-Modified changed mid-download — file was modified.
+  resourceChanged,
+
+  // ── HLS-specific ──
+  /// HLS playlist contained no media segments.
+  hlsPlaylistEmpty,
+  /// All fetch tiers failed to retrieve the HLS playlist.
+  hlsPlaylistFetchFailed,
+  /// Could not fetch the HLS encryption key.
+  hlsKeyFetchFailed,
+  /// Token refresh exhausted — the stream URL has expired.
+  hlsTokenExpired,
+  /// Too many consecutive 403s — CDN blocked access.
+  hlsCircuitBreaker,
+
+  /// Native torrent engine is not available (required for torrent downloads).
+  nativeEngineUnavailable,
+
+  // ── File I/O ──
+  /// No space left on device.
+  diskFull,
+  /// Cannot write to the output directory (missing permissions).
+  permissionDenied,
+  /// Other filesystem error (corrupt FS, path too long, etc.).
+  fileSystemError,
+
+  // ── Download integrity ──
+  /// Not all chunks/segments completed successfully.
+  chunkIncomplete,
+  /// A chunk file was truncated, missing, or corrupt.
+  chunkCorrupt,
+  /// Merge was interrupted on a previous run.
+  mergeInterrupted,
+  /// Force merge failed.
+  mergeFailed,
+
+  // ── Stall / Speed ──
+  /// Speed stayed below the configured threshold for too long.
+  speedStall,
+  /// Download stalled near completion — partial file is salvageable.
+  partialDownload,
+
+  // ── Torrent ──
+  /// Could not parse the torrent file or fetch torrent metadata.
+  torrentMetadataFailed,
+  /// The libtorrent engine reported an error.
+  torrentEngineError,
+
+  // ── Other ──
+  /// Unclassified or unexpected error.
+  unknown,
+}
 
 enum DownloadPriority implements Comparable<DownloadPriority> {
   low(0),
@@ -15,9 +111,17 @@ enum DownloadPriority implements Comparable<DownloadPriority> {
 class DownloadChunk {
   final int index;
   final int start;
-  final int end;
+  /// The end byte of this chunk's range.  Mutable so dynamic chunk
+  /// splitting (Phase 4) can shrink a slow chunk and redistribute its
+  /// remaining range to a newly-created child chunk.
+  int end;
   int bytesDownloaded;
   bool isCompleted;
+
+  /// When non-null, this chunk was created by splitting another chunk.
+  /// The value is the [index] of the original (parent) chunk.  Used by
+  /// the speed tracker and merge-ordering logic.
+  final int? splitFromIndex;
 
   DownloadChunk({
     required this.index,
@@ -25,6 +129,7 @@ class DownloadChunk {
     required this.end,
     this.bytesDownloaded = 0,
     this.isCompleted = false,
+    this.splitFromIndex,
   });
 
   /// Returns the expected byte length of this chunk, or `-1` if the
@@ -42,6 +147,7 @@ class DownloadChunk {
     'end': end,
     'bytesDownloaded': bytesDownloaded,
     'isCompleted': isCompleted,
+    if (splitFromIndex != null) 'splitFromIndex': splitFromIndex,
   };
 
   factory DownloadChunk.fromJson(Map<String, dynamic> json) => DownloadChunk(
@@ -50,6 +156,7 @@ class DownloadChunk {
     end: (json['end'] as num?)?.toInt() ?? 0,
     bytesDownloaded: (json['bytesDownloaded'] as num?)?.toInt() ?? 0,
     isCompleted: json['isCompleted'] as bool? ?? false,
+    splitFromIndex: (json['splitFromIndex'] as num?)?.toInt(),
   );
 }
 
@@ -69,6 +176,10 @@ class DownloadTask implements Comparable<DownloadTask> {
   double speed; // In bytes/second
   String? actualHash;
   String? errorMessage;
+  /// Structured failure reason — set alongside [errorMessage] when the
+  /// download fails.  Enables programmatic error handling (e.g. different
+  /// retry strategies per failure type) without string-matching.
+  DownloadFailure? failureReason;
   String? publicUri;
   String? publicPathLabel;
   String? publishErrorMessage;
@@ -91,8 +202,12 @@ class DownloadTask implements Comparable<DownloadTask> {
   /// through the WebView's JavaScript XHR with arraybuffer response type.
   /// Returns the raw bytes as List<int>, or null on failure.
   Future<List<int>?> Function(String url)? fetchBinaryViaWebView;
-  String? exportUri;
-  String? exportDirectoryUri;
+  /// Optional callback that returns cookies from the WebView's cookie jar
+  /// for a given URL.  Used by [HlsDownloader] to add Cloudflare cf_clearance
+  /// and session cookies to Dart HTTP requests when the WebView XHR fetch
+  /// fails (cross-origin) and the HTTP fallback would otherwise get 403.
+  Future<Map<String, String>> Function(String url)? cookieProvider;
+  bool isBackupImport;
 
   DownloadTask({
     required this.id,
@@ -106,6 +221,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.fetchViaWebView,
     this.hlsPlaylistCache,
     this.fetchBinaryViaWebView,
+    this.cookieProvider,
     this.priority = DownloadPriority.medium,
     this.state = DownloadState.idle,
     this.totalBytes = -1,
@@ -113,6 +229,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.speed = 0.0,
     this.actualHash,
     this.errorMessage,
+    this.failureReason,
     this.publicUri,
     this.publicPathLabel,
     this.publishErrorMessage,
@@ -120,8 +237,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.lastModified,
     this.chunks = const [],
     DateTime? createdAt,
-    this.exportUri,
-    this.exportDirectoryUri,
+    this.isBackupImport = false,
   }) : url = _cleanUrl(url),
        createdAt = createdAt ?? DateTime.now();
 
@@ -160,6 +276,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     'speed': speed,
     'actualHash': actualHash,
     'errorMessage': errorMessage,
+    'failureReason': failureReason?.name,
     'publicUri': publicUri,
     'publicPathLabel': publicPathLabel,
     'publishErrorMessage': publishErrorMessage,
@@ -167,8 +284,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     'lastModified': lastModified,
     'chunks': chunks.map((c) => c.toJson()).toList(),
     'createdAt': createdAt.toIso8601String(),
-    'exportUri': exportUri,
-    'exportDirectoryUri': exportDirectoryUri,
+    'isBackupImport': isBackupImport,
   };
 
   factory DownloadTask.fromJson(Map<String, dynamic> json) {
@@ -238,6 +354,12 @@ class DownloadTask implements Comparable<DownloadTask> {
       speed: (json['speed'] as num?)?.toDouble() ?? 0.0,
       actualHash: json['actualHash'] as String?,
       errorMessage: json['errorMessage'] as String?,
+      failureReason: json['failureReason'] != null
+          ? DownloadFailure.values.cast<DownloadFailure?>().firstWhere(
+              (e) => e?.name == json['failureReason'],
+              orElse: () => DownloadFailure.unknown,
+            )
+          : null,
       publicUri: json['publicUri'] as String?,
       publicPathLabel: json['publicPathLabel'] as String?,
       publishErrorMessage: json['publishErrorMessage'] as String?,
@@ -247,8 +369,7 @@ class DownloadTask implements Comparable<DownloadTask> {
       createdAt: json['createdAt'] != null
           ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
           : DateTime.now(),
-      exportUri: json['exportUri'] as String?,
-      exportDirectoryUri: json['exportDirectoryUri'] as String?,
+      isBackupImport: json['isBackupImport'] as bool? ?? false,
     );
   }
 

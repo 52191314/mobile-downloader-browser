@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../downloader/headless_webview_fetcher.dart';
 import '../../settings/download_settings.dart';
 import '../browser_controller.dart';
 import '../media_sniffer_engine.dart';
@@ -156,12 +157,29 @@ class TabLifecycleController {
   // Tab nav state
   // ---------------------------------------------------------------------------
 
+  /// Synchronously updates [tab.canGoBack] and [tab.canGoForward] from the
+  /// controller's [historyIndex], which is kept in sync with the WebView's
+  /// actual navigation stack via [onUpdateVisitedHistory] and the new
+  /// [onNavStateChanged] callback. This avoids an async round-trip to the
+  /// WebView's native `canGoBack()` / `canGoForward()` on every navigation.
+  ///
+  /// An async reconciliation with the WebView's own history is also available
+  /// via [reconcileNavStateAsync] for safety.
   void updateTabNavState(BrowserTab tab) {
-    () async {
-      tab.canGoBack = await tab.controller.canGoBack();
-      tab.canGoForward = await tab.controller.canGoForward();
-      if (host.isMounted) host.markNeedsBuild();
-    }();
+    tab.canGoBack = tab.controller.historyIndex > 0;
+    tab.canGoForward =
+        tab.controller.historyIndex < tab.controller.historyUrls.length - 1;
+    if (host.isMounted) host.markNeedsBuild();
+  }
+
+  /// Async reconciliation with the WebView's native back/forward state.
+  /// Called as a backup to [updateTabNavState] when there is reason to
+  /// distrust the controller's [`historyIndex`] (e.g. after JS-triggered
+  /// navigations that might not have fired [onUpdateVisitedHistory]).
+  Future<void> reconcileNavStateAsync(BrowserTab tab) async {
+    tab.canGoBack = await tab.controller.canGoBack();
+    tab.canGoForward = await tab.controller.canGoForward();
+    if (host.isMounted) host.markNeedsBuild();
   }
 
   // ---------------------------------------------------------------------------
@@ -268,17 +286,20 @@ class TabLifecycleController {
     String? restoredId,
     List<String>? restoredHistory,
     int restoredHistoryIndex = -1,
+
     /// When non-null, the new tab is inserted at this index instead of
     /// appended to the end.  Used for "Open in Background Tab" which
     /// should place the new tab right after the current one.
     int? insertAtIndex,
+
+    /// When true, build the WebView even if the tab is opened in the
+    /// background so its page can start loading immediately.
+    bool buildImmediately = false,
   }) {
-    final useInjectedController =
-        _tabs.isEmpty && injectedController != null;
+    final useInjectedController = _tabs.isEmpty && injectedController != null;
     final controller = useInjectedController
         ? injectedController!
-        : debugControllerFactory?.call() ??
-              SnifferWebViewControllerImpl();
+        : debugControllerFactory?.call() ?? SnifferWebViewControllerImpl();
     final injectedEngine = injectedSnifferEngine;
     final snifferEngine =
         injectedEngine ??
@@ -295,6 +316,7 @@ class TabLifecycleController {
       snifferEngine: snifferEngine,
       addressController: addressController,
       ownsEngine: injectedEngine == null,
+      ownsController: !useInjectedController,
     );
     // Fetch and cache the browser's user agent
     unawaited(() async {
@@ -324,6 +346,13 @@ class TabLifecycleController {
     // same-origin playlists will work and it's better than no fallback.
     tab.snifferEngine.fetchPlaylistBodyViaWebView = (url) =>
         tab.controller.fetchPlaylistBodyViaJavaScript(url);
+    // Wire the headless-WebView fetcher as the last-resort tier for HLS/DASH
+    // playlist body fetching. Created lazily and reuses a per-tab headless
+    // WebView navigated to the CDN origin (same-origin XHR bypasses both CORS
+    // and Cloudflare WAF). Disposed automatically via [BrowserTab.dispose].
+    tab.headlessFetcher = HeadlessWebViewFetcher();
+    tab.snifferEngine.fetchPlaylistBodyViaHeadlessWebView = (url) =>
+        tab.headlessFetcher!.fetchText(url);
     tab.snifferEngine.hlsPlaylistCache = (url) => tab.hlsPlaylistCache[url];
     host.setupTabCallbacks(tab);
     unawaited(host.configureTabAdblock(tab));
@@ -350,25 +379,42 @@ class TabLifecycleController {
     } else {
       _tabs.add(tab);
     }
+    if (buildImmediately) {
+      host.builtWebViewTabIds.add(tab.id);
+    }
     if (restoredHistory != null && restoredHistory.isNotEmpty) {
       tab.controller.restoreHistory(restoredHistory, restoredHistoryIndex);
     }
     if (url != null) {
       addressController.text = url;
-      unawaited(
-        host.loadUrlWithHostSettings(
-          tab,
-          Uri.parse(url),
-          addToHistory: restoredHistory == null,
-        ),
-      );
     }
-    unawaited(host.refreshPageInfo(tab, recordHistory: false));
+    // Only refresh page info for blank/restored tabs.  When a URL is being
+    // loaded, refreshPageInfo's currentUrl() races with loadRequest below and
+    // can overwrite tab.currentUrl with "about:blank" before the WebView loads.
+    if (url == null) {
+      unawaited(host.refreshPageInfo(tab, recordHistory: false));
+    }
     if (switchToTab) {
       final newIndex = insertAtIndex ?? _tabs.length - 1;
       host.switchToActiveTab(newIndex);
     } else if (host.isMounted) {
       host.markNeedsBuild();
+    }
+    // Defer URL load until after the build phase so the new tab's WebView
+    // is created before loadRequest runs, avoiding any race between
+    // _ready.future and onWebViewCreated.
+    if (url != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (host.isMounted && _tabs.contains(tab)) {
+          unawaited(
+            host.loadUrlWithHostSettings(
+              tab,
+              Uri.parse(url),
+              addToHistory: restoredHistory == null,
+            ),
+          );
+        }
+      });
     }
     unawaited(saveTabs());
   }
@@ -378,10 +424,10 @@ class TabLifecycleController {
     // tab's timer would run simultaneously and waste resources.
     if (tab != _activeTab) return;
     tab.videoPollTimer?.cancel();
-    // Slowed from 2s → 5s. installBrowserGuards() is called on navigation
-    // events, not here, to prevent the expensive DOM scan from causing FPS
-    // drops.
-    tab.videoPollTimer = Timer.periodic(const Duration(seconds: 15), (
+    // Restored to 3s (was 2s originally, then 15s after perf optimization).
+    // This poll bypasses CSP restrictions and catches media that the
+    // injected JS guard cannot detect. 3s balances responsiveness vs overhead.
+    tab.videoPollTimer = Timer.periodic(const Duration(seconds: 3), (
       timer,
     ) async {
       if (!host.isMounted || !_tabs.contains(tab)) {

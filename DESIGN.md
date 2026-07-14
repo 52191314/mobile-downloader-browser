@@ -24,6 +24,7 @@ colors:
 - **Theme Philosophy:** Nordic Minimalist Dark. Avoid pure white or pure primary colors.
 - **Glassmorphism:** Elements mimic frosted glass overlaying a background gradient. Use `BoxDecoration` with thin transparent borders (`#0FFFFFFF` / 6% white opacity) and slight rounded corners.
 - **Backgrounds:** Do NOT use dynamic fragment shaders (which caused GPU crashes on some Adreno 740 devices like S23 Ultra). Use a static diagonal `LinearGradient` from `background` to `surface`.
+- **Notch Handling Rule:** All bottom sheets (`showModalBottomSheet`) must specify `useSafeArea: true` to prevent overlap with status bars, notches, or navigation elements. The sheet body must use `SafeArea` to ensure contents are not clipped by device notches in either portrait or landscape.
 
 ## Components
 - **Download Cards:** Cards require `#18212B` background, `#263241` border, and progress indicators utilizing `accent` (`#88C0D0`) for active downloads.

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
@@ -189,6 +190,7 @@ class GoogleDriveApiClient implements GoogleDriveClient {
     _authClient?.close();
     _authClient = null;
     _account = null;
+    clearCache();
     await googleSignIn.signOut();
   }
 
@@ -229,13 +231,15 @@ class GoogleDriveApiClient implements GoogleDriveClient {
       parentId,
     );
     var totalBytes = 0;
+    final Map<String, String> localFolderCache = {};
     await for (final entity in directory.list(recursive: true)) {
       if (entity is! File) continue;
       final relativePath = p.relative(entity.path, from: directory.path);
-      final createdParents = await _ensureRelativeFolder(
+      final createdParents = await _ensureRelativeFolderWithCache(
         api,
         torrentFolder,
         p.dirname(relativePath),
+        localFolderCache,
       );
       final length = await entity.length();
       totalBytes += length;
@@ -288,7 +292,16 @@ class GoogleDriveApiClient implements GoogleDriveClient {
     return drive.DriveApi(client);
   }
 
+  final Map<String, String> _folderIdCache = {};
+
+  void clearCache() {
+    _folderIdCache.clear();
+  }
+
   Future<String> _ensureFolder(drive.DriveApi api, String folderName) async {
+    if (_folderIdCache.containsKey(folderName)) {
+      return _folderIdCache[folderName]!;
+    }
     final escapedName = folderName.replaceAll("'", r"\'");
     final existing = await api.files.list(
       q:
@@ -301,9 +314,44 @@ class GoogleDriveApiClient implements GoogleDriveClient {
     final matches = existing.files ?? const <drive.File>[];
     final match = matches.isEmpty ? null : matches.first;
     if (match?.id != null) {
-      return match!.id!;
+      final id = match!.id!;
+      _folderIdCache[folderName] = id;
+      return id;
     }
-    return _createFolder(api, folderName, null);
+    final id = await _createFolder(api, folderName, null);
+    _folderIdCache[folderName] = id;
+    return id;
+  }
+
+  Future<String> _ensureRelativeFolderWithCache(
+    drive.DriveApi api,
+    String parentId,
+    String relativeFolder,
+    Map<String, String> cache,
+  ) async {
+    if (relativeFolder == '.' || relativeFolder.isEmpty) {
+      return parentId;
+    }
+
+    if (cache.containsKey(relativeFolder)) {
+      return cache[relativeFolder]!;
+    }
+
+    final segments = p.split(relativeFolder);
+    var currentParent = parentId;
+    var currentPath = '';
+
+    for (final segment in segments) {
+      currentPath = currentPath.isEmpty ? segment : p.join(currentPath, segment);
+      if (cache.containsKey(currentPath)) {
+        currentParent = cache[currentPath]!;
+      } else {
+        currentParent = await _createFolder(api, segment, currentParent);
+        cache[currentPath] = currentParent;
+      }
+    }
+
+    return currentParent;
   }
 
   Future<String> _ensureRelativeFolder(
@@ -392,11 +440,17 @@ class DriveSyncService {
     }
   }
 
+  String? _syncTasksPath;
+
   Future<void> disconnect() async {
     await client.signOut();
+    if (client is GoogleDriveApiClient) {
+      (client as GoogleDriveApiClient).clearCache();
+    }
     _account = null;
     _syncedTaskIds.clear();
     _errorMessage = null;
+    unawaited(_saveSyncedTasks());
     _setStatus(DriveConnectionStatus.disconnected);
   }
 
@@ -425,6 +479,9 @@ class DriveSyncService {
     if (!_autoSyncEnabled || task.state != DownloadState.completed) {
       return null;
     }
+    if (!isConnected) {
+      return null;
+    }
     if (_syncedTaskIds.contains(task.id)) {
       return null;
     }
@@ -433,11 +490,6 @@ class DriveSyncService {
     }
 
     try {
-      if (!isConnected) {
-        _errorMessage = 'Google Drive is not connected.';
-        _setStatus(DriveConnectionStatus.error);
-        return null;
-      }
 
       final entityType = await FileSystemEntity.type(task.savePath);
       if (entityType == FileSystemEntityType.notFound) {
@@ -458,6 +510,7 @@ class DriveSyncService {
             );
       _uploadHistory.insert(0, result);
       _syncedTaskIds.add(task.id);
+      unawaited(_saveSyncedTasks());
       _errorMessage = null;
       _setStatus(DriveConnectionStatus.connected);
       return result;
@@ -478,6 +531,29 @@ class DriveSyncService {
   void _setStatus(DriveConnectionStatus status) {
     _status = status;
     _emitState();
+  }
+
+  Future<void> loadSyncedTasks(String appSupportPath) async {
+    _syncTasksPath = '$appSupportPath/synced_drive_tasks.json';
+    try {
+      final file = File(_syncTasksPath!);
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final list = jsonDecode(content);
+        if (list is List) {
+          _syncedTaskIds.addAll(list.map((e) => e.toString()));
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveSyncedTasks() async {
+    if (_syncTasksPath == null) return;
+    try {
+      final file = File(_syncTasksPath!);
+      final content = jsonEncode(_syncedTaskIds.toList());
+      await file.writeAsString(content);
+    } catch (_) {}
   }
 
   void _emitState() {

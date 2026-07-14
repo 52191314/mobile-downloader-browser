@@ -32,7 +32,7 @@ class DownloadNotificationService {
   StreamSubscription<DownloadTask>? _subscription;
 
   Future<void> initialize() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings('ic_notification');
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -97,6 +97,7 @@ class DownloadNotificationService {
           _showFailedNotification(task);
         case DownloadState.paused:
         case DownloadState.idle:
+        case DownloadState.merging:
           break;
       }
     } catch (e, s) {

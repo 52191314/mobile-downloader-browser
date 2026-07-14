@@ -7,7 +7,6 @@ import '../models/sniffed_media.dart';
 /// This is a pure data/analysis controller with no widget dependencies.
 class MediaCatchController {
   bool captureShowAllMedia = false;
-  bool hideShortClips = false;
   MediaType? activeFilter;
   final Set<int> selectedIndices = {};
   final MediaCaptureAnalyzer captureAnalyzer =
@@ -49,8 +48,6 @@ class MediaCatchController {
     return captureAnalyzer.analyze(
       media,
       showAll: captureShowAllMedia,
-      minMediaSizeKb: 0,
-      minMediaDurationSeconds: hideShortClips ? 10 : 0,
     );
   }
 

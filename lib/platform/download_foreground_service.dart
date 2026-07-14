@@ -75,4 +75,17 @@ class DownloadForegroundService {
       // Best-effort.
     }
   }
+
+  /// Checks whether the app is already whitelisted from battery optimisations.
+  /// Always returns true on non-Android platforms.
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? result =
+          await _channel.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+      return result ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
 }

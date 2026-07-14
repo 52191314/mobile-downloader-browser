@@ -1649,14 +1649,31 @@ class _QueuePageState extends State<QueuePage> {
             child: const Text('Create New'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              // Update existing task with new URL
+              // Update existing task with the freshly sniffed URL and make it
+              // retryable. A changed URL means the previously downloaded bytes
+              // no longer match, so progress is reset before resuming.
               final existing = widget.queue.getTask(existingTaskId);
               if (existing != null) {
+                final urlChanged = existing.url != newUrl;
                 existing.url = newUrl;
+                if (urlChanged) {
+                  existing.downloadedBytes = 0;
+                  existing.totalBytes = 0;
+                }
+                if (existing.state == DownloadState.failed ||
+                    existing.state == DownloadState.paused) {
+                  existing.state = DownloadState.idle;
+                }
+                existing.failureReason = null;
+                existing.errorMessage = null;
+                await widget.queue.resumeTaskAsync(existingTaskId);
                 if (mounted) {
-                  AuroraSnackbar.show(context, 'Download link updated. You can retry the download.');
+                  AuroraSnackbar.show(
+                    context,
+                    'Download link updated. The download will retry.',
+                  );
                   setState(() {});
                 }
               }

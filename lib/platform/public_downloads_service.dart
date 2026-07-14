@@ -27,37 +27,6 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
       );
     }
 
-    if (task.exportUri != null && task.exportUri!.isNotEmpty) {
-      try {
-        final success = await writeExportFile(
-          sourcePath: task.savePath,
-          exportUri: task.exportUri!,
-        );
-        if (success) {
-          return PublishedDownload(
-            uri: task.exportUri!,
-            pathLabel: 'Custom Location',
-          );
-        }
-      } catch (_) {}
-    } else if (task.exportDirectoryUri != null &&
-        task.exportDirectoryUri!.isNotEmpty) {
-      try {
-        final success = await writeExportFileToDirectory(
-          sourcePath: task.savePath,
-          directoryUri: task.exportDirectoryUri!,
-          displayName: p.basename(task.savePath),
-          mimeType: mimeTypeForName(task.savePath),
-        );
-        if (success) {
-          return PublishedDownload(
-            uri: task.exportDirectoryUri!,
-            pathLabel: 'Custom Directory',
-          );
-        }
-      } catch (_) {}
-    }
-
     final normalized = p.normalize(task.savePath).replaceAll('\\', '/');
     int completedIndex = normalized.lastIndexOf('/completed/');
     int prefixLen = '/completed/'.length;
@@ -111,16 +80,15 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     });
   }
 
-  Future<void> share(DownloadTask task) async {
-    final uri = task.publicUri;
-    if (uri == null || uri.isEmpty) {
-      throw StateError('This download has not been published yet.');
-    }
-    await _channel.invokeMethod<void>('shareUri', {
-      'uri': uri,
-      'mimeType': mimeTypeForName(task.savePath),
-      'displayName': p.basename(task.savePath),
+  Future<bool> renamePublishedFile({
+    required String publicUri,
+    required String newDisplayName,
+  }) async {
+    final result = await _channel.invokeMethod<bool>('renamePublishedFile', {
+      'uri': publicUri,
+      'newDisplayName': newDisplayName,
     });
+    return result ?? false;
   }
 
   static Future<void> shareFile(String filePath) async {
@@ -134,67 +102,34 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     return result;
   }
 
+  static Future<List<Map<String, dynamic>>> listBackupFiles({String? relativePath}) async {
+    final result = await _channel.invokeListMethod<Map<Object?, Object?>>('listBackupFiles', {
+      'relativePath': relativePath,
+    });
+    if (result == null) return [];
+    return result.map((item) => Map<String, dynamic>.from(item)).toList();
+  }
+
+  static Future<bool> deleteBackupFile(String uri) async {
+    final result = await _channel.invokeMethod<bool>('deleteBackupFile', {
+      'uri': uri,
+    });
+    return result ?? false;
+  }
+
+  static Future<String?> readBackupFile(String uri) async {
+    final result = await _channel.invokeMethod<String>('readBackupFile', {
+      'uri': uri,
+    });
+    return result;
+  }
+
   static Future<void> openUrl(String url) async {
     await _channel.invokeMethod<void>('openUrl', {'url': url});
   }
 
   static Future<void> shareUrl(String url) async {
     await _channel.invokeMethod<void>('shareUrl', {'url': url});
-  }
-
-  Future<bool> exportFile({
-    required String sourcePath,
-    required String displayName,
-    required String mimeType,
-  }) async {
-    final result = await _channel.invokeMethod<bool>('exportFile', {
-      'sourcePath': sourcePath,
-      'displayName': displayName,
-      'mimeType': mimeType,
-    });
-    return result ?? false;
-  }
-
-  Future<String?> selectExportUri({
-    required String displayName,
-    required String mimeType,
-  }) async {
-    final result = await _channel.invokeMethod<String>('selectExportUri', {
-      'displayName': displayName,
-      'mimeType': mimeType,
-    });
-    return result;
-  }
-
-  Future<bool> writeExportFile({
-    required String sourcePath,
-    required String exportUri,
-  }) async {
-    final result = await _channel.invokeMethod<bool>('writeExportFile', {
-      'sourcePath': sourcePath,
-      'exportUri': exportUri,
-    });
-    return result ?? false;
-  }
-
-  Future<String?> selectExportDirectory() async {
-    final result = await _channel.invokeMethod<String>('selectExportDirectory');
-    return result;
-  }
-
-  Future<bool> writeExportFileToDirectory({
-    required String sourcePath,
-    required String directoryUri,
-    required String displayName,
-    required String mimeType,
-  }) async {
-    final result = await _channel.invokeMethod<bool>('writeExportFileToDirectory', {
-      'sourcePath': sourcePath,
-      'directoryUri': directoryUri,
-      'displayName': displayName,
-      'mimeType': mimeType,
-    });
-    return result ?? false;
   }
 
   static String mimeTypeForName(String path) {

@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
+import '../logging/aurora_log.dart';
 import 'models/sniffed_media.dart';
 
 /// Owns the persistent and in-memory caches of sniffed media for a single
@@ -115,9 +117,6 @@ class SniffedMediaCache {
   /// [ttl]; the entry will be removed from both caches after the timer
   /// fires (unless the engine is disposed first).
   bool registerUrl(String normalizedUrl, Duration ttl) {
-    final alreadyExists = detectedMedia.any((m) => normalizeUrl(m.url) == normalizedUrl);
-    if (alreadyExists) return false;
-
     if (urlCache.contains(normalizedUrl)) return false;
     if (_globalUrlCache.contains(normalizedUrl)) return false;
     urlCache.add(normalizedUrl);
@@ -145,6 +144,12 @@ class SniffedMediaCache {
     final bIsPlaylist = b.url.toLowerCase().contains('.m3u8');
     if (aIsPlaylist != bIsPlaylist) {
       return aIsPlaylist ? -1 : 1;
+    }
+    if (aIsPlaylist && bIsPlaylist) {
+      // Both are playlists. Prefer newer playlists because HLS variant
+      // playlists are added after the master playlist and must not be evicted
+      // before/during enrichment.
+      return b.sniffedAt.compareTo(a.sniffedAt);
     }
     final aSize = a.contentLengthBytes;
     final bSize = b.contentLengthBytes;
@@ -182,6 +187,11 @@ class SniffedMediaCache {
   // ---------------------------------------------------------------------------
 
   void clear() {
+    final itemCount = detectedMedia.length;
+    debugPrint(
+      '[SniffedMediaCache] clear() — removing $itemCount items, '
+      '${urlCache.length} dedup entries',
+    );
     for (final timer in evictionTimers.values) {
       timer.cancel();
     }
@@ -195,6 +205,12 @@ class SniffedMediaCache {
     detectedMedia.clear();
     suppressedMediaCount = 0;
     suppressedReasons.clear();
+    AuroraLog.instance.debug(
+      'SniffedMediaCache cleared ($itemCount items removed)',
+      category: LogCategory.sniffer,
+      screen: LogScreen.browser,
+      eventType: LogEventType.sniff,
+    );
   }
 
   /// Clears the global cross-tab dedup cache so the same URL can be
@@ -202,6 +218,21 @@ class SniffedMediaCache {
   /// captured media.
   static void clearGlobal() {
     _globalUrlCache.clear();
+  }
+
+  /// Clears the per-engine and global dedup caches without removing any
+  /// detected media items. Used by the manual rescan button so re-captured
+  /// DOM-scan URLs are not silently dropped by the dedup check while
+  /// keeping the existing enriched items intact.
+  void clearDedupOnly() {
+    for (final timer in evictionTimers.values) {
+      timer.cancel();
+    }
+    evictionTimers.clear();
+    for (final url in urlCache) {
+      _globalUrlCache.remove(url);
+    }
+    urlCache.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -236,9 +267,10 @@ class SniffedMediaCache {
             },
           )
           .toList(growable: false);
-      await file.writeAsString(
-        jsonEncode({'schemaVersion': 2, 'items': items}),
+      final jsonString = await Isolate.run(
+        () => jsonEncode({'schemaVersion': 2, 'items': items}),
       );
+      await file.writeAsString(jsonString);
     } catch (e) {
       debugPrint('[SniffedMediaCache] Failed to save media cache: $e');
     }
@@ -248,7 +280,8 @@ class SniffedMediaCache {
     try {
       final file = File(filePath);
       if (!await file.exists()) return false;
-      final decoded = jsonDecode(await file.readAsString());
+      final raw = await file.readAsString();
+      final decoded = await Isolate.run(() => jsonDecode(raw));
       final items = _cacheItemsFromDecoded(decoded);
       if (items == null) return false;
       var added = 0;

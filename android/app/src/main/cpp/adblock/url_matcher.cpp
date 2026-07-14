@@ -12,26 +12,22 @@ bool RegexCache::match(const std::string& pattern, const std::string& text) {
     auto it = cache_.find(pattern);
     if (it != cache_.end()) {
         lru_list_.splice(lru_list_.begin(), lru_list_, it->second);
-        try {
-            return std::regex_search(text, it->second->re);
-        } catch (...) {
-            return false;
-        }
+        return RE2::PartialMatch(text, *it->second->re);
     }
-    
-    try {
-        std::regex re(pattern, std::regex::ECMAScript | std::regex::optimize);
-        if (lru_list_.size() >= capacity_) {
-            auto last = lru_list_.back();
-            cache_.erase(last.pattern);
-            lru_list_.pop_back();
-        }
-        lru_list_.push_front({pattern, re});
-        cache_[pattern] = lru_list_.begin();
-        return std::regex_search(text, re);
-    } catch (...) {
+
+    // RE2 never throws on construction — returns ok() == false for
+    // malformed patterns.
+    auto re = std::make_unique<RE2>(pattern);
+    if (!re->ok()) {
         return false;
     }
+    if (lru_list_.size() >= capacity_) {
+        auto last = std::move(lru_list_.back());
+        cache_.erase(last.pattern);
+        lru_list_.pop_back();
+    }
+    lru_list_.push_front({pattern, std::move(re)});
+    return RE2::PartialMatch(text, *lru_list_.front().re);
 }
 
 // Helper to split domain components

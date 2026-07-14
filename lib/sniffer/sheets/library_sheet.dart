@@ -23,6 +23,7 @@ void showLibrarySheet<T>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    useSafeArea: true,
     builder: (sheetContext) {
       return _LibrarySheetContent<T>(
         title: title,

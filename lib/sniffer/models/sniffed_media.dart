@@ -52,6 +52,12 @@ class SniffedMedia {
   final bool isStale;
   final bool isSizeEstimated;
 
+  /// When this item is a variant of an HLS master playlist, the URL of the
+  /// master that produced it. Set by [MediaEnricher] during variant expansion.
+  /// Used by [MediaCaptureAnalyzer] to hide bare master cards once their
+  /// variants exist. Null for non-variant items and for the master itself.
+  final String? masterUrl;
+
   SniffedMedia({
     required String url,
     required this.name,
@@ -79,6 +85,7 @@ class SniffedMedia {
     this.isCacheRestored = false,
     this.isStale = false,
     this.isSizeEstimated = false,
+    this.masterUrl,
   }) : url = _cleanUrl(url),
        sniffedAt = sniffedAt ?? DateTime.now();
 
@@ -126,6 +133,7 @@ class SniffedMedia {
     bool? isCacheRestored,
     bool? isStale,
     bool? isSizeEstimated,
+    String? masterUrl,
   }) {
     return SniffedMedia(
       url: url ?? this.url,
@@ -154,6 +162,7 @@ class SniffedMedia {
       isCacheRestored: isCacheRestored ?? this.isCacheRestored,
       isStale: isStale ?? this.isStale,
       isSizeEstimated: isSizeEstimated ?? this.isSizeEstimated,
+      masterUrl: masterUrl ?? this.masterUrl,
     );
   }
 }

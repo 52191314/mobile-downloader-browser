@@ -13,7 +13,8 @@
     <application
         android:label="Aurora Downloader"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -34,6 +35,22 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.APP_BROWSER"/>
+            </intent-filter>
+            <!-- Handle HTTP and HTTPS URLs so the app can be selected as a default browser -->
+            <intent-filter android:label="Aurora Browser">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+            <!-- Handle Magnet links -->
+            <intent-filter android:label="Aurora Magnet">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
             </intent-filter>
         </activity>
         <!-- Android 14+ foreground service that keeps the download process

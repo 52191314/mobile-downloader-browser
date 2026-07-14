@@ -94,6 +94,27 @@ bool looksLikeMediaUrl(String url) {
   return mediaFastPathRegExp.hasMatch(url);
 }
 
+/// Canonical set of URL path hints that suggest a URL may be a disguised
+/// HLS/DASH playlist served under a non-standard extension (e.g.
+/// `.../hls/.../index.jpg` whose body is `#EXTM3U`). Centralized so every
+/// playlist-routing / detection site uses the same list — previously this
+/// list was duplicated in 7 places with drift risk.
+const Set<String> _playlistPathHints = {
+  '/hls/',
+  '/master',
+  '/playlist',
+  '/manifest',
+  '/dash/',
+};
+
+/// Returns true if [url] contains a known disguised-playlist path hint.
+/// Case-insensitive. Used by classification, enrichment, capture analysis,
+/// download routing, and the WebView resource guard.
+bool isPlaylistPathHint(String url) {
+  final low = url.toLowerCase();
+  return _playlistPathHints.any((h) => low.contains(h));
+}
+
 /// Returns the standard base request headers for media downloads.
 /// Currently only includes Do-Not-Track headers if enabled.
 Map<String, String> baseRequestHeaders(bool doNotTrackEnabled) {

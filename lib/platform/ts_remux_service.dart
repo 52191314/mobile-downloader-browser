@@ -2,6 +2,17 @@ import '../logging/aurora_log.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+/// Result of a TS→MP4 remux attempt.
+class RemuxResult {
+  final bool success;
+  final String? error;
+
+  const RemuxResult({required this.success, this.error});
+
+  @override
+  String toString() => 'RemuxResult(success: $success, error: $error)';
+}
+
 class TsRemuxService {
   static const MethodChannel _channel = MethodChannel(
     'aurora_downloader/public_downloads',
@@ -9,14 +20,46 @@ class TsRemuxService {
 
   /// Remuxes an MPEG-TS file to MP4 container using Android's native
   /// MediaExtractor + MediaMuxer. No transcoding — just container change.
-  /// Returns true on success, false on failure (the .ts file is kept as fallback).
-  static Future<bool> remuxTsToMp4(String sourcePath, String destPath) async {
+  /// Returns a [RemuxResult]; on failure the `.ts` file is kept as fallback
+  /// and the failure reason is logged to AuroraLog for diagnostics.
+  static Future<RemuxResult> remuxTsToMp4(
+    String sourcePath,
+    String destPath,
+  ) async {
     try {
-      final result = await _channel.invokeMethod<bool>('remuxTsToMp4', {
+      final result = await _channel.invokeMethod<dynamic>('remuxTsToMp4', {
         'sourcePath': sourcePath,
         'destPath': destPath,
       });
-      return result ?? false;
+      // Native side now returns a map {success: bool, error: String?}.
+      // Tolerate a bare bool for backward compatibility.
+      bool success;
+      String? error;
+      if (result is Map) {
+        success = (result['success'] as bool?) ?? false;
+        error = result['error'] as String?;
+      } else {
+        success = (result as bool?) ?? false;
+      }
+      if (!success) {
+        AuroraLog.instance.error(
+          'remuxTsToMp4 failed: ${error ?? "unknown"} '
+          '(source=$sourcePath)',
+          category: LogCategory.platform,
+          screen: LogScreen.background,
+          eventType: LogEventType.error,
+        );
+      }
+      return RemuxResult(success: success, error: error);
+    } on PlatformException catch (e) {
+      debugPrint('[TsRemuxService] remuxTsToMp4 PlatformException: $e');
+      AuroraLog.instance.error(
+        'remuxTsToMp4 PlatformException: ${e.message}',
+        category: LogCategory.platform,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+      );
+      return RemuxResult(success: false, error: e.message);
     } catch (e) {
       debugPrint('[TsRemuxService] remuxTsToMp4 failed: $e');
       AuroraLog.instance.error(
@@ -25,7 +68,7 @@ class TsRemuxService {
         screen: LogScreen.background,
         eventType: LogEventType.error,
       );
-      return false;
+      return RemuxResult(success: false, error: e.toString());
     }
   }
 }

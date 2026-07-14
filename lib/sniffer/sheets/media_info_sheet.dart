@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_colors.dart';
+import 'package:aurora_downloader/ui/notifications/aurora_snackbar.dart';
 
 /// Shows the "Media Information" bottom sheet for [item]. Replaces the body
 /// of `_SnifferScreenState._showMediaInfoSheet`.
@@ -30,6 +31,7 @@ void showMediaInfoSheet(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AuroraColors.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -157,11 +159,7 @@ void showMediaInfoSheet(
                     ),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: item.url));
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('URL copied to clipboard'),
-                        ),
-                      );
+                      AuroraSnackbar.show(ctx, 'URL copied to clipboard');
                     },
                     tooltip: 'Copy URL',
                   ),

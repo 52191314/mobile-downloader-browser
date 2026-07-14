@@ -946,10 +946,13 @@ void main() {
           client: client,
           numChunks: 1,
         );
-        await expectLater(
-          splitter.start(),
-          throwsA(isA<Exception>()),
-        );
+        try {
+          await splitter.start();
+          fail('Expected start() to throw');
+        } catch (e) {
+          expect(e, isA<Exception>());
+          expect(e.toString(), contains('403'));
+        }
         expect(task.state, DownloadState.failed);
         expect(task.errorMessage, contains('403'));
       },

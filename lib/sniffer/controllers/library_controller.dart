@@ -70,7 +70,7 @@ class LibraryController {
     final history = [
       BrowserHistoryEntry(title: title, url: url, visitedAt: DateTime.now()),
       ...existing,
-    ].take(100).toList(growable: false);
+    ].toList();
     await save(library.copyWith(history: history));
   }
 
@@ -315,7 +315,7 @@ class LibraryController {
                       m.cast<String, dynamic>(),
                     ),
                   ),
-            ].take(100).toList(growable: false),
+            ].toList(),
           );
         }
         if (savedPagesCount > 0) {

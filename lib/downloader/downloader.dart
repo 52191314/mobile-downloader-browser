@@ -1,4 +1,5 @@
 export 'models.dart';
+export 'download_error_classifier.dart';
 export 'range_calculator.dart';
 export 'file_combiner.dart';
 export 'download_splitter.dart';

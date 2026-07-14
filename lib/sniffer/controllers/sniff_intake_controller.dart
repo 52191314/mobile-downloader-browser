@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -9,6 +10,7 @@ import '../../settings/download_settings.dart';
 import '../cookie_header_cache.dart';
 import '../models/browser_tab.dart';
 import '../models/sniffed_media.dart';
+import '../sniffer_url_utils.dart';
 import 'tab_manager.dart';
 
 /// Owns the URL intake pipeline that feeds sniffed media into the
@@ -28,12 +30,21 @@ import 'tab_manager.dart';
 /// sniffed-count badge) are surfaced as named callbacks so this class
 /// can be unit-tested in isolation.
 class SniffIntakeController {
+  static const int _maxActiveLiveHeaderSniffs = 4;
+  static const int _maxQueuedLiveHeaderSniffs = 120;
+  static const Duration _recentSniffWindow = Duration(seconds: 2);
+
   /// Tab list + active-tab state. Used to resolve the current active tab
   /// and its media-change throttling timers.
   final TabManager tabManager;
 
   /// Cookie header cache, keyed by URL origin.
   final CookieHeaderCache cookieCache = CookieHeaderCache();
+
+  final Queue<_QueuedSniff> _queuedSniffs = Queue<_QueuedSniff>();
+  final Set<String> _queuedSniffKeys = <String>{};
+  final Map<String, DateTime> _recentSniffs = <String, DateTime>{};
+  int _activeLiveHeaderSniffs = 0;
 
   /// Reference to the download queue — kept for parity with the
   /// [TabManager] and future enrichment hooks. The controller does not
@@ -84,7 +95,8 @@ class SniffIntakeController {
     String? currentUrl,
     String? addressText,
     String? sourcePageUrl,
-  }) normalizeHeadersForUrl;
+  })
+  normalizeHeadersForUrl;
 
   /// Returns the first non-null, non-empty string in [values].
   final String? Function(Iterable<String?> values) firstNonEmpty;
@@ -148,14 +160,76 @@ class SniffIntakeController {
     // Fast-path: skip CSS/JS/fonts/analytics/etc. before any async work.
     // If contentType is provided, it may be a media response — let it through.
     if (contentType == null && !_looksLikeMediaUrl(trimmed)) return;
-    unawaited(
-      sniffWithLiveHeaders(
+    _enqueueLiveHeaderSniff(
+      _QueuedSniff(
         tab,
         trimmed,
         sourcePageUrl: sourcePageUrl,
         contentType: contentType,
         contentLength: contentLength,
       ),
+    );
+  }
+
+  void _enqueueLiveHeaderSniff(_QueuedSniff request) {
+    final key = request.key;
+    final now = DateTime.now();
+    _pruneRecentSniffs(now);
+    final lastSeen = _recentSniffs[key];
+    if (lastSeen != null && now.difference(lastSeen) < _recentSniffWindow) {
+      return;
+    }
+    if (_queuedSniffKeys.contains(key)) return;
+
+    if (_queuedSniffs.length >= _maxQueuedLiveHeaderSniffs) {
+      // Evict the lowest-priority queued sniff (tie-break: oldest first)
+      // instead of blindly dropping the oldest. This keeps important HLS /
+      // master playlist captures alive when the queue is saturated by a
+      // burst of low-value image/document URLs.
+      var minPriority = _queuedSniffs.first.priority;
+      var dropIndex = 0;
+      for (var i = 1; i < _queuedSniffs.length; i++) {
+        final p = _queuedSniffs.elementAt(i).priority;
+        if (p < minPriority) {
+          minPriority = p;
+          dropIndex = i;
+        }
+      }
+      final dropped = _queuedSniffs.elementAt(dropIndex);
+      _queuedSniffs.remove(dropped);
+      _queuedSniffKeys.remove(dropped.key);
+    }
+    _queuedSniffs.addLast(request);
+    _queuedSniffKeys.add(key);
+    _drainLiveHeaderSniffs();
+  }
+
+  void _drainLiveHeaderSniffs() {
+    while (_activeLiveHeaderSniffs < _maxActiveLiveHeaderSniffs &&
+        _queuedSniffs.isNotEmpty) {
+      final request = _queuedSniffs.removeFirst();
+      _queuedSniffKeys.remove(request.key);
+      _activeLiveHeaderSniffs++;
+      _recentSniffs[request.key] = DateTime.now();
+      unawaited(
+        sniffWithLiveHeaders(
+          request.tab,
+          request.url,
+          sourcePageUrl: request.sourcePageUrl,
+          contentType: request.contentType,
+          contentLength: request.contentLength,
+        ).whenComplete(() {
+          _activeLiveHeaderSniffs--;
+          _drainLiveHeaderSniffs();
+        }),
+      );
+    }
+  }
+
+  void _pruneRecentSniffs(DateTime now) {
+    if (_recentSniffs.length < 120) return;
+    _recentSniffs.removeWhere(
+      (_, seenAt) => now.difference(seenAt) > _recentSniffWindow,
     );
   }
 
@@ -359,5 +433,37 @@ class SniffIntakeController {
   /// captures.
   void clearCookieCache() {
     cookieCache.clear();
+  }
+}
+
+class _QueuedSniff {
+  final BrowserTab tab;
+  final String url;
+  final String? sourcePageUrl;
+  final String? contentType;
+  final int? contentLength;
+
+  const _QueuedSniff(
+    this.tab,
+    this.url, {
+    this.sourcePageUrl,
+    this.contentType,
+    this.contentLength,
+  });
+
+  String get key =>
+      '${tab.id}|$url|${contentType ?? ''}|${contentLength ?? ''}';
+
+  /// Eviction priority: higher = more important and kept longer when the
+  /// queue is saturated. HLS/DASH playlists (incl. disguised ones under
+  /// non-.m3u8 URLs) are highest; other media is medium; everything else
+  /// is low.
+  int get priority {
+    final low = url.toLowerCase();
+    if (isPlaylistPathHint(low) || low.contains('m3u8') || low.contains('mpd')) {
+      return 3;
+    }
+    if (mediaFastPathRegExp.hasMatch(low)) return 2;
+    return 1;
   }
 }

@@ -123,6 +123,7 @@ Widget buildCatchSheetHeader(
   required int selectedCount,
   required VoidCallback onSelectBest,
   required VoidCallback onClearCaptured,
+  required VoidCallback onRescan,
 }) {
   return Padding(
     padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
@@ -152,6 +153,11 @@ Widget buildCatchSheetHeader(
               ),
             ],
           ),
+        ),
+        IconButton(
+          tooltip: 'Re-scan page for media',
+          icon: const Icon(Icons.refresh_rounded, color: Colors.cyanAccent),
+          onPressed: onRescan,
         ),
         TextButton.icon(
           key: const Key('capture_select_best_button'),
@@ -332,6 +338,7 @@ void showSniffedMediaSheet(
     SniffedMedia media, {
     List<SniffedMedia> variants,
   }) onAddToQueue,
+  required VoidCallback onRescan,
 }) {
   if (!isMounted) return;
   final parentContext = context;
@@ -364,8 +371,7 @@ void showSniffedMediaSheet(
                 // --- Gather & analyse media ---
                 final allMedia = sortMedia(tab.snifferEngine.detectedMedia)
                     .where(
-                      (m) =>
-                          !mediaCatchController.hideShortClips || !m.isShortClip,
+                      (m) => !m.isShortClip,
                     )
                     .toList();
 
@@ -403,6 +409,7 @@ void showSniffedMediaSheet(
                   expand: false,
                   builder: (scrollCtx, scrollController) {
                     return CustomScrollView(
+                      key: const Key('sniffer_drawer'),
                       controller: scrollController,
                       physics: const ClampingScrollPhysics(),
                       slivers: [
@@ -434,6 +441,7 @@ void showSniffedMediaSheet(
                                 mediaCatchController.clearSelection();
                               });
                             },
+                            onRescan: onRescan,
                           ),
                         ),
                         SliverToBoxAdapter(

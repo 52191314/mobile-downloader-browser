@@ -37,20 +37,42 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
       title: const Text('Rename File'),
       content: Form(
         key: _formKey,
-        child: TextFormField(
-          key: widget.textFieldKey ?? const Key('dialog_filename_input'),
-          controller: _controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Filename',
-            border: OutlineInputBorder(),
-          ),
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Filename cannot be empty';
-            }
-            return null;
-          },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextFormField(
+              key: widget.textFieldKey ?? const Key('dialog_filename_input'),
+              controller: _controller,
+              autofocus: true,
+              minLines: 1,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Filename',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (val) {
+                setState(() {});
+              },
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Filename cannot be empty';
+                }
+                return null;
+              },
+            ),
+            if (_controller.text.length > 120) ...[
+              const SizedBox(height: 8),
+              const Text(
+                '⚠️ Filename exceeds 120 characters. It will be auto-truncated to fit on save, or you can cut it manually.',
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
       actions: [
@@ -62,7 +84,11 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
           key: widget.okButtonKey ?? const Key('dialog_rename_ok_button'),
           onPressed: () {
             if (_formKey.currentState?.validate() ?? false) {
-              Navigator.pop(context, _controller.text.trim());
+              final finalName = _SnifferScreenState.truncateFilename(
+                _controller.text.trim(),
+                maxLength: 120,
+              );
+              Navigator.pop(context, finalName);
             }
           },
           child: const Text('OK'),

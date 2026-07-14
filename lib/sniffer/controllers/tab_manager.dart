@@ -17,6 +17,7 @@ class TabManager {
   bool isLoading = false;
   final List<ClosedTabSnapshot> recentlyClosedTabs = [];
   static const int maxRecentlyClosed = 12;
+  static const int maxTabs = 20;
 
   /// Subscription to the active tab's media-changed stream.
   StreamSubscription<dynamic>? snifferSubscription;
@@ -49,22 +50,27 @@ class TabManager {
   int switchToActiveTab(int index) {
     if (tabs.isEmpty) return -1;
     final previous = activeTabIndex;
-    activeTabIndex = index.clamp(0, tabs.length - 1);
+    final next = index.clamp(0, tabs.length - 1);
+    if (previous == next && snifferSubscription != null) {
+      return previous;
+    }
+    activeTabIndex = next;
 
     snifferSubscription?.cancel();
     snifferSubscription = activeTab.snifferEngine.onMediaChanged.listen((_) {
       onRebuild?.call();
     });
 
-    for (var i = 0; i < tabs.length; i++) {
-      final t = tabs[i];
-      if (t == activeTab) {
-        if (i != previous) unawaited(t.controller.thaw());
-      } else {
-        t.videoPollTimer?.cancel();
-        if (i != previous) unawaited(t.controller.freeze());
-      }
+    if (previous != activeTabIndex && previous >= 0 && previous < tabs.length) {
+      final oldActive = tabs[previous];
+      oldActive.videoPollTimer?.cancel();
+      unawaited(oldActive.controller.freeze());
+      unawaited(oldActive.controller.suspendTab());
     }
+
+    final newActive = activeTab;
+    unawaited(newActive.controller.thaw());
+    unawaited(newActive.controller.resumeTab());
 
     onRebuild?.call();
     return previous;

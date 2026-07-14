@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../../downloader/headless_webview_fetcher.dart';
 import '../browser_controller.dart';
 import '../media_sniffer_engine.dart';
 import 'page_meta.dart';
@@ -13,37 +14,49 @@ class BrowserTab {
   final MediaSnifferEngine snifferEngine;
   final TextEditingController addressController;
   final bool ownsEngine;
+  final bool ownsController;
   Timer? videoPollTimer;
   StreamSubscription<SniffedMedia>? mediaSubscription;
   String? userAgent;
   String? title;
   String? currentUrl;
+  /// Last *fully-loaded* main-frame URL, updated on `onPageFinished`.
+  /// Invisible JS navigations (ad insertion, analytics `location.href`
+  /// reassignments) and SPA `pushState` route changes never reach
+  /// `onPageFinished`, so this stays pinned to the previous real page. Used
+  /// by `SnifferScreen.setOnPageStarted` to decide whether to clear the
+  /// media cache — see the "Page-lifecycle guard" section of the flow doc.
+  String? committedMainFrameUrl;
   String? groupName;
   bool canGoBack = false;
   bool canGoForward = false;
+  bool isLoading = false;
+  int progress = 0;
   PageMeta pageMeta = const PageMeta();
+
   /// Per-tab cache of HLS playlist response bodies captured by
   /// browser_guard.js. Keyed by URL, value is the raw playlist text.
   /// Cleared on each page navigation.
   Map<String, String> hlsPlaylistCache = {};
+
   /// Per-tab cache of Authorization headers captured during sniffing.
   /// Keyed by media URL. Populated by [_sniffWithLiveHeaders] so the
   /// header survives the sanitization in [sanitizeSniffedMediaHeaders]
   /// and can be re-added at download time. Cleared on each page navigation.
   Map<String, String> authHeaderCache = {};
-  /// Timestamp of the last JS-fired swipe-back, used for debouncing to
-  /// prevent double-navigation when the Flutter-side GestureDetector
-  /// also fires in the same gesture sequence.
-  DateTime? lastSwipeBack;
-  /// Same as [lastSwipeBack] but for forward navigation.
-  DateTime? lastSwipeForward;
 
+  /// Headless WebView fetcher used as the last-resort tier for fetching
+  /// HLS/DASH playlist bodies. Created lazily by [TabLifecycleController]
+  /// and disposed when the tab is closed. Uses same-origin XHR from the
+  /// CDN domain to bypass CORS and Cloudflare WAF.
+  HeadlessWebViewFetcher? headlessFetcher;
   BrowserTab({
     required this.id,
     required this.controller,
     required this.snifferEngine,
     required this.addressController,
     this.ownsEngine = true,
+    this.ownsController = true,
     this.groupName,
   });
 
@@ -51,11 +64,14 @@ class BrowserTab {
     videoPollTimer?.cancel();
     mediaSubscription?.cancel();
     addressController.dispose();
+    headlessFetcher?.dispose();
     snifferEngine.clearCache();
     if (ownsEngine) {
       snifferEngine.dispose();
     }
-    controller.dispose();
+    if (ownsController) {
+      controller.dispose();
+    }
   }
 
   void detachAddressListener(void Function() listener) {

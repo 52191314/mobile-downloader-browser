@@ -23,6 +23,7 @@ class HlsPlaylistParser {
     double? pendingDuration;
     int? pendingBandwidth;
     String? pendingResolution;
+    String? pendingCodecs;
     int? pendingByteRangeLength;
 
     for (var i = 0; i < lines.length; i++) {
@@ -83,6 +84,7 @@ class HlsPlaylistParser {
       if (line.startsWith('#EXT-X-STREAM-INF')) {
         pendingBandwidth = int.tryParse(_attribute(line, 'BANDWIDTH') ?? '');
         pendingResolution = _attribute(line, 'RESOLUTION');
+        pendingCodecs = _attribute(line, 'CODECS');
         continue;
       }
       if (line.startsWith('#EXTINF')) {
@@ -112,10 +114,12 @@ class HlsPlaylistParser {
             uri: resolved,
             bandwidth: pendingBandwidth,
             resolution: pendingResolution,
+            codecs: pendingCodecs,
           ),
         );
         pendingBandwidth = null;
         pendingResolution = null;
+        pendingCodecs = null;
       } else {
         segments.add(
           HlsSegment(

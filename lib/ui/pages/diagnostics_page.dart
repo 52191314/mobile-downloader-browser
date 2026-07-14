@@ -8,6 +8,7 @@ import '../../logging/aurora_log.dart';
 import '../../logging/log_exporter.dart';
 import '../../logging/log_settings_store.dart';
 import '../../theme/aurora_colors.dart';
+import '../notifications/aurora_snackbar.dart';
 
 /// Full diagnostics viewer with filters, search, verbosity toggle, and
 /// export to plain-text or JSON.
@@ -77,64 +78,259 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     final text = LogExporter.toPlainText(entries);
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logs copied to clipboard')),
-      );
+      AuroraSnackbar.show(context, 'Logs copied to clipboard');
     }
   }
 
   Future<void> _export(List<AuroraLogEntry> entries) async {
+    bool exportApp = true;
+    bool exportBrowser = true;
+    bool exportDownload = true;
+    bool exportSystem = true;
     bool sanitize = false;
+    LogExportFormat selectedFormat = LogExportFormat.plainText;
 
-    final format = await showDialog<LogExportFormat>(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Export Logs'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Choose the file format for your exported logs.'),
-              const SizedBox(height: 16),
-              CheckboxListTile(
-                title: const Text('Sanitize for sharing'),
-                subtitle: const Text(
-                  'Replaces URL paths with hashes so personal or '
-                  'sensitive links are not included in the export.',
-                  style: TextStyle(fontSize: 11),
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Count entries in each group
+            final appCount = entries.where((e) =>
+              e.category == LogCategory.app ||
+              e.category == LogCategory.settings ||
+              e.category == LogCategory.notification
+            ).length;
+
+            final browserCount = entries.where((e) =>
+              e.category == LogCategory.browser ||
+              e.category == LogCategory.sniffer ||
+              e.category == LogCategory.adblock
+            ).length;
+
+            final downloadCount = entries.where((e) =>
+              e.category == LogCategory.download ||
+              e.category == LogCategory.hls ||
+              e.category == LogCategory.torrent
+            ).length;
+
+            final systemCount = entries.where((e) =>
+              e.category == LogCategory.native ||
+              e.category == LogCategory.platform ||
+              e.category == LogCategory.sync
+            ).length;
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.file_upload_outlined,
+                          color: AuroraColors.accent,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Export Logs',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AuroraColors.text,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      activeColor: AuroraColors.accent,
+                      title: const Text(
+                        'App & Settings',
+                        style: TextStyle(color: AuroraColors.text),
+                      ),
+                      subtitle: Text(
+                        '$appCount entries (General, settings, notifications)',
+                        style: const TextStyle(color: AuroraColors.mutedText, fontSize: 11),
+                      ),
+                      value: exportApp,
+                      onChanged: (val) =>
+                          setModalState(() => exportApp = val),
+                    ),
+                    SwitchListTile(
+                      activeColor: AuroraColors.accent,
+                      title: const Text(
+                        'Browser & Sniffer',
+                        style: TextStyle(color: AuroraColors.text),
+                      ),
+                      subtitle: Text(
+                        '$browserCount entries (WebView, sniffer, adblock)',
+                        style: const TextStyle(color: AuroraColors.mutedText, fontSize: 11),
+                      ),
+                      value: exportBrowser,
+                      onChanged: (val) =>
+                          setModalState(() => exportBrowser = val),
+                    ),
+                    SwitchListTile(
+                      activeColor: AuroraColors.accent,
+                      title: const Text(
+                        'Download Engine',
+                        style: TextStyle(color: AuroraColors.text),
+                      ),
+                      subtitle: Text(
+                        '$downloadCount entries (HTTP splitter, HLS, torrent)',
+                        style: const TextStyle(color: AuroraColors.mutedText, fontSize: 11),
+                      ),
+                      value: exportDownload,
+                      onChanged: (val) =>
+                          setModalState(() => exportDownload = val),
+                    ),
+                    SwitchListTile(
+                      activeColor: AuroraColors.accent,
+                      title: const Text(
+                        'System & Sync',
+                        style: TextStyle(color: AuroraColors.text),
+                      ),
+                      subtitle: Text(
+                        '$systemCount entries (Native C++, platform, Drive sync)',
+                        style: const TextStyle(color: AuroraColors.mutedText, fontSize: 11),
+                      ),
+                      value: exportSystem,
+                      onChanged: (val) =>
+                          setModalState(() => exportSystem = val),
+                    ),
+                    const Divider(height: 24),
+                    SwitchListTile(
+                      activeColor: AuroraColors.accent,
+                      title: const Text(
+                        'Sanitize for sharing',
+                        style: TextStyle(color: AuroraColors.text),
+                      ),
+                      subtitle: const Text(
+                        'Replaces URL paths with secure hashes to hide sensitive links',
+                        style: TextStyle(color: AuroraColors.mutedText, fontSize: 11),
+                      ),
+                      value: sanitize,
+                      onChanged: (val) =>
+                          setModalState(() => sanitize = val),
+                    ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          const Text(
+                            'Format:',
+                            style: TextStyle(
+                              color: AuroraColors.text,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const Spacer(),
+                          SegmentedButton<LogExportFormat>(
+                            segments: const [
+                              ButtonSegment(
+                                value: LogExportFormat.plainText,
+                                label: Text('Plain Text (.txt)', style: TextStyle(fontSize: 11)),
+                              ),
+                              ButtonSegment(
+                                value: LogExportFormat.json,
+                                label: Text('JSON (.json)', style: TextStyle(fontSize: 11)),
+                              ),
+                            ],
+                            selected: {selectedFormat},
+                            onSelectionChanged: (v) =>
+                                setModalState(() => selectedFormat = v.first),
+                            style: const ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(color: AuroraColors.mutedText),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          key: const Key('confirm_log_export_button'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AuroraColors.accent,
+                            foregroundColor: AuroraColors.background,
+                          ),
+                          onPressed: (!exportApp &&
+                                  !exportBrowser &&
+                                  !exportDownload &&
+                                  !exportSystem)
+                              ? null
+                              : () async {
+                                  Navigator.pop(ctx);
+
+                                  final toExport = entries.where((e) {
+                                    if (e.category == LogCategory.app ||
+                                        e.category == LogCategory.settings ||
+                                        e.category == LogCategory.notification) {
+                                      return exportApp;
+                                    }
+                                    if (e.category == LogCategory.browser ||
+                                        e.category == LogCategory.sniffer ||
+                                        e.category == LogCategory.adblock) {
+                                      return exportBrowser;
+                                    }
+                                    if (e.category == LogCategory.download ||
+                                        e.category == LogCategory.hls ||
+                                        e.category == LogCategory.torrent) {
+                                      return exportDownload;
+                                    }
+                                    if (e.category == LogCategory.native ||
+                                        e.category == LogCategory.platform ||
+                                        e.category == LogCategory.sync) {
+                                      return exportSystem;
+                                    }
+                                    return true;
+                                  }).toList();
+
+                                  try {
+                                    await LogExporter.exportAndShare(
+                                      toExport,
+                                      selectedFormat,
+                                      sanitize: sanitize,
+                                    );
+                                  } catch (e) {
+                                    if (mounted) {
+                                      AuroraSnackbar.show(
+                                        context,
+                                        'Export failed: $e',
+                                      );
+                                    }
+                                  }
+                                },
+                          child: const Text('Export'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                value: sanitize,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (v) =>
-                    setDialogState(() => sanitize = v ?? false),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(LogExportFormat.plainText),
-              child: const Text('Plain Text (.txt)'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(LogExportFormat.json),
-              child: const Text('JSON (.json)'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (format == null || !mounted) return;
-    try {
-      await LogExporter.exportAndShare(entries, format, sanitize: sanitize);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
+            );
+          },
         );
-      }
-    }
+      },
+    );
   }
 
   void _clear() {

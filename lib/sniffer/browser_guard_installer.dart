@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-/// Installs the JS guard script in the WebView and periodically refreshes
-/// the hooks to catch overwrites by page JS.
+/// Installs the JS guard script in the WebView and provides a way to
+/// re-inject it on demand (e.g. from `onLoadStop` or a manual button).
 ///
 /// The single injected script (in `assets/browser_guard.js`) does all of
 /// the following:
@@ -15,11 +15,13 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 /// * Wraps `fetch` and `XMLHttpRequest` to capture media requests.
 /// * Sets up a `MutationObserver` for dynamic DOM changes.
 ///
-/// This class also runs a 20-second refresh timer that re-injects the
-/// guard (with `force: true`) so that overwrites by page JS after
-/// `onLoadStop` are caught. The expensive DOM scan and observer setup
-/// flags are preserved by the JS script, so only the fetch/XHR/src
-/// function wrappers are re-applied.
+/// The guard is installed as a user script (`AT_DOCUMENT_START`) once per
+/// WebView, which guarantees it runs before any page JS. A force re-injection
+/// via [installBrowserGuards] (called from `onLoadStop` or a manual button)
+/// re-applies the fetch/XHR/src wrappers and optionally re-scans the DOM.
+/// No periodic refresh timer exists — [installAsUserScript] + `onLoadStop`
+/// force-injection cover normal navigation, and the manual "Re-scan" button
+/// handles rare cases where page JS overwrites hooks after `onLoadStop`.
 class BrowserGuardInstaller {
   BrowserGuardInstaller({required InAppWebViewController? controller})
       : _controller = controller {
@@ -33,7 +35,6 @@ class BrowserGuardInstaller {
   InAppWebViewController? _controller;
   bool _guardInstalled = false;
   bool _userScriptAdded = false;
-  Timer? _guardRefreshTimer;
 
   /// Update the WebView controller. Called by
   /// [SnifferWebViewControllerImpl.onWebViewCreated] when the InAppWebView
@@ -78,15 +79,15 @@ class BrowserGuardInstaller {
   }
 
   Future<void> _installBrowserGuards({bool force = false}) async {
+    if (_userScriptAdded && !force) return; // Skip non-force injection; force re-injection restores hooks overwritten by page JS
     if (_controller == null) return;
     if (!force && _guardInstalled) return;
     if (force) {
       _guardInstalled = false;
       // Reset only the version counter so hooks are re-wrapped.
-      // Do NOT reset __auroraHtmlScanned — the initial DOM scan is expensive
-      // and only needed once per navigation. __auroraPerformanceObserverActive
-      // and __auroraObserverActive are also preserved by browser_guard.js
-      // so they skip re-setup on force-reinject.
+      // Do NOT reset __auroraHtmlScanned during normal force-reinject
+      // (onLoadStop) — the initial DOM scan is expensive and only needed
+      // once per navigation.  Use [rescanPage] for a full re-scan.
       await _controller!
           .evaluateJavascript(
             source: 'window.__auroraGuardVersion = 0;',
@@ -98,20 +99,24 @@ class BrowserGuardInstaller {
         .evaluateJavascript(source: guardScript)
         .catchError((_) {});
     _guardInstalled = true;
-    _startGuardRefreshTimer();
   }
 
-  /// Periodically re-injects the guard hooks so that overwrites by page JS
-  /// (e.g. a site redefining `window.fetch` or `XMLHttpRequest.prototype.open`
-  /// after onLoadStop) are caught. Uses `force: true` but the expensive DOM
-  /// scan and observer setup flags are preserved, so only the fetch/XHR/src
-  /// function wrappers are re-applied.
-  void _startGuardRefreshTimer() {
-    _guardRefreshTimer?.cancel();
-    _guardRefreshTimer = Timer.periodic(
-      const Duration(seconds: 20),
-      (_) => _installBrowserGuards(force: true),
-    );
+  /// Full page re-scan: resets the DOM-scan flag so [installBrowserGuards]
+  /// re-scans the page's `<video>`, `<audio>`, `<a>` and related elements
+  /// in addition to re-wrapping fetch/XHR/src hooks.
+  ///
+  /// Called from the manual "Re-scan" button in the browser menu.  This is
+  /// the only path that resets `__auroraHtmlScanned`.
+  Future<void> rescanPage() async {
+    final controller = _controller;
+    if (controller == null) return;
+    await controller
+        .evaluateJavascript(
+          source:
+              'window.__auroraHtmlScanned = false; window.__auroraGuardVersion = 0;',
+        )
+        .catchError((_) {});
+    await _installBrowserGuards(force: true);
   }
 
   // JS shim + guard script lives in assets/browser_guard.js so it can be
@@ -124,9 +129,9 @@ class BrowserGuardInstaller {
     );
   }
 
-  /// Cancel the refresh timer. Called by
-  /// [SnifferWebViewControllerImpl.dispose].
+  /// No-op — kept for backward compatibility. The refresh timer was removed
+  /// in favor of `onLoadStop` force-injection + a manual button.
   void dispose() {
-    _guardRefreshTimer?.cancel();
+    // Nothing to dispose — no periodic timer.
   }
 }

@@ -2,15 +2,33 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../downloader/hls_models.dart';
-import '../logging/aurora_log.dart';
+import '../platform/network_binding_service.dart';
 import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'adblock_injector.dart';
 import 'browser_guard_installer.dart';
+import 'sniffer_url_utils.dart';
 import 'webview_fetch_delegate.dart';
+
+class StrictRedirectEvent {
+  final String url;
+  final String sourceUrl;
+  final String method;
+  final bool userInitiated;
+  final bool isRedirect;
+
+  const StrictRedirectEvent({
+    required this.url,
+    this.sourceUrl = '',
+    this.method = 'navigation',
+    this.userInitiated = false,
+    this.isRedirect = false,
+  });
+}
 
 abstract interface class SnifferBrowserController {
   Future<void> loadRequest(
@@ -27,6 +45,8 @@ abstract interface class SnifferBrowserController {
   Future<bool> canGoForward();
   Future<void> goForward();
   Future<void> reload();
+  Future<void> stop();
+  void setOnProgressChanged(void Function(int progress)? callback);
   List<String> get historyUrls;
   int get historyIndex;
   void restoreHistory(List<String> urls, int index);
@@ -34,6 +54,7 @@ abstract interface class SnifferBrowserController {
   void setOnPageStarted(void Function(String url) callback);
   void setOnPageFinished(void Function(String url) callback);
   void setOnScrollPositionChange(void Function(double x, double y) callback);
+  void setOnRecreated(void Function() callback);
   void addJavaScriptChannel(
     String name, {
     required void Function(String message) onMessageReceived,
@@ -47,6 +68,15 @@ abstract interface class SnifferBrowserController {
   Future<void> resumeActiveWebView();
   Future<void> pauseWebView();
   Future<void> resumeWebView();
+
+  /// Suspend this WebView's rendering pipeline (Android-only, per-WebView).
+  /// Unlike [pauseWebView], this does NOT call the global pauseTimers()
+  /// which would affect ALL WebViews in the process.
+  Future<void> suspendTab();
+
+  /// Resume a previously suspended WebView (Android-only, per-WebView).
+  Future<void> resumeTab();
+  void onRenderProcessGone();
   Future<int> fillForm(Map<String, String> values);
   Future<void> findAllAsync(String search);
   Future<void> findNext(bool forward);
@@ -58,8 +88,12 @@ abstract interface class SnifferBrowserController {
   bool get adBlockerEnabled;
   set adBlockerEnabled(bool enabled);
   bool get popupBlockingEnabled;
+  bool get invisibleRedirectBlockingEnabled;
   int get blockedPopupsCount;
   void incrementBlockedPopups();
+  int get blockedInvisibleRedirectsCount;
+  void incrementBlockedInvisibleRedirects();
+  Future<void> setInvisibleRedirectBlocking(bool enabled);
   int get blockedRequestCount;
   List<String> get adblockAllowlist;
   void updateAdblockAllowlist(List<String> allowlist);
@@ -80,13 +114,28 @@ abstract interface class SnifferBrowserController {
   Future<WebResourceResponse?> shouldInterceptRequestCallback(
     WebResourceRequest request,
   );
+
+  /// Called when a native HLS playlist (m3u8) request is intercepted, so the
+  /// caller can capture the playlist body (which our JS hooks cannot see when
+  /// the page uses Android WebView's built-in HLS player). The callback
+  /// receives the request URL and should return the captured body string, or
+  /// null if it could not be captured. Returning a non-null body lets the
+  /// downloader use the real playlist instead of falling back to Dart HTTP.
+  void setOnHlsPlaylistIntercepted(
+    Future<void> Function(String url, String body)? callback,
+  );
   Map<String, String> get currentHeaders;
   HlsPlaylist? get lastMasterPlaylist;
   void setOnIframeMediaDetected(void Function(String url) callback);
   void setOnDownloadStartRequest(
-      void Function(String url, String? suggestedFilename) callback);
+    void Function(String url, String? suggestedFilename) callback,
+  );
   Future<String?> fetchFreshPlaylistUrl(String url);
-  Future<String?> fetchViaJavaScript(String url, {Map<String, String>? headers});
+  Future<String?> fetchViaJavaScript(
+    String url, {
+    Map<String, String>? headers,
+  });
+
   /// Fetches response headers for [url] through the WebView's networking
   /// stack using an async XHR HEAD request. Returns a map of lowercased
   /// header names to values, including at minimum 'statusCode'. Returns
@@ -94,20 +143,61 @@ abstract interface class SnifferBrowserController {
   /// The 'content-length' key is reliably populated for CORS-safelisted
   /// responses (Content-Length is always exposed cross-origin).
   Future<Map<String, String>?> fetchHeadersViaJavaScript(String url);
+
   /// Fetches the full response body for [url] through the WebView's JS
   /// networking stack using a GET request. Returns the response text or
   /// null on failure. Used to fetch HLS playlist bodies that the browser
   /// cached but the Dart HTTP client cannot reach (Cloudflare WAF).
   Future<String?> fetchPlaylistBodyViaJavaScript(String url);
+
   /// Fetches binary data (e.g. .ts segments) through the WebView's
   /// networking stack. Uses XHR with responseType='arraybuffer' and
   /// returns the body as List<int>. Returns null on failure.
   Future<List<int>?> fetchBinaryViaJavaScript(String url);
+
   /// Returns cookies for the given [url]. If [url] is null or empty, falls
   /// back to the current page URL.
   Future<Map<String, String>> getCookiesForDomain({String? url});
   void requestOpenUrl(String url);
   void setOnOpenUrlRequest(void Function(String url)? callback);
+
+  /// Open [url] in a new browser tab directly, bypassing the
+  /// [requestOpenUrl] / [setOnOpenUrlRequest] indirection.
+  void openUrlInNewTab(String url);
+
+  /// Registers a callback for [openUrlInNewTab]. Passing `null` clears it.
+  void setOnOpenUrlInNewTab(void Function(String url)? callback);
+
+  /// Registers a callback for the active-tab system-back handler.
+  /// [SnifferScreen] sets this to a closure that navigates the active
+  /// tab's WebView back. Returns `true` if the back was handled
+  /// (the WebView could go back), `false` otherwise.
+  void setOnSystemBackRequested(Future<bool> Function()? callback);
+
+  /// Called by [AuroraHome] when the system back gesture is detected on
+  /// the Browser tab. Delegates to the callback registered via
+  /// [setOnSystemBackRequested].
+  Future<bool> handleSystemBack();
+
+  /// Registers a callback for synchronous nav-state updates.
+  /// Fired whenever [historyIndex] changes, so the UI can update
+  /// [canGoBack]/[canGoForward] flags without an async round-trip
+  /// to the WebView.
+  void setOnNavStateChanged(VoidCallback? callback);
+
+  /// Registers a callback for strict cross-origin redirect prompts. The
+  /// controller cancels the attempted main-frame redirect first, then reports
+  /// it here so the browser UI can ask what to do with it.
+  void setOnStrictRedirectDetected(
+    void Function(StrictRedirectEvent event)? callback,
+  );
+
+  /// Full page re-scan: resets the DOM-scan flag and re-injects the guard
+  /// script so that `<video>`, `<audio>`, `<a>` and other media elements
+  /// are re-scanned, and fetch/XHR/src hooks are re-wrapped.
+  /// Called from the manual "Re-scan" button.
+  Future<void> rescanPage();
+
   void dispose();
 }
 
@@ -148,9 +238,15 @@ String _adBlockConfigSignature({
   return buffer.toString();
 }
 
+bool _isHttpLike(Uri uri) => uri.scheme == 'http' || uri.scheme == 'https';
+
+bool _sameOrigin(Uri a, Uri b) =>
+    a.scheme == b.scheme && a.host == b.host && a.port == b.port;
+
 class SnifferWebViewControllerImpl implements SnifferBrowserController {
   InAppWebViewController? _controller;
   final Completer<void> _ready = Completer<void>();
+  bool _isDisposed = false;
 
   void Function(String)? _onUrlChanged;
   void Function(String)? _onPageStarted;
@@ -158,27 +254,42 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void Function(double x, double y)? _onScrollPositionChange;
   void Function(String)? _onIframeMediaDetected;
   void Function(String url, String? suggestedFilename)? _onDownloadStartRequest;
+  void Function()? _onRecreated;
+  Future<bool> Function()? _onSystemBackRequested;
+  void Function()? _onNavStateChanged;
+  void Function(int)? _onProgressChanged;
+  void Function(StrictRedirectEvent event)? _onStrictRedirectDetected;
+  String? _pendingOpenUrl;
+  String? _pendingOpenInNewTabUrl;
 
   final Map<String, void Function(String)> _jsChannels = {};
 
   bool _adBlockerEnabled = true;
   bool _popupBlockingEnabled = true;
+  bool _invisibleRedirectBlockingEnabled = true;
   AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
   int _blockedRequestCount = 0;
+  int _blockedInvisibleRedirectsCount = 0;
+
   /// Per-site allowlist of hostnames. When the current page host matches an
   /// entry in this list, adblock is bypassed for both subresource requests
   /// and main-frame navigations.
   List<String> _adblockAllowlist = const [];
+  Set<String> _adblockAllowlistSet = const {};
   String? _lastAdBlockConfigSignature;
   Future<void>? _adBlockConfigFuture;
   int _adBlockConfigGeneration = 0;
   int _blockedPopupsCount = 0;
   Map<String, String> _currentHeaders = {};
   String? _currentUrl;
+  Uri? _currentUri;
+  String _currentHost = '';
   HlsPlaylist? _lastMasterPlaylist;
+  Future<void> Function(String url, String body)? _onHlsPlaylistIntercepted;
   bool _webViewCreated = false;
   Timer? _loadResourceTimer;
   final Set<String> _pendingResourceUrls = {};
+  static const int _maxPendingResourceUrls = 80;
 
   // Custom history stack that survives app restarts. The native WebView
   // history is only valid for the current session.
@@ -197,14 +308,30 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   );
 
   // JS guard installer + 20s refresh timer.
-  late final BrowserGuardInstaller _guardInstaller =
-      BrowserGuardInstaller(controller: _controller);
+  late final BrowserGuardInstaller _guardInstaller = BrowserGuardInstaller(
+    controller: _controller,
+  );
 
   // Cosmetic filter + scriptlet injector.
   final AdblockInjector _adblockInjector = AdblockInjector(
     controller: null,
     engine: AdBlockEngine.builtIn(),
   );
+
+  void _setCurrentUrl(String? url, {bool clearOnNull = false}) {
+    if (url == null || url.isEmpty) {
+      if (clearOnNull) {
+        _currentUrl = null;
+        _currentUri = null;
+        _currentHost = '';
+      }
+      return;
+    }
+    _currentUrl = url;
+    final uri = Uri.tryParse(url);
+    _currentUri = uri;
+    _currentHost = uri?.host ?? '';
+  }
 
   static final RegExp _mediaUrlRegExp = RegExp(
     // .ts is excluded â€” HLS segments are not discoverable media; the
@@ -215,6 +342,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   /// Called by BrowserWidget when InAppWebView creates its controller.
   void onWebViewCreated(InAppWebViewController controller) {
+    final isRecreation = _webViewCreated;
     _controller = controller;
     _webViewCreated = true;
     _fetchDelegate.setController(controller);
@@ -231,6 +359,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _registerPendingChannels();
     unawaited(_syncPopupBlockingFlag());
     if (!_ready.isCompleted) _ready.complete();
+
+    if (isRecreation) {
+      _onRecreated?.call();
+    }
   }
 
   @override
@@ -240,7 +372,8 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   @override
   void setOnDownloadStartRequest(
-      void Function(String url, String? suggestedFilename) callback) {
+    void Function(String url, String? suggestedFilename) callback,
+  ) {
     _onDownloadStartRequest = callback;
   }
 
@@ -253,13 +386,42 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Future<void> installBrowserGuards() => _guardInstaller.installBrowserGuards();
 
   @override
+  Future<void> rescanPage() => _guardInstaller.rescanPage();
+
+  @override
   bool get adBlockerEnabled => _adBlockerEnabled;
 
   @override
   bool get popupBlockingEnabled => _popupBlockingEnabled;
 
   @override
+  bool get invisibleRedirectBlockingEnabled =>
+      _invisibleRedirectBlockingEnabled;
+
+  @override
   int get blockedRequestCount => _blockedRequestCount;
+
+  @override
+  int get blockedInvisibleRedirectsCount => _blockedInvisibleRedirectsCount;
+
+  @override
+  void incrementBlockedInvisibleRedirects() {
+    _blockedInvisibleRedirectsCount++;
+  }
+
+  @override
+  Future<void> setInvisibleRedirectBlocking(bool enabled) async {
+    _invisibleRedirectBlockingEnabled = enabled;
+    if (_webViewCreated) {
+      await _controller
+          ?.evaluateJavascript(
+            source:
+                'window.__auroraInvisibleRedirectBlockingEnabled = '
+                '${enabled ? 'true' : 'false'};',
+          )
+          .catchError((_) {});
+    }
+  }
 
   @override
   set adBlockerEnabled(bool enabled) {
@@ -286,6 +448,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   void updateAdblockAllowlist(List<String> allowlist) {
     _adblockAllowlist = List<String>.unmodifiable(allowlist);
+    _adblockAllowlistSet = Set<String>.unmodifiable(allowlist);
   }
 
   @override
@@ -306,9 +469,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   bool shouldSuppressSniffedUrl(String url) {
     if (url.trim().isEmpty) return false;
-    final pageUri = Uri.tryParse(_currentUrl ?? '');
+    final pageUri = _currentUri;
     final requestUri = Uri.tryParse(url);
-    final sourceHost = pageUri?.host ?? '';
+    final sourceHost = _currentHost;
     bool isThirdParty = false;
     if (pageUri != null &&
         requestUri != null &&
@@ -389,35 +552,65 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   @override
+  void setOnHlsPlaylistIntercepted(
+    Future<void> Function(String url, String body)? callback,
+  ) {
+    _onHlsPlaylistIntercepted = callback;
+  }
+
+  @override
   Future<WebResourceResponse?> shouldInterceptRequestCallback(
     WebResourceRequest request,
   ) async {
+    // Capture native HLS playlist (m3u8) bodies. When the page uses Android
+    // WebView's built-in HLS player, the playlist is fetched by native code
+    // (not JS fetch/XHR), so our browser_guard.js hooks never see it. We
+    // detect the request here, fetch the body ourselves via native HTTP
+    // (with browser cookies, no CORS restriction), and hand it to the
+    // downloader so it uses the REAL playlist instead of a Dart-HTTP fallback
+    // that may receive a decoy. We let the WebView's own request proceed
+    // (return null) so playback is unaffected.
+    if (_onHlsPlaylistIntercepted != null &&
+        request.isForMainFrame != true &&
+        request.method == 'GET') {
+      final reqUrl = request.url.toString();
+      final lowUrl = reqUrl.toLowerCase();
+      final isHls =
+          lowUrl.contains('.m3u8') ||
+          isPlaylistPathHint(lowUrl) ||
+          (request.headers?['Accept']?.toLowerCase().contains('mpegurl') ??
+              false);
+      if (isHls) {
+        unawaited(_captureHlsPlaylistBody(reqUrl));
+      }
+    }
+
     if (!_adBlockerEnabled) return null;
 
     // Skip main frame — already handled by shouldOverrideUrlLoading
     if (request.isForMainFrame == true) return null;
 
+    final pageUri = _currentUri;
+    final pageHost = _currentHost;
+
     // Per-site allowlist: skip adblock for the current page's host
-    final pageHost = Uri.tryParse(_currentUrl ?? '')?.host ?? '';
-    if (pageHost.isNotEmpty && _adblockAllowlist.contains(pageHost)) {
+    if (pageHost.isNotEmpty && _adblockAllowlistSet.contains(pageHost)) {
       return null;
     }
 
-    final url = request.url.toString();
-    if (url.isEmpty) return null;
-
-    // Skip data: and blob: URLs
-    final lower = url.toLowerCase();
-    if (lower.startsWith('data:') || lower.startsWith('blob:')) return null;
+    final requestUri = request.url;
+    if (pageUri != null && requestUri.host == pageUri.host) {
+      return null;
+    }
 
     // Skip non-http(s) schemes
-    if (!lower.startsWith('http://') && !lower.startsWith('https://')) return null;
+    final scheme = requestUri.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') return null;
 
-    final requestUri = Uri.tryParse(url);
-    final pageUri = Uri.tryParse(_currentUrl ?? '');
-    if (requestUri == null) return null;
+    final url = requestUri.toString();
+    if (url.isEmpty) return null;
 
-    final sourceHost = pageUri?.host ?? '';
+    final sourceHost = pageHost;
     bool isThirdParty = false;
     if (pageUri != null && requestUri.host != pageUri.host) {
       isThirdParty = true;
@@ -445,16 +638,66 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     return null; // allow
   }
 
+  /// Fetches the m3u8 body for a native HLS playlist request via native HTTP
+  /// (with browser cookies) and forwards it to the registered
+  /// [_onHlsPlaylistIntercepted] callback. Runs asynchronously so it never
+  /// blocks the WebView's own request. Failures are silently ignored — the
+  /// downloader will fall back to its existing playlist-fetch ladder.
+  Future<void> _captureHlsPlaylistBody(String url) async {
+    try {
+      final uri = Uri.tryParse(url);
+      final origin = uri != null ? '${uri.scheme}://${uri.host}' : '';
+      final result = await NetworkBindingService.fetchUrl(
+        url,
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          'Referer': '$origin/',
+          'Origin': origin,
+          'Accept': '*/*',
+        },
+      );
+      if (result == null) return;
+      final body = result['body'] as String?;
+      final status = result['statusCode'] as int? ?? 0;
+      if (body != null &&
+          body.isNotEmpty &&
+          status >= 200 &&
+          status < 300 &&
+          body.trim().startsWith('#EXTM3U') &&
+          _onHlsPlaylistIntercepted != null) {
+        await _onHlsPlaylistIntercepted!(url, body);
+      }
+    } catch (_) {
+      // Ignore — fallback ladder handles missing playlist bodies.
+    }
+  }
+
   String _inferRequestType(String url, String method) {
-    final ext = url.toLowerCase();
+    var path = url;
+    final qIdx = url.indexOf('?');
+    if (qIdx != -1) {
+      path = url.substring(0, qIdx);
+    }
+    final hashIdx = path.indexOf('#');
+    if (hashIdx != -1) {
+      path = path.substring(0, hashIdx);
+    }
+    final ext = path.toLowerCase();
     if (ext.endsWith('.js')) return 'script';
     if (ext.endsWith('.css')) return 'stylesheet';
-    if (ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') ||
-        ext.endsWith('.gif') || ext.endsWith('.webp') || ext.endsWith('.svg') ||
-        ext.endsWith('.ico') || ext.endsWith('.bmp')) return 'image';
+    if (ext.endsWith('.png') ||
+        ext.endsWith('.jpg') ||
+        ext.endsWith('.jpeg') ||
+        ext.endsWith('.gif') ||
+        ext.endsWith('.webp') ||
+        ext.endsWith('.svg') ||
+        ext.endsWith('.ico') ||
+        ext.endsWith('.bmp')) {
+      return 'image';
+    }
     if (ext.endsWith('.html') || ext.endsWith('.htm')) return 'subdocument';
-    if (ext.endsWith('.xml')) return 'xmlhttprequest';
-    if (ext.endsWith('.json')) return 'xmlhttprequest';
+    if (ext.endsWith('.xml') || ext.endsWith('.json')) return 'xmlhttprequest';
     return 'other';
   }
 
@@ -463,8 +706,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// Called by InAppWebView onLoadStart
   void onLoadStart(WebUri? url) {
     final urlStr = url?.toString() ?? '';
+    _pendingResourceUrls.clear();
+    _loadResourceTimer?.cancel();
+    _loadResourceTimer = null;
     if (urlStr.isNotEmpty) {
-      _currentUrl = urlStr;
+      _setCurrentUrl(urlStr);
     }
     unawaited(_adblockInjector.injectForPage(urlStr));
     _guardInstaller.installBrowserGuards();
@@ -476,7 +722,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void onLoadStop(WebUri? url) {
     final urlStr = url?.toString() ?? '';
     if (urlStr.isNotEmpty) {
-      _currentUrl = urlStr;
+      _setCurrentUrl(urlStr);
     }
     _guardInstaller.installBrowserGuards(force: true);
     _onPageFinished?.call(urlStr);
@@ -487,7 +733,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _guardInstaller.installBrowserGuards(force: true);
     if (url != null) {
       final urlStr = url.toString();
-      _currentUrl = urlStr;
+      _setCurrentUrl(urlStr);
       // Track real navigations in our persistent history stack. Reloads don't
       // push a new entry.
       if (isReload != true &&
@@ -501,6 +747,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// Called by InAppWebView onProgressChanged
   void onProgressChanged(int progress) {
     // Guards already installed via onLoadStart/onLoadStop
+    _onProgressChanged?.call(progress);
   }
 
   /// Called by InAppWebView shouldOverrideUrlLoading
@@ -508,9 +755,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     NavigationAction action,
   ) async {
     final url = action.request.url?.toString() ?? '';
-    final pageUri = Uri.tryParse(_currentUrl ?? '');
+    final pageUri = _currentUri;
     final requestUri = Uri.tryParse(url);
-    final sourceHost = pageUri?.host ?? '';
+    final sourceHost = _currentHost;
     final requestType = action.isForMainFrame ? 'document' : 'subdocument';
     bool isThirdParty = false;
     if (pageUri != null &&
@@ -520,16 +767,40 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       isThirdParty = pageUri.host != requestUri.host;
     }
     // Per-site allowlist: skip adblock for the current page's host
-    final pageHost = Uri.tryParse(_currentUrl ?? '')?.host ?? '';
-    final allowlisted = pageHost.isNotEmpty && _adblockAllowlist.contains(pageHost);
+    final pageHost = _currentHost;
+    final allowlisted =
+        pageHost.isNotEmpty && _adblockAllowlistSet.contains(pageHost);
 
     // Skip adblock for history navigation (back/forward) so that URLs
     // that were successfully visited before are never blocked on revisit.
     // The `_history.contains(url)` fallback catches the race where
     // `_isHistoryNavigation` has already been reset by the time
     // this native callback fires.
-    final isHistoryNav =
-        _isHistoryNavigation || _history.contains(url);
+    final isHistoryNav = _isHistoryNavigation || _history.contains(url);
+    final shouldPromptStrictRedirect =
+        _invisibleRedirectBlockingEnabled &&
+        action.isForMainFrame &&
+        !isHistoryNav &&
+        pageUri != null &&
+        requestUri != null &&
+        _isHttpLike(pageUri) &&
+        _isHttpLike(requestUri) &&
+        !_sameOrigin(pageUri, requestUri) &&
+        (action.isRedirect == true || action.hasGesture != true);
+    if (shouldPromptStrictRedirect) {
+      _onStrictRedirectDetected?.call(
+        StrictRedirectEvent(
+          url: url,
+          sourceUrl: pageUri.toString(),
+          method: action.isRedirect == true
+              ? 'http-redirect'
+              : 'main-frame navigation',
+          userInitiated: action.hasGesture == true,
+          isRedirect: action.isRedirect == true,
+        ),
+      );
+      return NavigationActionPolicy.CANCEL;
+    }
     if (!allowlisted &&
         !isHistoryNav &&
         shouldBlockUrl(
@@ -564,7 +835,6 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (resource == null) return;
     final url = resource.url?.toString() ?? '';
     if (url.isEmpty) return;
-    final initiator = resource.initiatorType ?? '';
 
     // SKIP: segment files (HLS .ts fragments, DASH .m4s fragments)
     final lowUrl = url.toLowerCase();
@@ -595,11 +865,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     // (e.g. .../hls/.../index.jpg served as #EXTM3U). Applies to all
     // initiator types including fetch, xmlhttprequest, and media.
     if (!matches) {
-      if (lowUrl.contains('/hls/') ||
-          lowUrl.contains('/master') ||
-          lowUrl.contains('/playlist') ||
-          lowUrl.contains('/manifest') ||
-          lowUrl.contains('/dash/')) {
+      if (isPlaylistPathHint(lowUrl)) {
         matches = true;
       }
     }
@@ -610,6 +876,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
     // Throttle: batch matching URLs and flush at MOST every 2000ms,
     // with a hard cap of 20 URLs per flush to prevent platform channel saturation.
+    if (!_pendingResourceUrls.contains(url) &&
+        _pendingResourceUrls.length >= _maxPendingResourceUrls) {
+      _pendingResourceUrls.remove(_pendingResourceUrls.first);
+    }
     _pendingResourceUrls.add(url);
     _loadResourceTimer ??= Timer.periodic(const Duration(milliseconds: 2000), (
       _,
@@ -644,21 +914,36 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     Map<String, String>? headers,
     bool addToHistory = true,
   }) async {
-    _currentHeaders = headers ?? const {};
+    if (_isDisposed) return;
     final urlStr = uri.toString();
-    _currentUrl = urlStr;
+    if (urlStr.isEmpty) {
+      debugPrint(
+        '[BrowserController] loadRequest called with empty URI — ignoring',
+      );
+      return;
+    }
+    _currentHeaders = headers ?? const {};
+    _setCurrentUrl(urlStr);
     if (addToHistory) {
       _recordHistoryNavigation(urlStr);
     }
-    // Fire callbacks immediately so the SnifferScreen UI updates even when
-    // the WebView's onLoadStart/onUpdateVisitedHistory are delayed or
-    // suppressed (e.g. same-page hash navigation, platform-view timing).
-    _onPageStarted?.call(urlStr);
-    _onUrlChanged?.call(urlStr);
+    // Only fire synthetic callbacks for EXISTING WebViews (already ready).
+    // For NEW WebViews, skip and let the real onLoadStart/onUpdateVisitedHistory
+    // callbacks handle the UI update, avoiding a race where the WebView hasn't
+    // been created yet and refreshPageInfo overwrites tab.currentUrl.
+    if (_ready.isCompleted) {
+      _onPageStarted?.call(urlStr);
+      _onUrlChanged?.call(urlStr);
+    }
     await _ready.future;
-    await _controller?.loadUrl(
-      urlRequest: URLRequest(url: WebUri.uri(uri), headers: headers),
-    );
+    if (_isDisposed) return;
+    try {
+      await _controller?.loadUrl(
+        urlRequest: URLRequest(url: WebUri.uri(uri), headers: headers),
+      );
+    } catch (e) {
+      debugPrint('[BrowserController] loadUrl failed (likely disposed): $e');
+    }
   }
 
   void _recordHistoryNavigation(String urlStr) {
@@ -667,6 +952,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
     _history.add(urlStr);
     _historyIndex = _history.length - 1;
+    _onNavStateChanged?.call();
   }
 
   @override
@@ -681,12 +967,16 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       ..clear()
       ..addAll(urls);
     _historyIndex = index.clamp(-1, _history.length - 1);
-    _currentUrl = _historyIndex >= 0 ? _history[_historyIndex] : null;
+    _setCurrentUrl(
+      _historyIndex >= 0 ? _history[_historyIndex] : null,
+      clearOnNull: true,
+    );
+    _onNavStateChanged?.call();
   }
 
   @override
   Future<void> loadFile(String path) async {
-    _currentUrl = 'file://$path';
+    _setCurrentUrl('file://$path');
     await _ready.future;
     if (path.startsWith('/') || path.contains(':\\') || path.contains(':/')) {
       await _controller?.loadUrl(
@@ -701,7 +991,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Future<String?> currentUrl() async {
     await _ready.future;
     final url = await _controller?.getUrl();
-    _currentUrl = url?.toString() ?? _currentUrl;
+    _setCurrentUrl(url?.toString());
     return _currentUrl;
   }
 
@@ -725,8 +1015,21 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (_historyIndex > 0) {
       _isHistoryNavigation = true;
       _historyIndex--;
-      final url = _history[_historyIndex];
-      await loadRequest(Uri.parse(url), addToHistory: false);
+      _onNavStateChanged?.call();
+      // Use the WebView's native goBack() which uses the browser cache
+      // and is instant, instead of reloading the page from the network.
+      try {
+        final canGo = await _controller?.canGoBack() ?? false;
+        if (canGo) {
+          await _controller?.goBack();
+        } else {
+          final url = _history[_historyIndex];
+          await loadRequest(Uri.parse(url), addToHistory: false);
+        }
+      } catch (_) {
+        final url = _history[_historyIndex];
+        await loadRequest(Uri.parse(url), addToHistory: false);
+      }
       _isHistoryNavigation = false;
     }
   }
@@ -739,8 +1042,21 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (_historyIndex < _history.length - 1) {
       _isHistoryNavigation = true;
       _historyIndex++;
-      final url = _history[_historyIndex];
-      await loadRequest(Uri.parse(url), addToHistory: false);
+      _onNavStateChanged?.call();
+      // Use the WebView's native goForward() which uses the browser cache
+      // and is instant, instead of reloading the page from the network.
+      try {
+        final canGo = await _controller?.canGoForward() ?? false;
+        if (canGo) {
+          await _controller?.goForward();
+        } else {
+          final url = _history[_historyIndex];
+          await loadRequest(Uri.parse(url), addToHistory: false);
+        }
+      } catch (_) {
+        final url = _history[_historyIndex];
+        await loadRequest(Uri.parse(url), addToHistory: false);
+      }
       _isHistoryNavigation = false;
     }
   }
@@ -748,10 +1064,29 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   Future<void> reload() async {
     await _ready.future;
-    // Clear WebView cache so reload fetches a fresh token/playlist instead
-    // of reusing a cached, expired one.
-    await InAppWebViewController.clearAllCache();
+    // Use the WebView's native reload — it already sends Cache-Control: max-age=0
+    // to bypass the HTTP cache for this page.  Do NOT call
+    // InAppWebViewController.clearAllCache() globally — that destroys the
+    // in-memory back-forward cache (bfcache) for EVERY tab, forcing every
+    // WebView to reload pages from the network on back/forward navigation.
     await _controller?.reload();
+  }
+
+  @override
+  Future<void> stop() async {
+    await _ready.future;
+    await _controller?.stopLoading();
+    // stopLoading() does not trigger onLoadStop, so manually fire
+    // page-finished to transition the tab out of loading state.
+    final url = _currentUrl;
+    if (url != null) {
+      _onPageFinished?.call(url);
+    }
+  }
+
+  @override
+  void setOnProgressChanged(void Function(int progress)? callback) {
+    _onProgressChanged = callback;
   }
 
   @override
@@ -772,6 +1107,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   void setOnScrollPositionChange(void Function(double x, double y) callback) {
     _onScrollPositionChange = callback;
+  }
+
+  @override
+  void setOnRecreated(void Function() callback) {
+    _onRecreated = callback;
   }
 
   @override
@@ -866,11 +1206,13 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     // parsing for ALL WebViews in the process.  This frees the Dart event
     // loop from WebView activity so download HTTP streams are processed
     // without starvation.
+    // NOTE: We intentionally do NOT call freeze() here.  freeze() hides the
+    // DOM via visibility:hidden, but if Android kills the WebView renderer
+    // while the tab is in the background, thaw() fails silently and the
+    // user sees a permanent blank/blue screen when returning to the tab.
     try {
       await _controller?.pauseTimers();
     } catch (_) {}
-    // Also hide the DOM on the current tab as a best-effort signal.
-    await freeze();
   }
 
   @override
@@ -878,7 +1220,35 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     try {
       await _controller?.resumeTimers();
     } catch (_) {}
-    await thaw();
+    // Check if the WebView is still alive after resuming.  If the renderer
+    // was killed by Android, reload the current page so the user doesn't
+    // see a blank screen.
+    try {
+      final url = await _controller?.getUrl();
+      if (url != null && url.toString().isNotEmpty) {
+        // Verify the WebView can evaluate JS — if this throws, the renderer
+        // is dead and we need to reload.
+        await _controller?.evaluateJavascript(source: '1');
+      }
+    } catch (_) {
+      // Renderer was killed — reload the page.
+      try {
+        final url = await _controller?.getUrl();
+        if (url != null && url.toString().isNotEmpty) {
+          await _controller?.loadUrl(urlRequest: URLRequest(url: url));
+        }
+      } catch (_) {}
+    }
+  }
+
+  @override
+  void onRenderProcessGone() async {
+    try {
+      final url = await _controller?.getUrl();
+      if (url != null && url.toString().isNotEmpty) {
+        await _controller?.loadUrl(urlRequest: URLRequest(url: url));
+      }
+    } catch (_) {}
   }
 
   @override
@@ -898,6 +1268,22 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       if (Platform.isAndroid) {
         await _controller?.android.resume();
       }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> suspendTab() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _controller?.android.pause();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> resumeTab() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _controller?.android.resume();
     } catch (_) {}
   }
 
@@ -987,7 +1373,24 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   @override
   Future<void> clearCookies() async {
-    await InAppWebViewController.clearAllCache();
+    // Delete all cookies through the OS-level CookieManager.
+    // Do NOT call InAppWebViewController.clearAllCache() — that destroys
+    // the back-forward cache for ALL tabs, forcing network reloads.
+    try {
+      await CookieManager.instance().deleteAllCookies();
+    } catch (_) {
+      // Fallback: delete known cookies for the current page domain.
+      try {
+        if (_currentHost.isNotEmpty) {
+          await CookieManager.instance().deleteCookies(
+            url: WebUri('https://$_currentHost/'),
+          );
+          await CookieManager.instance().deleteCookies(
+            url: WebUri('http://$_currentHost/'),
+          );
+        }
+      } catch (_) {}
+    }
   }
 
   @override
@@ -1002,9 +1405,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         source: 'try{localStorage.clear();sessionStorage.clear();}catch(e){}',
       );
     } catch (_) {}
-    try {
-      await InAppWebViewController.clearAllCache();
-    } catch (_) {}
+    // Deliberately NOT calling InAppWebViewController.clearAllCache() here —
+    // that would destroy the back-forward cache for ALL tabs, forcing every
+    // WebView to reload from network on back/forward navigation.  Only a
+    // per-URL clear would be appropriate, and even then the HTTP cache is
+    // separate from the bfcache.
   }
 
   @override
@@ -1012,8 +1417,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       _fetchDelegate.fetchFreshPlaylistUrl(url);
 
   @override
-  Future<String?> fetchViaJavaScript(String url, {Map<String, String>? headers}) =>
-      _fetchDelegate.fetchViaJavaScript(url, headers: headers);
+  Future<String?> fetchViaJavaScript(
+    String url, {
+    Map<String, String>? headers,
+  }) => _fetchDelegate.fetchViaJavaScript(url, headers: headers);
 
   @override
   Future<Map<String, String>?> fetchHeadersViaJavaScript(String url) =>
@@ -1032,27 +1439,78 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       _fetchDelegate.getCookiesForDomain(url: url);
 
   void Function(String)? _onOpenUrlRequest;
+  void Function(String)? _onOpenUrlInNewTab;
 
   @override
-  void requestOpenUrl(String url) {
-    AuroraLog.instance.info(
-      'requestOpenUrl("$url"), _onOpenUrlRequest=${_onOpenUrlRequest != null}',
-      category: LogCategory.app,
-      screen: LogScreen.browser,
-      eventType: LogEventType.navigation,
-    );
-    _onOpenUrlRequest?.call(url);
+  void openUrlInNewTab(String url) {
+    final callback = _onOpenUrlInNewTab;
+    if (callback == null) {
+      _pendingOpenInNewTabUrl = url;
+      return;
+    }
+    callback(url);
+  }
+
+  /// Registers a callback for [openUrlInNewTab]. Passing `null` clears it.
+  @override
+  void setOnOpenUrlInNewTab(void Function(String url)? callback) {
+    _onOpenUrlInNewTab = callback;
+    final pending = _pendingOpenInNewTabUrl;
+    if (callback != null && pending != null && pending.isNotEmpty) {
+      _pendingOpenInNewTabUrl = null;
+      scheduleMicrotask(() => callback(pending));
+    }
   }
 
   @override
-  void setOnOpenUrlRequest(void Function(String url)? callback) =>
-      _onOpenUrlRequest = callback;
+  void setOnSystemBackRequested(Future<bool> Function()? callback) {
+    _onSystemBackRequested = callback;
+  }
+
+  @override
+  Future<bool> handleSystemBack() async {
+    return (await _onSystemBackRequested?.call()) ?? false;
+  }
+
+  @override
+  void setOnNavStateChanged(VoidCallback? callback) {
+    _onNavStateChanged = callback;
+  }
+
+  @override
+  void setOnStrictRedirectDetected(
+    void Function(StrictRedirectEvent event)? callback,
+  ) {
+    _onStrictRedirectDetected = callback;
+  }
+
+  @override
+  void requestOpenUrl(String url) {
+    final callback = _onOpenUrlRequest;
+    if (callback == null) {
+      _pendingOpenUrl = url;
+      return;
+    }
+    callback(url);
+  }
+
+  @override
+  void setOnOpenUrlRequest(void Function(String url)? callback) {
+    _onOpenUrlRequest = callback;
+    final pending = _pendingOpenUrl;
+    if (callback != null && pending != null && pending.isNotEmpty) {
+      _pendingOpenUrl = null;
+      scheduleMicrotask(() => callback(pending));
+    }
+  }
 
   @override
   void dispose() {
+    _isDisposed = true;
     _guardInstaller.dispose();
     _adblockInjector.dispose();
     _loadResourceTimer?.cancel();
+    _pendingResourceUrls.clear();
     _controller?.dispose();
     _controller = null;
   }
@@ -1072,35 +1530,97 @@ class MockBrowserController implements SnifferBrowserController {
 
   bool _adBlockerEnabled = true;
   bool _popupBlockingEnabled = true;
+  bool _invisibleRedirectBlockingEnabled = true;
   AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
   int _blockedPopupsCount = 0;
+  int _blockedInvisibleRedirectsCount = 0;
   Map<String, String> _currentHeaders = {};
   HlsPlaylist? _lastMasterPlaylist;
 
   void Function(String)? _onOpenUrlRequest;
+  String? _pendingOpenUrl;
+  String? _pendingOpenInNewTabUrl;
+  void Function(String)? _onOpenUrlInNewTab;
+  Future<bool> Function()? _onSystemBackRequested;
+  void Function()? _onNavStateChanged;
+  void Function(int)? _onProgressChanged;
 
   @override
-  void requestOpenUrl(String url) {
-    AuroraLog.instance.info(
-      '[Mock] requestOpenUrl("$url"), _onOpenUrlRequest=${_onOpenUrlRequest != null}',
-      category: LogCategory.app,
-      screen: LogScreen.browser,
-      eventType: LogEventType.navigation,
-    );
-    _onOpenUrlRequest?.call(url);
+  void openUrlInNewTab(String url) {
+    final callback = _onOpenUrlInNewTab;
+    if (callback == null) {
+      _pendingOpenInNewTabUrl = url;
+      return;
+    }
+    callback(url);
   }
 
   @override
-  void setOnOpenUrlRequest(void Function(String url)? callback) =>
-      _onOpenUrlRequest = callback;
+  void setOnOpenUrlInNewTab(void Function(String url)? callback) {
+    _onOpenUrlInNewTab = callback;
+    final pending = _pendingOpenInNewTabUrl;
+    if (callback != null && pending != null && pending.isNotEmpty) {
+      _pendingOpenInNewTabUrl = null;
+      scheduleMicrotask(() => callback(pending));
+    }
+  }
+
+  @override
+  void setOnSystemBackRequested(Future<bool> Function()? callback) {
+    _onSystemBackRequested = callback;
+  }
+
+  @override
+  Future<bool> handleSystemBack() async {
+    return (await _onSystemBackRequested?.call()) ?? false;
+  }
+
+  @override
+  void setOnNavStateChanged(VoidCallback? callback) {
+    _onNavStateChanged = callback;
+  }
+
+  @override
+  void setOnStrictRedirectDetected(
+    void Function(StrictRedirectEvent event)? callback,
+  ) {}
+
+  @override
+  void requestOpenUrl(String url) {
+    final callback = _onOpenUrlRequest;
+    if (callback == null) {
+      _pendingOpenUrl = url;
+      return;
+    }
+    callback(url);
+  }
+
+  @override
+  void setOnOpenUrlRequest(void Function(String url)? callback) {
+    _onOpenUrlRequest = callback;
+    final pending = _pendingOpenUrl;
+    if (callback != null && pending != null && pending.isNotEmpty) {
+      _pendingOpenUrl = null;
+      scheduleMicrotask(() => callback(pending));
+    }
+  }
 
   @override
   void dispose() {}
+
+  @override
+  Future<void> rescanPage() async {}
+
   @override
   void setOnIframeMediaDetected(void Function(String url) callback) {}
   @override
+  void setOnHlsPlaylistIntercepted(
+    Future<void> Function(String url, String body)? callback,
+  ) {}
+  @override
   void setOnDownloadStartRequest(
-      void Function(String url, String? suggestedFilename) callback) {}
+    void Function(String url, String? suggestedFilename) callback,
+  ) {}
   @override
   HlsPlaylist? get lastMasterPlaylist => _lastMasterPlaylist;
 
@@ -1112,6 +1632,10 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   bool get popupBlockingEnabled => _popupBlockingEnabled;
+
+  @override
+  bool get invisibleRedirectBlockingEnabled =>
+      _invisibleRedirectBlockingEnabled;
 
   @override
   set adBlockerEnabled(bool enabled) {
@@ -1130,6 +1654,19 @@ class MockBrowserController implements SnifferBrowserController {
   @override
   void incrementBlockedPopups() {
     _blockedPopupsCount++;
+  }
+
+  @override
+  int get blockedInvisibleRedirectsCount => _blockedInvisibleRedirectsCount;
+
+  @override
+  void incrementBlockedInvisibleRedirects() {
+    _blockedInvisibleRedirectsCount++;
+  }
+
+  @override
+  Future<void> setInvisibleRedirectBlocking(bool enabled) async {
+    _invisibleRedirectBlockingEnabled = enabled;
   }
 
   @override
@@ -1238,6 +1775,7 @@ class MockBrowserController implements SnifferBrowserController {
       }
       _history.add(urlStr);
       _historyIndex = _history.length - 1;
+      _onNavStateChanged?.call();
     }
     _currentUrl = urlStr;
     _title = uri.host;
@@ -1257,6 +1795,7 @@ class MockBrowserController implements SnifferBrowserController {
       ..clear()
       ..addAll(urls);
     _historyIndex = index.clamp(-1, _history.length - 1);
+    _onNavStateChanged?.call();
     if (_historyIndex >= 0) {
       _currentUrl = _history[_historyIndex];
     }
@@ -1289,6 +1828,7 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> goBack() async {
     if (_historyIndex > 0) {
       _historyIndex--;
+      _onNavStateChanged?.call();
       _currentUrl = _history[_historyIndex];
       _onUrlChanged?.call(_currentUrl!);
     }
@@ -1301,6 +1841,7 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> goForward() async {
     if (_historyIndex < _history.length - 1) {
       _historyIndex++;
+      _onNavStateChanged?.call();
       _currentUrl = _history[_historyIndex];
       _onUrlChanged?.call(_currentUrl!);
     }
@@ -1315,9 +1856,25 @@ class MockBrowserController implements SnifferBrowserController {
   }
 
   @override
+  Future<void> stop() async {
+    // Mock stop: fire page-finished to simulate load stopping
+    if (_currentUrl != null) {
+      _onPageFinished?.call(_currentUrl!);
+    }
+  }
+
+  @override
+  void setOnProgressChanged(void Function(int progress)? callback) {
+    _onProgressChanged = callback;
+  }
+
+  @override
   void setOnUrlChanged(void Function(String url) callback) {
     _onUrlChanged = callback;
   }
+
+  @override
+  void setOnRecreated(void Function() callback) {}
 
   @override
   void setOnPageStarted(void Function(String url) callback) {
@@ -1372,6 +1929,15 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> resumeWebView() async {}
 
   @override
+  Future<void> suspendTab() async {}
+
+  @override
+  Future<void> resumeTab() async {}
+
+  @override
+  void onRenderProcessGone() {}
+
+  @override
   Future<int> fillForm(Map<String, String> values) async => 0;
 
   @override
@@ -1393,10 +1959,14 @@ class MockBrowserController implements SnifferBrowserController {
   Future<String?> fetchFreshPlaylistUrl(String url) async => url;
 
   @override
-  Future<String?> fetchViaJavaScript(String url, {Map<String, String>? headers}) async => null;
+  Future<String?> fetchViaJavaScript(
+    String url, {
+    Map<String, String>? headers,
+  }) async => null;
 
   @override
-  Future<Map<String, String>?> fetchHeadersViaJavaScript(String url) async => null;
+  Future<Map<String, String>?> fetchHeadersViaJavaScript(String url) async =>
+      null;
 
   @override
   Future<String?> fetchPlaylistBodyViaJavaScript(String url) async => null;

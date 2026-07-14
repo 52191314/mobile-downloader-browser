@@ -448,8 +448,6 @@ class DownloadSettings {
   final bool readerMode;
   final bool captureShowAllMedia;
   final int maxDetectedMedia;
-  final int minMediaSizeKb;
-  final int minMediaDurationSeconds;
   final Set<MediaType> disabledMediaTypes;
   final bool doNotTrackEnabled;
   final DownloadLinkBehavior downloadLinkBehavior;
@@ -493,6 +491,15 @@ class DownloadSettings {
   /// When true, temporary alert snackbars are shown at the bottom of the screen.
   final bool showSnackbars;
 
+  final bool autoBackupEnabled;
+  final int autoBackupFrequencyHours;
+  final bool autoBackupFavorites;
+  final bool autoBackupHistory;
+  final bool autoBackupSavedPages;
+  final bool autoBackupQueue;
+  final bool autoBackupSettings;
+  final int lastBackupTimestamp;
+
   const DownloadSettings({
     required this.maxConcurrentDownloads,
     required this.chunksPerTask,
@@ -514,8 +521,6 @@ class DownloadSettings {
     this.readerMode = false,
     this.captureShowAllMedia = false,
     this.maxDetectedMedia = 200,
-    this.minMediaSizeKb = 0,
-    this.minMediaDurationSeconds = 0,
     this.disabledMediaTypes = const {},
     this.doNotTrackEnabled = true,
     this.downloadLinkBehavior = DownloadLinkBehavior.capture,
@@ -532,13 +537,21 @@ class DownloadSettings {
     this.proxyPassword = '',
     this.autoRetry = true,
     this.retryLimit = 3,
-    this.minSpeedThresholdKbps = 0,
+    this.minSpeedThresholdKbps = 10,
     this.stallTimeoutSeconds = 20,
     this.partialDownloadThreshold = 0.95,
     this.autoClassifyEnabled = true,
     this.remuxTsToMp4 = true,
     this.autoClassifyMappings = const {},
     this.showSnackbars = true,
+    this.autoBackupEnabled = false,
+    this.autoBackupFrequencyHours = 24,
+    this.autoBackupFavorites = true,
+    this.autoBackupHistory = true,
+    this.autoBackupSavedPages = true,
+    this.autoBackupQueue = true,
+    this.autoBackupSettings = true,
+    this.lastBackupTimestamp = 0,
   });
 
   static const trustedAdblockSources = [
@@ -550,7 +563,7 @@ class DownloadSettings {
 
   factory DownloadSettings.defaults() => DownloadSettings(
     maxConcurrentDownloads: 3,
-    chunksPerTask: 8,
+    chunksPerTask: 16,
     downloadDestination: 'Downloads/Aurora Downloads',
     searchEngine: SearchEngine.google,
     adblockEnabled: true,
@@ -562,6 +575,7 @@ class DownloadSettings {
     browserToolbarPosition: BrowserToolbarPosition.bottom,
     autoRetry: true,
     retryLimit: 3,
+    minSpeedThresholdKbps: 10,
     autoClassifyEnabled: true,
     remuxTsToMp4: true,
     showSnackbars: true,
@@ -588,8 +602,6 @@ class DownloadSettings {
     bool? readerMode,
     bool? captureShowAllMedia,
     int? maxDetectedMedia,
-    int? minMediaSizeKb,
-    int? minMediaDurationSeconds,
     Set<MediaType>? disabledMediaTypes,
     bool? doNotTrackEnabled,
     DownloadLinkBehavior? downloadLinkBehavior,
@@ -613,6 +625,14 @@ class DownloadSettings {
     bool? remuxTsToMp4,
     Map<String, String>? autoClassifyMappings,
     bool? showSnackbars,
+    bool? autoBackupEnabled,
+    int? autoBackupFrequencyHours,
+    bool? autoBackupFavorites,
+    bool? autoBackupHistory,
+    bool? autoBackupSavedPages,
+    bool? autoBackupQueue,
+    bool? autoBackupSettings,
+    int? lastBackupTimestamp,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -628,6 +648,14 @@ class DownloadSettings {
       autoClassifyMappings:
           autoClassifyMappings ?? this.autoClassifyMappings,
       showSnackbars: showSnackbars ?? this.showSnackbars,
+      autoBackupEnabled: autoBackupEnabled ?? this.autoBackupEnabled,
+      autoBackupFrequencyHours: autoBackupFrequencyHours ?? this.autoBackupFrequencyHours,
+      autoBackupFavorites: autoBackupFavorites ?? this.autoBackupFavorites,
+      autoBackupHistory: autoBackupHistory ?? this.autoBackupHistory,
+      autoBackupSavedPages: autoBackupSavedPages ?? this.autoBackupSavedPages,
+      autoBackupQueue: autoBackupQueue ?? this.autoBackupQueue,
+      autoBackupSettings: autoBackupSettings ?? this.autoBackupSettings,
+      lastBackupTimestamp: lastBackupTimestamp ?? this.lastBackupTimestamp,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -651,9 +679,6 @@ class DownloadSettings {
       readerMode: readerMode ?? this.readerMode,
       captureShowAllMedia: captureShowAllMedia ?? this.captureShowAllMedia,
       maxDetectedMedia: maxDetectedMedia ?? this.maxDetectedMedia,
-      minMediaSizeKb: minMediaSizeKb ?? this.minMediaSizeKb,
-      minMediaDurationSeconds:
-          minMediaDurationSeconds ?? this.minMediaDurationSeconds,
       disabledMediaTypes: disabledMediaTypes ?? this.disabledMediaTypes,
       doNotTrackEnabled: doNotTrackEnabled ?? this.doNotTrackEnabled,
       downloadLinkBehavior:
@@ -701,8 +726,6 @@ class DownloadSettings {
     'readerMode': readerMode,
       'captureShowAllMedia': captureShowAllMedia,
       'maxDetectedMedia': maxDetectedMedia,
-      'minMediaSizeKb': minMediaSizeKb,
-      'minMediaDurationSeconds': minMediaDurationSeconds,
       'disabledMediaTypes': disabledMediaTypes.map((t) => t.name).toList(),
       'doNotTrackEnabled': doNotTrackEnabled,
       'downloadLinkBehavior': downloadLinkBehavior.name,
@@ -726,6 +749,14 @@ class DownloadSettings {
     'remuxTsToMp4': remuxTsToMp4,
     'autoClassifyMappings': autoClassifyMappings,
     'showSnackbars': showSnackbars,
+    'autoBackupEnabled': autoBackupEnabled,
+    'autoBackupFrequencyHours': autoBackupFrequencyHours,
+    'autoBackupFavorites': autoBackupFavorites,
+    'autoBackupHistory': autoBackupHistory,
+    'autoBackupSavedPages': autoBackupSavedPages,
+    'autoBackupQueue': autoBackupQueue,
+    'autoBackupSettings': autoBackupSettings,
+    'lastBackupTimestamp': lastBackupTimestamp,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -783,10 +814,6 @@ class DownloadSettings {
       captureShowAllMedia: json['captureShowAllMedia'] as bool? ?? false,
       maxDetectedMedia:
           (json['maxDetectedMedia'] as num?)?.round() ?? 200,
-      minMediaSizeKb:
-          (json['minMediaSizeKb'] as num?)?.round() ?? 0,
-      minMediaDurationSeconds:
-          (json['minMediaDurationSeconds'] as num?)?.round() ?? 0,
       disabledMediaTypes: _parseDisabledMediaTypes(
         json['disabledMediaTypes'] as List?,
       ),
@@ -806,7 +833,7 @@ class DownloadSettings {
       ),
       translateTargetLang: json['translateTargetLang'] as String? ??
           defaults.translateTargetLang,
-      siteZoomLevels: _parseStringDoubleMap(
+      siteZoomLevels: _parseZoomLevels(
         json['siteZoomLevels'] as Map?,
       ),
       siteUserAgents: _parseStringStringMap(json['siteUserAgents'] as Map?),
@@ -821,7 +848,7 @@ class DownloadSettings {
       autoRetry: json['autoRetry'] as bool? ?? true,
       retryLimit: (json['retryLimit'] as num?)?.round() ?? defaults.retryLimit,
       minSpeedThresholdKbps:
-          (json['minSpeedThresholdKbps'] as num?)?.round() ?? 0,
+          (json['minSpeedThresholdKbps'] as num?)?.round() ?? defaults.minSpeedThresholdKbps,
       stallTimeoutSeconds:
           (json['stallTimeoutSeconds'] as num?)?.round() ?? 20,
       partialDownloadThreshold:
@@ -840,6 +867,22 @@ class DownloadSettings {
               : const {},
       showSnackbars:
           json['showSnackbars'] as bool? ?? true,
+      autoBackupEnabled:
+          json['autoBackupEnabled'] as bool? ?? false,
+      autoBackupFrequencyHours:
+          (json['autoBackupFrequencyHours'] as num?)?.round() ?? 24,
+      autoBackupFavorites:
+          json['autoBackupFavorites'] as bool? ?? true,
+      autoBackupHistory:
+          json['autoBackupHistory'] as bool? ?? true,
+      autoBackupSavedPages:
+          json['autoBackupSavedPages'] as bool? ?? true,
+      autoBackupQueue:
+          json['autoBackupQueue'] as bool? ?? true,
+      autoBackupSettings:
+          json['autoBackupSettings'] as bool? ?? true,
+      lastBackupTimestamp:
+          (json['lastBackupTimestamp'] as num?)?.round() ?? 0,
     );
   }
 
@@ -862,6 +905,26 @@ class DownloadSettings {
     raw.forEach((key, value) {
       if (key is String && value is num) {
         result[key.toLowerCase()] = value.toDouble();
+      }
+    });
+    return result;
+  }
+
+  /// Parses per-site zoom levels with the same clamping applied at zoom-time
+  /// (0.5x–3.0x). Rejects non-finite values and drops no-op (~1.0x) entries so
+  /// a corrupted or out-of-range persisted value can't break zoom math on load.
+  static Map<String, double> _parseZoomLevels(Map? raw) {
+    if (raw == null) return const {};
+    const minZoom = 0.5;
+    const maxZoom = 3.0;
+    final result = <String, double>{};
+    raw.forEach((key, value) {
+      if (key is String && value is num) {
+        final v = value.toDouble();
+        if (!v.isFinite) return;
+        final clamped = v.clamp(minZoom, maxZoom).toDouble();
+        if ((clamped - 1.0).abs() < 0.01) return; // drop no-op zoom
+        result[key.toLowerCase()] = double.parse(clamped.toStringAsFixed(2));
       }
     });
     return result;

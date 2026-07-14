@@ -3,6 +3,7 @@ package com.personal.aurora_downloader
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.media.MediaCodec
@@ -16,6 +17,7 @@ import android.net.Network
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -42,18 +44,14 @@ class MainActivity : FlutterActivity() {
     private val channelName = "aurora_downloader/public_downloads"
     private val networkChannelName = "aurora_downloader/network"
     private val fgServiceChannelName = "aurora_downloader/foreground_service"
+    private val intentChannelName = "aurora_downloader/intent"
+    private var intentUrlChannel: MethodChannel? = null
     private var pendingImportResult: MethodChannel.Result? = null
-    private var pendingExportResult: MethodChannel.Result? = null
-    private var pendingExportSourcePath: String? = null
-    private var pendingPickUriResult: MethodChannel.Result? = null
-    private var pendingPickDirectoryResult: MethodChannel.Result? = null
+    private lateinit var nativeDownloadEngine: NativeDownloadEngine
 
     companion object {
         private const val TAG = "AuroraMain"
         private const val PICK_IMPORT_FILE = 1001
-        private const val REQUEST_EXPORT_FILE = 1002
-        private const val REQUEST_PICK_EXPORT_URI = 1003
-        private const val REQUEST_PICK_DIRECTORY = 1004
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val NETWORK_TAG = "AuroraNet"
     }
@@ -65,17 +63,15 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "publishFile" -> publishFile(call, result)
                     "openUri" -> openUri(call, result)
-                    "shareUri" -> shareUri(call, result)
+                    "renamePublishedFile" -> renamePublishedFile(call, result)
                     "shareFile" -> shareFile(call, result)
                     "pickImportFile" -> pickImportFile(result)
-                    "exportFile" -> exportFile(call, result)
                     "openUrl" -> openUrl(call, result)
                     "shareUrl" -> shareUrl(call, result)
-                    "selectExportUri" -> selectExportUri(call, result)
-                    "writeExportFile" -> writeExportFile(call, result)
-                    "selectExportDirectory" -> selectExportDirectory(result)
-                    "writeExportFileToDirectory" -> writeExportFileToDirectory(call, result)
                     "remuxTsToMp4" -> remuxTsToMp4(call, result)
+                    "listBackupFiles" -> listBackupFiles(call, result)
+                    "deleteBackupFile" -> deleteBackupFile(call, result)
+                    "readBackupFile" -> readBackupFile(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -93,6 +89,20 @@ class MainActivity : FlutterActivity() {
                         result.success(bound)
                     }
                     "fetchUrl" -> fetchUrl(call, result)
+                    "fetchBinaryUrl" -> fetchBinaryUrl(call, result)
+                    "streamSegmentToFile" -> streamSegmentToFile(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Native download engine channel: OkHttp-backed chunk downloads
+        // with HTTP/2, connection pooling, and cancellation.
+        nativeDownloadEngine = NativeDownloadEngine()
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/native_download")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "downloadChunk" -> nativeDownloadEngine.downloadChunk(call, result)
+                    "cancelChunk" -> nativeDownloadEngine.cancelChunk(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -142,9 +152,51 @@ class MainActivity : FlutterActivity() {
                         requestBatteryOptimizationExemption()
                         result.success(null)
                     }
+                    "isIgnoringBatteryOptimizations" -> {
+                        val packageName = applicationContext.packageName
+                        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                        val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            pm.isIgnoringBatteryOptimizations(packageName)
+                        } else {
+                            true
+                        }
+                        result.success(isIgnoring)
+                    }
                     else -> result.notImplemented()
                 }
             }
+
+        intentUrlChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, intentChannelName)
+        intentUrlChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "getInitialUrl") {
+                result.success(getInitialUrl())
+            } else {
+                result.notImplemented()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val url = getInitialUrl()
+        if (url != null) {
+            intentUrlChannel?.invokeMethod("onNewUrl", url)
+        }
+    }
+
+    private fun getInitialUrl(): String? {
+        val intent = intent
+        if (intent != null && Intent.ACTION_VIEW == intent.action) {
+            val data = intent.data
+            if (data != null) {
+                val url = data.toString()
+                intent.action = null
+                intent.data = null
+                return url
+            }
+        }
+        return null
     }
 
     /**
@@ -223,6 +275,180 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
+     * Fetches a binary resource (HLS .ts segment, DASH .m4s, etc.) through
+     * Android's native HttpURLConnection with **media-player request headers**
+     * (Accept: video/MP2T, Sec-Fetch-Dest: video, optional Range). This is the
+     * fingerprint a real video player uses — unlike [fetchUrl] which sends
+     * XHR-style headers (Sec-Fetch-Dest: empty). Some CDNs (e.g. TikTok CDN)
+     * serve placeholder/PNG content to non-media requests, so segment
+     * downloads must look like a media player request to get real video.
+     *
+     * Returns `{statusCode: int, data: String(base64)}` on success or
+     * `{statusCode: int, data: ""}` on an error response, or `null` on a
+     * thrown exception. Never throws to the Dart side.
+     */
+    private fun fetchBinaryUrl(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url") ?: ""
+        if (url.isBlank()) {
+            result.error("bad_args", "url is required", null)
+            return
+        }
+        val referer = call.argument<String>("referer") ?: ""
+        val origin = call.argument<String>("origin") ?: ""
+        val userAgent = call.argument<String>("userAgent") ?:
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        val cookieHeader = call.argument<String>("cookie") ?: ""
+        val rangeHeader = call.argument<String>("range") ?: ""
+
+        val mergedCookies = buildString {
+            try {
+                val webCookies = CookieManager.getInstance().getCookie(url)
+                if (!webCookies.isNullOrBlank()) {
+                    append(webCookies)
+                }
+            } catch (_: Exception) {}
+            if (isNotEmpty() && cookieHeader.isNotBlank()) {
+                append("; ")
+            }
+            if (cookieHeader.isNotBlank()) {
+                append(cookieHeader)
+            }
+        }
+
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", userAgent)
+            if (referer.isNotBlank()) connection.setRequestProperty("Referer", referer)
+            if (origin.isNotBlank()) connection.setRequestProperty("Origin", origin)
+            if (mergedCookies.isNotBlank()) connection.setRequestProperty("Cookie", mergedCookies)
+            // Media-player fingerprint (NOT XHR):
+            connection.setRequestProperty("Accept", "video/MP2T, video/mp4, application/vnd.apple.mpegurl, */*")
+            connection.setRequestProperty("Sec-Fetch-Dest", "video")
+            connection.setRequestProperty("Sec-Fetch-Mode", "no-cors")
+            connection.setRequestProperty("Sec-Fetch-Site", "cross-site")
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            if (rangeHeader.isNotBlank()) connection.setRequestProperty("Range", rangeHeader)
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = true
+
+            val statusCode = connection.responseCode
+            val inputStream = if (statusCode in 200..399) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+            val bytes = inputStream?.readBytes() ?: ByteArray(0)
+            inputStream?.close()
+            connection.disconnect()
+
+            val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            result.success(mapOf(
+                "statusCode" to statusCode,
+                "data" to base64
+            ))
+        } catch (e: Exception) {
+            Log.w(NETWORK_TAG, "fetchBinaryUrl failed: ${e.message}")
+            result.error("fetch_failed", e.message, null)
+        }
+    }
+
+    /**
+     * Streams an HLS segment file (or any binary resource) directly to a file
+     * path on disk using Android's native [HttpURLConnection], avoiding the
+     * base64 encode/decode overhead and full-segment memory buffering of
+     * [fetchBinaryUrl].
+     *
+     * This is the successor to [fetchBinaryUrl] for HLS segment downloads:
+     * the native side opens an HTTP connection with media-player fingerprint
+     * headers (Sec-Fetch-Dest: video), streams the response body directly to
+     * the target file via a 64 KB buffer loop, and returns only the status
+     * code + byte count — no base64, no full-segment memory allocation.
+     *
+     * Returns `{statusCode: int, bytesWritten: long}` on success, or
+     * `{statusCode: int, bytesWritten: 0}` for a non-2xx response, or
+     * `null` on a thrown exception.  Never throws to the Dart side.
+     */
+    private fun streamSegmentToFile(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url") ?: ""
+        if (url.isBlank()) {
+            result.error("bad_args", "url is required", null)
+            return
+        }
+        val filePath = call.argument<String>("filePath") ?: ""
+        if (filePath.isBlank()) {
+            result.error("bad_args", "filePath is required", null)
+            return
+        }
+        val referer = call.argument<String>("referer") ?: ""
+        val origin = call.argument<String>("origin") ?: ""
+        val userAgent = call.argument<String>("userAgent") ?:
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        val cookieHeader = call.argument<String>("cookie") ?: ""
+        val rangeHeader = call.argument<String>("range") ?: ""
+
+        val mergedCookies = buildString {
+            try {
+                val webCookies = CookieManager.getInstance().getCookie(url)
+                if (!webCookies.isNullOrBlank()) append(webCookies)
+            } catch (_: Exception) {}
+            if (isNotEmpty() && cookieHeader.isNotBlank()) append("; ")
+            if (cookieHeader.isNotBlank()) append(cookieHeader)
+        }
+
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", userAgent)
+            if (referer.isNotBlank()) connection.setRequestProperty("Referer", referer)
+            if (origin.isNotBlank()) connection.setRequestProperty("Origin", origin)
+            if (mergedCookies.isNotBlank()) connection.setRequestProperty("Cookie", mergedCookies)
+            // Media-player fingerprint (NOT XHR):
+            connection.setRequestProperty("Accept", "video/MP2T, video/mp4, application/vnd.apple.mpegurl, */*")
+            connection.setRequestProperty("Sec-Fetch-Dest", "video")
+            connection.setRequestProperty("Sec-Fetch-Mode", "no-cors")
+            connection.setRequestProperty("Sec-Fetch-Site", "cross-site")
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            connection.setRequestProperty("Accept-Encoding", "gzip, deflate, br")
+            if (rangeHeader.isNotBlank()) connection.setRequestProperty("Range", rangeHeader)
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = true
+
+            val statusCode = connection.responseCode
+            val inputStream = if (statusCode in 200..399) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+
+            var bytesWritten = 0L
+            if (inputStream != null) {
+                val outFile = File(filePath)
+                outFile.parentFile?.mkdirs()
+                val buffer = ByteArray(65536) // 64 KB buffer
+                FileOutputStream(outFile).use { outputStream ->
+                    var read: Int
+                    while (inputStream.read(buffer).also { read = it } != -1) {
+                        outputStream.write(buffer, 0, read)
+                        bytesWritten += read
+                    }
+                }
+            }
+            connection.disconnect()
+
+            result.success(mapOf(
+                "statusCode" to statusCode,
+                "bytesWritten" to bytesWritten
+            ))
+        } catch (e: Exception) {
+            Log.w(NETWORK_TAG, "streamSegmentToFile failed: ${e.message}")
+            result.error("stream_failed", e.message, null)
+        }
+    }
+
+    /**
      * Binds the calling process to Android's currently active default
      * network so that subsequent sockets (including those opened by
      * Dart's `dart:io` HTTP client) resolve DNS through the same
@@ -266,10 +492,16 @@ class MainActivity : FlutterActivity() {
             return
         }
 
+        val mimeType = if (source.name.endsWith(".json", ignoreCase = true)) {
+            "application/json"
+        } else {
+            "text/plain"
+        }
+
         val resolver = applicationContext.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloads")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
@@ -302,8 +534,9 @@ class MainActivity : FlutterActivity() {
             resolver.update(uri, values, null, null)
 
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/json"
+                type = mimeType
                 putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newRawUri(null, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, source.name))
@@ -314,11 +547,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun getDisplayName(uri: Uri): String? {
+        var name: String? = null
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) {
+                        name = cursor.getString(index)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to query display name", e)
+        }
+        return name
+    }
+
     private fun pickImportFile(result: MethodChannel.Result) {
         pendingImportResult = result
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/json"
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/octet-stream", "application/zip"))
         }
         try {
             startActivityForResult(intent, PICK_IMPORT_FILE)
@@ -334,7 +585,10 @@ class MainActivity : FlutterActivity() {
             if (resultCode == Activity.RESULT_OK && data?.data != null) {
                 val uri = data.data!!
                 try {
-                    val destFile = File(filesDir, "imported_library_${System.currentTimeMillis()}.json")
+                    val displayName = getDisplayName(uri) ?: ""
+                    val is1dmBak = displayName.lowercase().endsWith(".1dmbak")
+                    val ext = if (is1dmBak) ".1dmbak" else ".json"
+                    val destFile = File(filesDir, "imported_library_${System.currentTimeMillis()}$ext")
                     contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(destFile).use { output -> input.copyTo(output) }
                     }
@@ -346,82 +600,6 @@ class MainActivity : FlutterActivity() {
                 pendingImportResult?.success(null)
             }
             pendingImportResult = null
-        } else if (requestCode == REQUEST_EXPORT_FILE && pendingExportResult != null) {
-            val sourcePath = pendingExportSourcePath
-            if (resultCode == Activity.RESULT_OK && data?.data != null && sourcePath != null) {
-                val uri = data.data!!
-                try {
-                    val source = File(sourcePath)
-                    contentResolver.openOutputStream(uri)?.use { output ->
-                        FileInputStream(source).use { input -> input.copyTo(output) }
-                    }
-                    pendingExportResult?.success(true)
-                } catch (error: Exception) {
-                    pendingExportResult?.error("write_failed", error.message, null)
-                }
-            } else {
-                pendingExportResult?.success(false)
-            }
-            pendingExportResult = null
-            pendingExportSourcePath = null
-        } else if (requestCode == REQUEST_PICK_EXPORT_URI && pendingPickUriResult != null) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                val uri = data.data!!
-                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                try {
-                    contentResolver.takePersistableUriPermission(uri, takeFlags)
-                } catch (_: Exception) {}
-                pendingPickUriResult?.success(uri.toString())
-            } else {
-                pendingPickUriResult?.success(null)
-            }
-            pendingPickUriResult = null
-        } else if (requestCode == REQUEST_PICK_DIRECTORY && pendingPickDirectoryResult != null) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                val uri = data.data!!
-                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                try {
-                    contentResolver.takePersistableUriPermission(uri, takeFlags)
-                } catch (_: Exception) {}
-                pendingPickDirectoryResult?.success(uri.toString())
-            } else {
-                pendingPickDirectoryResult?.success(null)
-            }
-            pendingPickDirectoryResult = null
-        }
-    }
-
-    private fun exportFile(call: MethodCall, result: MethodChannel.Result) {
-        val sourcePath = call.argument<String>("sourcePath")
-        val displayName = call.argument<String>("displayName")
-        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
-
-        if (sourcePath.isNullOrBlank() || displayName.isNullOrBlank()) {
-            result.error("bad_args", "sourcePath and displayName are required.", null)
-            return
-        }
-
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
-            result.error("missing_file", "Completed file not found: $sourcePath", null)
-            return
-        }
-
-        pendingExportResult = result
-        pendingExportSourcePath = sourcePath
-
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = mimeType
-            putExtra(Intent.EXTRA_TITLE, displayName)
-        }
-
-        try {
-            startActivityForResult(intent, REQUEST_EXPORT_FILE)
-        } catch (error: Exception) {
-            result.error("picker_error", error.message, null)
-            pendingExportResult = null
-            pendingExportSourcePath = null
         }
     }
 
@@ -614,29 +792,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun shareUri(call: MethodCall, result: MethodChannel.Result) {
-        val uri = call.argument<String>("uri")?.let(Uri::parse)
-        val mimeType = call.argument<String>("mimeType") ?: "*/*"
-        val displayName = call.argument<String>("displayName") ?: "Aurora download"
-        if (uri == null) {
-            result.error("bad_args", "uri is required.", null)
-            return
-        }
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TITLE, displayName)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            clipData = android.content.ClipData.newUri(contentResolver, displayName, uri)
-        }
-        try {
-            startActivity(Intent.createChooser(intent, displayName))
-            result.success(null)
-        } catch (error: ActivityNotFoundException) {
-            result.error("no_activity", "No app can share this file type.", null)
-        }
-    }
-
     private fun shareUrl(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")
         if (url.isNullOrBlank()) {
@@ -655,100 +810,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun selectExportUri(call: MethodCall, result: MethodChannel.Result) {
-        val displayName = call.argument<String>("displayName")
-        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
-
-        if (displayName.isNullOrBlank()) {
-            result.error("bad_args", "displayName is required.", null)
+    private fun renamePublishedFile(call: MethodCall, result: MethodChannel.Result) {
+        val uri = call.argument<String>("uri")?.let(Uri::parse)
+        val newDisplayName = call.argument<String>("newDisplayName")
+        if (uri == null || newDisplayName.isNullOrBlank()) {
+            result.error("bad_args", "uri and newDisplayName are required.", null)
             return
         }
-
-        pendingPickUriResult = result
-
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = mimeType
-            putExtra(Intent.EXTRA_TITLE, displayName)
-        }
-
         try {
-            startActivityForResult(intent, REQUEST_PICK_EXPORT_URI)
-        } catch (error: Exception) {
-            result.error("picker_error", error.message, null)
-            pendingPickUriResult = null
-        }
-    }
-
-    private fun writeExportFile(call: MethodCall, result: MethodChannel.Result) {
-        val sourcePath = call.argument<String>("sourcePath")
-        val exportUri = call.argument<String>("exportUri")
-
-        if (sourcePath.isNullOrBlank() || exportUri.isNullOrBlank()) {
-            result.error("bad_args", "sourcePath and exportUri are required.", null)
-            return
-        }
-
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
-            result.error("missing_file", "Source file not found: $sourcePath", null)
-            return
-        }
-
-        try {
-            val uri = Uri.parse(exportUri)
-            contentResolver.openOutputStream(uri)?.use { output ->
-                FileInputStream(source).use { input -> input.copyTo(output) }
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, newDisplayName)
             }
-            result.success(true)
+            val rows = contentResolver.update(uri, values, null, null)
+            result.success(rows > 0)
         } catch (error: Exception) {
-            result.error("write_failed", error.message, null)
-        }
-    }
-
-    private fun selectExportDirectory(result: MethodChannel.Result) {
-        pendingPickDirectoryResult = result
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        try {
-            startActivityForResult(intent, REQUEST_PICK_DIRECTORY)
-        } catch (error: Exception) {
-            result.error("picker_error", error.message, null)
-            pendingPickDirectoryResult = null
-        }
-    }
-
-    private fun writeExportFileToDirectory(call: MethodCall, result: MethodChannel.Result) {
-        val sourcePath = call.argument<String>("sourcePath")
-        val directoryUriStr = call.argument<String>("directoryUri")
-        val displayName = call.argument<String>("displayName")
-        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
-
-        if (sourcePath.isNullOrBlank() || directoryUriStr.isNullOrBlank() || displayName.isNullOrBlank()) {
-            result.error("bad_args", "sourcePath, directoryUri, and displayName are required.", null)
-            return
-        }
-
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
-            result.error("missing_file", "Source file not found: $sourcePath", null)
-            return
-        }
-
-        try {
-            val treeUri = Uri.parse(directoryUriStr)
-            val documentId = DocumentsContract.getTreeDocumentId(treeUri)
-            val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-            val newFileUri = DocumentsContract.createDocument(contentResolver, parentDocumentUri, mimeType, displayName)
-            if (newFileUri == null) {
-                result.error("create_failed", "Could not create document in tree.", null)
-                return
-            }
-            contentResolver.openOutputStream(newFileUri)?.use { output ->
-                FileInputStream(source).use { input -> input.copyTo(output) }
-            }
-            result.success(true)
-        } catch (error: Exception) {
-            result.error("write_failed", error.message, null)
+            result.error("rename_failed", error.message, null)
         }
     }
 
@@ -768,7 +844,7 @@ class MainActivity : FlutterActivity() {
         val sourcePath = call.argument<String>("sourcePath") ?: ""
         val destPath = call.argument<String>("destPath") ?: ""
         if (sourcePath.isBlank() || destPath.isBlank()) {
-            result.success(false)
+            result.success(mapOf("success" to false, "error" to "missing sourcePath/destPath"))
             return
         }
         Thread {
@@ -785,13 +861,14 @@ class MainActivity : FlutterActivity() {
                     extractor.release()
                     muxer.release()
                     File(destPath).delete()
-                    result.success(false)
+                    runOnUiThread { result.success(mapOf("success" to false, "error" to "no tracks found in source")) }
                     return@Thread
                 }
                 muxer.start()
                 val buffer = ByteBuffer.allocate(1024 * 1024)
                 for (i in 0 until extractor.trackCount) {
                     extractor.selectTrack(i)
+                    extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                     val info = MediaCodec.BufferInfo()
                     while (true) {
                         val size = extractor.readSampleData(buffer, 0)
@@ -808,11 +885,11 @@ class MainActivity : FlutterActivity() {
                 muxer.stop()
                 muxer.release()
                 extractor.release()
-                result.success(true)
+                runOnUiThread { result.success(mapOf("success" to true, "error" to null)) }
             } catch (e: Exception) {
                 Log.w("AuroraRemux", "remuxTsToMp4 failed: ${e.message}")
                 try { File(destPath).delete() } catch (_: Exception) {}
-                result.success(false)
+                runOnUiThread { result.success(mapOf("success" to false, "error" to (e.message ?: "unknown native error"))) }
             }
         }.start()
     }
@@ -850,6 +927,116 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open battery opt exemption", e)
             }
+        }
+    }
+
+    private fun listBackupFiles(call: MethodCall, result: MethodChannel.Result) {
+        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloads/Backups/"
+        val list = mutableListOf<Map<String, Any>>()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = applicationContext.contentResolver
+            val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_MODIFIED
+            )
+            val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+            val selectionArgs = arrayOf("${relativePath.trimEnd('/')}%")
+            
+            try {
+                resolver.query(uri, projection, selection, selectionArgs, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                    
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val name = cursor.getString(nameCol)
+                        if (name.startsWith("aurora_backup_") || name.startsWith("aurora_auto_backup_")) {
+                            val size = cursor.getLong(sizeCol)
+                            val date = cursor.getLong(dateCol) * 1000
+                            val contentUri = ContentUris.withAppendedId(uri, id)
+                            list.add(mapOf(
+                                "uri" to contentUri.toString(),
+                                "displayName" to name,
+                                "size" to size,
+                                "dateModified" to date
+                            ))
+                        }
+                    }
+                }
+                result.success(list)
+            } catch (e: Exception) {
+                result.error("query_failed", e.message, null)
+            }
+        } else {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val destDir = File(downloadsDir, "Aurora Downloads/Backups")
+            if (destDir.exists()) {
+                val files = destDir.listFiles()
+                if (files != null) {
+                    files.sortByDescending { it.lastModified() }
+                    for (file in files) {
+                        if (file.isFile && (file.name.startsWith("aurora_backup_") || file.name.startsWith("aurora_auto_backup_"))) {
+                            list.add(mapOf(
+                                "uri" to Uri.fromFile(file).toString(),
+                                "displayName" to file.name,
+                                "size" to file.length(),
+                                "dateModified" to file.lastModified()
+                            ))
+                        }
+                    }
+                }
+            }
+            result.success(list)
+        }
+    }
+
+    private fun deleteBackupFile(call: MethodCall, result: MethodChannel.Result) {
+        val uriStr = call.argument<String>("uri")
+        if (uriStr.isNullOrBlank()) {
+            result.error("bad_args", "uri is required.", null)
+            return
+        }
+        try {
+            val uri = Uri.parse(uriStr)
+            if (uri.scheme == "content") {
+                val deleted = contentResolver.delete(uri, null, null)
+                result.success(deleted > 0)
+            } else {
+                val file = File(uri.path ?: "")
+                if (file.exists()) {
+                    result.success(file.delete())
+                } else {
+                    result.success(false)
+                }
+            }
+        } catch (e: Exception) {
+            result.error("delete_failed", e.message, null)
+        }
+    }
+
+    private fun readBackupFile(call: MethodCall, result: MethodChannel.Result) {
+        val uriStr = call.argument<String>("uri")
+        if (uriStr.isNullOrBlank()) {
+            result.error("bad_args", "uri is required.", null)
+            return
+        }
+        try {
+            val uri = Uri.parse(uriStr)
+            val destFile = File(filesDir, "temp_restore_${System.currentTimeMillis()}.json")
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalStateException("Could not open input stream.")
+            result.success(destFile.absolutePath)
+        } catch (e: Exception) {
+            result.error("read_failed", e.message, null)
         }
     }
 }

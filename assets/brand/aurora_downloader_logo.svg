@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Aurora Downloader Logo - Vector Source -->
+  <rect width="1024" height="1024" fill="#01081a"/>
+  <polygon points="512,430 417.0,430.0 512.0,140.0" fill="#5aabd0"/>
+  <polygon points="512,430 512.0,525.0 222.0,430.00000000000006" fill="#5aabd0"/>
+  <polygon points="512,430 512.0,525.0 802.0,430.0" fill="#5aabd0"/>
+  <polygon points="512,430 394.0,430.0 512.0,790.0" fill="#bfbfbf"/>
+  <polygon points="512,430 607.0,430.0 512.0,140.0" fill="#8dd7fe"/>
+  <polygon points="512,430 512.0,335.0 222.0,430.00000000000006" fill="#8dd7fe"/>
+  <polygon points="512,430 512.0,335.0 802.0,430.0" fill="#8dd7fe"/>
+  <polygon points="512,430 630.0,430.0 512.0,790.0" fill="#ffffff"/>
+</svg>

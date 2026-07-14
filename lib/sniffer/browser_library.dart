@@ -318,10 +318,19 @@ class BrowserLibraryStore {
     Map<String, dynamic>? settingsJson,
   }) async {
     final library = await load();
-    final dir = targetDirectory ?? await getApplicationSupportDirectory();
+    final Directory dir;
+    if (targetDirectory != null) {
+      dir = targetDirectory;
+    } else {
+      final extDir = Platform.isAndroid ? await getExternalStorageDirectory() : null;
+      final baseDir = extDir ?? await getApplicationSupportDirectory();
+      dir = Directory('${baseDir.path}/Backups');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+    }
     final file = File(
-      '${dir.path}/aurora_library_export_'
-      '${DateTime.now().millisecondsSinceEpoch}.json',
+      '${dir.path}/aurora_backup_${DateTime.now().millisecondsSinceEpoch}.json',
     );
 
     final Map<String, dynamic> exportData = {};

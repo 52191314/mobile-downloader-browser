@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:path/path.dart' as p;
 import 'models.dart';
+import 'download_error_classifier.dart';
 import 'download_splitter.dart';
 import 'file_combiner.dart';
 import 'hls_downloader.dart';
@@ -15,6 +17,7 @@ import 'torrent_downloader.dart';
 import '../logging/aurora_log.dart';
 import '../platform/download_foreground_service.dart';
 import '../settings/download_settings.dart' show ProxyType;
+import '../sniffer/sniffer_url_utils.dart';
 import 'file_classifier.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
@@ -51,7 +54,7 @@ class DownloadQueue {
   final bool useNativeTorrentEngine;
   int numChunksPerTask;
   final http.Client? httpClient;
-  late final http.Client _client;
+  late http.Client _client;
   final bool _ownsClient;
   CompletedDownloadPublisher? completedDownloadPublisher;
   bool wifiOnly = false;
@@ -136,7 +139,7 @@ class DownloadQueue {
 
   static http.Client _createDefaultClient({ProxyType proxyType = ProxyType.none, String proxyHost = '', int proxyPort = 8080, String proxyUsername = '', String proxyPassword = ''}) {
     final inner = HttpClient()
-      ..maxConnectionsPerHost = 32
+      ..maxConnectionsPerHost = 64
       ..connectionTimeout = const Duration(seconds: 15)
       ..idleTimeout = const Duration(seconds: 90);
 
@@ -161,6 +164,10 @@ class DownloadQueue {
     _proxyPort = port;
     _proxyUsername = username;
     _proxyPassword = password;
+    // Direct assignment replaces the deferred initializer from the constructor
+    // or overwrites the existing client. No explicit close needed here because
+    // the old client (if it was constructed at all) is garbage-collected and
+    // its underlying TCP connections time out naturally.
     _client = _createDefaultClient(
       proxyType: type,
       proxyHost: host,
@@ -193,7 +200,7 @@ class DownloadQueue {
       this.maxConcurrentDownloads = maxConcurrentDownloads.clamp(1, 12).toInt();
     }
     if (numChunksPerTask != null) {
-      this.numChunksPerTask = numChunksPerTask.clamp(1, 16).toInt();
+      this.numChunksPerTask = numChunksPerTask.clamp(1, 32).toInt();
     }
     if (completedDownloadPublisher != null) {
       this.completedDownloadPublisher = completedDownloadPublisher;
@@ -208,7 +215,7 @@ class DownloadQueue {
       this.autoRetry = autoRetry;
     }
     if (retryLimit != null) {
-      this.retryLimit = retryLimit.clamp(1, 10).toInt();
+      this.retryLimit = retryLimit.clamp(1, 999999).toInt();
     }
     if (minSpeedThresholdBytesPerSec != null) {
       this.minSpeedThresholdBytesPerSec = minSpeedThresholdBytesPerSec.clamp(0, 100 * 1024 * 1024).toInt();
@@ -243,17 +250,30 @@ class DownloadQueue {
                 t.state == DownloadState.paused),
       );
       if (existing.isNotEmpty) {
-        // When resniff mode is active and the existing task matches the
+        // When resniff mode is active and the duplicate belongs to the
         // pending resniff task, delegate to the callback so the user can
         // choose "Update existing" or "Create new".
         if (resniffPendingTaskId != null &&
             onResniffDuplicate != null &&
-            _tasks[resniffPendingTaskId]?.url == task.url) {
+            resniffPendingTaskId == existing.first.id) {
           onResniffDuplicate!(resniffPendingTaskId!, task.url, task.contentType);
           return;
         }
         _warn('Already in queue: ${task.url}');
         return;
+      }
+      // Resniff mode: a freshly sniffed URL that looks like the same media
+      // as the pending task (same scheme/host/path, e.g. a token-refreshed
+      // variant with a different query string) is routed to the resniff
+      // dialog instead of being added as a silent new download. This is what
+      // makes "Update Existing" actually receive a *new* URL rather than the
+      // identical one already in the queue.
+      if (resniffPendingTaskId != null && onResniffDuplicate != null) {
+        final pending = _tasks[resniffPendingTaskId];
+        if (pending != null && _isLikelySameMedia(pending.url, task.url)) {
+          onResniffDuplicate!(resniffPendingTaskId!, task.url, task.contentType);
+          return;
+        }
       }
     }
     if (task.isBackupImport && task.state != DownloadState.completed) {
@@ -274,6 +294,7 @@ class DownloadQueue {
     // instead of crashing the downloader with "No host specified in URI".
     if (task.url.startsWith('blob:')) {
       task.state = DownloadState.failed;
+      task.failureReason = DownloadFailure.urlInvalid;
       task.errorMessage =
           'Blob URLs (MediaSource) cannot be downloaded directly. '
           'Look for the .m3u8 or .mpd playlist URL in the captured media list instead.';
@@ -298,7 +319,7 @@ class DownloadQueue {
         downloader = HlsDownloader(
           task: task,
           client: _client,
-          maxConcurrentSegments: numChunksPerTask,
+          maxConcurrentSegments: math.min(numChunksPerTask, 8),
           speedLimiter: speedLimiter,
         );
       } else {
@@ -371,9 +392,9 @@ class DownloadQueue {
             );
             if (autoRetry && !updatedTask.isBackupImport) {
               final isStallOrTruncation =
-                  (updatedTask.errorMessage ?? '').contains('Speed stall') ||
-                      (updatedTask.errorMessage ?? '')
-                          .contains('not all chunks completed');
+                  updatedTask.failureReason == DownloadFailure.speedStall ||
+                  updatedTask.failureReason == DownloadFailure.partialDownload ||
+                  updatedTask.failureReason == DownloadFailure.chunkIncomplete;
               final alreadyDownloadedEnough =
                   updatedTask.downloadedBytes >= minBytesBeforeFullRetry;
               if (isStallOrTruncation && alreadyDownloadedEnough) {
@@ -392,6 +413,7 @@ class DownloadQueue {
                 );
                 final alreadyMb =
                     (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
+                updatedTask.failureReason = DownloadFailure.partialDownload;
                 updatedTask.errorMessage =
                     '[Download stalled near completion] '
                     '$alreadyMb MB already downloaded. '
@@ -404,10 +426,11 @@ class DownloadQueue {
                 final nextAttempt = attempts + 1;
                 _autoRetryAttempts[updatedTask.id] = nextAttempt;
                 final originalError = updatedTask.errorMessage ?? 'Unknown error';
-                updatedTask.errorMessage = '[Retrying in 2s, attempt $nextAttempt/$retryLimit] $originalError';
+                final limitStr = retryLimit >= 999999 ? '∞' : '$retryLimit';
+                updatedTask.errorMessage = '[Retrying in 1s, attempt $nextAttempt/$limitStr] $originalError';
                 _emitTask(updatedTask);
 
-                Future.delayed(const Duration(seconds: 2), () {
+                Future.delayed(const Duration(seconds: 1), () {
                   if (_tasks[updatedTask.id]?.state == DownloadState.failed) {
                     retryHlsTaskWithRefresh(updatedTask.id, forceReload: false, isAutoRetry: true);
                   }
@@ -421,8 +444,9 @@ class DownloadQueue {
                   taskId: updatedTask.id,
                 );
                 final originalError = updatedTask.errorMessage ?? 'Unknown error';
-                final cleanError = originalError.replaceFirst(RegExp(r'^\[Retrying in 2s, attempt \d+/\d+\] '), '');
-                updatedTask.errorMessage = '[Auto-retry failed after $retryLimit attempts] $cleanError';
+                final cleanError = originalError.replaceFirst(RegExp(r'^\[Retrying in [12]s, attempt \d+/(?:\d+|∞)\] '), '');
+                final failLimitStr = retryLimit >= 999999 ? 'infinite' : '$retryLimit';
+                updatedTask.errorMessage = '[Auto-retry failed after $failLimitStr attempts] $cleanError';
                 _emitTask(updatedTask);
               }
             }
@@ -558,6 +582,7 @@ class DownloadQueue {
         eventType: LogEventType.error,
         taskId: task.id,
       );
+      task.failureReason = DownloadFailure.mergeFailed;
       task.errorMessage = '[Force merge refused] Task is still downloading.';
       _emitTask(task);
       return false;
@@ -574,25 +599,39 @@ class DownloadQueue {
 
     task.state = DownloadState.merging;
     task.downloadedBytes = 0;
-    task.totalBytes = task.chunks.length;
+    task.totalBytes = _isHlsTask(task) ? -1 : task.chunks.length;
     _emitTask(task);
 
     try {
-      // Pull chunks from in-memory task (loaded from meta.json in _loadMeta
-      // or already on the in-memory model).
-      final result = await FileCombiner.combinePartial(
-        chunks: task.chunks,
-        tempDir: task.tempDir,
-        destination: File(task.savePath),
-        onProgress: (chunkIndex, totalChunks) {
-          task.downloadedBytes = chunkIndex;
-          task.totalBytes = totalChunks;
-          _emitTask(task);
-        },
-      );
+      final PartialMergeResult result;
+      if (_isHlsTask(task)) {
+        result = await FileCombiner.combineHlsPartial(
+          tempDir: task.tempDir,
+          destination: File(task.savePath),
+          onProgress: (current, total) {
+            task.downloadedBytes = current;
+            task.totalBytes = total;
+            _emitTask(task);
+          },
+        );
+      } else {
+        // Pull chunks from in-memory task (loaded from meta.json in _loadMeta
+        // or already on the in-memory model).
+        result = await FileCombiner.combinePartial(
+          chunks: task.chunks,
+          tempDir: task.tempDir,
+          destination: File(task.savePath),
+          onProgress: (chunkIndex, totalChunks) {
+            task.downloadedBytes = chunkIndex;
+            task.totalBytes = totalChunks;
+            _emitTask(task);
+          },
+        );
+      }
 
       if (!result.hasData) {
         task.state = DownloadState.failed;
+        task.failureReason = DownloadFailure.mergeFailed;
         task.errorMessage =
             '[Force merge failed] No chunk data on disk to merge.';
         _emitTask(task);
@@ -647,6 +686,7 @@ class DownloadQueue {
     } catch (e, s) {
       _logError('Exception during force merge', e, s);
       task.state = DownloadState.failed;
+      task.failureReason = DownloadFailure.mergeFailed;
       task.errorMessage = '[Force merge failed] Error: $e';
       _emitTask(task);
       if (queuePath != null && !_isLoading) {
@@ -837,7 +877,8 @@ class DownloadQueue {
             task.state = DownloadState.idle;
           } else if (task.state == DownloadState.merging) {
             task.state = DownloadState.failed;
-            task.errorMessage = '[Merge interrupted] Rename the task to a shorter name and retry.';
+            task.failureReason = DownloadFailure.mergeInterrupted;
+            task.errorMessage = '[Merge interrupted] The download was interrupted while merging saved parts. Retry to re-merge.';
           }
           addTask(task);
         } catch (e, s) {
@@ -999,6 +1040,28 @@ class DownloadQueue {
           .toString();
     } catch (_) {
       return url;
+    }
+  }
+
+  /// Returns true if [a] and [b] point at the same media resource while
+  /// ignoring query-string differences (e.g. a refreshed CDN token). Used by
+  /// resniff mode to recognise a re-sniffed URL as the same media even when
+  /// its query parameters changed, so the resniff dialog can offer to update
+  /// the existing task with the new URL.
+  static bool _isLikelySameMedia(String a, String b) {
+    try {
+      final ua = Uri.parse(a);
+      final ub = Uri.parse(b);
+      if (ua.scheme != ub.scheme || ua.host != ub.host) return false;
+      final pa = ua.pathSegments.where((s) => s.isNotEmpty).toList();
+      final pb = ub.pathSegments.where((s) => s.isNotEmpty).toList();
+      if (pa.length != pb.length) return false;
+      for (var i = 0; i < pa.length; i++) {
+        if (pa[i] != pb[i]) return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1595,7 +1658,9 @@ class DownloadQueue {
     if (uri == null) return false;
     final path = uri.path.toLowerCase();
     // Explicit playlist extensions — definitely HLS/DASH
-    if (path.endsWith('.m3u8') || path.endsWith('.mpd')) return true;
+    if (path.endsWith('.m3u8') ||
+        path.endsWith('.m3u') ||
+        path.endsWith('.mpd')) return true;
     // Path hints for disguised playlists (e.g. index.jpg under /hls/).
     // Checked BEFORE the known-direct-media list so that CDNs serving
     // playlists under non-.m3u8 URLs (e.g. .../hls/.../index.jpg) are
@@ -1603,12 +1668,9 @@ class DownloadQueue {
     // body starts with #EXTM3U and fail gracefully if it is not actually
     // an HLS playlist.
     final urlLower = url.toLowerCase();
-    if (path.contains('/hls/') ||
-        path.contains('/master') ||
-        path.contains('/playlist') ||
-        path.contains('/manifest') ||
-        path.contains('/dash/') ||
+    if (isPlaylistPathHint(path) ||
         urlLower.contains('m3u8') ||
+        urlLower.contains('m3u') ||
         urlLower.contains('mpd')) {
       return true;
     }

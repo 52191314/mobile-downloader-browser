@@ -14,6 +14,7 @@ import 'hls_playlist_parser.dart';
 import '../platform/network_binding_service.dart';
 import '../platform/ts_remux_service.dart';
 import 'headless_webview_fetcher.dart';
+import 'download_error_classifier.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[HlsDownloader] $context: $error';
@@ -332,6 +333,7 @@ class HlsDownloader implements BaseDownloader {
           await _redownloadStaleSegments(_playlist!, partFiles, staleSnapshot);
         }
         if (_needsRefresh && _staleSegmentIndexes.isNotEmpty) {
+          task.failureReason = DownloadFailure.hlsTokenExpired;
           task.errorMessage =
               'Token refresh failed — the stream URL may have expired. Re-sniff from the page.';
           _taskUpdateController.add(task);
@@ -352,16 +354,24 @@ class HlsDownloader implements BaseDownloader {
         final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
         task.errorMessage = 'Converting to MP4...';
         _taskUpdateController.add(task);
-        final ok = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
-        if (ok) {
+        final remux = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
+        if (remux.success) {
           try {
             File(mergedPath).delete();
           } catch (_) {}
           task.savePath = mp4Path;
           task.errorMessage = null;
         } else {
+          AuroraLog.instance.error(
+            'TS→MP4 remux failed for ${task.savePath.split("/").last}: '
+            '${remux.error ?? "unknown"}',
+            category: LogCategory.hls,
+            screen: LogScreen.background,
+            eventType: LogEventType.error,
+            taskId: task.id,
+          );
           task.errorMessage = 'Could not convert to MP4 (kept as .ts). '
-              'The stream may use an unsupported codec.';
+              '${remux.error ?? "The stream may use an unsupported codec."}';
         }
       }
 
@@ -374,7 +384,9 @@ class HlsDownloader implements BaseDownloader {
     } catch (error) {
       if (_isPaused) return;
       task.state = DownloadState.failed;
-      task.errorMessage = error.toString();
+      final classified = DownloadErrorClassifier.classifyAndMessage(error);
+      task.failureReason = classified.reason;
+      task.errorMessage = classified.message;
       _taskUpdateController.add(task);
       rethrow;
     } finally {
@@ -1153,6 +1165,7 @@ class HlsDownloader implements BaseDownloader {
                 !_hostBlocked) {
               _hostBlocked = true;
               task.state = DownloadState.failed;
+              task.failureReason = DownloadFailure.hlsCircuitBreaker;
               task.errorMessage =
                   'Server blocked access ($_consecutiveSegmentFailures consecutive 403s). '
                   'The CDN may have rate-limited or blocked this device. '

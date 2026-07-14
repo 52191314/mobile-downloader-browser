@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
+
 import 'media_sniffer_engine.dart';
 import 'models/sniffed_media.dart';
+import 'sniffer_url_utils.dart';
 
 class CaptureCandidate {
   final SniffedMedia media;
@@ -63,12 +66,15 @@ class MediaCaptureAnalyzer {
   MediaCaptureResult analyze(
     List<SniffedMedia> media, {
     required bool showAll,
-    int minMediaSizeKb = 0,
-    int minMediaDurationSeconds = 0,
   }) {
-    final candidates = media
-        .map((m) => _candidateFor(m, minMediaSizeKb, minMediaDurationSeconds))
-        .toList(growable: false);
+    // Precompute the set of master playlist URLs that have been expanded
+    // into variant child items. Used to hide the bare master card once its
+    // variants appear in the sheet.
+    final expandedMasterUrls = <String>{
+      for (final m in media)
+        if (m.masterUrl != null) m.masterUrl!,
+    };
+    final candidates = media.map((m) => _candidateFor(m, expandedMasterUrls)).toList(growable: false);
     final recommended = _recommendedGroupKey(candidates);
     final marked = candidates
         .map(
@@ -98,16 +104,14 @@ class MediaCaptureAnalyzer {
 
   CaptureCandidate _candidateFor(
     SniffedMedia media,
-    int minMediaSizeKb,
-    int minMediaDurationSeconds,
+    Set<String> expandedMasterUrls,
   ) {
     final uri = Uri.tryParse(media.url);
     final qualityLabel = _qualityLabel(media, uri);
     final hiddenReason = _hiddenReason(
       media,
       uri,
-      minMediaSizeKb: minMediaSizeKb,
-      minMediaDurationSeconds: minMediaDurationSeconds,
+      expandedMasterUrls,
     );
     final confidence = _confidence(media, hiddenReason);
     return CaptureCandidate(
@@ -194,46 +198,52 @@ class MediaCaptureAnalyzer {
 
   String? _hiddenReason(
     SniffedMedia media,
-    Uri? uri, {
-    int minMediaSizeKb = 0,
-    int minMediaDurationSeconds = 0,
-  }) {
+    Uri? uri,
+    Set<String> expandedMasterUrls,
+  ) {
     final path = (uri?.path ?? media.url).toLowerCase();
     final name = media.name.toLowerCase();
 
-    // User-configurable size filter (skip for images, which already have
-    // their own tiny-image rule).
-    if (minMediaSizeKb > 0 && media.type != MediaType.image) {
-      final size = media.contentLengthBytes;
-      if (size != null && size < minMediaSizeKb * 1024) {
-        return 'below size threshold';
-      }
-    }
-
-    // User-configurable duration filter.
-    if (minMediaDurationSeconds > 0) {
-      final duration = media.duration;
-      if (duration != null && duration.inSeconds < minMediaDurationSeconds) {
-        return 'below duration threshold';
+    // Hide bare master playlist cards once their variants have been expanded.
+    // A "bare master" is an HLS/DASH playlist item with no resolution marker
+    // (no width/height, no bandwidth) — meaning it hasn't already been
+    // reclassified as a quality variant. If we have child variant items whose
+    // masterUrl points back to this master, it's redundant.
+    if (expandedMasterUrls.contains(media.url) &&
+        (media.type == MediaType.video || media.type == MediaType.playlist)) {
+      final hasResolution = media.width != null || media.height != null;
+      final hasBandwidth = media.bandwidth != null;
+      if (!hasResolution && !hasBandwidth) {
+        debugPrint(
+          '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
+          'expanded master (variants show its qualities)',
+        );
+        return 'expanded master';
       }
     }
 
     if (media.type == MediaType.image) {
-      if (path.endsWith('.ico') || path.endsWith('.svg')) return 'site asset';
-      if (_looksLikeAssetName(name)) return 'site asset';
+      if (path.endsWith('.ico') || path.endsWith('.svg')) {
+        debugPrint('[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): site asset (.ico/.svg)');
+        return 'site asset';
+      }
+      if (_looksLikeAssetName(name)) {
+        debugPrint('[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): site asset (name)');
+        return 'site asset';
+      }
       final size = media.contentLengthBytes;
       if (size != null && size < 64 * 1024) {
         // Don't hide images that look like disguised playlists
         // (e.g. /hls/.../index.jpg). These are usually 1-5KB HLS
         // playlists, not real images. The MediaEnricher's body-content
         // check will reclassify them to MediaType.video shortly.
-        if (path.contains('/hls/') ||
-            path.contains('/master') ||
-            path.contains('/playlist') ||
-            path.contains('/manifest') ||
-            path.contains('/dash/')) {
+        if (isPlaylistPathHint(path)) {
           // Keep visible — the enricher will reclassify within seconds.
         } else {
+          debugPrint(
+            '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
+            'tiny image (${size}B < 64KB)',
+          );
           return 'tiny image';
         }
       }
@@ -241,11 +251,25 @@ class MediaCaptureAnalyzer {
     if (media.type == MediaType.video && path.endsWith('.ts')) {
       final size = media.contentLengthBytes;
       if (size == null || size < 2 * 1024 * 1024 || _looksLikeSegment(name)) {
+        debugPrint(
+          '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
+          'HLS segment (size=$size, name=$name)',
+        );
         return 'HLS segment';
       }
     }
-    if (_looksLikeTracker(path)) return 'tracking media';
+    if (_looksLikeTracker(path)) {
+      debugPrint('[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): tracking media');
+      return 'tracking media';
+    }
     return null;
+  }
+
+  /// Short URL snippet for debug logging (last 60 chars of the URL path).
+  String _urlSnippet(SniffedMedia media) {
+    final u = Uri.tryParse(media.url);
+    final path = u?.path ?? media.url;
+    return path.length > 60 ? '...${path.substring(path.length - 60)}' : path;
   }
 
   double _confidence(SniffedMedia media, String? hiddenReason) {
@@ -280,11 +304,7 @@ class MediaCaptureAnalyzer {
       return true;
     }
     // Path hints for disguised playlists (e.g. index.jpg under /hls/).
-    if (path.contains('/hls/') ||
-        path.contains('/master') ||
-        path.contains('/playlist') ||
-        path.contains('/manifest') ||
-        path.contains('/dash/')) {
+    if (isPlaylistPathHint(path)) {
       return true;
     }
     return false;

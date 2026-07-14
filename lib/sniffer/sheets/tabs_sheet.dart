@@ -20,6 +20,7 @@ void showTabsSheet(
   required void Function(int index) onSwitchToActiveTab,
   required String Function(BrowserTab) getTabLabel,
   required VoidCallback onCloseAllTabs,
+  required Set<String> builtWebViewTabIds,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -123,6 +124,7 @@ void showTabsSheet(
                                     onCloseTab: onCloseTab,
                                     onSwitchToActiveTab: onSwitchToActiveTab,
                                     getTabLabel: getTabLabel,
+                                    builtWebViewTabIds: builtWebViewTabIds,
                                   ),
                               ],
                             ),
@@ -158,6 +160,7 @@ void showTabsSheet(
                               onCloseTab: onCloseTab,
                               onSwitchToActiveTab: onSwitchToActiveTab,
                               getTabLabel: getTabLabel,
+                              builtWebViewTabIds: builtWebViewTabIds,
                             ),
                         ],
                       ],
@@ -186,6 +189,7 @@ Widget buildTabCard(
   required void Function(int index) onCloseTab,
   required void Function(int index) onSwitchToActiveTab,
   required String Function(BrowserTab) getTabLabel,
+  required Set<String> builtWebViewTabIds,
 }) {
   final isActive = originalIndex == activeTabIndex;
   return Card(
@@ -198,14 +202,29 @@ Widget buildTabCard(
       ),
     ),
     child: ListTile(
-      title: Text(
-        getTabLabel(tab),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: AuroraColors.text,
-          fontWeight: isActive ? FontWeight.bold : null,
-        ),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              getTabLabel(tab),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AuroraColors.text,
+                fontWeight: isActive ? FontWeight.bold : null,
+              ),
+            ),
+          ),
+          if (!isActive && !builtWebViewTabIds.contains(tab.id)) ...[
+            const SizedBox(width: 6),
+            const Icon(
+              Icons.snooze_outlined,
+              size: 14,
+              color: AuroraColors.mutedText,
+            ),
+          ],
+        ],
       ),
       subtitle: Text(
         tab.addressController.text.trim().isEmpty
@@ -296,6 +315,7 @@ void showTabGroupMenu(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    useSafeArea: true,
     builder: (menuCtx) {
       return SafeArea(
         child: Column(

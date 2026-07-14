@@ -38,7 +38,7 @@ class SpeedLimiter {
       _refillTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         _bytesThisWindow = 0;
         _windowStartMs = DateTime.now().millisecondsSinceEpoch;
-        if (_hasPendingListener && _bytesThisWindow < _limitBytesPerSec) {
+        if (_hasPendingListener && _bytesThisWindow < (_limitBytesPerSec ~/ 2)) {
           _hasPendingListener = false;
           _capacityController.add(null);
         }
@@ -65,7 +65,7 @@ class SpeedLimiter {
       _windowStartMs = now;
     }
 
-    if (_bytesThisWindow + bytes <= _limitBytesPerSec) {
+    if (_bytesThisWindow + bytes <= (_limitBytesPerSec ~/ 2)) {
       _bytesThisWindow += bytes;
       return true;
     }

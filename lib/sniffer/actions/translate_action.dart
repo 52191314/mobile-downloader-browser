@@ -37,6 +37,7 @@ Future<void> translatePage(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    useSafeArea: true,
     builder: (ctx) {
       return SafeArea(
         child: ListView(

@@ -52,6 +52,18 @@ class MediaSnifferEngine implements MediaEnricherHost {
   /// falling back to a Dart HTTP GET.
   Future<String?> Function(String url)? fetchPlaylistBodyViaWebView;
 
+  /// Optional callback that fetches the full response body for a URL through
+  /// a headless WebView navigated to the CDN origin, using same-origin XHR
+  /// to bypass both CORS (same origin) and Cloudflare WAF (real Chrome TLS
+  /// fingerprint + cf_clearance cookie). Set by the owning
+  /// [TabLifecycleController] to point at the per-tab
+  /// [HeadlessWebViewFetcher.fetchText].
+  ///
+  /// This is the last-resort tier (4th attempt) after the JS body cache,
+  /// page-origin WebView XHR, and Dart HTTP all fail. It should succeed for
+  /// cross-origin / WAF-protected CDNs where the other tiers are blocked.
+  Future<String?> Function(String url)? fetchPlaylistBodyViaHeadlessWebView;
+
   /// Optional per-tab HLS playlist body cache. When the browser already loaded
   /// a protected playlist, enrichment can parse that body without triggering a
   /// second Dart HTTP request that may be blocked by WAF/CORS policy.
@@ -79,7 +91,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
   // list and are not downloadable on their own. HLS playlists (.m3u8) are
   // detected via _streamRegExp and handled by the HLS downloader.
   static final RegExp _videoRegExp = RegExp(
-    r'\.(mp4|m3u8|webm|mkv|avi|flv|mov|3gp|ogv|wmv|m4v|f4v|mpeg|mpg|mts|m2ts|hevc)(\?.*)?$',
+    r'\.(mp4|m3u8|m3u|webm|mkv|avi|flv|mov|3gp|ogv|wmv|m4v|f4v|mpeg|mpg|mts|m2ts|hevc)(\?.*)?$',
     caseSensitive: false,
   );
 
@@ -114,7 +126,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
   );
 
   static final RegExp _streamRegExp = RegExp(
-    r'\.(mpd|f4m|smil|m3u)(\?.*)?$',
+    r'\.(mpd|f4m|smil)(\?.*)?$',
     caseSensitive: false,
   );
 
@@ -269,15 +281,47 @@ class MediaSnifferEngine implements MediaEnricherHost {
       return;
     }
 
-    // De-duplication cache logic — check both the per-engine cache and
-    // the global cross-tab cache. The global cache prevents the same URL
-    // from appearing in multiple tabs when browsing different pages on
-    // the same site that embed the same media.
+    // Prevent duplicate items of the same URL from filling up the cache and evicting
+    // other media (especially when maxDetectedMedia is small).
+    final existingIndex = cache.detectedMedia.indexWhere(
+      (m) => cache.normalizeUrl(m.url) == normalizedUrl,
+    );
+    if (existingIndex != -1) {
+      final existing = cache.detectedMedia[existingIndex];
+      var updated = existing;
+      if (contentType != null && existing.contentType != contentType) {
+        updated = updated.copyWith(contentType: contentType);
+      }
+      if (contentLength != null && existing.contentLengthBytes != contentLength) {
+        updated = updated.copyWith(contentLengthBytes: contentLength);
+      }
+      if (contentType != null) {
+        final ct = contentType.toLowerCase().split(';').first.trim();
+        final isHls = ct == 'application/vnd.apple.mpegurl' ||
+            ct == 'application/x-mpegurl' ||
+            ct.contains('mpegurl');
+        final isDash = ct == 'application/dash+xml';
+        if ((isHls || isDash) &&
+            existing.type != MediaType.video &&
+            existing.type != MediaType.playlist) {
+          final containerFormat = isDash ? 'mp4' : existing.containerFormat;
+          updated = updated.copyWith(
+            type: MediaType.video,
+            containerFormat: containerFormat,
+          );
+          if (!url.startsWith('blob:')) {
+            enricher.enqueue(updated);
+          }
+        }
+      }
+      if (updated != existing) {
+        cache.detectedMedia[existingIndex] = updated;
+        cache.mediaChangedController.add(updated);
+      }
+      return;
+    }
+
     if (!cache.registerUrl(normalizedUrl, dedupDuration)) {
-      // URL was already seen.  If the new call carries an HLS/DASH
-      // content-type that should override the previous classification
-      // (e.g. a disguised .jpg playlist re-posted by the JS body
-      // sniffer), update the existing item in-place instead of dropping.
       if (contentType != null) {
         _reclassifyIfNeeded(normalizedUrl, contentType);
       }
@@ -491,6 +535,13 @@ class MediaSnifferEngine implements MediaEnricherHost {
 
   void clearCache() {
     cache.clear();
+  }
+
+  /// Clears the per-engine and global dedup caches without removing any
+  /// detected media items. Used by the manual rescan button so re-captured
+  /// DOM-scan URLs are not silently dropped by the dedup check.
+  void clearDedupOnly() {
+    cache.clearDedupOnly();
   }
 
   /// Clears the global cross-tab dedup cache so the same URL can be

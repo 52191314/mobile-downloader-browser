@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -53,6 +54,33 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  static const List<int> _retryLimitSteps = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    20, 50, 100, 200, 500, 1000, 5000, 20000, 100000, 999999
+  ];
+
+  int _getRetryLimitIndex(int limit) {
+    final idx = _retryLimitSteps.indexOf(limit);
+    if (idx != -1) return idx;
+    int closestIndex = 0;
+    int minDiff = (limit - _retryLimitSteps[0]).abs();
+    for (int i = 1; i < _retryLimitSteps.length; i++) {
+      final diff = (limit - _retryLimitSteps[i]).abs();
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
+    }
+    return closestIndex;
+  }
+
+  String _getRetryLimitLabel(int limit) {
+    if (limit >= 999999) {
+      return 'Practically Infinite';
+    }
+    return '$limit';
+  }
+
   late DownloadSettings _settings;
   late double _speedLimitKbps;
 
@@ -324,7 +352,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 16),
               _label('Max concurrent'),
-              _slider(local.maxConcurrentDownloads.toDouble(), 1, 8, 7,
+              _slider(local.maxConcurrentDownloads.toDouble(), 1, 12, 11,
                   '${local.maxConcurrentDownloads}',
                   (v) {
                     setLocal(() => local = local.copyWith(maxConcurrentDownloads: v.round()));
@@ -332,7 +360,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   }),
               const SizedBox(height: 16),
               _label('Chunks per task'),
-              _slider(local.chunksPerTask.toDouble(), 1, 12, 11,
+              _slider(local.chunksPerTask.toDouble(), 1, 32, 31,
                   '${local.chunksPerTask}',
                   (v) {
                     setLocal(() => local = local.copyWith(chunksPerTask: v.round()));
@@ -350,10 +378,15 @@ class _SettingsPageState extends State<SettingsPage> {
               if (local.autoRetry) ...[
                 const SizedBox(height: 8),
                 _label('Retry limit'),
-                _slider(local.retryLimit.toDouble(), 1, 10, 9,
-                    '${local.retryLimit}',
+                _slider(
+                    _getRetryLimitIndex(local.retryLimit).toDouble(),
+                    0,
+                    (_retryLimitSteps.length - 1).toDouble(),
+                    _retryLimitSteps.length - 1,
+                    _getRetryLimitLabel(local.retryLimit),
                     (v) {
-                      setLocal(() => local = local.copyWith(retryLimit: v.round()));
+                      final selectedLimit = _retryLimitSteps[v.round()];
+                      setLocal(() => local = local.copyWith(retryLimit: selectedLimit));
                       _update(local);
                     }),
               ],
@@ -1334,10 +1367,13 @@ class _BackupPageState extends State<BackupPage> {
   bool exportQueue = true;
   bool exportSettings = true;
 
+  List<Map<String, dynamic>> _localBackups = [];
+
   @override
   void initState() {
     super.initState();
     _loadLibrary();
+    _loadLocalBackups();
   }
 
   Future<void> _loadLibrary() async {
@@ -1348,6 +1384,19 @@ class _BackupPageState extends State<BackupPage> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _loadLocalBackups() async {
+    try {
+      final files = await PublicDownloadsService.listBackupFiles(
+        relativePath: 'Download/Aurora Downloads/Backups',
+      );
+      if (mounted) {
+        setState(() {
+          _localBackups = files;
+        });
+      }
+    } catch (_) {}
   }
 
   void _showSnack(String message) {
@@ -1377,23 +1426,40 @@ class _BackupPageState extends State<BackupPage> {
         downloadQueueJson: downloadQueueJson,
         settingsJson: settingsJson,
       );
-      await PublicDownloadsService.shareFile(file.path);
-      _showSnack('Backup exported successfully.');
+
+      // Publish the file directly to public Download/Aurora Downloads/Backups/
+      await const MethodChannel('aurora_downloader/public_downloads').invokeMapMethod<String, Object?>('publishFile', {
+        'sourcePath': file.path,
+        'displayName': p.basename(file.path),
+        'mimeType': 'application/json',
+        'relativePath': 'Download/Aurora Downloads/Backups',
+      });
+
+      // Delete the private temporary file
+      try {
+        await file.delete();
+      } catch (_) {}
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      widget.onSettingsChanged(widget.settings.copyWith(lastBackupTimestamp: now));
+
+      await _loadLocalBackups();
+      _showSnack('Backup saved: ${p.basename(file.path)}');
     } catch (error) {
       _showSnack('Export failed: $error');
     }
   }
 
-  Future<void> _importBackup() async {
+  Future<void> _importBackup({String? filePath}) async {
     try {
-      final filePath = await PublicDownloadsService.pickImportFile();
-      if (filePath == null) return;
+      final actualPath = filePath ?? await PublicDownloadsService.pickImportFile();
+      if (actualPath == null) return;
 
       final Map<String, dynamic> decoded;
-      if (filePath.toLowerCase().endsWith('.1dmbak')) {
-        decoded = await IdmBackupParser.parse(filePath);
+      if (actualPath.toLowerCase().endsWith('.1dmbak')) {
+        decoded = await IdmBackupParser.parse(actualPath);
       } else {
-        decoded = await const BrowserLibraryStore().readImportMap(filePath);
+        decoded = await const BrowserLibraryStore().readImportMap(actualPath);
       }
 
       final hasFavorites = decoded.containsKey('favorites') && (decoded['favorites'] is List) && (decoded['favorites'] as List).isNotEmpty;
@@ -1824,6 +1890,63 @@ class _BackupPageState extends State<BackupPage> {
     }
   }
 
+  Future<void> _deleteBackup(String uri) async {
+    try {
+      await PublicDownloadsService.deleteBackupFile(uri);
+      await _loadLocalBackups();
+      _showSnack('Backup deleted.');
+    } catch (e) {
+      _showSnack('Failed to delete backup: $e');
+    }
+  }
+
+  Future<void> _shareBackup(String uri, String displayName) async {
+    try {
+      final tempPath = await PublicDownloadsService.readBackupFile(uri);
+      if (tempPath != null) {
+        final file = File(tempPath);
+        final renamedFile = await file.rename(
+          p.join(p.dirname(tempPath), displayName),
+        );
+        await PublicDownloadsService.shareFile(renamedFile.path);
+        try {
+          await renamedFile.delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      _showSnack('Sharing failed: $e');
+    }
+  }
+
+  Future<void> _importLocalBackup(String uri) async {
+    try {
+      final tempPath = await PublicDownloadsService.readBackupFile(uri);
+      if (tempPath != null) {
+        await _importBackup(filePath: tempPath);
+        try {
+          await File(tempPath).delete();
+        } catch (_) {}
+      }
+    } catch (error) {
+      _showSnack('Restore failed: $error');
+    }
+  }
+
+  String _formatDateTime(int timestamp) {
+    if (timestamp == 0) return 'Never';
+    final dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${pad(dt.month)}-${pad(dt.day)} ${pad(dt.hour)}:${pad(dt.minute)}';
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(1)} MB';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1942,6 +2065,110 @@ class _BackupPageState extends State<BackupPage> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // Local Backups List Section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Local Backups',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AuroraColors.text,
+                        ),
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.refresh, size: 16, color: AuroraColors.accent),
+                        label: const Text('Scan', style: TextStyle(color: AuroraColors.accent, fontSize: 12)),
+                        onPressed: _loadLocalBackups,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (_localBackups.isEmpty)
+                    Card(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                        alignment: Alignment.center,
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.folder_open_outlined,
+                              size: 40,
+                              color: AuroraColors.mutedDeep,
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'No backups found.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AuroraColors.mutedText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    Column(
+                      children: _localBackups.map((item) {
+                        final name = item['displayName'] as String? ?? 'backup.json';
+                        final isAuto = name.startsWith('aurora_auto_backup_');
+                        final timestamp = item['dateModified'] as int? ?? 0;
+                        final formattedTime = timestamp > 0 ? _formatDateTime(timestamp) : 'Unknown Date';
+                        final size = item['size'] as int? ?? 0;
+                        final uri = item['uri'] as String? ?? '';
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          color: isAuto
+                              ? AuroraColors.surfaceVariant.withOpacity(0.3)
+                              : AuroraColors.surface,
+                          child: ListTile(
+                            leading: Icon(
+                              isAuto ? Icons.auto_mode_rounded : Icons.backup_rounded,
+                              color: isAuto ? Colors.cyanAccent : AuroraColors.accent,
+                            ),
+                            title: Text(
+                              isAuto ? 'Auto Backup' : 'Manual Backup',
+                              style: const TextStyle(
+                                color: AuroraColors.text,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '$formattedTime • ${_formatFileSize(size)}',
+                              style: const TextStyle(
+                                color: AuroraColors.mutedText,
+                                fontSize: 11,
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.share_rounded, size: 18, color: AuroraColors.mutedText),
+                                  onPressed: () => _shareBackup(uri, name),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.settings_backup_restore_rounded, size: 18, color: Colors.green),
+                                  onPressed: () => _importLocalBackup(uri),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                                  onPressed: () => _deleteBackup(uri),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                 ],
               ),
             ),

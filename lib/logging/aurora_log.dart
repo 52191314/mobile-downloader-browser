@@ -135,15 +135,31 @@ class AuroraLog {
 
   static const int _maxEntries = 10000;
 
+  /// Repeat-detection window in seconds: identical messages within this
+  /// window are aggregated with an `[xN, ΔTs]` suffix instead of flooding
+  /// the log with redundant entries.
+  static const int _repeatWindowSec = 30;
+
   final List<AuroraLogEntry> _entries = [];
   final StreamController<List<AuroraLogEntry>> _controller =
       StreamController<List<AuroraLogEntry>>.broadcast();
+  final StreamController<AuroraLogEntry> _logAddedController =
+      StreamController<AuroraLogEntry>.broadcast();
+
+  Stream<AuroraLogEntry> get onLogAdded => _logAddedController.stream;
 
   String? _logPath;
   LogVerbosity _verbosity = LogVerbosity.verbose;
   bool _isLoading = false;
   bool _isSaving = false;
   bool _needsSave = false;
+
+  // -- repeat tracking --
+  String? _lastRepeatKey;
+  int _repeatCount = 0;
+  DateTime? _repeatFirst;
+  DateTime? _repeatLast;
+  AuroraLogEntry? _repeatEntry; // the first instance (in _entries[0])
 
   // -- public accessors --
 
@@ -294,6 +310,43 @@ class AuroraLog {
 
   // -- internal --
 
+  /// Build a composite key used for repeat detection.
+  String _repeatKey(
+    LogLevel level,
+    LogCategory category,
+    String message,
+    String? taskId,
+  ) =>
+      '${level.name}|${category.name}|$message|$taskId';
+
+  /// Flush any pending aggregated repeat to the log entry in-memory.
+  /// Called before writing a non-duplicate message or when the repeat
+  /// window expires.
+  void _flushRepeats() {
+    if (_repeatCount <= 1 || _repeatEntry == null) return;
+    final elapsed = _repeatLast!.difference(_repeatFirst!).inSeconds;
+    // Replace the aggregated entry's message in-place in _entries so
+    // the next save-to-file picks up the [xN, ΔTs] suffix.
+    final updated = AuroraLogEntry(
+      timestamp: _repeatEntry!.timestamp,
+      level: _repeatEntry!.level,
+      category: _repeatEntry!.category,
+      screen: _repeatEntry!.screen,
+      eventType: _repeatEntry!.eventType,
+      message: '${_repeatEntry!.message} [x$_repeatCount, ${elapsed}s]',
+      taskId: _repeatEntry!.taskId,
+    );
+    final idx = _entries.indexOf(_repeatEntry!);
+    if (idx != -1) {
+      _entries[idx] = updated;
+      if (!_controller.isClosed) {
+        _controller.add(_entries);
+      }
+      _saveToFile();
+    }
+    _repeatEntry = null;
+  }
+
   void _add(
     LogLevel level,
     String message, {
@@ -306,8 +359,30 @@ class AuroraLog {
     // Ingestion filter based on verbosity.
     if (!_passesFilter(level)) return;
 
+    final now = DateTime.now();
+    final key = _repeatKey(level, category, message, taskId);
+
+    // --- repeat detection ---
+    if (key == _lastRepeatKey &&
+        _repeatFirst != null &&
+        now.difference(_repeatFirst!).inSeconds < _repeatWindowSec) {
+      // Same message within the aggregation window — suppress and count.
+      _repeatCount++;
+      _repeatLast = now;
+      return; // no new entry, no save
+    }
+
+    // Different message or window expired — flush previous repeats first.
+    _flushRepeats();
+
+    // Reset repeat tracking for the new message.
+    _lastRepeatKey = key;
+    _repeatCount = 1;
+    _repeatFirst = now;
+    _repeatLast = now;
+
     final entry = AuroraLogEntry(
-      timestamp: DateTime.now(),
+      timestamp: now,
       level: level,
       category: category,
       screen: screen,
@@ -316,6 +391,7 @@ class AuroraLog {
       taskId: taskId,
       stackTrace: stackTrace?.toString(),
     );
+    _repeatEntry = entry;
 
     // Mirror to debugPrint in debug mode so logcat still works.
     if (kDebugMode) {
@@ -329,6 +405,9 @@ class AuroraLog {
     }
     if (!_controller.isClosed) {
       _controller.add(_entries);
+    }
+    if (!_logAddedController.isClosed) {
+      _logAddedController.add(entry);
     }
     _saveToFile();
   }

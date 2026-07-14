@@ -291,6 +291,8 @@ String? _firstNonEmpty(Iterable<String?> values) {
   return null;
 }
 
+enum _RedirectPromptAction { foreground, background, ignore }
+
 /// Filter options for the rich catch sheet segmented control are defined
 /// in `sheets/sniffed_media_sheet.dart` (re-declared so the file is
 /// self-contained). The state class uses the same enum via
@@ -389,8 +391,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   bool get _captureShowAllMedia => _mediaCatchController.captureShowAllMedia;
   set _captureShowAllMedia(bool v) =>
       _mediaCatchController.captureShowAllMedia = v;
-  bool get _hideShortClips => _mediaCatchController.hideShortClips;
-  set _hideShortClips(bool v) => _mediaCatchController.hideShortClips = v;
   MediaType? get _activeFilter => _mediaCatchController.activeFilter;
   set _activeFilter(MediaType? v) => _mediaCatchController.activeFilter = v;
   Set<int> get _selectedIndices => _mediaCatchController.selectedIndices;
@@ -451,6 +451,9 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// (test) controllers always build immediately regardless of this flag.
   bool _tabsLoaded = false;
   String? _pendingOpenUrlAfterTabsLoaded;
+  static const Duration _strictRedirectPromptCooldown = Duration(seconds: 8);
+  final Set<String> _activeStrictRedirectPrompts = {};
+  final Map<String, int> _recentStrictRedirectPrompts = {};
 
   // Cookie cache is owned by [_sniffIntakeController] (see
   // `SniffIntakeController.cookieCache`). Cleared on each page
@@ -554,8 +557,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     });
     _tabLifecycleController.openNewTab();
-    _initPaths();
-    unawaited(_libraryController.load());
+    unawaited(_initPaths().then((_) => _libraryController.load()));
     unawaited(_loadAutofillProfiles());
     widget.libraryUpdateNotifier?.addListener(_onLibraryUpdate);
   }
@@ -1157,6 +1159,11 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   Future<void> _importLibrary() async {
     try {
+      // Ensure download paths are resolved before import processes queue tasks
+      if (_baseDir == null) {
+        await _initPaths();
+      }
+
       final filePath = await PublicDownloadsService.pickImportFile();
       if (filePath == null) return;
 
@@ -1520,7 +1527,8 @@ class _SnifferScreenState extends State<SnifferScreen>
       } else {
         _showSnack('Imported: ${summary.join(", ")}.');
       }
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('[ImportLibrary] $error\n$stack');
       _showSnack('Import failed: $error');
     }
   }
@@ -1717,7 +1725,34 @@ class _SnifferScreenState extends State<SnifferScreen>
       );
       tab.authHeaderCache.clear();
       _sniffIntakeController.clearCookieCache();
-      tab.snifferEngine.clearCache();
+      // Only clear the media cache when navigating to a genuinely different
+      // page. The authority is the last *fully-loaded* main-frame URL
+      // (`committedMainFrameUrl`, updated on onPageFinished), NOT the raw
+      // onLoadStart url. Invisible JS navigations (ad insertion, analytics
+      // `location.href` reassignments) and SPA `pushState` route changes
+      // fire onLoadStart but never reach onPageFinished, so they keep the
+      // previous committed URL and the cache is preserved. Same-URL reloads
+      // also keep the cache. `_isDifferentPage` is an AND-guard against
+      // WebView versions where onPageFinished timing is unreliable.
+      final previousUrl = tab.committedMainFrameUrl;
+      if (url != tab.committedMainFrameUrl &&
+          _isDifferentPage(tab.currentUrl, url)) {
+        AuroraLog.instance.debug(
+          'Navigation: clearing media cache ($previousUrl -> $url)',
+          category: LogCategory.sniffer,
+          screen: LogScreen.browser,
+          eventType: LogEventType.sniff,
+        );
+        tab.snifferEngine.clearCache();
+      } else {
+        AuroraLog.instance.debug(
+          'Same-page navigation ($url) — keeping media cache '
+          '(${tab.snifferEngine.detectedMedia.length} items)',
+          category: LogCategory.sniffer,
+          screen: LogScreen.browser,
+          eventType: LogEventType.sniff,
+        );
+      }
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
       _updateTabNavState(tab);
     });
@@ -1725,6 +1760,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (!mounted) return;
       tab.isLoading = false;
       tab.progress = 0;
+      // Record the last fully-loaded main-frame URL. This is the authority
+      // used by setOnPageStarted to decide cache clearing — invisible JS
+      // navigations never reach here, so they keep the previous value.
+      tab.committedMainFrameUrl = url;
       setState(() {});
       AuroraLog.instance.info(
         'Page finished: $url',
@@ -1770,6 +1809,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       tab.canGoForward =
           tab.controller.historyIndex < tab.controller.historyUrls.length - 1;
       if (mounted) setState(() {});
+    });
+    tab.controller.setOnStrictRedirectDetected((event) {
+      _handleNativeStrictRedirect(tab, event);
     });
     tab.controller.addJavaScriptChannel(
       'MediaSnifferChannel',
@@ -1938,6 +1980,18 @@ class _SnifferScreenState extends State<SnifferScreen>
         tab,
         url,
         sourcePageUrl: tab.addressController.text,
+      );
+    });
+    // Capture native HLS playlist bodies (when the page uses Android WebView's
+    // built-in HLS player, browser_guard.js can't see the request). Store the
+    // body in the per-tab cache so the downloader uses the real playlist.
+    tab.controller.setOnHlsPlaylistIntercepted((url, body) async {
+      tab.hlsPlaylistCache[url] = body;
+      AuroraLog.instance.debug(
+        'Captured native HLS playlist body for $url (${body.length} chars)',
+        category: LogCategory.hls,
+        screen: LogScreen.browser,
+        eventType: LogEventType.network,
       );
     });
     tab.controller.setOnDownloadStartRequest((url, suggestedFilename) async {
@@ -2338,39 +2392,30 @@ class _SnifferScreenState extends State<SnifferScreen>
     } catch (_) {}
     final event = BlockedPopupEvent.fromJson(data);
     final url = event.url?.trim();
-    if (url != null &&
-        url.isNotEmpty &&
-        (tab.controller.shouldBlockUrl(url) ||
-            AdBlockEngine.looksLikeAdMediaUrl(url) ||
-            !event.userInitiated)) {
-      tab.snifferEngine.suppress(url, 'popup ad');
-    }
     tab.controller.incrementBlockedPopups();
     setState(() {});
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          url == null || url.isEmpty ? 'Popup blocked.' : 'Popup blocked.',
-        ),
-        action: url == null || url.isEmpty
-            ? null
-            : SnackBarAction(
-                label: 'Open once',
-                onPressed: () {
-                  final uri = Uri.tryParse(url);
-                  if (uri != null && uri.hasScheme) {
-                    unawaited(_loadUrlWithHostSettings(tab, uri));
-                  }
-                },
-              ),
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) return;
+    _suppressBlockedRedirectNoise(
+      tab,
+      url,
+      reason: 'popup ad',
+      userInitiated: event.userInitiated,
+    );
+    unawaited(
+      _showStrictRedirectPrompt(
+        tab: tab,
+        uri: uri,
+        title: 'Popup blocked',
+        method: event.reason,
+        sourcePageUrl: event.sourcePageUrl,
       ),
     );
   }
 
   void _handleInvisibleRedirect(BrowserTab tab, String rawMessage) {
-    if (!mounted) return;
+    if (!mounted || !widget.settings.invisibleRedirectBlockingEnabled) return;
     Map<String, dynamic> data = {};
     try {
       final decoded = jsonDecode(rawMessage);
@@ -2378,60 +2423,172 @@ class _SnifferScreenState extends State<SnifferScreen>
     } catch (_) {}
     final url = (data['url'] as String?)?.trim();
     if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) return;
+    final userInitiated = data['userInitiated'] as bool? ?? false;
     tab.controller.incrementBlockedInvisibleRedirects();
     setState(() {});
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 8),
-        content: Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Redirect from ${data['method'] ?? 'script'}',
+    _suppressBlockedRedirectNoise(
+      tab,
+      url,
+      reason: 'invisible redirect',
+      userInitiated: userInitiated,
+    );
+    unawaited(
+      _showStrictRedirectPrompt(
+        tab: tab,
+        uri: uri,
+        title: 'Redirect blocked',
+        method: data['method'] as String? ?? 'script',
+        sourcePageUrl: data['sourcePageUrl'] as String?,
+      ),
+    );
+  }
+
+  void _handleNativeStrictRedirect(BrowserTab tab, StrictRedirectEvent event) {
+    if (!mounted || !widget.settings.invisibleRedirectBlockingEnabled) return;
+    final uri = Uri.tryParse(event.url);
+    if (uri == null || !uri.hasScheme) return;
+    tab.controller.incrementBlockedInvisibleRedirects();
+    setState(() {});
+    _suppressBlockedRedirectNoise(
+      tab,
+      event.url,
+      reason: event.isRedirect ? 'http redirect' : 'invisible redirect',
+      userInitiated: event.userInitiated,
+    );
+    unawaited(
+      _showStrictRedirectPrompt(
+        tab: tab,
+        uri: uri,
+        title: 'Redirect blocked',
+        method: event.method,
+        sourcePageUrl: event.sourceUrl,
+      ),
+    );
+  }
+
+  void _suppressBlockedRedirectNoise(
+    BrowserTab tab,
+    String url, {
+    required String reason,
+    required bool userInitiated,
+  }) {
+    if (tab.controller.shouldBlockUrl(url) ||
+        AdBlockEngine.looksLikeAdMediaUrl(url) ||
+        !userInitiated) {
+      tab.snifferEngine.suppress(url, reason);
+    }
+  }
+
+  Future<void> _showStrictRedirectPrompt({
+    required BrowserTab tab,
+    required Uri uri,
+    required String title,
+    required String method,
+    String? sourcePageUrl,
+  }) async {
+    final url = uri.toString();
+    final promptKey = '${tab.id}|$title|$url';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _recentStrictRedirectPrompts.removeWhere(
+      (_, value) => now - value > _strictRedirectPromptCooldown.inMilliseconds,
+    );
+    if (_activeStrictRedirectPrompts.contains(promptKey)) return;
+    final lastPromptAt = _recentStrictRedirectPrompts[promptKey];
+    if (lastPromptAt != null &&
+        now - lastPromptAt < _strictRedirectPromptCooldown.inMilliseconds) {
+      return;
+    }
+    _activeStrictRedirectPrompts.add(promptKey);
+    _recentStrictRedirectPrompts[promptKey] = now;
+    try {
+      if (!mounted) return;
+      final sourceHost = Uri.tryParse(sourcePageUrl ?? '')?.host;
+      final targetHost = uri.host.isNotEmpty ? uri.host : url;
+      final decision = await showDialog<_RedirectPromptAction>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.block, color: Colors.redAccent),
+              const SizedBox(width: 8),
+              Expanded(child: Text(title)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                targetHost,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
+              if (sourceHost != null && sourceHost.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'From $sourceHost',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Text(
+                method,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(_RedirectPromptAction.ignore),
+              child: const Text('Ignore'),
             ),
             TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: AuroraColors.nordGreen,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: () {
-                messenger.hideCurrentSnackBar();
-                _tabLifecycleController.openNewTab(url: url);
-              },
-              child: const Text('New tab', style: TextStyle(fontSize: 13)),
+              onPressed: () =>
+                  Navigator.of(ctx).pop(_RedirectPromptAction.background),
+              child: const Text('Background'),
             ),
-            const SizedBox(width: 4),
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: AuroraColors.nordRed,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: () {
-                messenger.hideCurrentSnackBar();
-              },
-              child: const Text('Block', style: TextStyle(fontSize: 13)),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(_RedirectPromptAction.foreground),
+              child: const Text('New page'),
             ),
           ],
         ),
-        action: SnackBarAction(
-          label: 'Open here',
-          onPressed: () {
-            final uri = Uri.tryParse(url);
-            if (uri != null && uri.hasScheme) {
-              unawaited(_loadUrlWithHostSettings(tab, uri));
-            }
-          },
-        ),
-      ),
-    );
+      );
+      if (!mounted || !_tabs.contains(tab)) return;
+      switch (decision) {
+        case _RedirectPromptAction.foreground:
+          _tabLifecycleController.openNewTab(
+            url: url,
+            insertAtIndex: _activeTabIndex + 1,
+          );
+          break;
+        case _RedirectPromptAction.background:
+          _tabLifecycleController.openNewTab(
+            url: url,
+            switchToTab: false,
+            insertAtIndex: _activeTabIndex + 1,
+            buildImmediately: true,
+          );
+          _showSnack('Opened in background: $targetHost');
+          break;
+        case _RedirectPromptAction.ignore:
+        case null:
+          _showSnack('Ignored redirect to $targetHost');
+          break;
+      }
+    } finally {
+      _activeStrictRedirectPrompts.remove(promptKey);
+    }
   }
 
   Future<void> _startElementPicker() async {
@@ -2513,7 +2670,47 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   Future<void> _rescanPageMedia() async {
     await _activeTab.controller.rescanPage();
+    // Clear the dedup cache so the DOM re-scan's postUrl calls are not
+    // silently dropped as duplicates.
+    _activeTab.snifferEngine.clearDedupOnly();
+    // Re-enqueue HLS items for enrichment.  The hlsPlaylistCache still
+    // holds the master playlist body, so the enricher can re-parse it
+    // and regenerate variant items.
+    _reEnrichHlsItems();
     _showSnack('Page rescanned for media');
+  }
+
+  /// Re-enqueues HLS playlist items in the active tab's sniffer engine
+  /// for enrichment.  The [MediaEnricher] checks [hlsPlaylistCache] first
+  /// (which is preserved across navigations), so variants can be
+  /// regenerated from the cached master playlist body without a new
+  /// network request.
+  void _reEnrichHlsItems() {
+    final engine = _activeTab.snifferEngine;
+    for (final item in engine.detectedMedia) {
+      final uri = Uri.tryParse(item.url);
+      if (uri == null || !uri.hasScheme) continue;
+      final isHls =
+          uri.path.toLowerCase().endsWith('.m3u8') ||
+          (item.contentType?.toLowerCase().contains('mpegurl') ?? false);
+      if (isHls) {
+        engine.enricher.enqueue(item);
+      }
+    }
+  }
+
+  /// Returns true when [newUrl] points to a different logical page than
+  /// [oldUrl] (different scheme, host, or path).  Same-URL reloads and
+  /// query-only changes (e.g. analytics params) are NOT considered
+  /// different pages, so the media cache is preserved.
+  bool _isDifferentPage(String? oldUrl, String newUrl) {
+    if (oldUrl == null || oldUrl.isEmpty) return true;
+    final oldUri = Uri.tryParse(oldUrl);
+    final newUri = Uri.tryParse(newUrl);
+    if (oldUri == null || newUri == null) return oldUrl != newUrl;
+    return oldUri.scheme != newUri.scheme ||
+        oldUri.host != newUri.host ||
+        oldUri.path != newUri.path;
   }
 
   String _tabLabel(BrowserTab tab) {
@@ -2627,7 +2824,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     ),
                     decoration: BoxDecoration(
                       color: isActive
-                          ? activeColor.withValues(alpha: 0.15)
+                          ? activeColor.withOpacity(0.15)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -3018,8 +3215,6 @@ class _SnifferScreenState extends State<SnifferScreen>
                             unawaited(t.controller.goForward());
                           },
                           onRefresh: () => t.controller.reload(),
-                          onTranslateSelection: _translateSelectedText,
-                          onSearchSelection: _searchSelectedText,
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -3067,8 +3262,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  /// Unified bottom strip — browser nav (back/forward/home/tabs) +
-  /// app nav (Queue/capture FAB/Settings) in one row.
+  /// Unified bottom strip — browser nav (back/forward/tabs) +
+  /// capture FAB + downloads (Queue) visible by default, with home/menu/settings
+  /// accessible by horizontal scrolling.
   Widget _buildConsolidatedStrip(BrowserTab tab, double height) {
     final badgeCount = tab.snifferEngine.detectedMedia.length;
     final homeUrl = widget.settings.searchEngine.id == 'custom'
@@ -3085,99 +3281,113 @@ class _SnifferScreenState extends State<SnifferScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: AuroraColors.border),
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                const SizedBox(width: 2),
-                // Browser navigation
-                _CompactNavButton(
-                  key: const Key('sniffer_back_button'),
-                  icon: Icons.arrow_back_ios_new,
-                  enabled: tab.canGoBack,
-                  onTap: tab.canGoBack ? () => tab.controller.goBack() : null,
-                ),
-                _CompactNavButton(
-                  key: const Key('sniffer_forward_button'),
-                  icon: Icons.arrow_forward_ios,
-                  enabled: tab.canGoForward,
-                  onTap: tab.canGoForward
-                      ? () => tab.controller.goForward()
-                      : null,
-                ),
-                _CompactNavButton(
-                  key: const Key('browser_home_button'),
-                  icon: Icons.home_outlined,
-                  enabled: true,
-                  onTap: () => unawaited(
-                    _loadUrlWithHostSettings(tab, Uri.parse(homeUrl)),
-                  ),
-                ),
-                _CompactNavButton(
-                  key: const Key('browser_tabs_button'),
-                  icon: Icons.tab,
-                  enabled: true,
-                  onTap: _showTabsSheet,
-                ),
-                _buildAdblockShieldButton(tab),
-                const SizedBox(width: 8),
-                // App nav
-                _miniDockTab(
-                  key: const Key('mini_dock_queue'),
-                  icon: Icons.download_rounded,
-                  label: 'Queue',
-                  compact: true,
-                  onTap: () => widget.onOpenQueue?.call(),
-                ),
-                const SizedBox(width: 6),
-                // Capture FAB (morphing)
-                Material(
-                  key: const Key('sniffer_fab'),
-                  elevation: 4,
-                  shape: const CircleBorder(),
-                  color: badgeCount > 0
-                      ? AuroraColors.accentAmber
-                      : AuroraColors.accent,
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: _showSniffedMediaSheet,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      child: Badge(
-                        label: Text('$badgeCount'),
-                        isLabelVisible: badgeCount > 0,
-                        backgroundColor: Colors.red,
-                        textColor: Colors.white,
-                        child: Icon(
-                          badgeCount > 0 ? Icons.radar : Icons.add,
-                          size: 22,
-                          color: AuroraColors.background,
-                        ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final viewportWidth = constraints.maxWidth;
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: viewportWidth,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _CompactNavButton(
+                            key: const Key('sniffer_back_button'),
+                            icon: Icons.arrow_back_ios_new,
+                            enabled: tab.canGoBack,
+                            onTap: tab.canGoBack ? () => tab.controller.goBack() : null,
+                          ),
+                          _CompactNavButton(
+                            key: const Key('sniffer_forward_button'),
+                            icon: Icons.arrow_forward_ios,
+                            enabled: tab.canGoForward,
+                            onTap: tab.canGoForward
+                                ? () => tab.controller.goForward()
+                                : null,
+                          ),
+                          _CompactNavButton(
+                            key: const Key('browser_tabs_button'),
+                            icon: Icons.tab,
+                            enabled: true,
+                            onTap: _showTabsSheet,
+                          ),
+                          // Capture FAB (morphing)
+                          Semantics(
+                            label: badgeCount > 0
+                                ? 'Captured media, $badgeCount items. Tap to review.'
+                                : 'Capture detected media',
+                            button: true,
+                            child: Material(
+                              key: const Key('sniffer_fab'),
+                              elevation: 4,
+                              shape: const CircleBorder(),
+                              color: badgeCount > 0
+                                  ? AuroraColors.accentAmber
+                                  : AuroraColors.accent,
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onTap: _showSniffedMediaSheet,
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  alignment: Alignment.center,
+                                  child: Badge(
+                                    label: Text('$badgeCount'),
+                                    isLabelVisible: badgeCount > 0,
+                                    backgroundColor: Colors.red,
+                                    textColor: Colors.white,
+                                    child: Icon(
+                                      badgeCount > 0 ? Icons.radar : Icons.add,
+                                      size: 22,
+                                      color: AuroraColors.background,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          _miniDockTab(
+                            key: const Key('mini_dock_queue'),
+                            icon: Icons.download_rounded,
+                            label: 'Queue',
+                            compact: true,
+                            onTap: () => widget.onOpenQueue?.call(),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    _CompactNavButton(
+                      key: const Key('browser_home_button'),
+                      icon: Icons.home_outlined,
+                      enabled: true,
+                      onTap: () => unawaited(
+                        _loadUrlWithHostSettings(tab, Uri.parse(homeUrl)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _miniDockTab(
+                      key: const Key('browser_menu_button'),
+                      icon: Icons.menu_rounded,
+                      label: 'Menu',
+                      compact: true,
+                      onTap: _showBrowserMenuSheet,
+                    ),
+                    const SizedBox(width: 8),
+                    _miniDockTab(
+                      key: const Key('mini_dock_settings'),
+                      icon: Icons.tune_rounded,
+                      label: 'Settings',
+                      compact: true,
+                      onTap: () => widget.onOpenSettings?.call(),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                _miniDockTab(
-                  key: const Key('browser_menu_button'),
-                  icon: Icons.menu_rounded,
-                  label: 'Menu',
-                  compact: true,
-                  onTap: _showBrowserMenuSheet,
-                ),
-                const SizedBox(width: 6),
-                _miniDockTab(
-                  key: const Key('mini_dock_settings'),
-                  icon: Icons.tune_rounded,
-                  label: 'Settings',
-                  compact: true,
-                  onTap: () => widget.onOpenSettings?.call(),
-                ),
-                const SizedBox(width: 2),
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),
@@ -3470,6 +3680,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     onLoadUrl: (uri) => _loadUrlWithHostSettings(_activeTab, uri),
     onAddToQueue: (targetUrl, label) =>
         _addContextTargetToQueue(targetUrl, label),
+    onTranslateText: _translateSelectedText,
+    onSearchText: _searchSelectedText,
     isCurrentPageFavorited: _isCurrentPageFavorited(),
     isMounted: mounted,
   );
@@ -3543,7 +3755,10 @@ class _SnifferScreenState extends State<SnifferScreen>
     // (in case the page's JS sets the src after a longer delay)
     try {
       final media = await tab.snifferEngine.onMediaDetected
-          .firstWhere((m) => m.url.contains('.m3u8'))
+          .firstWhere((m) =>
+              m.url.contains('.m3u8') &&
+              !m.url.contains('ping.m3u8') &&
+              !m.url.contains('/ping'))
           .timeout(const Duration(seconds: 10));
       return media.url;
     } catch (_) {
@@ -3560,18 +3775,21 @@ class _SnifferScreenState extends State<SnifferScreen>
             const sources = root.querySelectorAll('source[src]');
             for (const s of sources) {
               const src = s.src || s.getAttribute('src') || '';
-              if (src && src.indexOf('.m3u8') !== -1) return src;
+              if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
             }
             const medias = root.querySelectorAll('video, audio');
             for (const m of medias) {
               const src = m.currentSrc || m.src || '';
-              if (src && src.indexOf('.m3u8') !== -1) return src;
+              if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
             }
             const scripts = root.querySelectorAll('script');
             for (const sc of scripts) {
               const text = sc.textContent || '';
               const match = text.match(/https?:\\/\\/[^"\\\\s]+\\.m3u8[^"\\\\s]*/);
-              if (match) return match[0];
+              if (match) {
+                const u = match[0];
+                if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) return u;
+              }
             }
             return '';
           }
@@ -3587,7 +3805,11 @@ class _SnifferScreenState extends State<SnifferScreen>
           return '';
         })()
       ''');
-      if (result is String && result.isNotEmpty && result.contains('.m3u8')) {
+      if (result is String &&
+          result.isNotEmpty &&
+          result.contains('.m3u8') &&
+          !result.contains('ping.m3u8') &&
+          !result.contains('/ping')) {
         return result;
       }
     } catch (_) {}
@@ -4188,6 +4410,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
+        final settings = widget.settings;
+        final host = Uri.tryParse(_activeTab.currentUrl ?? '')?.host ?? '';
+        final isAllowlisted = host.isNotEmpty && settings.adblockAllowlist.contains(host);
         return SafeArea(
           child: SingleChildScrollView(
             child: Padding(
@@ -4305,6 +4530,21 @@ class _SnifferScreenState extends State<SnifferScreen>
                         },
                       ),
                       _buildMenuItem(
+                        icon: !settings.adblockEnabled
+                            ? Icons.shield
+                            : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
+                        label: !settings.adblockEnabled
+                            ? 'Adblock: Off'
+                            : (isAllowlisted ? 'Ads Allowed' : 'Adblock: On'),
+                        color: !settings.adblockEnabled
+                            ? Colors.redAccent
+                            : (isAllowlisted ? AuroraColors.mutedText : Colors.green),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showAdblockPopup(_activeTab);
+                        },
+                      ),
+                      _buildMenuItem(
                         icon: Icons.refresh_rounded,
                         label: 'Re-scan',
                         color: Colors.cyanAccent,
@@ -4346,7 +4586,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     required VoidCallback onTap,
   }) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.05),
+      color: Colors.white.withOpacity(0.05),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -4359,7 +4599,7 @@ class _SnifferScreenState extends State<SnifferScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
+                  color: color.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 22),
@@ -4439,12 +4679,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     final uri = Uri.tryParse(url);
     if (uri == null) return url;
     final path = uri.path.toLowerCase();
-    if (!path.endsWith('.m3u8') &&
-        !path.contains('/hls/') &&
-        !path.contains('/master') &&
-        !path.contains('/playlist') &&
-        !path.contains('/manifest') &&
-        !path.contains('/dash/')) {
+    if (!path.endsWith('.m3u8') && !isPlaylistPathHint(path)) {
       return url;
     }
 
@@ -4503,13 +4738,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<List<SniffedMedia>> _fetchMasterPlaylistVariants(String url) async {
     final uri = Uri.tryParse(url);
     final path = uri?.path.toLowerCase() ?? '';
-    if (uri == null ||
-        (!path.endsWith('.m3u8') &&
-            !path.contains('/hls/') &&
-            !path.contains('/master') &&
-            !path.contains('/playlist') &&
-            !path.contains('/manifest') &&
-            !path.contains('/dash/'))) {
+    if (uri == null || (!path.endsWith('.m3u8') && !isPlaylistPathHint(path))) {
       return [];
     }
 
