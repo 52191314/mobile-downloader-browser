@@ -21,6 +21,9 @@ void showHistorySheet(
   required BrowserLibrary library,
   required Future<void> Function(BrowserLibrary) onSaveLibrary,
   required Future<void> Function(String url) onLoadUrl,
+  /// Called when the user wants to open multiple URLs, each in its own
+  /// new tab.  The list is already deduplicated (unique URLs only).
+  required Future<void> Function(List<String> urls) onOpenUrlsInNewTabs,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -31,6 +34,7 @@ void showHistorySheet(
       library: library,
       onSaveLibrary: onSaveLibrary,
       onLoadUrl: onLoadUrl,
+      onOpenUrlsInNewTabs: onOpenUrlsInNewTabs,
     ),
   );
 }
@@ -39,11 +43,13 @@ class _HistorySheetContent extends StatefulWidget {
   final BrowserLibrary library;
   final Future<void> Function(BrowserLibrary) onSaveLibrary;
   final Future<void> Function(String url) onLoadUrl;
+  final Future<void> Function(List<String> urls) onOpenUrlsInNewTabs;
 
   const _HistorySheetContent({
     required this.library,
     required this.onSaveLibrary,
     required this.onLoadUrl,
+    required this.onOpenUrlsInNewTabs,
   });
 
   @override
@@ -151,14 +157,11 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
 
   void _openAllSelected() {
     if (_selectedUrls.isEmpty) return;
+    // Deduplicate — a Set already guarantees uniqueness, so just drain it.
     final urls = _selectedUrls.toList(growable: false);
     _exitSelectionMode();
-    // Pop the sheet first, then load each URL sequentially so we don't
-    // leave the sheet open while navigating.
     Navigator.pop(context);
-    for (final url in urls) {
-      unawaited(widget.onLoadUrl(url));
-    }
+    unawaited(widget.onOpenUrlsInNewTabs(urls));
   }
 
   void _openItem(BrowserHistoryEntry item) {
@@ -447,10 +450,26 @@ class _HistoryRowState extends State<_HistoryRow> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: Text(
-            widget.item.url,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.item.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                _formatDate(widget.item.visitedAt),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
+            ],
           ),
           // Highlight selected rows
           selected: widget.isSelected,
@@ -472,4 +491,19 @@ class _HistoryRowState extends State<_HistoryRow> {
       ),
     );
   }
+}
+
+String _formatDate(DateTime dt) {
+  final now = DateTime.now();
+  final diff = now.difference(dt);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+  if (diff.inDays < 1) return '${diff.inHours}h ago';
+  if (diff.inDays == 1) return 'Yesterday';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  if (dt.year == now.year) {
+    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${months[dt.month - 1]} ${dt.day}';
+  }
+  return '${dt.month}/${dt.day}/${dt.year}';
 }

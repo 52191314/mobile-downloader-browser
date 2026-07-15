@@ -65,6 +65,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // One-time migration: rename "Aurora Downloads" → "Aurora Downloader"
+        migrateOldDownloadPath()
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -516,7 +518,7 @@ class MainActivity : FlutterActivity() {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloads")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloader")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
 
@@ -524,7 +526,7 @@ class MainActivity : FlutterActivity() {
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
         } else {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val destDir = File(downloadsDir, "Aurora Downloads")
+            val destDir = File(downloadsDir, "Aurora Downloader")
             if (!destDir.exists()) destDir.mkdirs()
             val destFile = File(destDir, source.name)
             source.copyTo(destFile, overwrite = true)
@@ -683,7 +685,7 @@ class MainActivity : FlutterActivity() {
         val sourcePath = call.argument<String>("sourcePath")
         val displayName = call.argument<String>("displayName")
         val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
-        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloads"
+        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader"
 
         if (sourcePath.isNullOrBlank() || displayName.isNullOrBlank()) {
             result.error("bad_args", "sourcePath and displayName are required.", null)
@@ -987,7 +989,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun listBackupFiles(call: MethodCall, result: MethodChannel.Result) {
-        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloads/Backups/"
+        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader/Backups/"
         val list = mutableListOf<Map<String, Any>>()
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1031,7 +1033,7 @@ class MainActivity : FlutterActivity() {
             }
         } else {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val destDir = File(downloadsDir, "Aurora Downloads/Backups")
+            val destDir = File(downloadsDir, "Aurora Downloader/Backups")
             if (destDir.exists()) {
                 val files = destDir.listFiles()
                 if (files != null) {
@@ -1291,6 +1293,59 @@ class MainActivity : FlutterActivity() {
             result.success(true)
         } catch (e: Exception) {
             result.error("restore_failed", e.message, null)
+        }
+    }
+
+    /// One-time migration: rename "Aurora Downloads" → "Aurora Downloader"
+    /// so all app data lives under a single consistent path.
+    private fun migrateOldDownloadPath() {
+        try {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+            val oldDir = File(downloadsDir, "Aurora Downloads")
+            val newDir = File(downloadsDir, "Aurora Downloader")
+
+            if (!oldDir.exists()) return // nothing to migrate
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Q+: update MediaStore RELATIVE_PATH entries
+                val resolver = applicationContext.contentResolver
+                val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val where = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val args = arrayOf("Download/Aurora Downloads%")
+
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloader")
+                }
+                val updated = resolver.update(uri, values, where, args)
+                Log.i(TAG, "Migrated $updated MediaStore entries: Aurora Downloads → Aurora Downloader")
+
+                // Also migrate backup sub-path
+                val backupValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloader/Backups")
+                }
+                val backupWhere = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val backupArgs = arrayOf("Download/Aurora Downloads/Backups%")
+                val backupUpdated = resolver.update(uri, backupValues, backupWhere, backupArgs)
+                if (backupUpdated > 0) {
+                    Log.i(TAG, "Migrated $backupUpdated backup entries")
+                }
+            }
+
+            // Rename the actual directory (works on pre-Q; on Q+ this
+            // is a belt-and-suspenders step for any files that weren't
+            // registered in MediaStore).
+            if (oldDir.exists()) {
+                val renamed = oldDir.renameTo(newDir)
+                if (renamed) {
+                    Log.i(TAG, "Renamed $oldDir → $newDir")
+                } else {
+                    Log.w(TAG, "Could not rename $oldDir (may already be migrated on disk)")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Path migration failed: ${e.message}")
         }
     }
 }

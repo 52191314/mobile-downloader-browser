@@ -2327,7 +2327,9 @@ class _BackupPageState extends State<BackupPage> {
               final count = byTimestamp[ts]!.length;
               return ListTile(
                 title: Text(ts.replaceAll('_', ' ')),
-                subtitle: Text('$count files'),
+                subtitle: Text(count == 1
+                    ? '1 consolidated backup file'
+                    : '$count files'),
                 onTap: () async {
                   Navigator.of(dialogContext).pop();
                   final restored =

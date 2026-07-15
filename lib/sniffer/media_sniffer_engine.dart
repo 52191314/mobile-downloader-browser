@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'media_enricher.dart';
 import 'models/sniffed_media.dart';
 import 'sniffed_media_cache.dart';
+import 'sniffer_url_utils.dart';
 
 class MediaSnifferEngine implements MediaEnricherHost {
   final http.Client client;
@@ -398,6 +399,14 @@ class MediaSnifferEngine implements MediaEnricherHost {
           type = MediaType.video;
         }
       }
+    }
+
+    // Video-hosting-domain fallback: URLs from known video CDNs
+    // (DoodStream, Streamtape, MixDrop, etc.) that don't have a standard
+    // media extension. These are video pages/download links that the user
+    // can open to reach the actual video.
+    if (type == null && isVideoHostingUrl(url)) {
+      type = MediaType.video;
     }
 
     if (type != null) {

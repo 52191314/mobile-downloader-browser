@@ -572,7 +572,7 @@ class DownloadSettings {
   factory DownloadSettings.defaults() => DownloadSettings(
     maxConcurrentDownloads: 3,
     chunksPerTask: 16,
-    downloadDestination: 'Downloads/Aurora Downloads',
+    downloadDestination: 'Downloads/Aurora Downloader',
     searchEngine: SearchEngine.google,
     adblockEnabled: true,
     popupBlockingEnabled: true,

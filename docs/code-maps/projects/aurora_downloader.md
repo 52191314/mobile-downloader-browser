@@ -53,7 +53,7 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 - `lib/log_server.dart` — debug-only HTTP server exposing `DownloadLogger` (release tree-shaken).
 - `lib/downloader/download_splitter.dart` — parallel segmented download.
 - `lib/downloader/torrent_downloader.dart` — torrent (native libtorrent_flutter + synthetic Dart fallback).
-- `lib/backup/*` — auto-backup feature (models/service/state).
+- `lib/backup/*` — auto-backup feature (consolidated JSON format, models/service/state).
 - `android/app/src/main/cpp/adblock/*` — native C++ adblock engine.
 
 ## Feature Status (audit 2026-07-14)
@@ -86,3 +86,4 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
   (`_fetchMasterPlaylistVariants`); defaults to highest bandwidth, user-selectable.
 - Debug-only Log Server added (2026-07-14): `lib/log_server.dart`, started via
   `startLogServerIfDebug()` in `main.dart` after logger init; no-op in release.
+- Consolidated Backup (2026-07-15): backup data files merged into a single consolidated `aurora_backup.json` to avoid multi-file copy issues, with backward-compatible fallback for restoring older backups.

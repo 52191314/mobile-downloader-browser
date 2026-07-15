@@ -101,43 +101,47 @@ class AutoBackupService {
 
       final timestamp = _timestamp(DateTime.now());
       final tempDir = await getTemporaryDirectory();
-      final written = <String>[];
+      final consolidatedMap = <String, dynamic>{};
 
       for (final source in sources) {
         final name = p.basename(source.path);
-        final temp = File('${tempDir.path}/aurora_bak_$name');
-        await source.copy(temp.path);
-        final ok = await PublicDownloadsService.backupFileToDownloads(
-          sourcePath: temp.path,
-          displayName: name,
-          relativePath: '$autoBackupRootRelative/$timestamp',
-        );
-        await temp.delete();
-        if (!ok) {
-          return AutoBackupResult(
-            success: false,
-            message: "Couldn't write $name. Free up storage and try again.",
-          );
+        final content = await source.readAsString();
+        final dynamic decoded = jsonDecode(content);
+        if (name == 'download_queue.json') {
+          consolidatedMap['downloadQueue'] = decoded;
+        } else if (name == 'download_settings.json') {
+          consolidatedMap['settings'] = decoded;
+        } else if (name == 'browser_tabs.json') {
+          consolidatedMap['tabs'] = decoded;
+        } else if (name == 'tab_groups.json') {
+          consolidatedMap['tabGroups'] = decoded;
+        } else if (name == 'browser_library.json') {
+          if (decoded is Map) {
+            for (final key in ['favorites', 'folders', 'history', 'savedPages']) {
+              if (decoded.containsKey(key)) {
+                consolidatedMap[key] = decoded[key];
+              }
+            }
+          }
+        } else {
+          final key = p.basenameWithoutExtension(source.path);
+          consolidatedMap[key] = decoded;
         }
-        written.add(name);
       }
 
-      final manifestTemp = File('${tempDir.path}/aurora_bak_manifest.json');
-      await manifestTemp.writeAsString(jsonEncode({
-        'app': 'Aurora Downloader',
-        'createdAt': DateTime.now().toIso8601String(),
-        'files': written,
-      }));
-      final manifestOk = await PublicDownloadsService.backupFileToDownloads(
-        sourcePath: manifestTemp.path,
-        displayName: 'backup_manifest.json',
+      final temp = File('${tempDir.path}/aurora_bak_aurora_backup.json');
+      await temp.writeAsString(jsonEncode(consolidatedMap));
+      final ok = await PublicDownloadsService.backupFileToDownloads(
+        sourcePath: temp.path,
+        displayName: 'aurora_backup.json',
         relativePath: '$autoBackupRootRelative/$timestamp',
       );
-      await manifestTemp.delete();
-      if (!manifestOk) {
+      await temp.delete();
+
+      if (!ok) {
         return const AutoBackupResult(
           success: false,
-          message: "Couldn't write the backup manifest. Free up storage and try again.",
+          message: "Couldn't write aurora_backup.json. Free up storage and try again.",
         );
       }
 
@@ -147,7 +151,7 @@ class AutoBackupService {
       await _stateStore.save(_state);
       return AutoBackupResult(
         success: true,
-        message: 'Done — backed up ${written.length} files.',
+        message: 'Done — backed up 1 consolidated backup file.',
         timestamp: timestamp,
       );
     } catch (e, s) {
@@ -176,17 +180,109 @@ class AutoBackupService {
     final all = await listBackups();
     final matching = all.where((f) => f.timestamp == timestamp).toList();
     if (matching.isEmpty) return 0;
+
     final supportDir = await getApplicationSupportDirectory();
-    var restored = 0;
-    for (final file in matching) {
-      final dest = File('${supportDir.path}/${file.name}');
+    final hasConsolidated = matching.any((f) => f.name == 'aurora_backup.json');
+
+    if (hasConsolidated) {
+      final file = matching.firstWhere((f) => f.name == 'aurora_backup.json');
+      final tempDir = await getTemporaryDirectory();
+      final tempDest = File('${tempDir.path}/aurora_restore_consolidated.json');
       final ok = await PublicDownloadsService.restoreBackupFile(
         uri: file.uri,
-        destPath: dest.path,
+        destPath: tempDest.path,
       );
-      if (ok) restored++;
+      if (!ok) return 0;
+
+      try {
+        final content = await tempDest.readAsString();
+        final dynamic decoded = jsonDecode(content);
+        if (decoded is! Map) return 0;
+
+        var restored = 0;
+
+        // Reconstruct downloadQueue -> download_queue.json
+        if (decoded.containsKey('downloadQueue')) {
+          final f = File('${supportDir.path}/download_queue.json');
+          await f.writeAsString(jsonEncode(decoded['downloadQueue']));
+          restored++;
+        }
+
+        // Reconstruct settings -> download_settings.json
+        if (decoded.containsKey('settings')) {
+          final f = File('${supportDir.path}/download_settings.json');
+          await f.writeAsString(jsonEncode(decoded['settings']));
+          restored++;
+        }
+
+        // Reconstruct tabs -> browser_tabs.json
+        if (decoded.containsKey('tabs')) {
+          final f = File('${supportDir.path}/browser_tabs.json');
+          await f.writeAsString(jsonEncode(decoded['tabs']));
+          restored++;
+        }
+
+        // Reconstruct tabGroups -> tab_groups.json
+        if (decoded.containsKey('tabGroups')) {
+          final f = File('${supportDir.path}/tab_groups.json');
+          await f.writeAsString(jsonEncode(decoded['tabGroups']));
+          restored++;
+        }
+
+        // Reconstruct browser_library.json
+        final libraryMap = <String, dynamic>{};
+        for (final k in ['favorites', 'folders', 'history', 'savedPages']) {
+          if (decoded.containsKey(k)) {
+            libraryMap[k] = decoded[k];
+          }
+        }
+        if (libraryMap.isNotEmpty) {
+          final f = File('${supportDir.path}/browser_library.json');
+          await f.writeAsString(jsonEncode(libraryMap));
+          restored++;
+        }
+
+        // Reconstruct other keys -> <key>.json
+        for (final entry in decoded.entries) {
+          final key = entry.key;
+          if (const [
+            'downloadQueue',
+            'settings',
+            'tabs',
+            'tabGroups',
+            'favorites',
+            'folders',
+            'history',
+            'savedPages'
+          ].contains(key)) {
+            continue;
+          }
+          final f = File('${supportDir.path}/$key.json');
+          await f.writeAsString(jsonEncode(entry.value));
+          restored++;
+        }
+
+        return restored;
+      } catch (e, s) {
+        debugPrint('[AutoBackup] restoreBackup failed during decoding: $e\n$s');
+        return 0;
+      } finally {
+        if (await tempDest.exists()) {
+          await tempDest.delete();
+        }
+      }
+    } else {
+      var restored = 0;
+      for (final file in matching) {
+        final dest = File('${supportDir.path}/${file.name}');
+        final ok = await PublicDownloadsService.restoreBackupFile(
+          uri: file.uri,
+          destPath: dest.path,
+        );
+        if (ok) restored++;
+      }
+      return restored;
     }
-    return restored;
   }
 
   Future<List<File>> _collectSourceFiles(Directory supportDir) async {

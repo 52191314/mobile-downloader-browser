@@ -4646,6 +4646,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     library: _library,
     onSaveLibrary: _saveLibrary,
     onLoadUrl: (url) => _loadUrlWithHostSettings(_activeTab, Uri.parse(url)),
+    onOpenUrlsInNewTabs: (urls) async {
+      // Open each URL in its own background tab without switching away
+      // from the current tab.
+      for (final url in urls) {
+        _openNewTab(url: url, switchToTab: false);
+      }
+    },
   );
 
   void _showLibrarySheet<T>({
@@ -5455,24 +5462,58 @@ class _SnifferScreenState extends State<SnifferScreen>
         if (widget.settings.includeQualitySuffix && qualityLabel.isNotEmpty) {
           return _truncateFilename('$sanitized (${qualityLabel}p)$ext');
         }
-        return _truncateFilename('$sanitized$ext');
+        // If ext is empty and this is a known video host (dood.sh etc),
+        // default to .mp4 so the file doesn't save without an extension.
+        final finalExt = ext.isNotEmpty
+            ? ext
+            : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
+        return _truncateFilename('$sanitized$finalExt');
+      }
+    }
+
+    // Title was empty or an error page — try the media's own pageTitle
+    // field, which was captured at sniff time and is still available
+    // even if the user navigated away from the original page.
+    if (media?.pageTitle != null && media!.pageTitle!.trim().isNotEmpty) {
+      final mediaTitle = media.pageTitle!.trim();
+      if (!_isErrorPageTitle(mediaTitle) && mediaTitle.length >= 4) {
+        final sanitized = mediaTitle
+            .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+            .trim();
+        if (sanitized.isNotEmpty) {
+          final finalExt = ext.isNotEmpty
+              ? ext
+              : (mediaUrl != null && isVideoHostingUrl(mediaUrl)
+                  ? '.mp4'
+                  : '');
+          if (widget.settings.includeQualitySuffix && qualityLabel.isNotEmpty) {
+            return _truncateFilename('$sanitized (${qualityLabel}p)$finalExt');
+          }
+          return _truncateFilename('$sanitized$finalExt');
+        }
       }
     }
 
     // Title was empty or an error page — use the source page identifier
     // (e.g., "fc2-ppv-4912494") for a distinguishing filename.
     if (sourceId.isNotEmpty) {
+      final finalExt = ext.isNotEmpty
+          ? ext
+          : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
       if (qualityLabel.isNotEmpty) {
-        return _truncateFilename('${sourceId}_${qualityLabel}p$ext');
+        return _truncateFilename('${sourceId}_${qualityLabel}p$finalExt');
       }
-      return _truncateFilename('$sourceId$ext');
+      return _truncateFilename('$sourceId$finalExt');
     }
 
+    final finalExt = ext.isNotEmpty
+        ? ext
+        : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
     if (qualityLabel.isNotEmpty) {
       final qBase = base.isNotEmpty ? base : 'video';
-      return _truncateFilename('${qBase}_${qualityLabel}p$ext');
+      return _truncateFilename('${qBase}_${qualityLabel}p$finalExt');
     }
-    return _truncateFilename(base.isNotEmpty ? '$base$ext' : 'download$ext');
+    return _truncateFilename(base.isNotEmpty ? '$base$finalExt' : 'download$finalExt');
   }
 
   List<SniffedMedia> _sortedMedia(List<SniffedMedia> media) {

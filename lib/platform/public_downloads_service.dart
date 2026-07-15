@@ -12,8 +12,8 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     'aurora_downloader/public_downloads',
   );
 
-  static const String defaultRelativePath = 'Download/Aurora Downloads';
-  static const String defaultPathLabel = 'Downloads/Aurora Downloads';
+  static const String defaultRelativePath = 'Download/Aurora Downloader';
+  static const String defaultPathLabel = 'Downloads/Aurora Downloader';
 
   const PublicDownloadsService();
 

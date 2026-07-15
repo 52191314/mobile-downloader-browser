@@ -115,6 +115,58 @@ bool isPlaylistPathHint(String url) {
   return _playlistPathHints.any((h) => low.contains(h));
 }
 
+/// Known video-hosting CDN domains that serve video through redirect chains
+/// or iframe embeds (DoodStream, Streamtape, MixDrop, etc.). These URLs
+/// rarely end in `.mp4` — they use token-based download paths like
+/// `/d/abc123` or `/download/hash/...`. When `onLoadResource` sees a
+/// request to one of these hosts, we capture it as a potential video.
+const Set<String> _knownVideoHosts = {
+  // DoodStream / DoodStream mirrors
+  'dood.sh', 'dood.so', 'doodstream.com', 'doodcdn.io', 'doodcdn.com',
+  'dood.pm', 'dood.ws', 'dood.cx', 'dood.re', 'dood.yt',
+  // PlayMogo (DoodStream CDN)
+  'playmogo.com',
+  // Streamtape
+  'streamtape.com', 'streamtape.net', 'streamtape.to', 'streamtape.cc',
+  // MixDrop
+  'mixdrop.co', 'mixdrop.to', 'mixdrop.ch', 'mixdrop.sc',
+  // Upstream
+  'upstream.to', 'upstreamembed.com',
+  // Vidoza
+  'vidoza.net', 'vidoza.co', 'vidoza.org',
+  // FileMoon
+  'filemoon.sx', 'filemoon.in', 'filemoon.to',
+  // StreamWish
+  'streamwish.to', 'streamwish.com', 'streamwish.cc',
+  // UqLoad
+  'uqload.co', 'uqload.com',
+  // VideoVard
+  'videovard.sx', 'videovard.to',
+  // Fastream
+  'fastream.to', 'fastream.co',
+  // Guccihideout
+  'guccihideout.com',
+  // Voe
+  'voe.sx', 'voe-unblock.com', 'voe-unblock.net',
+  // Vidplay
+  'vidplay.site', 'vidplay.online', 'vidplay.live',
+};
+
+/// Returns true if [url] points to a known video-hosting CDN that serves
+/// video through redirect chains or iframe embeds. Used by `onLoadResource`
+/// to capture video URLs that don't have a standard media extension.
+bool isVideoHostingUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) return false;
+  final host = uri.host.toLowerCase();
+  // Check exact host match first, then check if host ends with a known
+  // video host (handles subdomains like cdn.doodstream.com).
+  for (final known in _knownVideoHosts) {
+    if (host == known || host.endsWith('.$known')) return true;
+  }
+  return false;
+}
+
 /// Returns the standard base request headers for media downloads.
 /// Currently only includes Do-Not-Track headers if enabled.
 Map<String, String> baseRequestHeaders(bool doNotTrackEnabled) {

@@ -407,7 +407,7 @@ class DriveSyncService {
 
   DriveSyncService({
     GoogleDriveClient? client,
-    String destinationFolderName = 'Aurora Downloads',
+    String destinationFolderName = 'Aurora Downloader',
     bool autoSyncEnabled = true,
   }) : client = client ?? GoogleDriveApiClient(),
        _destinationFolderName = destinationFolderName,

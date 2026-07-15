@@ -250,7 +250,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       );
     } catch (e, s) {
       _logError('DriveSync init', e, s);
-      _folderController = TextEditingController(text: 'Aurora Downloads');
+      _folderController = TextEditingController(text: 'Aurora Downloader');
     }
     try {
       _driveSyncService.attachQueue(_downloadQueue);

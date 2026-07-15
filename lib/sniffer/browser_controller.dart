@@ -869,6 +869,17 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         matches = true;
       }
     }
+
+    // Video-hosting-domain match: catch URLs from known video CDNs
+    // (DoodStream, Streamtape, MixDrop, etc.) that serve video through
+    // redirect chains or iframe embeds. These URLs don't end in `.mp4`
+    // but are video pages/download links that the user can open to
+    // reach the actual video.
+    if (!matches) {
+      if (isVideoHostingUrl(url)) {
+        matches = true;
+      }
+    }
     // NOTE: fetch/xhr initiators WITHOUT extensions are NOT matched.
     // This filters out 99% of the junk (ad trackers, analytics, JSON configs).
 
