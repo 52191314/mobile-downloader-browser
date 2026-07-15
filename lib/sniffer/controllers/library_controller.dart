@@ -195,8 +195,10 @@ class LibraryController {
     required bool exportSavedPages,
     required bool exportQueue,
     required bool exportSettings,
+    required bool exportTabs,
     required DownloadQueue? downloadQueue,
     required DownloadSettings settings,
+    List<Map<String, dynamic>>? tabsJson,
   }) async {
     try {
       final queueJson = exportQueue && downloadQueue != null
@@ -209,6 +211,7 @@ class LibraryController {
         exportSavedPages: exportSavedPages,
         downloadQueueJson: queueJson,
         settingsJson: settingsJson,
+        tabsJson: exportTabs ? (tabsJson ?? []) : null,
       );
     } catch (e) {
       debugPrint('[LibraryController] Export failed: $e');

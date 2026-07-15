@@ -14,6 +14,8 @@ import '../session_recovery.dart';
 import 'sniff_intake_controller.dart';
 import 'tab_manager.dart';
 
+import '../models/tab_group.dart';
+
 /// Host interface that [TabLifecycleController] uses to drive the
 /// owning [SnifferScreen] state. Each member is a callback or getter
 /// the host state must satisfy; this keeps the controller free of any
@@ -211,16 +213,23 @@ class TabLifecycleController {
                   .toList(growable: false);
               final historyIndex =
                   (entry['historyIndex'] as num?)?.round() ?? -1;
+              final groupName = entry['groupName'] as String?;
+              final groupColorIndex = entry['groupColorIndex'] as int?;
+              final autoGrouped = entry['autoGrouped'] as bool? ?? false;
               openNewTab(
                 url: url,
                 switchToTab: false,
                 restoredId: tabId,
                 restoredHistory: history,
                 restoredHistoryIndex: historyIndex,
+                restoredGroupName: groupName,
+                restoredColorIndex: groupColorIndex,
+                restoredAutoGrouped: autoGrouped,
               );
               if (isActive) activeIdx = _tabs.length - 1;
             }
           }
+          loadGroups();
           if (_tabs.isEmpty) openNewTab();
           host.switchToActiveTab(activeIdx.clamp(0, _tabs.length - 1));
           host.markTabsLoaded();
@@ -255,6 +264,9 @@ class TabLifecycleController {
               'active': e.key == tabManager.activeTabIndex,
               'history': e.value.controller.historyUrls,
               'historyIndex': e.value.controller.historyIndex,
+              'groupName': e.value.groupName,
+              'groupColorIndex': e.value.groupColorIndex,
+              'autoGrouped': e.value.autoGrouped,
             },
           )
           .toList(growable: false);
@@ -273,7 +285,51 @@ class TabLifecycleController {
               .toList(growable: false),
         ),
       );
+      unawaited(saveGroups());
     } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group persistence
+  // ---------------------------------------------------------------------------
+
+  Future<void> loadGroups() async {
+    if (baseDir == null) return;
+    try {
+      final file = File('$baseDir/tab_groups.json');
+      if (await file.exists()) {
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is List) {
+          final groups = decoded
+              .map((e) => TabGroup.fromJson(e as Map<String, dynamic>))
+              .toList();
+          tabManager.replaceGroups(groups);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> saveGroups() async {
+    if (baseDir == null) return;
+    try {
+      final dir = Directory(baseDir!);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final data = tabManager.tabGroups.map((g) => g.toJson()).toList();
+      await File('$baseDir/tab_groups.json').writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  void _applyAutoGroupFor(BrowserTab tab) {
+    if (tab.autoGrouped) return;
+    final hostStr = Uri.tryParse(tab.addressController.text)?.host;
+    if (hostStr == null || hostStr.isEmpty) return;
+    for (final group in tabManager.tabGroups) {
+      if (group.autoHost != null && hostStr.contains(group.autoHost!)) {
+        tabManager.moveTabToGroup(tab, groupName: group.name);
+        tab.autoGrouped = true;
+        return;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -286,6 +342,9 @@ class TabLifecycleController {
     String? restoredId,
     List<String>? restoredHistory,
     int restoredHistoryIndex = -1,
+    String? restoredGroupName,
+    int? restoredColorIndex,
+    bool restoredAutoGrouped = false,
 
     /// When non-null, the new tab is inserted at this index instead of
     /// appended to the end.  Used for "Open in Background Tab" which
@@ -318,6 +377,9 @@ class TabLifecycleController {
       ownsEngine: injectedEngine == null,
       ownsController: !useInjectedController,
     );
+    if (restoredGroupName != null) tab.groupName = restoredGroupName;
+    if (restoredColorIndex != null) tab.groupColorIndex = restoredColorIndex;
+    tab.autoGrouped = restoredAutoGrouped;
     // Fetch and cache the browser's user agent
     unawaited(() async {
       try {
@@ -415,6 +477,9 @@ class TabLifecycleController {
           );
         }
       });
+    }
+    if (restoredGroupName == null) {
+      _applyAutoGroupFor(tab);
     }
     unawaited(saveTabs());
   }
@@ -523,5 +588,47 @@ class TabLifecycleController {
     }
     openNewTab(url: url);
     host.showSnack('Reopened ${host.titleForUrl(url)} tab.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group delegation — thin wrappers that persist after mutation.
+  // ---------------------------------------------------------------------------
+
+  void moveTabToGroup(String tabId, String? groupName) {
+    final idx = tabManager.indexOfTabId(tabId);
+    if (idx < 0) return;
+    tabManager.moveTabToGroup(tabManager.tabs[idx], groupName: groupName);
+    unawaited(saveTabs());
+    unawaited(saveGroups());
+  }
+
+  void renameGroup(String oldName, String newName) {
+    tabManager.renameGroup(oldName, newName);
+    unawaited(saveTabs());
+    unawaited(saveGroups());
+  }
+
+  void setGroupColor(String name, int? colorIndex) {
+    tabManager.setGroupColor(name, colorIndex);
+    unawaited(saveGroups());
+  }
+
+  void setGroupAutoHost(String name, String? host) {
+    tabManager.setGroupAutoHost(name, host);
+    unawaited(saveGroups());
+  }
+
+  void closeGroup(String name) {
+    final closedIds = tabManager.closeGroup(name);
+    host.builtWebViewTabIds.removeAll(closedIds);
+    unawaited(saveTabs());
+    unawaited(saveGroups());
+    if (host.isMounted) host.markNeedsBuild();
+  }
+
+  void disbandGroup(String name) {
+    tabManager.disbandGroup(name);
+    unawaited(saveTabs());
+    unawaited(saveGroups());
   }
 }

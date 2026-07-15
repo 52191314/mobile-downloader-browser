@@ -131,9 +131,7 @@ void main() {
       File('D:\\progress.txt')
           .writeAsStringSync(
               '[PROGRESS] state=${t.state} '
-              '${t.downloadedBytes}/${t.totalBytes} bytes '
-              'seg ${t.completedSegments}/${t.totalSegments} '
-              'msg=${t.statusMessage}\n',
+              '${t.downloadedBytes}/${t.totalBytes} bytes\n',
               mode: FileMode.append);
     });
 

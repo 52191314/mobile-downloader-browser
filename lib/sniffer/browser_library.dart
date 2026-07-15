@@ -316,6 +316,7 @@ class BrowserLibraryStore {
     bool exportSavedPages = true,
     List<Map<String, dynamic>>? downloadQueueJson,
     Map<String, dynamic>? settingsJson,
+    List<Map<String, dynamic>>? tabsJson,
   }) async {
     final library = await load();
     final Directory dir;
@@ -349,6 +350,9 @@ class BrowserLibraryStore {
     }
     if (settingsJson != null) {
       exportData['settings'] = settingsJson;
+    }
+    if (tabsJson != null) {
+      exportData['tabs'] = tabsJson;
     }
 
     await file.writeAsString(jsonEncode(exportData));

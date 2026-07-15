@@ -50,6 +50,7 @@ import 'actions/autofill_action.dart';
 import 'actions/context_menu_action.dart';
 import 'actions/translate_action.dart';
 import 'sheets/favorites_sheet.dart';
+import 'sheets/group_actions_sheet.dart' show showGroupActionsSheet, GroupActionsCallbacks;
 import 'sheets/history_sheet.dart';
 import 'sheets/library_sheet.dart';
 import 'sheets/media_info_sheet.dart';
@@ -57,6 +58,11 @@ import 'sheets/media_preview_sheet.dart';
 import 'sheets/saved_pages_sheet.dart';
 import 'sheets/sniffed_media_sheet.dart';
 import 'sheets/tabs_sheet.dart';
+import 'models/tab_group.dart' show TabGroup;
+import 'widgets/draggable_tab_card.dart' show DraggableTabCard, TabListDropSlot;
+import 'widgets/group_drop_zone.dart' show GroupDropZone;
+import 'widgets/tab_grid_view.dart' show TabGridView;
+import 'tab_groups/tab_group_palette.dart' show TabGroupPalette;
 import 'aurora_video_player.dart';
 import 'widgets/floating_video_button.dart';
 
@@ -435,6 +441,9 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// Only tabs in this set get a real [BrowserWidget] — others render an empty
   /// placeholder to avoid creating expensive native WebViews at launch.
   final Set<String> _builtWebViewTabIds = {};
+
+  /// Tracks which tab group headers are expanded in the tabs sheet.
+  final Set<String> _expandedGroups = {};
 
   /// Maximum number of native WebViews to keep alive simultaneously.
   /// Tabs beyond this limit are evicted (their WebView is destroyed) using
@@ -981,6 +990,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     bool exportSavedPages = true;
     bool exportQueue = true;
     bool exportSettings = true;
+    bool exportTabs = true;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1085,6 +1095,20 @@ class _SnifferScreenState extends State<SnifferScreen>
                         onChanged: (val) =>
                             setModalState(() => exportSettings = val),
                       ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'Open Tabs',
+                          style: TextStyle(color: context.ac.textPrimary),
+                        ),
+                        subtitle: Text(
+                          '${_tabs.length} open tab(s)',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportTabs,
+                        onChanged: (val) =>
+                            setModalState(() => exportTabs = val),
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
@@ -1108,7 +1132,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                                   !exportHistory &&
                                   !exportSavedPages &&
                                   !exportQueue &&
-                                  !exportSettings)
+                                  !exportSettings &&
+                                  !exportTabs)
                               ? null
                               : () {
                                   Navigator.pop(ctx);
@@ -1119,6 +1144,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                                       exportSavedPages: exportSavedPages,
                                       exportQueue: exportQueue,
                                       exportSettings: exportSettings,
+                                      exportTabs: exportTabs,
                                     ),
                                   );
                                 },
@@ -1142,6 +1168,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     required bool exportSavedPages,
     required bool exportQueue,
     required bool exportSettings,
+    required bool exportTabs,
   }) async {
     try {
       final List<Map<String, dynamic>>? downloadQueueJson = exportQueue
@@ -1150,6 +1177,14 @@ class _SnifferScreenState extends State<SnifferScreen>
       final Map<String, dynamic>? settingsJson = exportSettings
           ? widget.settings.toJson()
           : null;
+      final List<Map<String, dynamic>>? tabsJson = exportTabs
+          ? _tabs.asMap().entries.map((e) => {
+                'id': e.value.id,
+                'url': e.value.addressController.text.trim(),
+                'title': e.value.title,
+                'active': e.key == _activeTabIndex,
+              }).toList()
+          : null;
 
       final file = await widget.libraryStore.exportToFile(
         exportFavorites: exportFavorites,
@@ -1157,6 +1192,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         exportSavedPages: exportSavedPages,
         downloadQueueJson: downloadQueueJson,
         settingsJson: settingsJson,
+        tabsJson: tabsJson,
       );
       await PublicDownloadsService.shareFile(file.path);
     } catch (error) {
@@ -1640,7 +1676,61 @@ class _SnifferScreenState extends State<SnifferScreen>
       setState(() {});
     },
     builtWebViewTabIds: _builtWebViewTabIds,
+    onDropOnGroup: (draggedTabId, groupName) {
+      final idx = _tabManager.indexOfTabId(draggedTabId);
+      if (idx >= 0) {
+        _tabManager.moveTabToGroup(_tabs[idx], groupName: groupName);
+        setState(() {});
+      }
+    },
+    onGroupLongPress: _showGroupActionsSheet,
+    colorIndexForGroup: (name) {
+      return _tabManager.groupByName(name)?.colorIndex ?? -1;
+    },
+    isGroupExpanded: (name) => _expandedGroups.contains(name),
+    onToggleGroup: (name) {
+      if (_expandedGroups.contains(name)) {
+        _expandedGroups.remove(name);
+      } else {
+        _expandedGroups.add(name);
+      }
+    },
   );
+
+  void _showGroupActionsSheet(String groupName) {
+    final group = _tabManager.groupByName(groupName);
+    if (group == null) return;
+    showGroupActionsSheet(
+      context,
+      groupName: groupName,
+      memberCount: _tabManager.tabsInGroup(groupName).length,
+      currentAutoHost: group.autoHost,
+      currentColorIndex: group.colorIndex,
+      callbacks: GroupActionsCallbacks(
+        onRename: (oldName, newName) {
+          final ok = _tabManager.renameGroup(oldName, newName);
+          if (ok) setState(() {});
+          return ok;
+        },
+        onSetColor: (name, colorIndex) {
+          _tabManager.setGroupColor(name, colorIndex);
+          setState(() {});
+        },
+        onSetAutoHost: (name, host) {
+          _tabManager.setGroupAutoHost(name, host);
+          setState(() {});
+        },
+        onCloseAll: (name) {
+          _tabManager.closeGroup(name);
+          setState(() {});
+        },
+        onDisband: (name) {
+          _tabManager.disbandGroup(name);
+          setState(() {});
+        },
+      ),
+    );
+  }
 
   Widget _buildTabCard(
     BuildContext ctx,
@@ -3337,14 +3427,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   /// Unified bottom strip — browser nav (back/forward/tabs) +
-  /// capture FAB + downloads (Queue) visible by default, with home/menu/settings
-  /// accessible by horizontal scrolling.
+  /// Unified bottom strip — a two-slide browser dock.
+  ///
+  /// Slide 1: Backward · Forward · Sniffer · Download · Tab
+  /// Slide 2: Browser Tools · Settings
+  /// Swipe horizontally to switch slides.
   Widget _buildConsolidatedStrip(BrowserTab tab, double height) {
-    final badgeCount = tab.snifferEngine.detectedMedia.length;
-    final homeUrl = widget.settings.searchEngine.id == 'custom'
-        ? widget.settings.searchEngine.templateUrl.replaceAll('%s', '')
-        : 'https://www.google.com';
-
     return SizedBox(
       height: height,
       child: Padding(
@@ -3355,157 +3443,14 @@ class _SnifferScreenState extends State<SnifferScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: context.ac.borderStrong),
           ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final viewportWidth = constraints.maxWidth;
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: viewportWidth,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _CompactNavButton(
-                            key: const Key('sniffer_back_button'),
-                            icon: Icons.arrow_back_ios_new,
-                            enabled: tab.canGoBack,
-                            onTap: tab.canGoBack ? () => tab.controller.goBack() : null,
-                          ),
-                          _CompactNavButton(
-                            key: const Key('sniffer_forward_button'),
-                            icon: Icons.arrow_forward_ios,
-                            enabled: tab.canGoForward,
-                            onTap: tab.canGoForward
-                                ? () => tab.controller.goForward()
-                                : null,
-                          ),
-                          _CompactNavButton(
-                            key: const Key('browser_tabs_button'),
-                            icon: Icons.tab,
-                            enabled: true,
-                            onTap: _showTabsSheet,
-                          ),
-                          // Capture FAB (morphing)
-                          Semantics(
-                            label: badgeCount > 0
-                                ? 'Captured media, $badgeCount items. Tap to review.'
-                                : 'Capture detected media',
-                            button: true,
-                            child: Material(
-                              key: const Key('sniffer_fab'),
-                              elevation: 4,
-                              shape: const CircleBorder(),
-                              color: badgeCount > 0
-                                  ? context.ac.accentAmber
-                                  : context.ac.accentFrost,
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onTap: _showSniffedMediaSheet,
-                                child: Container(
-                                  width: 40,
-                                  height: 40,
-                                  alignment: Alignment.center,
-                                  child: Badge(
-                                    label: Text('$badgeCount'),
-                                    isLabelVisible: badgeCount > 0,
-                                    backgroundColor: Colors.red,
-                                    textColor: Colors.white,
-                                    child: Icon(
-                                      badgeCount > 0 ? Icons.radar : Icons.add,
-                                      size: 22,
-                                      color: context.ac.surfaceField,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          _miniDockTab(
-                            key: const Key('mini_dock_queue'),
-                            icon: Icons.download_rounded,
-                            label: 'Queue',
-                            compact: true,
-                            onTap: () => widget.onOpenQueue?.call(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _CompactNavButton(
-                      key: const Key('browser_home_button'),
-                      icon: Icons.home_outlined,
-                      enabled: true,
-                      onTap: () => unawaited(
-                        _loadUrlWithHostSettings(tab, Uri.parse(homeUrl)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _miniDockTab(
-                      key: const Key('browser_menu_button'),
-                      icon: Icons.menu_rounded,
-                      label: 'Menu',
-                      compact: true,
-                      onTap: _showBrowserMenuSheet,
-                    ),
-                    const SizedBox(width: 8),
-                    _miniDockTab(
-                      key: const Key('mini_dock_settings'),
-                      icon: Icons.tune_rounded,
-                      label: 'Settings',
-                      compact: true,
-                      onTap: () => widget.onOpenSettings?.call(),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ),
-              );
-            },
+          child: _BrowserDock(
+            tab: tab,
+            onSniffer: _showSniffedMediaSheet,
+            onDownload: () => widget.onOpenQueue?.call(),
+            onTab: _showTabsSheet,
+            onBrowserTools: _showBrowserMenuSheet,
+            onSettings: () => widget.onOpenSettings?.call(),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _miniDockTab({
-    Key? key,
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool compact = false,
-  }) {
-    return Material(
-      key: key,
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Container(
-          padding: compact
-              ? const EdgeInsets.all(8)
-              : const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: context.ac.glassSurface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: context.ac.glassBorder),
-          ),
-          child: compact
-              ? Icon(icon, size: 20, color: context.ac.textSecondary)
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, size: 18, color: context.ac.textSecondary),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.ac.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
         ),
       ),
     );

@@ -5,14 +5,15 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurora_downloader/sniffer/media_sniffer_engine.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
+import 'package:aurora_downloader/sniffer/sniffed_media_cache.dart';
 
 void main() {
   group('disguised HLS/DASH segment drop', () {
-    late MediaDetector engine;
+    late MediaSnifferEngine engine;
 
     setUp(() {
-      MediaDetector.clearGlobalCache();
-      engine = MediaDetector();
+      SniffedMediaCache.clearGlobal();
+      engine = MediaSnifferEngine();
     });
 
     tearDown(() => engine.dispose());

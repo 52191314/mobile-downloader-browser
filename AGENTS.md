@@ -35,6 +35,8 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
 Do NOT launch the app after install — the user will open it themselves.
 
+**Never delete, remove, or overwrite the installed APK on the device.** The user's installed app is their working copy. Only `adb install -r` to upgrade it in place. Do not uninstall, clear data, or run `adb uninstall` unless explicitly asked.
+
 For release builds:
 ```bash
 adb install -r build/app/outputs/flutter-apk/app-release.apk

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/browser_tab.dart';
 import '../../theme/aurora_palette.dart';
+import '../widgets/draggable_tab_card.dart';
+import '../widgets/group_drop_zone.dart';
+import '../widgets/tab_grid_view.dart';
+import '../tab_groups/tab_group_palette.dart';
 
 /// Shows the bottom sheet that lists all open browser tabs grouped by
 /// their `groupName`, with controls to add a new tab, switch to an
@@ -21,6 +25,12 @@ void showTabsSheet(
   required String Function(BrowserTab) getTabLabel,
   required VoidCallback onCloseAllTabs,
   required Set<String> builtWebViewTabIds,
+  // --- Tab group callbacks (optional, nullable for backward compat) ---
+  void Function(String draggedTabId, String? groupName)? onDropOnGroup,
+  void Function(String groupName)? onGroupLongPress,
+  int Function(String name)? colorIndexForGroup,
+  bool Function(String name)? isGroupExpanded,
+  void Function(String name)? onToggleGroup,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -44,6 +54,7 @@ void showTabsSheet(
               )
               .toList();
 
+          bool isGrid = false;
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -62,109 +73,82 @@ void showTabsSheet(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.layers_clear_outlined,
-                          color: ctx.ac.textSecondary,
-                        ),
-                        tooltip: 'Close all tabs',
-                        onPressed: () {
-                          onCloseAllTabs();
-                          Navigator.pop(ctx);
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.add,
-                          color: ctx.ac.accentFrost,
-                        ),
-                        onPressed: () {
-                          onOpenNewTab();
-                          Navigator.pop(ctx);
-                        },
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              isGrid ? Icons.view_list : Icons.grid_view,
+                              color: ctx.ac.textSecondary,
+                            ),
+                            tooltip: isGrid ? 'List view' : 'Grid view',
+                            onPressed: () {
+                              setTabsState(() {
+                                isGrid = !isGrid;
+                              });
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              Icons.layers_clear_outlined,
+                              color: ctx.ac.textSecondary,
+                            ),
+                            tooltip: 'Close all tabs',
+                            onPressed: () {
+                              onCloseAllTabs();
+                              Navigator.pop(ctx);
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              Icons.add,
+                              color: ctx.ac.accentFrost,
+                            ),
+                            onPressed: () {
+                              onOpenNewTab();
+                              Navigator.pop(ctx);
+                            },
+                          ),
+                        ],
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Expanded(
-                    child: ListView(
-                      children: [
-                        // 1. Grouped Tabs (Collapsible Sections)
-                        for (final groupName in groupNames) ...[
-                          Theme(
-                            data: Theme.of(
-                              context,
-                            ).copyWith(dividerColor: Colors.transparent),
-                            child: ExpansionTile(
-                              key: PageStorageKey<String>(
-                                'tab_group_$groupName',
-                              ),
-                              title: Text(
-                                '$groupName (${tabs.where((t) => t.groupName == groupName).length})',
-                                style: TextStyle(
-                                  color: ctx.ac.accentFrost,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              iconColor: ctx.ac.accentFrost,
-                              collapsedIconColor: ctx.ac.textSecondary,
-                              childrenPadding: const EdgeInsets.only(left: 8),
-                              children: [
-                                for (final tab in tabs.where(
-                                  (t) => t.groupName == groupName,
-                                ))
-                                  buildTabCard(
-                                    ctx,
-                                    tab,
-                                    tabs.indexOf(tab),
-                                    setTabsState,
-                                    tabs: tabs,
-                                    activeTabIndex: activeTabIndex,
-                                    onCloseTab: onCloseTab,
-                                    onSwitchToActiveTab: onSwitchToActiveTab,
-                                    getTabLabel: getTabLabel,
-                                    builtWebViewTabIds: builtWebViewTabIds,
-                                  ),
-                              ],
-                            ),
+                    child: isGrid
+                        ? _buildGridView(
+                            ctx,
+                            tabs: tabs,
+                            activeTabIndex: activeTabIndex,
+                            groupNames: groupNames,
+                            ungroupedTabs: ungroupedTabs,
+                            getTabLabel: getTabLabel,
+                            builtWebViewTabIds: builtWebViewTabIds,
+                            onCloseTab: onCloseTab,
+                            onSwitchToActiveTab: onSwitchToActiveTab,
+                            onDropOnGroup: onDropOnGroup,
+                            onGroupLongPress: onGroupLongPress,
+                            colorIndexForGroup: colorIndexForGroup,
+                            isGroupExpanded: isGroupExpanded,
+                            onToggleGroup: onToggleGroup,
+                          )
+                        : _buildListView(
+                            ctx,
+                            setTabsState: setTabsState,
+                            tabs: tabs,
+                            activeTabIndex: activeTabIndex,
+                            groupNames: groupNames,
+                            ungroupedTabs: ungroupedTabs,
+                            getTabLabel: getTabLabel,
+                            builtWebViewTabIds: builtWebViewTabIds,
+                            onCloseTab: onCloseTab,
+                            onSwitchToActiveTab: onSwitchToActiveTab,
+                            onDropOnGroup: onDropOnGroup,
+                            onGroupLongPress: onGroupLongPress,
+                            colorIndexForGroup: colorIndexForGroup,
+                            isGroupExpanded: isGroupExpanded,
+                            onToggleGroup: onToggleGroup,
                           ),
-                        ],
-
-                        // 2. Ungrouped Tabs (Direct List at the Bottom)
-                        if (ungroupedTabs.isNotEmpty) ...[
-                          if (groupNames.isNotEmpty) ...[
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              child: Text(
-                                'Ungrouped Tabs',
-                                style: TextStyle(
-                                  color: ctx.ac.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                          for (final tab in ungroupedTabs)
-                            buildTabCard(
-                              ctx,
-                              tab,
-                              tabs.indexOf(tab),
-                              setTabsState,
-                              tabs: tabs,
-                              activeTabIndex: activeTabIndex,
-                              onCloseTab: onCloseTab,
-                              onSwitchToActiveTab: onSwitchToActiveTab,
-                              getTabLabel: getTabLabel,
-                              builtWebViewTabIds: builtWebViewTabIds,
-                            ),
-                        ],
-                      ],
-                    ),
                   ),
                 ],
               ),
@@ -173,6 +157,263 @@ void showTabsSheet(
         },
       );
     },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// List-view mode
+// ---------------------------------------------------------------------------
+
+Widget _buildListView(
+  BuildContext ctx, {
+  required void Function(void Function()) setTabsState,
+  required List<BrowserTab> tabs,
+  required int activeTabIndex,
+  required List<String> groupNames,
+  required List<BrowserTab> ungroupedTabs,
+  required String Function(BrowserTab) getTabLabel,
+  required Set<String> builtWebViewTabIds,
+  required void Function(int index) onCloseTab,
+  required void Function(int index) onSwitchToActiveTab,
+  required void Function(String draggedTabId, String? groupName)? onDropOnGroup,
+  required void Function(String groupName)? onGroupLongPress,
+  required int Function(String name)? colorIndexForGroup,
+  required bool Function(String name)? isGroupExpanded,
+  required void Function(String name)? onToggleGroup,
+}) {
+  // Non-nullable convenience aliases with no-op fallbacks.
+  void onDrop(String id, String? g) =>
+      onDropOnGroup?.call(id, g);
+  void onLongPress(String g) =>
+      onGroupLongPress?.call(g);
+  int colorFor(String n) =>
+      (colorIndexForGroup != null) ? colorIndexForGroup!(n) : -1;
+  bool isExpanded(String n) =>
+      (isGroupExpanded != null) ? isGroupExpanded!(n) : true;
+  void toggleGroup(String n) =>
+      onToggleGroup?.call(n);
+
+  return ListView(
+    children: [
+      // 1. Grouped Tabs (Collapsible Sections)
+      for (final groupName in groupNames) ...[
+        _buildGroupSection(
+          ctx,
+          groupName: groupName,
+          tabs: tabs,
+          setTabsState: setTabsState,
+          activeTabIndex: activeTabIndex,
+          getTabLabel: getTabLabel,
+          builtWebViewTabIds: builtWebViewTabIds,
+          onCloseTab: onCloseTab,
+          onSwitchToActiveTab: onSwitchToActiveTab,
+          onDropOnGroup: onDropOnGroup,
+          onGroupLongPress: onGroupLongPress,
+          colorIndexForGroup: colorIndexForGroup,
+          isGroupExpanded: isGroupExpanded,
+          onToggleGroup: onToggleGroup,
+        ),
+      ],
+
+      // 2. Ungrouped Tabs (Direct List at the Bottom)
+      if (ungroupedTabs.isNotEmpty) ...[
+        if (groupNames.isNotEmpty) ...[
+          DragTarget<String>(
+            onWillAcceptWithDetails: (_) => true,
+            onAcceptWithDetails: (details) => onDrop(details.data, null),
+            builder: (ctx2, candidate, _) {
+              final hovering = candidate.isNotEmpty;
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: hovering
+                      ? ctx2.ac.accentFrost.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.inbox_outlined,
+                      size: 14,
+                      color: hovering
+                          ? ctx2.ac.accentFrost
+                          : ctx2.ac.textSecondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Ungrouped Tabs (${ungroupedTabs.length})',
+                      style: TextStyle(
+                        color: hovering
+                            ? ctx2.ac.accentFrost
+                            : ctx2.ac.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+        for (final tab in ungroupedTabs)
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DraggableTabCard(
+                tab: tab,
+                child: buildTabCard(
+                  ctx,
+                  tab,
+                  tabs.indexOf(tab),
+                  setTabsState,
+                  tabs: tabs,
+                  activeTabIndex: activeTabIndex,
+                  onCloseTab: onCloseTab,
+                  onSwitchToActiveTab: onSwitchToActiveTab,
+                  getTabLabel: getTabLabel,
+                  builtWebViewTabIds: builtWebViewTabIds,
+                ),
+              ),
+              TabListDropSlot(
+                targetGroupName: null,
+                onAccept: (tabId) => onDrop(tabId, null),
+              ),
+            ],
+          ),
+      ],
+    ],
+  );
+}
+
+/// Builds a single group section header + its member tabs in list mode.
+Widget _buildGroupSection(
+  BuildContext ctx, {
+  required String groupName,
+  required List<BrowserTab> tabs,
+  required void Function(void Function()) setTabsState,
+  required int activeTabIndex,
+  required String Function(BrowserTab) getTabLabel,
+  required Set<String> builtWebViewTabIds,
+  required void Function(int index) onCloseTab,
+  required void Function(int index) onSwitchToActiveTab,
+  required void Function(String draggedTabId, String? groupName)? onDropOnGroup,
+  required void Function(String groupName)? onGroupLongPress,
+  required int Function(String name)? colorIndexForGroup,
+  required bool Function(String name)? isGroupExpanded,
+  required void Function(String name)? onToggleGroup,
+}) {
+  final colorIdx = (colorIndexForGroup != null)
+      ? colorIndexForGroup!(groupName)
+      : -1;
+  final accent = TabGroupPalette.colorFor(
+    colorIndex: colorIdx >= 0 ? colorIdx : null,
+    groupName: groupName,
+  );
+  final memberTabs = tabs
+      .where((t) => (t.groupName ?? '') == groupName)
+      .toList();
+
+  void onDrop(String id, String? g) =>
+      onDropOnGroup?.call(id, g);
+  void onLongPress(String g) =>
+      onGroupLongPress?.call(g);
+  bool isExpanded(String n) =>
+      (isGroupExpanded != null) ? isGroupExpanded!(n) : true;
+  void toggleGroup(String n) =>
+      onToggleGroup?.call(n);
+
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      GroupDropZone(
+        groupName: groupName,
+        accentColor: accent,
+        memberCount: memberTabs.length,
+        isExpanded: isExpanded(groupName),
+        onToggleExpand: () => toggleGroup(groupName),
+        onLongPress: () => onLongPress(groupName),
+        onAcceptDrop: (tabId) => onDrop(tabId, groupName),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        child: isExpanded(groupName)
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final tab in memberTabs)
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DraggableTabCard(
+                          tab: tab,
+                          accentColor: accent,
+                          child: buildTabCard(
+                            ctx,
+                            tab,
+                            tabs.indexOf(tab),
+                            setTabsState,
+                            tabs: tabs,
+                            activeTabIndex: activeTabIndex,
+                            onCloseTab: onCloseTab,
+                            onSwitchToActiveTab: onSwitchToActiveTab,
+                            getTabLabel: getTabLabel,
+                            builtWebViewTabIds: builtWebViewTabIds,
+                          ),
+                        ),
+                        TabListDropSlot(
+                          targetGroupName: groupName,
+                          onAccept: (tabId) => onDrop(tabId, groupName),
+                        ),
+                      ],
+                    ),
+                ],
+              )
+            : const SizedBox.shrink(),
+      ),
+    ],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Grid-view mode
+// ---------------------------------------------------------------------------
+
+Widget _buildGridView(
+  BuildContext ctx, {
+  required List<BrowserTab> tabs,
+  required int activeTabIndex,
+  required List<String> groupNames,
+  required List<BrowserTab> ungroupedTabs,
+  required String Function(BrowserTab) getTabLabel,
+  required Set<String> builtWebViewTabIds,
+  required void Function(int index) onCloseTab,
+  required void Function(int index) onSwitchToActiveTab,
+  required void Function(String draggedTabId, String? groupName)? onDropOnGroup,
+  required void Function(String groupName)? onGroupLongPress,
+  required int Function(String name)? colorIndexForGroup,
+  required bool Function(String name)? isGroupExpanded,
+  required void Function(String name)? onToggleGroup,
+}) {
+  return TabGridView(
+    tabs: tabs,
+    activeTabIndex: activeTabIndex,
+    groupNames: groupNames,
+    ungroupedTabs: ungroupedTabs,
+    getTabLabel: getTabLabel,
+    builtWebViewTabIds: builtWebViewTabIds,
+    onCloseTab: onCloseTab,
+    onSwitchToActiveTab: onSwitchToActiveTab,
+    onDropOnGroup: onDropOnGroup ?? (_, __) {},
+    onGroupLongPress: onGroupLongPress ?? (_) {},
+    colorIndexForGroup: colorIndexForGroup ?? (_) => -1,
+    isGroupExpanded: isGroupExpanded ?? (_) => true,
+    onToggleGroup: onToggleGroup ?? (_) {},
   );
 }
 
