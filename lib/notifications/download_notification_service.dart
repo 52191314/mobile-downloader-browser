@@ -1,18 +1,10 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import '../logging/aurora_log.dart';
 import '../downloader/models.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadNotification] $context: $error');
-  AuroraLog.instance.error(
-    '$context: $error',
-    category: LogCategory.notification,
-    screen: LogScreen.background,
-    eventType: LogEventType.error,
-    stackTrace: stack,
-  );
 }
 
 class DownloadNotificationService {
@@ -21,18 +13,18 @@ class DownloadNotificationService {
   final Set<String> _activeLiveNotificationIds = {};
 
   static const String _channelId = 'aurora_download_progress';
-  static const String _channelName = 'Download Progress';
+  static const String _channelName = 'Download progress';
   static const String _channelDescription =
-      'Shows progress for active downloads';
+      'Shows how far along each download is.';
   static const String _doneChannelId = 'aurora_download_done';
-  static const String _doneChannelName = 'Download Complete';
+  static const String _doneChannelName = 'Download complete';
   static const String _doneChannelDescription =
-      'Alerts when a download finishes';
+      'Notifies you when a download finishes.';
 
   StreamSubscription<DownloadTask>? _subscription;
 
   Future<void> initialize() async {
-    const androidSettings = AndroidInitializationSettings('ic_notification');
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -119,7 +111,7 @@ class DownloadNotificationService {
 
     _plugin.show(
       id,
-      'Downloading — $progress%',
+      'Downloading $progress%',
       filename,
       NotificationDetails(
         android: AndroidNotificationDetails(
@@ -145,7 +137,7 @@ class DownloadNotificationService {
     final filename = _shortName(task.savePath);
     _plugin.show(
       id,
-      'Download complete',
+      'Done',
       filename,
       NotificationDetails(
         android: AndroidNotificationDetails(
@@ -166,8 +158,8 @@ class DownloadNotificationService {
     final filename = _shortName(task.savePath);
     _plugin.show(
       id,
-      'Download failed',
-      '${task.errorMessage ?? 'Unknown error'} — $filename',
+      "Couldn't download",
+      '$filename. ${task.errorMessage ?? 'Something went wrong.'}',
       NotificationDetails(
         android: AndroidNotificationDetails(
           _doneChannelId,

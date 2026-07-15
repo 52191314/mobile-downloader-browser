@@ -1,11 +1,6 @@
 import 'models.dart';
 
 class HttpRangeCalculator {
-  /// Maximum practical content length (2^53, ~9 PB).
-  /// Dart int is 64-bit but HTTP Content-Length headers above this value
-  /// are unrealistic and risk overflow in chunk arithmetic.
-  static const int _maxContentLength = 9007199254740992; // 2^53
-
   static List<DownloadChunk> calculate({
     required int contentLength,
     required int maxChunks,
@@ -15,11 +10,6 @@ class HttpRangeCalculator {
     }
     if (maxChunks <= 0) {
       throw ArgumentError('maxChunks must be greater than 0');
-    }
-    // Clamp to a realistic maximum to prevent integer overflow in
-    // chunk boundary arithmetic (chunkSize + extra, start + length - 1).
-    if (contentLength > _maxContentLength) {
-      contentLength = _maxContentLength;
     }
 
     final actualChunks = maxChunks > contentLength ? contentLength : maxChunks;

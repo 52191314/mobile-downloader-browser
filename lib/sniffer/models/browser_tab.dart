@@ -28,6 +28,16 @@ class BrowserTab {
   /// media cache — see the "Page-lifecycle guard" section of the flow doc.
   String? committedMainFrameUrl;
   String? groupName;
+  /// Optional explicit color-index override (0..7) for the group. When
+  /// `null` the color is derived from the group name via
+  /// [TabGroupPalette.forName]. Set when the user picks a swatch or
+  /// when restoring a tab whose group had an explicit color override.
+  int? groupColorIndex;
+  /// True when this tab was added to its group automatically (because
+  /// the group's `autoHost` matched the URL host). The flag lets the
+  /// system avoid re-adding a tab that the user has explicitly removed
+  /// from the group.
+  bool autoGrouped = false;
   bool canGoBack = false;
   bool canGoForward = false;
   bool isLoading = false;

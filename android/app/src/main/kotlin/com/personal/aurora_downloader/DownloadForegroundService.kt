@@ -33,7 +33,7 @@ class DownloadForegroundService : Service() {
     companion object {
         private const val TAG = "AuroraFgService"
         private const val NOTIF_CHANNEL_ID = "aurora_download_service"
-        private const val NOTIF_CHANNEL_NAME = "Download Service"
+        private const val NOTIF_CHANNEL_NAME = "Ongoing downloads"
         private const val NOTIF_ID = 999
         private const val WAKE_LOCK_TAG = "AuroraDownloader:DownloadWakeLock"
 
@@ -141,7 +141,7 @@ class DownloadForegroundService : Service() {
         val body = when {
             currentFileName != null && percent > 0 -> "$currentFileName — $percent%"
             currentFileName != null -> currentFileName
-            else -> "Download in progress"
+            else -> "Downloading..."
         }
 
         return NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)

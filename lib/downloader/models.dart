@@ -208,6 +208,8 @@ class DownloadTask implements Comparable<DownloadTask> {
   /// fails (cross-origin) and the HTTP fallback would otherwise get 403.
   Future<Map<String, String>> Function(String url)? cookieProvider;
   bool isBackupImport;
+  String? exportUri;
+  String? exportDirectoryUri;
 
   DownloadTask({
     required this.id,
@@ -238,6 +240,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.chunks = const [],
     DateTime? createdAt,
     this.isBackupImport = false,
+    this.exportUri,
+    this.exportDirectoryUri,
   }) : url = _cleanUrl(url),
        createdAt = createdAt ?? DateTime.now();
 
@@ -285,6 +289,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     'chunks': chunks.map((c) => c.toJson()).toList(),
     'createdAt': createdAt.toIso8601String(),
     'isBackupImport': isBackupImport,
+    'exportUri': exportUri,
+    'exportDirectoryUri': exportDirectoryUri,
   };
 
   factory DownloadTask.fromJson(Map<String, dynamic> json) {
@@ -370,6 +376,8 @@ class DownloadTask implements Comparable<DownloadTask> {
           ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
           : DateTime.now(),
       isBackupImport: json['isBackupImport'] as bool? ?? false,
+      exportUri: json['exportUri'] as String?,
+      exportDirectoryUri: json['exportDirectoryUri'] as String?,
     );
   }
 

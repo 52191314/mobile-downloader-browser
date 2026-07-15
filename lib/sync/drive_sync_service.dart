@@ -22,7 +22,7 @@ enum DriveConnectionStatus {
 class SignInCancelledException implements Exception {
   const SignInCancelledException();
   @override
-  String toString() => 'Google Sign-In was cancelled.';
+  String toString() => "You cancelled signing in. Tap Link to try again.";
 }
 
 class DriveAccount {
@@ -170,8 +170,8 @@ class GoogleDriveApiClient implements GoogleDriveClient {
       final description = error.description;
       throw StateError(
         description == null || description.isEmpty
-            ? 'Google Sign-In failed: ${error.code.name}'
-            : 'Google Sign-In failed: ${error.code.name}: $description',
+            ? "Couldn't sign in to Google: ${error.code.name}. Check your account and try again."
+            : "Couldn't sign in to Google: $description. Check your account and try again.",
       );
     }
     if (account == null) {
@@ -282,12 +282,12 @@ class GoogleDriveApiClient implements GoogleDriveClient {
   Future<drive.DriveApi> _driveApi() async {
     final account = _account;
     if (account == null) {
-      throw StateError('Google Drive is not connected.');
+      throw StateError("Google Drive isn't linked. Tap Link to connect.");
     }
     _authClient ??= await _createAuthClient(account);
     final client = _authClient;
     if (client == null) {
-      throw StateError('Failed to obtain Google Drive auth client.');
+      throw StateError("Couldn't connect to Google Drive. Check your connection and try again.");
     }
     return drive.DriveApi(client);
   }
@@ -383,7 +383,7 @@ class GoogleDriveApiClient implements GoogleDriveClient {
     );
     final id = folder.id;
     if (id == null) {
-      throw StateError('Google Drive did not return a folder ID.');
+      throw StateError("Google Drive didn't respond. Try again later.");
     }
     return id;
   }
@@ -493,7 +493,7 @@ class DriveSyncService {
 
       final entityType = await FileSystemEntity.type(task.savePath);
       if (entityType == FileSystemEntityType.notFound) {
-        _errorMessage = 'Completed file was not found: ${task.savePath}';
+        _errorMessage = "Couldn't sync — completed file not found.";
         _setStatus(DriveConnectionStatus.error);
         return null;
       }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../theme/aurora_palette.dart';
 import '../../downloader/downloader.dart';
 import '../../platform/public_downloads_service.dart';
 import '../notifications/aurora_snackbar.dart';
@@ -41,7 +42,7 @@ class DownloadTaskRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final ac = context.ac;
 
     if (task.state == DownloadState.completed) {
       return Padding(
@@ -60,7 +61,7 @@ class DownloadTaskRow extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.info_outline, size: 20),
-                    tooltip: 'Properties',
+                    tooltip: 'View details',
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -75,7 +76,7 @@ class DownloadTaskRow extends StatelessWidget {
                     'Completed',
                     style: TextStyle(
                       fontSize: 12,
-                      color: scheme.primary,
+                      color: ac.accentFrost,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -84,7 +85,7 @@ class DownloadTaskRow extends StatelessWidget {
                     '•  ${formatBytes(task.downloadedBytes)}',
                     style: TextStyle(
                       fontSize: 12,
-                      color: scheme.onSurfaceVariant,
+                      color: ac.textSecondary,
                     ),
                   ),
                 ],
@@ -121,7 +122,7 @@ class DownloadTaskRow extends StatelessWidget {
                   IconButton(
                     key: Key('force_merge_${task.id}'),
                     icon: const Icon(Icons.merge_type, size: 20),
-                    tooltip: 'Force merge partial chunks',
+                    tooltip: 'Force merge — build the final file from whatever finished. Use when a download stalled and you want the partial file now.',
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -150,7 +151,7 @@ class DownloadTaskRow extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.info_outline, size: 20),
-                  tooltip: 'Properties',
+                  tooltip: 'View details',
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -168,11 +169,11 @@ class DownloadTaskRow extends StatelessWidget {
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (context) => AlertDialog(
-                              title: Text(isCompleted ? 'Remove Download?' : 'Cancel Download?'),
+                              title: Text(isCompleted ? 'Remove download?' : 'Cancel download?'),
                               content: Text(
                                 isCompleted
-                                    ? 'Are you sure you want to remove "${taskDisplayName(task)}" from the download list?'
-                                    : 'Are you sure you want to cancel and remove "${taskDisplayName(task)}" from your queue?\nThis will delete any temporary or downloaded files.',
+                                    ? 'Remove "${taskDisplayName(task)}" from your queue? The file stays on your device.'
+                                    : 'Cancel "${taskDisplayName(task)}" and remove it from your queue?\nTemporary files will be deleted.',
                               ),
                               actions: [
                                 TextButton(
@@ -204,13 +205,13 @@ class DownloadTaskRow extends StatelessWidget {
                 children: [
                   Text(
                     formatBytesPair(task.downloadedBytes, task.totalBytes),
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    style: TextStyle(fontSize: 12, color: ac.textSecondary),
                   ),
                   Text(
                     task.state == DownloadState.downloading
                         ? formatSpeed(task.speed)
                         : stateLabel(task.state),
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    style: TextStyle(fontSize: 12, color: ac.textSecondary),
                   ),
                 ],
               ),
@@ -236,7 +237,7 @@ class DownloadTaskRow extends StatelessWidget {
                   Icon(
                     Icons.error_outline,
                     size: 14,
-                    color: Theme.of(context).colorScheme.error,
+                    color: ac.statusError,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -244,7 +245,7 @@ class DownloadTaskRow extends StatelessWidget {
                       task.errorMessage!,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Theme.of(context).colorScheme.error,
+                        color: ac.statusError,
                       ),
                     ),
                   ),
@@ -286,12 +287,16 @@ class DownloadPropertiesDialog extends StatefulWidget {
   final Future<void> Function(DownloadTask task) onOpenDownload;
   final void Function(String url)? onOpenUrlInBrowser;
   final void Function(DownloadTask task)? onTaskUpdated;
+  final Future<void> Function(DownloadTask task)? onShareDownload;
+  final Future<void> Function(DownloadTask task)? onExport;
 
   const DownloadPropertiesDialog({
     required this.task,
     required this.onOpenDownload,
     this.onOpenUrlInBrowser,
     this.onTaskUpdated,
+    this.onShareDownload,
+    this.onExport,
   });
 
   @override
@@ -351,10 +356,10 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
           _currentName = newName;
         });
         widget.onTaskUpdated?.call(widget.task);
-        AuroraSnackbar.show(context, 'File renamed successfully');
+        AuroraSnackbar.show(context, 'Done — File renamed.');
       } catch (e) {
         if (!mounted) return;
-        AuroraSnackbar.show(context, 'Rename failed: $e');
+        AuroraSnackbar.show(context, "Couldn't rename. $e. Try a different name.");
       }
     } else {
       setState(() {
@@ -362,17 +367,17 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
         _currentName = newName;
       });
       widget.onTaskUpdated?.call(widget.task);
-      AuroraSnackbar.show(context, 'Download target path renamed');
+      AuroraSnackbar.show(context, 'Done — Save path renamed.');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final ac = context.ac;
     final isCompleted = widget.task.state == DownloadState.completed;
 
     return AlertDialog(
-      title: const Text('Download Properties'),
+      title: const Text('File details'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -381,20 +386,20 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
             TextField(
               controller: _nameController,
               decoration: InputDecoration(
-                labelText: 'Filename',
+                labelText: 'File name',
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.check),
-                  tooltip: 'Rename',
+                  tooltip: 'Save new name',
                   onPressed: _rename,
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            Text('Location', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary, fontSize: 12)),
+            Text('Location', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
             const SizedBox(height: 4),
             SelectableText(
               widget.task.publicPathLabel ?? widget.task.savePath,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              style: TextStyle(fontSize: 12, color: ac.textSecondary),
             ),
             const SizedBox(height: 16),
             Row(
@@ -403,23 +408,23 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Download URL', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary, fontSize: 12)),
+                      Text('Download link', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
                       const SizedBox(height: 4),
                       Text(
                         widget.task.url,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                        style: TextStyle(fontSize: 12, color: ac.textSecondary),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.copy, size: 18),
-                  tooltip: 'Copy URL',
+                  tooltip: 'Copy link',
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: widget.task.url));
-                    AuroraSnackbar.show(context, 'URL copied to clipboard');
+                    AuroraSnackbar.show(context, 'Done — Link copied.');
                   },
                 ),
               ],
@@ -432,29 +437,29 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Source Page', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary, fontSize: 12)),
+                        Text('Source page', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
                         const SizedBox(height: 4),
                         Text(
                           widget.task.sourcePageUrl!,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                          style: TextStyle(fontSize: 12, color: ac.textSecondary),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.copy, size: 18),
-                    tooltip: 'Copy Source Page',
+                    tooltip: 'Copy page link',
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: widget.task.sourcePageUrl!));
-                      AuroraSnackbar.show(context, 'Source page URL copied');
+                      AuroraSnackbar.show(context, 'Done — Page link copied.');
                     },
                   ),
                   if (widget.onOpenUrlInBrowser != null)
                     IconButton(
                       icon: const Icon(Icons.open_in_new, size: 18),
-                      tooltip: 'Open in Browser',
+                      tooltip: 'Open in browser',
                       onPressed: () {
                         Navigator.pop(context);
                         widget.onOpenUrlInBrowser!(widget.task.sourcePageUrl!);
@@ -467,7 +472,7 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
             if (isCompleted) ...[
               const Divider(),
               const SizedBox(height: 8),
-              Text('Actions', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary, fontSize: 12)),
+              Text('Actions', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -483,6 +488,28 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                             widget.onOpenDownload(widget.task);
                           },
                   ),
+                  if (widget.onShareDownload != null)
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
+                      icon: const Icon(Icons.share, size: 16),
+                      label: const Text('Share'),
+                      onPressed: widget.task.publicUri == null
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                              widget.onShareDownload!(widget.task);
+                            },
+                    ),
+                  if (widget.onExport != null)
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
+                      icon: const Icon(Icons.save_alt, size: 16),
+                      label: const Text('Export'),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        widget.onExport!(widget.task);
+                      },
+                    ),
                 ],
               ),
             ],

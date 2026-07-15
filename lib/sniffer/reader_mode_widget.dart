@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/aurora_colors.dart';
+import '../theme/aurora_palette.dart';
 import 'browser_controller.dart';
 
 class ReaderModeWidget extends StatefulWidget {
@@ -109,8 +109,9 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final ac = context.ac;
     return Scaffold(
-      backgroundColor: AuroraColors.background,
+      backgroundColor: ac.surfaceField,
       appBar: AppBar(
         title: Text(_title ?? 'Reader'),
         actions: [
@@ -143,6 +144,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
   }
 
   Widget _buildStructuredContent() {
+    final ac = context.ac;
     if (_content == null) return const SizedBox.shrink();
     final blocks = _content!.split('\n\n');
     final widgets = <Widget>[];
@@ -174,7 +176,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
                 text,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: AuroraColors.text,
+                  color: ac.textPrimary,
                 ),
               ),
             ),
@@ -188,7 +190,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
                 text,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: AuroraColors.text,
+                  color: ac.textPrimary,
                 ),
               ),
             ),
@@ -203,7 +205,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
                 text,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AuroraColors.text,
+                  color: ac.textPrimary,
                 ),
               ),
             ),
@@ -214,16 +216,16 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
             Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.only(left: 12),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
-                  left: BorderSide(color: AuroraColors.accent, width: 3),
+                  left: BorderSide(color: ac.accentFrost, width: 3),
                 ),
               ),
               child: Text(
                 text,
-                style: const TextStyle(
+                style: TextStyle(
                   fontStyle: FontStyle.italic,
-                  color: AuroraColors.mutedText,
+                  color: ac.textSecondary,
                 ),
               ),
             ),
@@ -235,13 +237,13 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AuroraColors.surface,
+                color: ac.surfacePanel,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 text,
                 style: const TextStyle(
-                  fontFamily: 'monospace',
+                  fontFamily: 'JetBrainsMono',
                   fontSize: 13,
                   height: 1.5,
                 ),
@@ -255,7 +257,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
                 text,
-                style: const TextStyle(height: 1.6, color: AuroraColors.text),
+                style: TextStyle(height: 1.6, color: ac.textPrimary),
               ),
             ),
           );

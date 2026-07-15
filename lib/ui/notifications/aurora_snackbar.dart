@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 
 /// Coalesces rapid-duplicate snackbar messages so bursts of the same
 /// notification don't spam the screen.
@@ -78,6 +78,8 @@ class AuroraSnackbar {
     SnackBar Function(String text)? builder,
   }) {
     final messenger = ScaffoldMessenger.of(context);
+    final ac = context.ac;
+    final isLight = context.isLight;
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       builder != null
@@ -86,16 +88,17 @@ class AuroraSnackbar {
               content: Text(
                 text,
                 style: TextStyle(
+                  fontFamily: 'Inter',
                   fontSize: 13,
-                  color: AuroraColorsLight.text,
+                  color: ac.textPrimary,
                 ),
               ),
-              backgroundColor: AuroraColorsLight.surface,
+              backgroundColor: ac.surfacePanel,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: AuroraColorsLight.accent.withValues(alpha: 0.3),
+                  color: ac.accentFrost.withValues(alpha: isLight ? 0.4 : 0.3),
                   width: 1,
                 ),
               ),
@@ -105,7 +108,7 @@ class AuroraSnackbar {
               action: actionLabel != null && onAction != null
                   ? SnackBarAction(
                       label: actionLabel,
-                      textColor: AuroraColorsLight.accent,
+                      textColor: ac.accentFrost,
                       onPressed: onAction,
                     )
                   : null,

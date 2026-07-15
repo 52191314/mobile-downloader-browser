@@ -1,7 +1,6 @@
 import 'dart:ffi';
 import 'package:flutter/foundation.dart';
 import 'package:ffi/ffi.dart';
-import '../logging/aurora_log.dart';
 import 'adblock_ffi.dart';
 
 class AdBlockNativeEngine implements Finalizable {
@@ -30,12 +29,6 @@ class AdBlockNativeEngine implements Finalizable {
       return _bindings.shouldBlock(_enginePtr, urlPtr) == 1;
     } catch (e) {
       debugPrint('Error checking URL with native engine: $e');
-      AuroraLog.instance.error(
-        'Error checking URL with native engine: $e',
-        category: LogCategory.native,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
       return false;
     } finally {
       malloc.free(urlPtr);
@@ -63,12 +56,6 @@ class AdBlockNativeEngine implements Finalizable {
           1;
     } catch (e) {
       debugPrint('Error checking URL Ex with native engine: $e');
-      AuroraLog.instance.error(
-        'Error checking URL Ex with native engine: $e',
-        category: LogCategory.native,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
       return false;
     } finally {
       malloc.free(urlPtr);
@@ -99,12 +86,6 @@ class AdBlockNativeEngine implements Finalizable {
           1;
     } catch (e) {
       debugPrint('Error checking element hiding with native engine: $e');
-      AuroraLog.instance.error(
-        'Error checking element hiding with native engine: $e',
-        category: LogCategory.native,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
       return false;
     } finally {
       malloc.free(hostPtr);

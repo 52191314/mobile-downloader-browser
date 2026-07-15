@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
-import 'package:aurora_downloader/theme/aurora_colors.dart';
+import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 /// Translates the active tab's URL through `translate.google.com` using
 /// the currently selected target language. Replaces the body of
@@ -28,6 +28,7 @@ Future<void> translatePage(
   required void Function(String message) onShowSnack,
   required bool isMounted,
 }) async {
+  final ac = context.ac;
   final tab = activeTab;
   final url = await tab.controller.currentUrl();
   if (url == null || url.isEmpty) return;
@@ -56,7 +57,7 @@ Future<void> translatePage(
                   lang.id == currentSettings.translateTargetLang
                       ? Icons.radio_button_checked
                       : Icons.radio_button_off,
-                  color: AuroraColors.accent,
+                  color: ac.accentFrost,
                 ),
                 title: Text(lang.label),
                 onTap: () => Navigator.of(ctx).pop(lang.id),

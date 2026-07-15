@@ -27,7 +27,7 @@ void showSavedPagesSheet(
   showLibrarySheet<SavedPage>(
     context,
     title: 'Saved Pages',
-    emptyText: 'No saved pages yet.',
+    emptyText: 'No saved pages yet. Save a page to read offline.',
     items: library.savedPages,
     titleFor: (item) => item.title,
     subtitleFor: (item) => item.sourceUrl,

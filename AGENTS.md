@@ -10,28 +10,6 @@ Before searching broadly, read:
 
 When changing Aurora structure, major features, important classes, or important methods, update `../docs/code-maps/projects/aurora_downloader.md` in the same session.
 
-## Document Sniffer & Download changes
-
-The Sniffer flow (capture → `SniffIntakeController` → `MediaSnifferEngine` → `MediaEnricher` → `MediaCaptureAnalyzer` → UI sheet) and the Download flow (queue → `DownloadSplitter` / `HlsDownloader` / `TorrentDownloader` → publish) are documented in `../docs/code-maps/projects/aurora_downloader_sniffer_download_flows.md`.
-
-When you change any class, method, or behavior in either flow (including HLS playlist body capture / WAF bypass, disguised-playlist detection, page-lifecycle cache guards, or download routing), you MUST:
-
-1. Update the relevant section of `aurora_downloader_sniffer_download_flows.md` (exact file/line anchors) in the same session.
-2. Update the matching method/class tables in `../docs/code-maps/projects/aurora_downloader.md`.
-3. Add a dated "Last verified" note at the top of both files summarizing what changed.
-
-Keep the two docs in sync — the flow doc is the narrative companion to the code map.
-
-## Use Subagents with High Thinking
-
-To maximize speed and accuracy during development, **always parallelize tasks using subagents** (like `cheap-scout` for read-only lookups or `task` for active changes). 
-
-* **Preferred Models:** Use **Tencent Hunyuan 3 (`Hy3`)** or **DeepSeek V4 Flash (`DSV4 Flash`)** as the engine for these subagents.
-* **Reasoning Level:** Always run these subagents with the **highest thinking/reasoning tier** (e.g. configuring `"reasoningEffort": "high"` or executing `/effort high` inside the subagent context). This ensures they fully think through the codebase architecture and trace edge cases before executing tools.
-* **Prefer subagents for:** grepping many patterns, reading multiple files, searching across the codebase, or any combination of independent lookups.
-* **Avoid subagents for:** trivial single-file reads or lookups that a single tool call can satisfy faster.
-* When in doubt, parallelize with subagents — the overhead is minimal and the speedup is significant.
-
 ## Build (incremental — fast)
 
 To keep development iteration fast, **always build and install in debug mode** for testing changes. Debug builds compile almost instantly and skip Proguard/R8 code shrinking:
@@ -92,6 +70,35 @@ Keep it simple: classify by extension only.
 Tab URLs saved to `browser_tabs.json` in app support dir. Restored on next launch.
 Sniffed media cached in `sniffed_media_cache.json`.
 
+## Tab Groups (Samsung-style dynamic arrangement)
+
+Tabs may be organized into named, color-coded groups with drag-and-drop,
+persisted across sessions:
+
+- `BrowserTab.groupName` + `BrowserTab.groupColorIndex` + `BrowserTab.autoGrouped`
+  on each tab (`lib/sniffer/models/browser_tab.dart`).
+- `TabGroup` model with `autoHost` / `colorIndex` / `sortOrder` persisted
+  separately at `tab_groups.json` (app support dir), loaded by
+  `TabLifecycleController.loadGroups()`. See
+  `lib/sniffer/models/tab_group.dart`.
+- `TabGroupPalette` (`lib/sniffer/tab_groups/tab_group_palette.dart`)
+  provides 8 swatches (`AuroraColors.group{Cyan,Amber,Purple,Green,Red,Orange,Blue,Pink}`).
+- `TabManager` mutation API: `moveTabToGroup`, `reorderTab`, `renameGroup`,
+  `setGroupColor`, `setGroupAutoHost`, `closeGroup`, `disbandGroup`.
+- UI sheet `lib/sniffer/sheets/tabs_sheet.dart` features a
+  List↔Grid view-mode toggle, long-press-to-lift drag-drop into group
+  headers / Ungrouped drop slot / between-tab drop slots. Group header
+  long-press opens `lib/sniffer/sheets/group_actions_sheet.dart`
+  (rename, color picker, auto-host toggle, close-all-in-group,
+  disband).
+- Drag widgets: `lib/sniffer/widgets/draggable_tab_card.dart`,
+  `lib/sniffer/widgets/group_drop_zone.dart`,
+  `lib/sniffer/widgets/tab_grid_view.dart`.
+- Auto-group: when a new tab's URL host matches a group's `autoHost`, the
+  tab is silently added to that group (`TabLifecycleController._applyAutoGroupFor`).
+  `BrowserTab.autoGrouped` flag prevents re-adding a tab the user has
+  explicitly removed from the group.
+
 ## APK Naming
 
 If we need to build an APK for Aurora Downloader, it must be named `aurora_downloader.apk`. The native C++ adblock engine is now compiled and active by default — there is no longer a separate `OptionB` variant.
@@ -119,4 +126,20 @@ Format:
 ```
 
 This applies regardless of whether the command was given directly or through the opencode interface.
+
+## Active Branch Constraint
+
+- All development, testing, builds, and commits in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`) must occur on the **`opencode/witty-river`** branch.
+- Never check out, switch to, or pull changes from other branches (such as `ui/redesign-2.0`) in this repository.
+
+## Interaction & Output Rules
+
+- **No Code Edit Expansions**:
+  Do NOT output full code blocks or file content expansions of edited files in the conversation responses. Always keep chat responses concise and clean, pointing the user directly to the modified files or a very brief summary.
+- **Clarification Over Guessing**:
+  If a user request is ambiguous, has multiple architectural paths, or is underspecified, do NOT guess the user's intent. Proactively ask clarifying questions to align on exactly what the user wants before writing code or running builds.
+- **Use Writing Subagents**:
+  For implementation, file editing, or command executions, actively delegate subtasks to writing subagents (such as `@deepseek-flash-max` running DeepSeek v4 Flash Max, `@hy3-high` running Hy3 High, or `@minimax-m3` running MiniMax M3) instead of trying to execute everything in the parent context or relying purely on read-only scouts like `@cheap-scout`. This keeps the parent conversation concise, saves token limits, and isolates file edits.
+
+
 

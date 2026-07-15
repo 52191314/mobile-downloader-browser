@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 
 /// Floating pill-shaped navigation dock with spring animation.
 ///
@@ -67,6 +67,8 @@ class _AuroraDockState extends State<AuroraDock>
   Widget build(BuildContext context) {
     const tabSize = 44.0;
     const dockHeight = 56.0;
+    final ac = context.ac;
+    final isLight = context.isLight;
 
     return Container(
       height: dockHeight,
@@ -90,22 +92,32 @@ class _AuroraDockState extends State<AuroraDock>
               constraints: const BoxConstraints(maxWidth: 280),
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: AuroraColors.dockSurface,
+                color: ac.dockSurface,
                 borderRadius: BorderRadius.circular(tabSize / 2),
                 border: Border.all(
                   color: badgeCount > 0
-                      ? AuroraColors.accent.withValues(alpha: 0.4)
-                      : AuroraColors.glassBorder,
+                      ? ac.accentFrost.withValues(alpha: 0.4)
+                      : ac.glassBorder,
                 ),
+                // Hairline + faint accent glow — no Material shadow in light
+                // mode (the frost-line hairline carries separation).
                 boxShadow: badgeCount > 0
                     ? [
                         BoxShadow(
-                          color: AuroraColors.accent.withValues(alpha: 0.15),
-                          blurRadius: 8,
+                          color: ac.accentFrost.withValues(alpha: isLight ? 0.10 : 0.15),
+                          blurRadius: isLight ? 6 : 8,
                           spreadRadius: 1,
                         ),
                       ]
-                    : null,
+                    : (isLight
+                        ? null
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -206,8 +218,8 @@ class _DockTab extends StatelessWidget {
                     icon,
                     size: 20,
                     color: isActive
-                        ? AuroraColors.accent
-                        : AuroraColors.mutedText.withValues(alpha: 0.4),
+                        ? context.ac.accentFrost
+                        : context.ac.textSecondary.withValues(alpha: 0.5),
                   ),
                 ),
               ),
@@ -231,6 +243,7 @@ class _DockFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ac = context.ac;
     return SizedBox(
       width: 44,
       height: 44,
@@ -238,9 +251,12 @@ class _DockFab extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Material(
-            elevation: 4,
+            // Restraint: drop elevation in light mode. The frost-line hairline
+            // around the dock carries separation; a 4dp shadow on white feels
+            // generic.
+            elevation: context.isLight ? 0 : 4,
             shape: const CircleBorder(),
-            color: AuroraColors.accent,
+            color: ac.accentFrost,
             child: InkWell(
               customBorder: const CircleBorder(),
               onTap: onTap,
@@ -257,7 +273,7 @@ class _DockFab extends StatelessWidget {
                     key: ValueKey(
                         badgeCount > 0 ? 'catch' : 'add'),
                     size: 22,
-                    color: AuroraColors.background,
+                    color: ac.surfaceField,
                   ),
                 ),
               ),
@@ -269,8 +285,8 @@ class _DockFab extends StatelessWidget {
               top: -2,
               child: Container(
                 padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: AuroraColors.accentAmber,
+                decoration: BoxDecoration(
+                  color: ac.accentAmber,
                   shape: BoxShape.circle,
                 ),
                 constraints: const BoxConstraints(
@@ -279,10 +295,11 @@ class _DockFab extends StatelessWidget {
                 ),
                 child: Text(
                   '$badgeCount',
-                  style: const TextStyle(
+                  style: TextStyle(
+                    fontFamily: 'Inter',
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: AuroraColors.background,
+                    color: ac.surfaceField,
                   ),
                   textAlign: TextAlign.center,
                 ),

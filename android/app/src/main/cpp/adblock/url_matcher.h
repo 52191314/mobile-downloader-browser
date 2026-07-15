@@ -4,14 +4,14 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
-#include <re2/re2.h>
+#include <regex>
 #include <mutex>
 #include <list>
 
 // Regex cache entry
 struct RegexCacheEntry {
     std::string pattern;
-    std::unique_ptr<RE2> re;
+    std::regex re;
 };
 
 class RegexCache {

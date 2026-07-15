@@ -4,7 +4,6 @@ import 'dart:typed_data';
 class BencodeDecoder {
   final Uint8List _bytes;
   int _pos = 0;
-  int _depth = 0;
 
   BencodeDecoder(this._bytes);
 
@@ -18,34 +17,26 @@ class BencodeDecoder {
   }
 
   dynamic _parseAny() {
-    if (_depth > 256) {
-      throw FormatException('Bencode nesting too deep');
-    }
     if (_pos >= _bytes.length) {
       throw FormatException('Unexpected EOF');
     }
-    _depth++;
-    try {
-      final char = _bytes[_pos];
-      if (char == 105) {
-        // 'i'
-        return _parseInt();
-      } else if (char == 108) {
-        // 'l'
-        return _parseList();
-      } else if (char == 100) {
-        // 'd'
-        return _parseDict();
-      } else if (char >= 48 && char <= 57) {
-        // '0'-'9'
-        return _parseByteString();
-      } else {
-        throw FormatException(
-          'Invalid bencode type prefix at index $_pos: ${String.fromCharCode(char)}',
-        );
-      }
-    } finally {
-      _depth--;
+    final char = _bytes[_pos];
+    if (char == 105) {
+      // 'i'
+      return _parseInt();
+    } else if (char == 108) {
+      // 'l'
+      return _parseList();
+    } else if (char == 100) {
+      // 'd'
+      return _parseDict();
+    } else if (char >= 48 && char <= 57) {
+      // '0'-'9'
+      return _parseByteString();
+    } else {
+      throw FormatException(
+        'Invalid bencode type prefix at index $_pos: ${String.fromCharCode(char)}',
+      );
     }
   }
 
@@ -90,19 +81,11 @@ class BencodeDecoder {
 
   Uint8List _parseByteString() {
     var len = 0;
-    final maxRemaining = _bytes.length - _pos;
     while (_pos < _bytes.length && _bytes[_pos] != 58) {
       // ':'
       final char = _bytes[_pos];
       if (char < 48 || char > 57) {
         throw FormatException('Invalid character in string length at $_pos');
-      }
-      // Guard against overflow: if multiplying by 10 would exceed
-      // remaining bytes, the actual string cannot possibly fit.
-      if (len > maxRemaining ~/ 10) {
-        throw FormatException(
-          'String length overflow at $_pos',
-        );
       }
       len = len * 10 + (char - 48);
       _pos++;

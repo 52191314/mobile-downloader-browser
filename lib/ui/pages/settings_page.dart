@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,12 +13,14 @@ import '../../platform/public_downloads_service.dart';
 import '../../platform/download_foreground_service.dart';
 import '../../sniffer/browser_library.dart';
 import '../../sniffer/idm_backup_parser.dart';
+import '../../backup/auto_backup_service.dart';
+import '../../backup/auto_backup_models.dart';
 
 import '../../settings/download_settings.dart';
 import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
@@ -34,6 +37,7 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<double> onSpeedLimitChanged;
   final DownloadQueue downloadQueue;
   final ValueNotifier<int> libraryUpdateNotifier;
+  final AutoBackupService autoBackupService;
 
   const SettingsPage({
     super.key,
@@ -47,6 +51,7 @@ class SettingsPage extends StatefulWidget {
     required this.onSpeedLimitChanged,
     required this.downloadQueue,
     required this.libraryUpdateNotifier,
+    required this.autoBackupService,
   });
 
   @override
@@ -76,7 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _getRetryLimitLabel(int limit) {
     if (limit >= 999999) {
-      return 'Practically Infinite';
+      return 'Up to 999,999 retries';
     }
     return '$limit';
   }
@@ -148,19 +153,19 @@ class _SettingsPageState extends State<SettingsPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AuroraColors.glassSurface,
+        color: context.ac.glassSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AuroraColors.glassBorder),
+        border: Border.all(color: context.ac.glassBorder),
       ),
       child: Row(
         children: [
           CircleAvatar(
             backgroundColor:
-                connected ? AuroraColors.nordGreen : AuroraColors.mutedDeep,
+                connected ? context.ac.statusSuccess : context.ac.textTertiary,
             radius: 24,
             child: Icon(
               connected ? Icons.cloud_done : Icons.cloud_outlined,
-              color: AuroraColors.background,
+              color: context.ac.surfaceField,
               size: 24,
             ),
           ),
@@ -173,16 +178,16 @@ class _SettingsPageState extends State<SettingsPage> {
                     style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: AuroraColors.text)),
+                        color: context.ac.textPrimary)),
                 const SizedBox(height: 2),
                 Text(
                   connected
-                      ? 'Drive: ${state.account ?? "Connected"}'
-                      : 'Drive not linked',
+                    ? 'Google Drive: ${state.account ?? "Connected"}'
+                    : 'Google Drive not linked',
                   style: TextStyle(
                       fontSize: 12,
                       color:
-                          connected ? AuroraColors.accent : AuroraColors.mutedText),
+                          connected ? context.ac.accentFrost : context.ac.textSecondary),
                 ),
               ],
             ),
@@ -214,7 +219,7 @@ class _SettingsPageState extends State<SettingsPage> {
           style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: AuroraColors.mutedText,
+              color: context.ac.textSecondary,
               letterSpacing: 0.5)),
     );
   }
@@ -224,49 +229,37 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildCardGrid() {
-    final state = widget.driveSyncService.state;
     return Column(
       children: [
         Row(children: [
           Expanded(child: _buildCard(Icons.download_rounded, 'Defaults',
-              'Path, threads, retry', () => _openPage(_buildDefaultsPage()))),
+              'Where files save, how many at once, and how Aurora handles drops', () => _openPage(_buildDefaultsPage()))),
           const SizedBox(width: 12),
-          Expanded(child: _buildCard(
-              Icons.speed_rounded, 'Speed',
-              _speedLimitKbps == 0 ? 'Unlimited' : '${_speedLimitKbps.round()} KB/s',
-              () => _openPage(_buildSpeedPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
           Expanded(child: _buildCard(Icons.shield_rounded, 'Adblock',
-              '${_settings.manualAdBlockRules.length} rules',
+              'Block ads, popups, and unwanted redirects',
               () => _openPage(_buildAdblockPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.search_rounded, 'Search',
-              _settings.searchEngine.name,
-              () => _openPage(_buildSearchPage()))),
         ]),
         const SizedBox(height: 12),
         Row(children: [
-          Expanded(child: _buildCard(Icons.tune_rounded, 'Sniffer',
-              'Media detection', () => _openPage(_buildSnifferPage()))),
+          Expanded(child: _buildCard(Icons.search_rounded, 'Search',
+              'Powered by ${_settings.searchEngine.name}',
+              () => _openPage(_buildSearchPage()))),
           const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.cloud_rounded, 'Drive Sync',
-              state.autoSyncEnabled ? 'Auto: on' : 'Auto: off',
-              () => _openPage(_buildDrivePage()))),
+          Expanded(child: _buildCard(Icons.tune_rounded, 'Sniffer',
+              'Choose which media types Aurora detects', () => _openPage(_buildSnifferPage()))),
         ]),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _buildCard(Icons.palette_outlined, 'Appearance',
-              'OLED mode, theme', () => _openPage(_buildAppearancePage()))),
+              'Pick theme, dark mode, and in-app alerts', () => _openPage(_buildAppearancePage()))),
           const SizedBox(width: 12),
           Expanded(child: _buildCard(Icons.wifi_rounded, 'Network',
-              'Proxy, user-agent', () => _openPage(_buildNetworkPage()))),
+              'Set proxy server and browser identity', () => _openPage(_buildNetworkPage()))),
         ]),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _buildCard(
-              Icons.backup_rounded, 'Backup', 'Import & export data', () => _openPage(_buildBackupPage()))),
+              Icons.backup_rounded, 'Backup', 'Save and restore your data', () => _openPage(_buildBackupPage()))),
           const SizedBox(width: 12),
           Expanded(child: _buildCard(
               Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
@@ -284,17 +277,17 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(icon, color: AuroraColors.accent, size: 28),
+            Icon(icon, color: context.ac.accentFrost, size: 28),
             const SizedBox(height: 10),
             Text(title,
                 style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: AuroraColors.text)),
+                    color: context.ac.textPrimary)),
             const SizedBox(height: 2),
             Text(subtitle,
                 style:
-                    TextStyle(fontSize: 11, color: AuroraColors.mutedDeep)),
+                    TextStyle(fontSize: 11, color: context.ac.textTertiary)),
           ]),
         ),
       ),
@@ -348,10 +341,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     ? local.downloadDestination
                     : 'App support directory',
                 style:
-                    TextStyle(fontSize: 13, color: AuroraColors.mutedText, fontFamily: 'monospace'),
+                    TextStyle(fontSize: 13, color: context.ac.textSecondary, fontFamily: 'JetBrainsMono'),
               ),
               const SizedBox(height: 16),
-              _label('Max concurrent'),
+              _label('Max concurrent downloads'),
               _slider(local.maxConcurrentDownloads.toDouble(), 1, 12, 11,
                   '${local.maxConcurrentDownloads}',
                   (v) {
@@ -359,7 +352,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     _update(local);
                   }),
               const SizedBox(height: 16),
-              _label('Chunks per task'),
+              _label('Chunks per download'),
               _slider(local.chunksPerTask.toDouble(), 1, 32, 31,
                   '${local.chunksPerTask}',
                   (v) {
@@ -368,7 +361,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   }),
               const SizedBox(height: 16),
               SwitchListTile(
-                  title: const Text('Auto-retry'),
+                  title: const Text('Auto-retry failed downloads'),
                   value: local.autoRetry,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(autoRetry: v));
@@ -393,7 +386,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               SwitchListTile(
                 title: const Text('Auto-classify downloads'),
-                subtitle: const Text('Sort completed files into Videos, Audio, Documents, etc.'),
+                subtitle: const Text('Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.'),
                 value: local.autoClassifyEnabled,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(autoClassifyEnabled: v));
@@ -404,10 +397,21 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               SwitchListTile(
                 title: const Text('Convert .ts to .mp4'),
-                subtitle: const Text('Remux MPEG-TS downloads to MP4 container after completion (faster than transcoding).'),
+                subtitle: const Text('Aurora converts .ts streams to .mp4 so they play in any app. Turn off if you prefer the original .ts.'),
                 value: local.remuxTsToMp4,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(remuxTsToMp4: v));
+                  _update(local);
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text('Include quality suffix'),
+                subtitle: const Text('Appends " (720p)" etc. to filenames when a resolution is detected.'),
+                value: local.includeQualitySuffix,
+                onChanged: (v) {
+                  setLocal(() => local = local.copyWith(includeQualitySuffix: v));
                   _update(local);
                 },
                 contentPadding: EdgeInsets.zero,
@@ -424,6 +428,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _label('Download link behavior'),
               const SizedBox(height: 4),
               _buildDownloadBehaviorDropdown(local, setLocal),
+              const SizedBox(height: 20),
+              _buildSpeedSection(local, setLocal),
             ])),
           ],
         ),
@@ -431,45 +437,73 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildSpeedPage() {
-    double localSpeed = _speedLimitKbps;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Speed Limiter')),
-      body: StatefulBuilder(
-        builder: (context, setLocal) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            PanelHeader(icon: Icons.speed_rounded, title: 'Speed Limiter'),
-            const SizedBox(height: 8),
-            Panel(child: Column(children: [
-              Row(children: [
-                Icon(Icons.speed, color: AuroraColors.accent, size: 28),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(localSpeed == 0 ? 'Unlimited' : '${localSpeed.round()} KB/s',
-                      style: TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.w700, color: AuroraColors.accent)),
-                  Text('Global download speed cap',
-                      style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
-                ])),
-              ]),
-              const SizedBox(height: 20),
-              Slider(
-                  value: localSpeed.clamp(0.0, 2048.0),
-                  min: 0, max: 2048, divisions: 16,
-                  activeColor: AuroraColors.accent,
-                  inactiveColor: AuroraColors.surfaceVariant,
-                  onChanged: (v) {
-                    setLocal(() => localSpeed = v);
-                    widget.onSpeedLimitChanged(v);
-                  }),
-              Text('0 KB/s (unlimited) — 2048 KB/s',
-                  style: TextStyle(fontSize: 11, color: AuroraColors.mutedDeep)),
-            ])),
-          ],
-        ),
-      ),
-    );
+  // ---------------------------------------------------------------------------
+  // Speed limit — exponential slider embedded in Defaults page
+  // ---------------------------------------------------------------------------
+
+  /// Convert MB/s to slider position (0–100).
+  /// 0 = unlimited, 1–20 = 1–20 MB/s (linear), 21–100 = exponential to 500 MB/s.
+  int _speedMbpsToPosition(double mbps) {
+    if (mbps <= 0) return 0;
+    if (mbps <= 20) return mbps.round().clamp(1, 20);
+    final t = math.log(mbps / 20.0) / math.log(500.0 / 20.0);
+    return (21 + t * 80).round().clamp(21, 100);
+  }
+
+  /// Convert slider position (0–100) back to MB/s.
+  double _speedPositionToMbps(int pos) {
+    if (pos <= 0) return 0;
+    if (pos <= 20) return pos.toDouble();
+    final t = (pos - 20) / 80.0;
+    return 20.0 * math.pow(500.0 / 20.0, t);
+  }
+
+  /// Human-readable label for a slider position.
+  String _speedPositionLabel(int pos) {
+    if (pos <= 0) return 'Unlimited';
+    final mbps = _speedPositionToMbps(pos);
+    if (mbps < 1000) return '${mbps.toStringAsFixed(1)} MB/s';
+    return '${(mbps / 1000).toStringAsFixed(1)} GB/s';
+  }
+
+  Widget _buildSpeedSection(DownloadSettings local, StateSetter setLocal) {
+    // _speedLimitKbps is in KB/s — convert to MB/s for the slider
+    final speedMbps = _speedLimitKbps / 1024;
+    final sliderPos = _speedMbpsToPosition(speedMbps).toDouble();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _label('Speed limit'),
+      Row(children: [
+        Icon(Icons.speed, color: context.ac.accentFrost, size: 22),
+        const SizedBox(width: 8),
+        Text(_speedPositionLabel(sliderPos.toInt()),
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: context.ac.accentFrost)),
+      ]),
+      const SizedBox(height: 8),
+      SliderTheme(
+          data: SliderThemeData(
+              activeTrackColor: context.ac.accentFrost,
+              inactiveTrackColor: context.ac.surfaceElevated,
+              thumbColor: context.ac.accentFrost,
+              overlayColor: context.ac.accentFrost.withValues(alpha: 0.14)),
+          child: Slider(
+              value: sliderPos.clamp(0, 100),
+              min: 0,
+              max: 100,
+              divisions: 100,
+              label: _speedPositionLabel(sliderPos.toInt()),
+              onChanged: (v) {
+                final pos = v.round();
+                final mbps = _speedPositionToMbps(pos);
+                // Upstream expects KB/s
+                widget.onSpeedLimitChanged(mbps * 1024);
+                setLocal(() {});
+              })),
+      Text('Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)',
+          style: TextStyle(fontSize: 10, color: context.ac.textTertiary)),
+    ]);
   }
 
   Widget _buildAdblockPage() {
@@ -495,9 +529,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Block popups'),
                   subtitle: Text(
                       local.popupBlockingEnabled
-                          ? 'Programmatic popups are blocked'
-                          : 'Popups can open normally',
-                      style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                          ? 'Block popups Aurora didn\'t expect. Turn off to allow sites to open popups.'
+                          : 'Let sites open popups when you tap a link. Turn on to block unexpected ones.',
+                      style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                   value: local.popupBlockingEnabled,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(popupBlockingEnabled: v));
@@ -508,9 +542,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Block invisible redirects'),
                   subtitle: Text(
                       local.invisibleRedirectBlockingEnabled
-                          ? 'Script redirects (location, meta-refresh) ask before navigating'
-                          : 'Script redirects navigate normally',
-                      style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                          ? 'Intercept redirects and ask before navigating. Use this to avoid being sent to unexpected pages.'
+                          : 'Let redirects navigate without asking. Turn on if a site keeps sending you away.',
+                      style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                   value: local.invisibleRedirectBlockingEnabled,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(invisibleRedirectBlockingEnabled: v));
@@ -521,9 +555,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: const Text('Per-site allowlist'),
                 subtitle: Text(
                     local.adblockAllowlist.isEmpty
-                        ? 'No sites are allowlisted. Manage allowlist per-site from the browser toolbar shield icon.'
+                        ? 'No sites are allowlisted. Tap the shield in the browser toolbar to allowlist a site.'
                         : '${local.adblockAllowlist.length} site${local.adblockAllowlist.length == 1 ? "" : "s"} allowlisted',
-                    style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                    style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                 trailing: local.adblockAllowlist.isEmpty
                     ? null
                     : TextButton(
@@ -541,7 +575,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Sources (${local.adblockFilterSources.length})',
-                      style: TextStyle(fontWeight: FontWeight.w600, color: AuroraColors.text)),
+                      style: TextStyle(fontWeight: FontWeight.w600, color: context.ac.textPrimary)),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -606,9 +640,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   )),
               const SizedBox(height: 16),
               Text(
-                  'Manual rules: ${local.manualAdBlockRules.length} network, '
-                  '${local.manualCosmeticRules.length} cosmetic',
-                  style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
+                  'Custom rules: ${local.manualAdBlockRules.length} network filters, '
+                  '${local.manualCosmeticRules.length} cosmetic filters',
+                  style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
             ])),
           ],
         ),
@@ -809,7 +843,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 16),
               SwitchListTile(
                 title: const Text('In-app snackbar alerts'),
-                subtitle: const Text('Show slide-up temporary notifications at the bottom of the screen'),
+                subtitle: const Text('Show slide-up alerts for queue events. Use this when you want to glance at progress without leaving the browser.'),
                 value: _settings.showSnackbars,
                 onChanged: (v) {
                   setLocal(() {});
@@ -975,46 +1009,52 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
               const SizedBox(height: 16),
-              Text('Per-site UA overrides',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AuroraColors.accent)),
+              Text('Per-site browser identity overrides',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.ac.accentFrost)),
               const SizedBox(height: 8),
               // List of current overrides
               if (localSiteUas.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text('No overrides configured.',
-                      style: TextStyle(fontSize: 13, color: AuroraColors.mutedText)),
+                  child: Text('No site-specific overrides yet. Tap "Add override" to create one.',
+                      style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
                 )
               else
-                ...localSiteUas.entries.map((entry) {
-                  final host = entry.key;
-                  final profile = entry.value;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(host,
-                              style: TextStyle(fontSize: 13, color: AuroraColors.text)),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(': $profile',
-                            style: TextStyle(fontSize: 12, color: AuroraColors.mutedText)),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 16),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                          onPressed: () {
-                            localSiteUas.remove(host);
-                            _update(_settings.copyWith(
-                              siteUserAgents: Map<String, String>.from(localSiteUas),
-                            ));
-                          },
-                        ),
-                      ],
-                    ),
-                  );
-                }),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: localSiteUas.entries.length,
+                  itemBuilder: (context, index) {
+                    final entry = localSiteUas.entries.elementAt(index);
+                    final host = entry.key;
+                    final profile = entry.value;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(host,
+                                style: TextStyle(fontSize: 13, color: context.ac.textPrimary)),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(': $profile',
+                              style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            onPressed: () {
+                              localSiteUas.remove(host);
+                              _update(_settings.copyWith(
+                                siteUserAgents: Map<String, String>.from(localSiteUas),
+                              ));
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               const SizedBox(height: 8),
               // Add new override button
               TextButton.icon(
@@ -1035,7 +1075,7 @@ class _SettingsPageState extends State<SettingsPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add UA Override'),
+        title: const Text('Add browser identity override'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1092,15 +1132,15 @@ class _SettingsPageState extends State<SettingsPage> {
           Panel(child: Column(
             children: [
               Text('Aurora Downloader',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AuroraColors.text)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.1.9', style: TextStyle(fontSize: 13, color: AuroraColors.mutedText)),
+              Text('v1.1.9', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
-              Text('Android download manager with segmented HTTP, HLS, torrent, browser sniffing, and Google Drive sync.',
-                  style: TextStyle(fontSize: 13, color: AuroraColors.mutedText)),
+              Text('Android download manager with segmented downloads, streaming video, torrents, in-browser media detection, and Google Drive sync.',
+                  style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 24),
-              Text('Built with Flutter, libtorrent, and the Nord palette.',
-                  style: TextStyle(fontSize: 12, color: AuroraColors.mutedDeep)),
+              Text('Built with Flutter and the Nord color palette.',
+                  style: TextStyle(fontSize: 12, color: context.ac.textTertiary)),
             ],
           )),
           const SizedBox(height: 16),
@@ -1109,10 +1149,10 @@ class _SettingsPageState extends State<SettingsPage> {
               const BatteryOptimizationTile(),
               const Divider(height: 1, indent: 56),
               ListTile(
-                leading: Icon(Icons.monitor_heart_outlined, color: AuroraColors.accent),
+                leading: Icon(Icons.monitor_heart_outlined, color: context.ac.accentFrost),
                 title: const Text('Diagnostics'),
                 subtitle: const Text('View, filter, and export app logs'),
-                trailing: const Icon(Icons.chevron_right, color: AuroraColors.mutedText),
+                trailing: Icon(Icons.chevron_right, color: context.ac.textSecondary),
                 onTap: () => _openPage(const DiagnosticsPage()),
               ),
             ],
@@ -1138,31 +1178,31 @@ class _SettingsPageState extends State<SettingsPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: AuroraColors.glassSurface,
+        color: context.ac.glassSurface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AuroraColors.glassBorder),
+        border: Border.all(color: context.ac.glassBorder),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<DownloadLinkBehavior>(
           value: local.downloadLinkBehavior,
           isExpanded: true,
-          icon: Icon(Icons.expand_more, color: AuroraColors.mutedText),
+          icon: Icon(Icons.expand_more, color: context.ac.textSecondary),
           items: const [
             DropdownMenuItem(
               value: DownloadLinkBehavior.capture,
-              child: Text('Capture to tray (review before download)'),
+              child: Text('Save to tray. Aurora keeps a list so you can pick which to download later.'),
             ),
             DropdownMenuItem(
               value: DownloadLinkBehavior.autoDownload,
-              child: Text('Download directly'),
+              child: Text('Download right away. Skip the tray and start fetching immediately.'),
             ),
             DropdownMenuItem(
               value: DownloadLinkBehavior.ask,
-              child: Text('Ask each time'),
+              child: Text('Ask each time Aurora spots media. Best when you download a mix of stuff.'),
             ),
             DropdownMenuItem(
               value: DownloadLinkBehavior.block,
-              child: Text('Block all downloads'),
+              child: Text('Block downloads from this site. Aurora will ignore every media URL.'),
             ),
           ],
           onChanged: (v) {
@@ -1182,7 +1222,7 @@ class _SettingsPageState extends State<SettingsPage> {
           style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: AuroraColors.text)),
+              color: context.ac.textPrimary)),
     );
   }
 
@@ -1191,10 +1231,10 @@ class _SettingsPageState extends State<SettingsPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SliderTheme(
           data: SliderThemeData(
-              activeTrackColor: AuroraColors.accent,
-              inactiveTrackColor: AuroraColors.surfaceVariant,
-              thumbColor: AuroraColors.accent,
-              overlayColor: AuroraColors.accent.withValues(alpha: 0.14)),
+              activeTrackColor: context.ac.accentFrost,
+              inactiveTrackColor: context.ac.surfaceElevated,
+              thumbColor: context.ac.accentFrost,
+              overlayColor: context.ac.accentFrost.withValues(alpha: 0.14)),
           child: Slider(
               value: value.clamp(min, max),
               min: min,
@@ -1205,8 +1245,8 @@ class _SettingsPageState extends State<SettingsPage> {
       Text(label,
           style: TextStyle(
               fontSize: 12,
-              color: AuroraColors.accent,
-              fontFamily: 'monospace')),
+              color: context.ac.accentFrost,
+              fontFamily: 'JetBrainsMono')),
     ]);
   }
 
@@ -1216,6 +1256,7 @@ class _SettingsPageState extends State<SettingsPage> {
       settings: _settings,
       onSettingsChanged: _update,
       libraryUpdateNotifier: widget.libraryUpdateNotifier,
+      autoBackupService: widget.autoBackupService,
     );
   }
 }
@@ -1285,12 +1326,12 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                       children: [
                         Text('Connected as ${_state.account ?? "Unknown"}',
                             style: TextStyle(
-                                color: AuroraColors.accent, fontSize: 13)),
+                                color: context.ac.accentFrost, fontSize: 13)),
                         if (_state.errorMessage != null) ...[
                           const SizedBox(height: 8),
                           Text(_state.errorMessage!,
                               style: TextStyle(
-                                  color: AuroraColors.nordRed,
+                                  color: context.ac.statusError,
                                   fontSize: 12)),
                         ],
                         const SizedBox(height: 16),
@@ -1309,7 +1350,7 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                               onPressed: () => widget.driveSyncService
                                   .setDestinationFolder(
                                       widget.folderController.text),
-                              child: const Text('Set')),
+                              child: const Text('Set folder')),
                         ]),
                         const SizedBox(height: 12),
                         SwitchListTile(
@@ -1323,7 +1364,7 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                   : Column(children: [
                       Text('Link Google Drive to auto-upload completed downloads.',
                           style: TextStyle(
-                              color: AuroraColors.mutedText, fontSize: 13)),
+                              color: context.ac.textSecondary, fontSize: 13)),
                       const SizedBox(height: 16),
                       SizedBox(
                           width: double.infinity,
@@ -1344,6 +1385,7 @@ class BackupPage extends StatefulWidget {
   final DownloadSettings settings;
   final ValueChanged<DownloadSettings> onSettingsChanged;
   final ValueNotifier<int> libraryUpdateNotifier;
+  final AutoBackupService autoBackupService;
 
   const BackupPage({
     super.key,
@@ -1351,6 +1393,7 @@ class BackupPage extends StatefulWidget {
     required this.settings,
     required this.onSettingsChanged,
     required this.libraryUpdateNotifier,
+    required this.autoBackupService,
   });
 
   @override
@@ -1403,10 +1446,6 @@ class _BackupPageState extends State<BackupPage> {
     AuroraSnackbar.show(
       context,
       message,
-      builder: (text) => SnackBar(
-        content: Text(text, style: const TextStyle(color: AuroraColors.text)),
-        backgroundColor: AuroraColors.surfaceVariant,
-      ),
     );
   }
 
@@ -1444,9 +1483,9 @@ class _BackupPageState extends State<BackupPage> {
       widget.onSettingsChanged(widget.settings.copyWith(lastBackupTimestamp: now));
 
       await _loadLocalBackups();
-      _showSnack('Backup saved: ${p.basename(file.path)}');
+      _showSnack('Done \u2014 backup saved as ${p.basename(file.path)}');
     } catch (error) {
-      _showSnack('Export failed: $error');
+      _showSnack('Couldn\'t export backup. $error. Check storage and try again.');
     }
   }
 
@@ -1504,59 +1543,59 @@ class _BackupPageState extends State<BackupPage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(
                             Icons.file_download_outlined,
-                            color: AuroraColors.accent,
+                            color: context.ac.accentFrost,
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Text(
-                            'Import Library',
+                            'Import from backup',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: AuroraColors.text,
+                              color: context.ac.textPrimary,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text)),
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary)),
                         value: importFavorites,
                         onChanged: (hasFavorites || isLegacy)
                             ? (val) => setModalState(() => importFavorites = val)
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text('Web History', style: TextStyle(color: AuroraColors.text)),
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Web History', style: TextStyle(color: context.ac.textPrimary)),
                         value: importHistory,
                         onChanged: (hasHistory || isLegacy)
                             ? (val) => setModalState(() => importHistory = val)
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text)),
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Saved Pages', style: TextStyle(color: context.ac.textPrimary)),
                         value: importSavedPages,
                         onChanged: (hasSavedPages || isLegacy)
                             ? (val) => setModalState(() => importSavedPages = val)
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text)),
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Download History (Queue)', style: TextStyle(color: context.ac.textPrimary)),
                         value: importQueue,
                         onChanged: hasQueue
                             ? (val) => setModalState(() => importQueue = val)
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text('App Settings', style: TextStyle(color: AuroraColors.text)),
+                        activeColor: context.ac.accentFrost,
+                        title: Text('App Settings', style: TextStyle(color: context.ac.textPrimary)),
                         value: importSettings,
                         onChanged: hasSettings
                             ? (val) => setModalState(() => importSettings = val)
@@ -1568,13 +1607,13 @@ class _BackupPageState extends State<BackupPage> {
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Cancel', style: TextStyle(color: AuroraColors.mutedText)),
+                            child: Text('Cancel', style: TextStyle(color: context.ac.textSecondary)),
                           ),
                           const SizedBox(width: 8),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AuroraColors.accent,
-                              foregroundColor: AuroraColors.background,
+                              backgroundColor: context.ac.accentFrost,
+                              foregroundColor: context.ac.surfaceField,
                             ),
                             onPressed: (!importFavorites &&
                                     !importHistory &&
@@ -1878,15 +1917,15 @@ class _BackupPageState extends State<BackupPage> {
       }
 
       if (summary.isEmpty) {
-        _showSnack('Import completed (no new items found).');
+        _showSnack('Done \u2014 import completed. No new items found.');
       } else {
-        _showSnack('Imported: ${summary.join(", ")}.');
+        _showSnack('Done \u2014 imported ${summary.join(", ")}.');
       }
 
       widget.libraryUpdateNotifier.value++;
       await _loadLibrary();
     } catch (error) {
-      _showSnack('Import failed: $error');
+      _showSnack('Couldn\'t import backup. $error. Make sure the file is a valid backup.');
     }
   }
 
@@ -1894,9 +1933,9 @@ class _BackupPageState extends State<BackupPage> {
     try {
       await PublicDownloadsService.deleteBackupFile(uri);
       await _loadLocalBackups();
-      _showSnack('Backup deleted.');
+      _showSnack('Done \u2014 backup deleted.');
     } catch (e) {
-      _showSnack('Failed to delete backup: $e');
+      _showSnack('Couldn\'t delete backup. $e. Try again.');
     }
   }
 
@@ -1914,7 +1953,7 @@ class _BackupPageState extends State<BackupPage> {
         } catch (_) {}
       }
     } catch (e) {
-      _showSnack('Sharing failed: $e');
+      _showSnack('Couldn\'t share backup. $e. Try again.');
     }
   }
 
@@ -1928,7 +1967,7 @@ class _BackupPageState extends State<BackupPage> {
         } catch (_) {}
       }
     } catch (error) {
-      _showSnack('Restore failed: $error');
+      _showSnack('Couldn\'t restore backup. $error. The file may be corrupted.');
     }
   }
 
@@ -1963,62 +2002,62 @@ class _BackupPageState extends State<BackupPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text(
-                          'Export Backup',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AuroraColors.text),
+                        Text(
+                          'Export your data',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: context.ac.textPrimary),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'Select categories to include in your backup file:',
-                          style: TextStyle(fontSize: 12, color: AuroraColors.mutedText),
+                        Text(
+                          'Pick what to include in the backup file:',
+                          style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                         ),
                         const SizedBox(height: 12),
                         SwitchListTile(
-                          activeColor: AuroraColors.accent,
-                          title: const Text('Favorites / Bookmarks', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
                             '${_library?.favorites.length ?? 0} favorites, ${_library?.folders.length ?? 0} folders',
-                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportFavorites,
                           onChanged: (v) => setState(() => exportFavorites = v),
                         ),
                         SwitchListTile(
-                          activeColor: AuroraColors.accent,
-                          title: const Text('Web History', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Web History', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
                             '${_library?.history.length ?? 0} entries',
-                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportHistory,
                           onChanged: (v) => setState(() => exportHistory = v),
                         ),
                         SwitchListTile(
-                          activeColor: AuroraColors.accent,
-                          title: const Text('Saved Pages', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Saved Pages', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
                             '${_library?.savedPages.length ?? 0} pages',
-                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportSavedPages,
                           onChanged: (v) => setState(() => exportSavedPages = v),
                         ),
                         SwitchListTile(
-                          activeColor: AuroraColors.accent,
-                          title: const Text('Download History (Queue)', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Download History (Queue)', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
                             '${widget.downloadQueue.allTasks.length} tasks',
-                            style: const TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportQueue,
                           onChanged: (v) => setState(() => exportQueue = v),
                         ),
                         SwitchListTile(
-                          activeColor: AuroraColors.accent,
-                          title: const Text('App Settings', style: TextStyle(color: AuroraColors.text, fontSize: 13)),
-                          subtitle: const Text(
-                            'Limits, search engine, adblock toggles',
-                            style: TextStyle(color: AuroraColors.mutedDeep, fontSize: 11),
+                          activeColor: context.ac.accentFrost,
+                          title: Text('App Settings', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                          subtitle: Text(
+                            'Download defaults, search engine, adblock settings, and more',
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportSettings,
                           onChanged: (v) => setState(() => exportSettings = v),
@@ -2026,10 +2065,10 @@ class _BackupPageState extends State<BackupPage> {
                         const SizedBox(height: 12),
                         ElevatedButton.icon(
                           icon: const Icon(Icons.share_rounded),
-                          label: const Text('Export Backup File'),
+                          label: const Text('Export backup file'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AuroraColors.accent,
-                            foregroundColor: AuroraColors.background,
+                            backgroundColor: context.ac.accentFrost,
+                            foregroundColor: context.ac.surfaceField,
                           ),
                           onPressed: (!exportFavorites &&
                                   !exportHistory &&
@@ -2047,20 +2086,104 @@ class _BackupPageState extends State<BackupPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text(
-                          'Import Backup',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AuroraColors.text),
+                        Text(
+                          'Import your data',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: context.ac.textPrimary),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'Restore your bookmarks, history, settings, or tasks from a previously saved JSON or 1DMBak backup file.',
-                          style: TextStyle(fontSize: 12, color: AuroraColors.mutedText),
+                        Text(
+                          'Restore bookmarks, history, settings, or downloads from a backup file.',
+                          style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton.icon(
                           icon: const Icon(Icons.file_download_outlined),
-                          label: const Text('Import Backup File'),
+                          label: const Text('Choose backup file'),
                           onPressed: _importBackup,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  PanelHeader(icon: Icons.schedule_rounded, title: 'Auto Backup'),
+                  const SizedBox(height: 8),
+                  Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Enable auto backup', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                          subtitle: Text(
+                            'Aurora saves your data to your Downloads folder automatically.',
+                            style: TextStyle(fontSize: 11, color: context.ac.textSecondary),
+                          ),
+                          value: widget.settings.autoBackupEnabled,
+                          onChanged: (enabled) {
+                            setState(() {
+                              widget.onSettingsChanged(
+                                widget.settings.copyWith(autoBackupEnabled: enabled),
+                              );
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<AutoBackupInterval>(
+                          value: widget.settings.autoBackupInterval,
+                          dropdownColor: context.ac.surfaceElevated,
+                          decoration: InputDecoration(
+                            labelText: 'Backup frequency',
+                            labelStyle: TextStyle(color: context.ac.textSecondary, fontSize: 12),
+                          ),
+                          items: AutoBackupInterval.values
+                              .map((interval) => DropdownMenuItem(
+                                    value: interval,
+                                    child: Text(interval.label, style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                                  ))
+                              .toList(),
+                          onChanged: (interval) {
+                            if (interval == null) return;
+                            setState(() {
+                              widget.onSettingsChanged(
+                                widget.settings.copyWith(autoBackupInterval: interval),
+                              );
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.save_rounded, size: 16),
+                                label: const Text('Back up now', style: TextStyle(fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: context.ac.accentFrost,
+                                  foregroundColor: context.ac.surfaceField,
+                                ),
+                                onPressed: () async {
+                                  final result = await widget.autoBackupService.performBackup();
+                                  _showSnack(result.message);
+                                  await _loadLocalBackups();
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.restore_rounded, size: 16),
+                                label: const Text('Restore', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: context.ac.accentFrost,
+                                  side: BorderSide(color: context.ac.accentFrost),
+                                ),
+                                onPressed: () async {
+                                  await _showRestoreDialog();
+                                },
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -2071,17 +2194,17 @@ class _BackupPageState extends State<BackupPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'Local Backups',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: AuroraColors.text,
+                          color: context.ac.textPrimary,
                         ),
                       ),
                       TextButton.icon(
-                        icon: const Icon(Icons.refresh, size: 16, color: AuroraColors.accent),
-                        label: const Text('Scan', style: TextStyle(color: AuroraColors.accent, fontSize: 12)),
+                        icon: Icon(Icons.refresh, size: 16, color: context.ac.accentFrost),
+                        label: Text('Scan', style: TextStyle(color: context.ac.accentFrost, fontSize: 12)),
                         onPressed: _loadLocalBackups,
                       ),
                     ],
@@ -2099,14 +2222,14 @@ class _BackupPageState extends State<BackupPage> {
                             Icon(
                               Icons.folder_open_outlined,
                               size: 40,
-                              color: AuroraColors.mutedDeep,
+                              color: context.ac.textTertiary,
                             ),
                             const SizedBox(height: 8),
-                            const Text(
-                              'No backups found.',
+                            Text(
+                              'No backups found yet. Export one first from the panel above.',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: AuroraColors.mutedText,
+                                color: context.ac.textSecondary,
                               ),
                             ),
                           ],
@@ -2126,25 +2249,25 @@ class _BackupPageState extends State<BackupPage> {
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 4),
                           color: isAuto
-                              ? AuroraColors.surfaceVariant.withOpacity(0.3)
-                              : AuroraColors.surface,
+                              ? context.ac.surfaceElevated.withOpacity(0.3)
+                              : context.ac.surfacePanel,
                           child: ListTile(
                             leading: Icon(
                               isAuto ? Icons.auto_mode_rounded : Icons.backup_rounded,
-                              color: isAuto ? Colors.cyanAccent : AuroraColors.accent,
+                              color: isAuto ? Colors.cyanAccent : context.ac.accentFrost,
                             ),
                             title: Text(
                               isAuto ? 'Auto Backup' : 'Manual Backup',
-                              style: const TextStyle(
-                                color: AuroraColors.text,
+                              style: TextStyle(
+                                color: context.ac.textPrimary,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             subtitle: Text(
                               '$formattedTime • ${_formatFileSize(size)}',
-                              style: const TextStyle(
-                                color: AuroraColors.mutedText,
+                              style: TextStyle(
+                                color: context.ac.textSecondary,
                                 fontSize: 11,
                               ),
                             ),
@@ -2152,7 +2275,7 @@ class _BackupPageState extends State<BackupPage> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.share_rounded, size: 18, color: AuroraColors.mutedText),
+                                  icon: Icon(Icons.share_rounded, size: 18, color: context.ac.textSecondary),
                                   onPressed: () => _shareBackup(uri, name),
                                 ),
                                 IconButton(
@@ -2174,6 +2297,64 @@ class _BackupPageState extends State<BackupPage> {
             ),
     );
   }
+
+  Future<void> _showRestoreDialog() async {
+    final backups = await widget.autoBackupService.listBackups();
+    if (!mounted) return;
+    if (backups.isEmpty) {
+      _showSnack('No backups found.');
+      return;
+    }
+    // Group files by snapshot timestamp.
+    final byTimestamp = <String, List<AutoBackupFile>>{};
+    for (final file in backups) {
+      byTimestamp.putIfAbsent(file.timestamp, () => []).add(file);
+    }
+    final timestamps = byTimestamp.keys.toList()
+      ..sort((a, b) => b.compareTo(a)); // newest first
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restore from backup'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: timestamps.length,
+            itemBuilder: (_, index) {
+              final ts = timestamps[index];
+              final count = byTimestamp[ts]!.length;
+              return ListTile(
+                title: Text(ts.replaceAll('_', ' ')),
+                subtitle: Text('$count files'),
+                onTap: () async {
+                  Navigator.of(dialogContext).pop();
+                  final restored =
+                      await widget.autoBackupService.restoreBackup(ts);
+                  if (mounted) {
+                    setState(() {});
+                    _showSnack(restored > 0
+                        ? 'Done \u2014 restored $restored files. Restart the app to apply.'
+                        : 'Couldn\'t restore backup. It may be corrupted. Try a different snapshot.');
+                    await _loadLocalBackups();
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _pad(int n) => n.toString().padLeft(2, '0');
 }
 
 class BatteryOptimizationTile extends StatefulWidget {
@@ -2206,18 +2387,18 @@ class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
   Widget build(BuildContext context) {
     if (_isExempt) {
       return ListTile(
-        leading: const Icon(Icons.battery_saver_rounded, color: AuroraColors.accent),
+        leading: Icon(Icons.battery_saver_rounded, color: context.ac.accentFrost),
         title: const Text('Battery Optimization'),
         subtitle: const Text('Aurora is optimized for background downloads'),
-        trailing: const Icon(Icons.check_circle_outline, color: AuroraColors.accent),
+        trailing: Icon(Icons.check_circle_outline, color: context.ac.accentFrost),
       );
     }
 
     return ListTile(
-      leading: const Icon(Icons.battery_alert_rounded, color: AuroraColors.accentAmber),
-      title: const Text('Never Sleep / Background Downloader'),
-      subtitle: const Text('Aurora may be killed in background. Tap to fix'),
-      trailing: const Icon(Icons.warning_amber_rounded, color: AuroraColors.accentAmber),
+      leading: Icon(Icons.battery_alert_rounded, color: context.ac.accentAmber),
+      title: const Text('Allow background downloads'),
+      subtitle: const Text('Aurora may pause downloads in the background. Tap to request an exception.'),
+      trailing: Icon(Icons.warning_amber_rounded, color: context.ac.accentAmber),
       onTap: () async {
         await DownloadForegroundService.requestBatteryOptimizationExemption();
         // Check again after a delay in case the user approved it

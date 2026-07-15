@@ -7,7 +7,7 @@ class IdmBackupParser {
   static Future<Map<String, dynamic>> parse(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) {
-      throw FileSystemException("Backup file not found", filePath);
+      throw FileSystemException("Could not find that backup file at the given path.", filePath);
     }
 
     final data = await file.readAsBytes();

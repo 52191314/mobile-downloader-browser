@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../sniffer/models/sniffed_media.dart' show MediaType;
+import '../../theme/aurora_palette.dart';
 
 class MediaTypeChip extends StatelessWidget {
   final MediaType type;
@@ -15,22 +16,33 @@ class MediaTypeChip extends StatelessWidget {
   });
 
   String get _label {
-    final name = type.name;
-    return name[0].toUpperCase() + name.substring(1);
+    return switch (type) {
+      MediaType.video => 'Video file',
+      MediaType.audio => 'Audio file',
+      MediaType.image => 'Image',
+      MediaType.document => 'Document',
+      MediaType.archive => 'Archive',
+      MediaType.torrent => 'Torrent',
+      MediaType.subtitle => 'Subtitles',
+      MediaType.executable => 'App',
+      MediaType.playlist => 'Streaming video',
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final ac = context.ac;
+    final color = context.auroraColorScheme.primary;
     return FilterChip(
       selected: !disabled,
       onSelected: (selected) => onChanged(!selected),
       label: Text(_label),
-      selectedColor: color.withValues(alpha: 0.2),
+      selectedColor: color.withValues(alpha: 0.16),
       checkmarkColor: color,
-      side: BorderSide(color: disabled ? Colors.white24 : color),
+      side: BorderSide(color: disabled ? ac.borderHairline : color),
       labelStyle: TextStyle(
-        color: disabled ? Colors.white54 : Colors.white,
+        fontFamily: 'Inter',
+        color: disabled ? ac.textDisabled : ac.textPrimary,
         fontSize: 12,
       ),
     );

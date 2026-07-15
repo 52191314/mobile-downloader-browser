@@ -3,21 +3,27 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../downloader/downloader.dart';
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_tokens.dart';
 
 class QueueProgressPainter extends CustomPainter {
   final List<DownloadTask> tasks;
+  final Color trackColor;
+  final Color fillColor;
 
-  QueueProgressPainter(this.tasks);
+  const QueueProgressPainter(
+    this.tasks, {
+    required this.trackColor,
+    required this.fillColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final trackPaint = Paint()
-      ..color = AuroraColors.border
+      ..color = trackColor
       ..strokeWidth = 8
       ..strokeCap = StrokeCap.round;
     final fillPaint = Paint()
-      ..color = AuroraColors.accent
+      ..color = fillColor
       ..strokeWidth = 8
       ..strokeCap = StrokeCap.round;
 
@@ -36,6 +42,21 @@ class QueueProgressPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant QueueProgressPainter oldDelegate) {
-    return oldDelegate.tasks != tasks;
+    return oldDelegate.tasks != tasks ||
+        oldDelegate.trackColor != trackColor ||
+        oldDelegate.fillColor != fillColor;
   }
+}
+
+/// Convenience factory that resolves the painter colors from a palette.
+class QueueProgressPainterFactory {
+  static QueueProgressPainter forPalette({
+    required List<DownloadTask> tasks,
+    required AColors palette,
+  }) =>
+      QueueProgressPainter(
+        tasks,
+        trackColor: palette.borderStrong,
+        fillColor: palette.accentFrost,
+      );
 }

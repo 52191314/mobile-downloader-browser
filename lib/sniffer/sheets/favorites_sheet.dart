@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../browser_library.dart';
 import '../models/browser_tab.dart';
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 
 void showFavoritesSheet(
   BuildContext context, {
@@ -119,7 +119,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
     final name = await showDialog<String>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('New folder'),
+        title: const Text('Create folder'),
         content: TextField(
           controller: nameController,
           autofocus: true,
@@ -170,7 +170,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.star, color: AuroraColors.accentAmber),
+                Icon(Icons.star, color: context.ac.accentAmber),
                 const SizedBox(width: 8),
                 const Text(
                   'Favorites',
@@ -263,8 +263,8 @@ Widget buildFavoritesFolderList(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
-          'Nothing saved in ${folder.name}.',
-          style: const TextStyle(color: AuroraColors.mutedText),
+          'No bookmarks in ${folder.name}.',
+          style: TextStyle(color: sheetContext.ac.textSecondary),
         ),
       ),
     );
@@ -274,7 +274,7 @@ Widget buildFavoritesFolderList(
       itemBuilder: (context, i) {
         final fav = items[i];
         return ListTile(
-          leading: const Icon(Icons.star, color: AuroraColors.accentAmber),
+          leading: Icon(Icons.star, color: sheetContext.ac.accentAmber),
           title: Text(fav.title, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,14 +300,14 @@ Widget buildFavoritesFolderList(
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: AuroraColors.surfaceVariant,
+                            color: sheetContext.ac.surfaceElevated,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             tag,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
-                              color: AuroraColors.accent,
+                              color: sheetContext.ac.accentFrost,
                             ),
                           ),
                         ),

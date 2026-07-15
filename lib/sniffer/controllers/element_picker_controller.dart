@@ -77,7 +77,7 @@ class ElementPickerController {
     } catch (_) {}
 
     if (autoCancelled) {
-      _showSnack('Element picker auto-cancelled.');
+      _showSnack('Picker timed out after 30 seconds. Tap "Block Element" to try again.');
     }
   }
 
@@ -209,10 +209,10 @@ class ElementPickerController {
         );
       } catch (_) {}
 
-      _showSnack('Page element blocks reset. Reloading…');
+      _showSnack('Element blocks cleared. Reloading page…');
       await tab.controller.reload();
     } catch (_) {
-      _showSnack('Failed to reset blocks.');
+      _showSnack('Could not reset element blocks. Try again.');
     }
   }
 

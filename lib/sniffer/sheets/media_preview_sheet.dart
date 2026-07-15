@@ -13,10 +13,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/sniffer/aurora_video_player.dart';
 import 'package:aurora_downloader/sniffer/media_preview_widget.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
-import 'package:aurora_downloader/sniffer/pip_player_screen.dart';
 
 /// Resolves the live URL/headers for [media] and shows either the
 /// in-app PIP player (video/audio) or the read-only media preview
@@ -75,12 +75,15 @@ Future<void> showMediaPreview(
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => PipPlayerScreen(
+        builder: (_) => AuroraVideoPlayer(
           url: finalMedia.url,
           title: finalMedia.name.isNotEmpty
               ? finalMedia.name
               : 'Sniffed media',
           headers: finalMedia.headers,
+          sourcePageUrl: finalMedia.sourcePageUrl,
+          onDownload: () => Navigator.pop(context, 'download'),
+          onFavorite: (url) => _addToFavorites(context, url, finalMedia.name),
         ),
       ),
     );
@@ -98,4 +101,14 @@ Future<void> showMediaPreview(
   if (result == 'download') {
     await onAddToQueue(finalMedia);
   }
+}
+
+Future<void> _addToFavorites(BuildContext context, String url, String name) async {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('Added "$name" to favorites'),
+      duration: const Duration(seconds: 1),
+    ),
+  );
 }

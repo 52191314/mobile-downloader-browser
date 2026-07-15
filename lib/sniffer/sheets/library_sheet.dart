@@ -156,7 +156,7 @@ class _LibrarySheetContentState<T> extends State<_LibrarySheetContent<T>> {
                       child: Text(
                         _searchQuery.isEmpty
                             ? widget.emptyText
-                            : 'No matching items found.',
+                            : 'No items match your search.',
                         style: const TextStyle(color: Colors.grey),
                       ),
                     ),

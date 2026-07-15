@@ -20,7 +20,7 @@ void showHistorySheet(
   showLibrarySheet<BrowserHistoryEntry>(
     context,
     title: 'History',
-    emptyText: 'No history yet.',
+    emptyText: 'No history yet. Browsed pages appear here automatically.',
     items: library.history,
     titleFor: (item) => item.title,
     subtitleFor: (item) => item.url,

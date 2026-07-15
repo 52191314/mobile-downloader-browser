@@ -347,7 +347,7 @@ class DashRepresentation {
       }
       return '${(bandwidth / 1000000).toStringAsFixed(1)} Mbps';
     }
-    return 'DASH variant';
+    return 'Dash stream';
   }
 }
 

@@ -31,11 +31,15 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
   http: ^1.3.0
   crypto: ^3.0.6
   path_provider: ^2.1.5
   path: ^1.9.1
   flutter_inappwebview: ^6.1.5
+  dynamic_color: ^1.7.0
   libtorrent_flutter: ^1.8.5
   google_sign_in: ^7.2.0
   googleapis: ^15.0.0
@@ -47,6 +51,8 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   encrypt: ^5.0.3
   ffi: ^2.1.3
+  qr_flutter: ^4.1.0
+  animations: ^2.0.11
 
 dev_dependencies:
   flutter_test:
@@ -76,31 +82,16 @@ flutter:
   #   - images/a_dot_ham.jpeg
   assets:
     - assets/browser_guard.js
-    - assets/adblock_cosmetic.js
-    - assets/scriptlets.js
+    - assets/brand/aurora-logo-master.png
+    - assets/brand/aurora-logo-red.png
 
-  # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
-
-  # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
-
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+  # Custom fonts — bundled locally (no network dependency) so the app works
+  # fully offline. Inter is the UI typeface; JetBrains Mono is used for
+  # technical data (speeds, byte counts, URLs, paths).
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono.ttf

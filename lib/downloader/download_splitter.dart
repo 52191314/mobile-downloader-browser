@@ -703,7 +703,7 @@ class DownloadSplitter implements BaseDownloader {
         final mergedPath = task.savePath;
         if (remuxTsToMp4 && p.extension(mergedPath).toLowerCase() == '.ts') {
           final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
-          task.errorMessage = 'Converting to MP4...';
+          task.errorMessage = 'Converting .ts to .mp4 so it plays in any app.';
           _emitTask();
           final remux = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
           if (remux.success) {
@@ -721,7 +721,7 @@ class DownloadSplitter implements BaseDownloader {
               eventType: LogEventType.error,
               taskId: task.id,
             );
-            task.errorMessage = 'Could not convert to MP4 (kept as .ts). '
+            task.errorMessage = 'Couldn\'t convert to .mp4 — keeping original .ts. '
                 '${remux.error ?? "The stream may use an unsupported codec."}';
           }
         }
@@ -1041,12 +1041,9 @@ class DownloadSplitter implements BaseDownloader {
         // Add random jitter of 0-2s to avoid thundering-herd retries.
         final jitterSecs = math.Random().nextInt(3); // 0, 1, or 2
         final wait = Duration(seconds: waitSecs + jitterSecs);
-        final thresholdLabel = minSpeedBytesPerSec > 0
-            ? '${(minSpeedBytesPerSec / 1024).toStringAsFixed(0)} KB/s threshold'
-            : 'rate limit';
         task.errorMessage =
-            '[Rate limited] Host returned 429 — waiting ${wait.inSeconds}s '
-            'before retry ${attempt + 1}/3... ($thresholdLabel)';
+            'Server asked Aurora to slow down. Waiting ${wait.inSeconds}s '
+            'before retry ${attempt + 1} of 3.';
         _emitTask();
         await Future<void>.delayed(wait);
         response = null;
@@ -1061,7 +1058,7 @@ class DownloadSplitter implements BaseDownloader {
         }
         retriedWithRefresh = true;
         try {
-          task.errorMessage = 'Token expired, refreshing...';
+          task.errorMessage = 'Access token expired. Aurora is fetching a fresh one.';
           _emitTask();
           final newUrl = await task.onTokenExpired!(forceReload: false);
           if (newUrl == null || newUrl == task.url) break;
@@ -1685,8 +1682,8 @@ class DownloadSplitter implements BaseDownloader {
         final pct = (ratio * 100).toStringAsFixed(1);
         task.failureReason = DownloadFailure.partialDownload;
         task.errorMessage =
-            '[PARTIAL:$pct] Server closed connection at ${pct}%. '
-            'Merge the partial file?';
+            'Download stopped at ${pct}%. '
+            'Try Force Merge to save what downloaded so far.';
         _emitTask();
         return;
       }
@@ -1694,8 +1691,8 @@ class DownloadSplitter implements BaseDownloader {
 
     task.failureReason = DownloadFailure.speedStall;
     task.errorMessage =
-        '[Speed stall] Speed stayed below $thresholdKbps KB/s '
-        'for ${stallTimeoutSeconds}s. Auto-retrying...';
+        'Speed dropped below $thresholdKbps KB/s. '
+        'Aurora is retrying the download.';
     // Complete all active chunk completers so Future.wait() unblocks
     for (final completer in List<Completer<void>>.from(_completers)) {
       if (!completer.isCompleted) completer.complete();

@@ -1,7 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import '../logging/aurora_log.dart';
 import 'package:ffi/ffi.dart';
 
 typedef AuroraAdblockCreateC = Pointer<Void> Function();
@@ -105,18 +104,12 @@ class AdBlockFFIBindings {
         lib = DynamicLibrary.open('libaurora_adblock.so');
       } else {
         throw UnsupportedError(
-          'Only Android supports the native adblocker .so library.',
+          'The native adblocker only runs on Android.',
         );
       }
       return AdBlockFFIBindings(lib);
     } catch (e) {
       debugPrint('Failed to load native adblocker library: $e');
-      AuroraLog.instance.error(
-        'Failed to load native adblocker library: $e',
-        category: LogCategory.native,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
       return null;
     }
   }

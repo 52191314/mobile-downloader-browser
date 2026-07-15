@@ -4,7 +4,7 @@
   // To new flutter_inappwebview API: window.flutter_inappwebview.callHandler(name, data)
   if (!window.__auroraChannelShim) {
     window.__auroraChannelShim = true;
-    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','InvisibleRedirectChannel'];
+    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','NavigationSwipeChannel'];
     for (var __i = 0; __i < __auroraChannels.length; __i++) {
       (function(__name) {
         window[__name] = {
@@ -261,7 +261,7 @@
 
   function scanMedia(root) {
     try {
-      var nodes = root.querySelectorAll('video, audio, source, a[href], img[src], iframe, script:not([src])');
+      var nodes = (root || document).querySelectorAll("a[href], video, audio, source[src], img[src], iframe[src], script");
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         if (node.tagName.toLowerCase() === 'script') {
@@ -280,74 +280,6 @@
     } catch (_) {}
   }
 
-  // --- Stealth: anti-automation detection ---
-  // Hides WebView automation markers that Cloudflare and similar WAFs
-  // check via JavaScript challenges.  Only runs once per document.
-  if (!window.__auroraStealthActive) {
-    window.__auroraStealthActive = true;
-    try {
-      // 1. navigator.webdriver → false (prevents automation detection).
-      //    Standard Chrome returns false.  Android WebView with debugging
-      //    enabled returns true — false is the correct non-automated value.
-      Object.defineProperty(navigator, 'webdriver', {
-        get: function() { return false; },
-        configurable: false
-      });
-    } catch(_) {}
-    try {
-      // 2. Remove chrome.runtime (ChromeDriver / automation artifact).
-      //    Some WAFs check for chrome.runtime to detect controlled browsers.
-      if (window.chrome) {
-        try {
-          chrome.runtime = void 0;
-          Object.defineProperty(chrome, 'runtime', {
-            get: function() { return void 0; },
-            set: function(_) {},
-            configurable: false
-          });
-        } catch(_e) { chrome.runtime = void 0; }
-        delete chrome.app;
-        delete chrome.csi;
-        delete chrome.loadTimes;
-      }
-    } catch(_) {}
-    try {
-      // 3. navigator.languages — WebView typically exposes only the system
-      //    language.  Real Chrome returns a fallback chain like
-      //    ['en-US', 'en', 'zh-CN', 'zh'].  A single language can
-      //    fingerprint WebView-based scrapers.
-      Object.defineProperty(navigator, 'languages', {
-        get: function() { return ['en-US', 'en']; },
-        configurable: false
-      });
-    } catch(_) {}
-    try {
-      // 4. navigator.hardwareConcurrency — Override to a realistic mobile value.
-      Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: function() { return 4; },
-        configurable: false
-      });
-    } catch(_) {}
-    try {
-      // 5. navigator.deviceMemory — Override to a realistic mobile value.
-      Object.defineProperty(navigator, 'deviceMemory', {
-        get: function() { return 4; },
-        configurable: false
-      });
-    } catch(_) {}
-    try {
-      // 6. Remove ChromeDriver / CDP artifacts on the document object.
-      //    Bot detectors enumerate own property names looking for
-      //    $cdc_* or $chrome_* keys injected by ChromeDriver/DevTools.
-      var _keys = Object.getOwnPropertyNames(document);
-      for (var _ki = 0; _ki < _keys.length; _ki++) {
-        if (_keys[_ki].indexOf('$cdc_') === 0 || _keys[_ki].indexOf('$chrome_') === 0) {
-          try { delete document[_keys[_ki]]; } catch(_) {}
-        }
-      }
-    } catch(_) {}
-  }
-
   // --- Re-installation gating via version counter ---
   if (window.__auroraGuardVersion > 0) return;
 
@@ -356,229 +288,126 @@
     var style = document.createElement('style');
     style.id = 'aurora-touch-callout-style';
     if (!document.getElementById('aurora-touch-callout-style')) {
-      style.textContent = 'a, img, video, audio, [href], [src] { -webkit-touch-callout: none !important; }';
+      style.textContent = 'a, img, video, audio, [href], [src] { -webkit-touch-callout: none !important; -webkit-user-select: none !important; }';
       (document.head || document.documentElement).appendChild(style);
     }
   } catch(_) {}
 
+  // --- user gesture tracking for popup blocking ---
+  // Distinguishes user-initiated window.open() (e.g. clicking a download button)
+  // from auto popups (e.g. ad popups on page load).  When the user taps, clicks,
+  // or presses a key we record the timestamp.  Any window.open() call within
+  // 3 seconds is considered user-initiated and is allowed through.
+  var __auroraLastUserGestureAt = 0;
+  document.addEventListener("touchstart", function() {
+    __auroraLastUserGestureAt = Date.now();
+  }, true);
+  document.addEventListener("mousedown", function() {
+    __auroraLastUserGestureAt = Date.now();
+  }, true);
+  document.addEventListener("keydown", function() {
+    __auroraLastUserGestureAt = Date.now();
+  }, true);
+
+  function isUserInitiated() {
+    return Date.now() - __auroraLastUserGestureAt < 3000;
+  }
+
   // --- popup blocking & window.open ---
-  var _auroraLastUserGestureAt = 0;
-  function markAuroraUserGesture() {
-    _auroraLastUserGestureAt = Date.now();
-  }
-  try {
-    ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function(evt) {
-      window.addEventListener(evt, markAuroraUserGesture, {capture: true, passive: true});
-    });
-  } catch(_) {}
-  function hasAuroraUserGesture() {
-    try {
-      if (navigator.userActivation && navigator.userActivation.isActive) return true;
-    } catch(_) {}
-    return Date.now() - _auroraLastUserGestureAt < 900;
-  }
-  function resolveAuroraUrl(url) {
-    try { return new URL(String(url), document.baseURI).href; } catch(_) {}
-    return String(url || '');
-  }
   var originalWindowOpen = window.open;
   window.open = function(url, name, specs) {
-    if (window.__auroraPopupBlockingEnabled === false) {
+    // Allow through when popup blocking is disabled OR the user triggered this
+    // by tapping/clicking (e.g. a download button that calls window.open).
+    if (window.__auroraPopupBlockingEnabled === false || isUserInitiated()) {
       if (originalWindowOpen) {
         return originalWindowOpen.apply(this, arguments);
       }
     } else {
-      if (url) {
-        try {
-          PopupBlockerChannel.postMessage(JSON.stringify({
-            url: resolveAuroraUrl(url),
-            userInitiated: hasAuroraUserGesture(),
-            sourcePageUrl: location.href
-          }));
-        } catch (_) {}
-      }
+      // Auto-popup (no user gesture) — block it.  Route the URL through the
+      // sniffer so it appears in the FAB drawer instead of showing a confusing
+      // context menu.
+      if (url) postUrl(url);
+      try { AdBlockerChannel.postMessage("popup_blocked"); } catch (_) {}
       return null;
     }
   };
 
-  // --- invisible redirect blocking (location.href, replace, assign, meta-refresh) ---
-  // Cross-origin silent redirects (ad scripts using location.href, window.location,
-  // location.replace, location.assign, or <meta http-equiv="refresh">) are intercepted.
-  // Same-origin redirects (site navigation, hash changes, same-domain buttons) pass through.
-  // The redirect is CANCELLED in JS, the URL is posted to InvisibleRedirectChannel,
-  // and the Dart side shows a snackbar: Block / Open here / Open in new tab.
-  var _invisibleRedirectGate = false;
-  function shouldInterceptRedirect(url) {
-    if (window.__auroraInvisibleRedirectBlockingEnabled === false) return false;
-    if (_invisibleRedirectGate) { _invisibleRedirectGate = false; return false; }
-    if (!url) return false;
-    try {
-      var resolved = new URL(String(url), document.baseURI);
-      // Same-origin → allow (hash changes, same-domain buttons, site nav)
-      if (resolved.host === location.host && resolved.protocol === location.protocol) return false;
-      return true; // Cross-origin → intercept
-    } catch(_) { return false; }
-  }
-
-  function postInvisibleRedirect(url, method) {
-    try {
-      InvisibleRedirectChannel.postMessage(JSON.stringify({
-        url: resolveAuroraUrl(url),
-        rawUrl: String(url),
-        method: String(method || "unknown"),
-        sourcePageUrl: location.href,
-        userInitiated: hasAuroraUserGesture()
-      }));
-    } catch(_) {}
-  }
-
-  // 1. Location.prototype.href setter (catches location.href=, location='url')
-  try {
-    var _hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
-    if (_hrefDesc && _hrefDesc.set) {
-      Object.defineProperty(Location.prototype, 'href', {
-        get: function() { return _hrefDesc.get.call(this); },
-        set: function(v) {
-          if (shouldInterceptRedirect(v)) { postInvisibleRedirect(v, 'href'); return; }
-          return _hrefDesc.set.call(this, v);
-        },
-        configurable: true,
-        enumerable: _hrefDesc.enumerable
-      });
-    }
-  } catch(_) {}
-
-  // 2. window.location setter (catches window.location='url', document.location='url')
-  try {
-    var _winLocDesc = Object.getOwnPropertyDescriptor(Window.prototype, 'location');
-    if (_winLocDesc && _winLocDesc.set) {
-      Object.defineProperty(Window.prototype, 'location', {
-        get: function() { return _winLocDesc.get.call(this); },
-        set: function(v) {
-          if (typeof v === 'string' && shouldInterceptRedirect(v)) { postInvisibleRedirect(v, 'window.location'); return; }
-          return _winLocDesc.set.call(this, v);
-        },
-        configurable: true
-      });
-    }
-  } catch(_) {}
-
-  // 3. Location.prototype.replace (catches location.replace(url))
-  try {
-    var _origReplace = Location.prototype.replace;
-    Location.prototype.replace = function(url) {
-      if (shouldInterceptRedirect(url)) { postInvisibleRedirect(url, 'replace'); return; }
-      return _origReplace.call(this, url);
-    };
-  } catch(_) {}
-
-  // 4. Location.prototype.assign (catches location.assign(url))
-  try {
-    var _origAssign = Location.prototype.assign;
-    Location.prototype.assign = function(url) {
-      if (shouldInterceptRedirect(url)) { postInvisibleRedirect(url, 'assign'); return; }
-      return _origAssign.call(this, url);
-    };
-  } catch(_) {}
-
-  // 5. Meta-refresh scan (catches <meta http-equiv="refresh" content="0;url=...">)
-  function scanMetaRefresh() {
-    if (window.__auroraInvisibleRedirectBlockingEnabled === false) return;
-    try {
-      var metas = document.querySelectorAll('meta[http-equiv="refresh"]');
-      for (var mi = 0; mi < metas.length; mi++) {
-        var content = metas[mi].getAttribute('content') || '';
-        var match = content.match(/url\s*=\s*['"]?\s*([^\s'"&]+)/i);
-        if (match) {
-          var url = String(match[1]);
-          if (shouldInterceptRedirect(url)) {
-            metas[mi].remove();
-            postInvisibleRedirect(url, 'meta-refresh');
-          }
-        }
-      }
-    } catch(_) {}
-  }
-
-  // 6. MutationObserver for dynamically added meta-refresh tags
-  //    (the main observer below also fires for 'http-equiv' and 'content' attribute changes)
-  function metaRefreshObserverCallback(mutations) {
-    for (var mi = 0; mi < mutations.length; mi++) {
-      var m = mutations[mi];
-      if (m.type === 'attributes' || m.type === 'childList') {
-        scanMetaRefresh();
-        break;
-      }
-    }
-  }
-  // Use a lightweight observer dedicated to meta-refresh so we don't pollute
-  // the main observer's heavy buffer with attribute changes on <meta>.
-  var _metaRefreshObserver = null;
-  try {
-    _metaRefreshObserver = new MutationObserver(metaRefreshObserverCallback);
-    // Wait for document body to be available
-    var _startMetaObs = function() {
-      if (document.body) {
-        _metaRefreshObserver.observe(document.documentElement || document.body, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['http-equiv', 'content']
-        });
-      } else {
-        setTimeout(_startMetaObs, 200);
-      }
-    };
-    _startMetaObs();
-  } catch(_) {}
-
   // --- long press and context menu ---
   var lastContextPostAt = 0;
   var suppressClickUntil = 0;
+  var touchTimer = null;
+  var touchTarget = null;
+  var touchStartX = 0;
+  var touchStartY = 0;
   var lastScrollAt = 0;
 
   window.addEventListener("scroll", function() {
     lastScrollAt = Date.now();
   }, { passive: true, capture: true });
 
-  function shouldInterceptContext(target) {
-    if (!target) return false;
-    var element = target.nodeType === 1 ? target : target.parentElement;
-    if (!element) return false;
-    var link = element.closest ? element.closest("a[href]") : null;
-    if (link) return true;
-    var media = element.closest ? element.closest("img[src],video,audio,source[src]") : null;
-    if (media) return true;
-    return false;
-  }
-
-  function hasSelectedContextText() {
+  function hasTextSelection() {
     try {
-      return String(window.getSelection ? window.getSelection() : "").trim().length > 0;
+      var sel = window.getSelection ? window.getSelection() : null;
+      return !!(sel && sel.toString().trim().length > 0);
     } catch (_) {
       return false;
     }
   }
 
   function postLongPressContext(target) {
+    // Text selections are handled by the native Android selection toolbar
+    // (copy / paste / select-all / share) — don't show our custom menu.
+    if (hasTextSelection()) return;
     if (Date.now() - lastContextPostAt < 400) return;
-    var ctx = contextForElement(target);
-    if (!ctx.href && !ctx.src && !ctx.selectedText) return;
     lastContextPostAt = Date.now();
     suppressClickUntil = lastContextPostAt + 150;
     postElementContext(target);
   }
 
-  document.addEventListener("contextmenu", function(event) {
-    if (!shouldInterceptContext(event.target) && !hasSelectedContextText()) {
-      return; // Blank-space long-press: no Aurora context action.
+  function clearLongPressTimer() {
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
     }
+  }
+
+  document.addEventListener("contextmenu", function(event) {
+    // For text selections, let the native Android selection toolbar
+    // (copy / paste / select-all / share) appear instead of our custom menu.
+    if (hasTextSelection()) return;
     try { event.preventDefault(); } catch (_) {}
+    // Suppress context menu if the user recently scrolled — the Android
+    // WebView can fire contextmenu when the user settles their finger
+    // after a scroll, which used to trigger an unwanted context menu
+    // up to ~1s later.  This also matches the JS touchstart guard
+    // (but with a longer window to cover fling-stop touches).
     if (Date.now() - lastScrollAt < 800) return;
     if (Date.now() - lastContextPostAt < 1000) return;
     postLongPressContext(event.target);
   }, true);
 
+  document.addEventListener("touchstart", function(event) {
+    clearLongPressTimer();
+    if (Date.now() - lastScrollAt < 500) return;
+    if (!event.touches || event.touches.length !== 1) return;
+    touchTarget = event.target;
+    touchStartX = event.touches[0].clientX;
+    touchStartY = event.touches[0].clientY;
+    touchTimer = setTimeout(function() {
+      clearLongPressTimer();
+      postLongPressContext(touchTarget);
+    }, 1200);
+  }, true);
+
+  document.addEventListener("touchmove", function(event) {
+    if (!touchTimer || !event.touches || event.touches.length !== 1) return;
+    var dx = Math.abs(event.touches[0].clientX - touchStartX);
+    var dy = Math.abs(event.touches[0].clientY - touchStartY);
+    if (dx > 10 || dy > 10) clearLongPressTimer();
+  }, true);
+
+  document.addEventListener("touchend", clearLongPressTimer, true);
+  document.addEventListener("touchcancel", clearLongPressTimer, true);
   document.addEventListener("click", function(event) {
     if (window.__auroraElementPickerActive) return;
     if (Date.now() < suppressClickUntil) {
@@ -600,23 +429,24 @@
             var ct = response.headers.get('content-type') || "";
             var cl = response.headers.get('content-length') || "";
             if (ct) postMediaData(response.url, ct, cl);
-            var _hlsUrl = response.url.toLowerCase();
-            var isHls = _hlsUrl.indexOf('.m3u8') >= 0 || hasPlaylistPathHint(response.url) || isHlsContentType(ct);
-            var isText = shouldScanText(response.url, ct, cl);
-            if (isHls || isText) {
+            if (shouldScanText(response.url, ct, cl)) {
               response.clone().text().then(function(text) {
-                if (isText) {
-                  scanTextForUrls(text);
-                }
-                if (isHls) {
-                  if (_hlsUrl.indexOf('.m3u8') >= 0) {
-                    try {
-                      HlsPlaylistChannel.postMessage(JSON.stringify({url: response.url, body: text}));
-                    } catch(_) {}
-                  } else {
-                    captureDisguisedPlaylist(response.url, text);
-                  }
-                }
+                scanTextForUrls(text);
+              }).catch(function() {});
+            }
+            // Capture .m3u8 response bodies for HlsPlaylistChannel
+            var _hlsUrl = response.url.toLowerCase();
+            if (_hlsUrl.indexOf('.m3u8') >= 0) {
+              response.clone().text().then(function(body) {
+                try {
+                  HlsPlaylistChannel.postMessage(JSON.stringify({url: response.url, body: body}));
+                } catch(_) {}
+              }).catch(function() {});
+            } else if (hasPlaylistPathHint(response.url) || isHlsContentType(ct)) {
+              // Disguised playlist: URL doesn't contain .m3u8 but path/content-type
+              // hints suggest it could be an HLS playlist. Read the body and check.
+              response.clone().text().then(function(body) {
+                captureDisguisedPlaylist(response.url, body);
               }).catch(function() {});
             }
           } catch(_) {}
@@ -713,6 +543,71 @@
     if (e.target instanceof HTMLMediaElement) postMediaElementSrc(e.target);
   }, true);
 
+  // --- Media Error Detection ---
+  // When a <video> or <audio> element fails to load its source (e.g. 404 from
+  // a dead CDN link), display a plain overlay so the user knows the video is
+  // no longer available, instead of staring at a blank player.
+  //
+  // Uses a flag to install once. The flag resets on full page navigation (new
+  // document context), so the listener is correctly re-established for each
+  // fresh page load. On force re-inject (same document), the flag prevents
+  // duplicate listeners.
+  (function() {
+    if (window.__auroraMediaErrorActive) return;
+    window.__auroraMediaErrorActive = true;
+
+    document.addEventListener('error', function(e) {
+      var target = e.target;
+      if (!target || !(target instanceof HTMLMediaElement)) return;
+
+      var error = target.error;
+      if (!error) return;
+
+      var message = '';
+      switch (error.code) {
+        case MediaError.MEDIA_ERR_NETWORK:
+          message = '视频源无法加载（服务器连接失败）\nVideo source is unavailable (server error or removed)';
+          break;
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          message = '视频格式不支持\nVideo format is not supported';
+          break;
+        case MediaError.MEDIA_ERR_DECODE:
+          message = '视频解码失败\nVideo decode error';
+          break;
+        default:
+          return; // MEDIA_ERR_ABORTED (user-aborted) or unknown — skip
+      }
+
+      // Find the closest reasonable container to place the overlay in.
+      var container = target.closest(
+        '#bofang_box, .play, .detail_right_tab, [class*="video"], [class*="player"], [id*="video"], [id*="player"]'
+      );
+      if (!container) container = target.parentElement;
+      if (!container) container = target;
+
+      // Prevent duplicate overlays (e.g. if multiple error events fire).
+      if (container.querySelector('.aurora-media-error-overlay')) return;
+
+      var overlay = document.createElement('div');
+      overlay.className = 'aurora-media-error-overlay';
+      overlay.style.cssText =
+        'position:absolute;top:0;left:0;width:100%;height:100%;' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+        'background:rgba(0,0,0,0.78);color:#e0e0e0;font-size:14px;text-align:center;' +
+        'padding:20px;z-index:9999;pointer-events:none;' +
+        'font-family:"PingFang SC","Microsoft YaHei",sans-serif;' +
+        'white-space:pre-line;line-height:1.6;';
+
+      overlay.textContent = message;
+
+      // Ensure the container is positioned so absolute overlay works.
+      var cs = window.getComputedStyle(container);
+      if (cs.position === 'static') container.style.position = 'relative';
+
+      container.appendChild(overlay);
+    }, true);
+  })();
+
   // --- createObjectURL hook ---
   // MediaSource blob URLs (e.g. blob:https://example.com/uuid) are NOT
   // real network URLs — they point to an in-memory streaming buffer inside
@@ -741,23 +636,10 @@
       // flooded the platform channel with hundreds of analytics/tracking
       // XHRs on busy pages (Google search, etc.), saturating the WebView's
       // JS thread and the Dart event loop → scroll freeze + ANR crash.
-      // Now only matches media URLs by extension, media-element init, or
-      // playlist path hints (/hls/, /master/, /playlist/, /manifest/, /dash/).
+      // Now only matches media URLs by extension or media-element init.
       function isMediaEntry(entry) {
         if (mediaRe.test(entry.name)) return true;
-        if (entry.initiatorType === 'media') return true;
-        // Path hints for disguised playlists (e.g. .../hls/.../index.jpg)
-        try {
-          var _path = new URL(entry.name).pathname.toLowerCase();
-          if (_path.indexOf('/hls/') >= 0 ||
-              _path.indexOf('/master') >= 0 ||
-              _path.indexOf('/playlist') >= 0 ||
-              _path.indexOf('/manifest') >= 0 ||
-              _path.indexOf('/dash/') >= 0) {
-            return true;
-          }
-        } catch(_) {}
-        return false;
+        return entry.initiatorType === 'media';
       }
       // No replay of past entries — `buffered: true` caused the observer
       // to re-fire every past resource, flooding the channel on page load.
@@ -786,7 +668,6 @@
         if (scripts[si].textContent) scanTextForUrls(scripts[si].textContent);
       }
     } catch(_) {}
-    try { scanMetaRefresh(); } catch(_) {}
     setTimeout(function() { try { scanMedia(document); } catch(_) {} }, 500);
     setTimeout(function() { try { scanMedia(document); } catch(_) {} }, 1500);
   }
@@ -794,28 +675,13 @@
   // --- MutationObserver ---
   if (!window.__auroraObserverActive) {
     window.__auroraObserverActive = true;
-    var pendingNodes = [];
-    var scanTimeout = null;
-    function flushPendingNodes() {
-      var nodes = pendingNodes;
-      pendingNodes = [];
-      scanTimeout = null;
-      for (var i = 0; i < nodes.length; i++) {
-        scanMedia(nodes[i]);
-      }
-    }
     var observer = new MutationObserver(function(records) {
       for (var i = 0; i < records.length; i++) {
         var record = records[i];
         if (record.type === 'childList') {
           for (var j = 0; j < record.addedNodes.length; j++) {
             var node = record.addedNodes[j];
-            if (node && node.querySelectorAll) {
-              if (pendingNodes.indexOf(node) === -1) {
-                if (pendingNodes.length >= 200) pendingNodes.shift();
-                pendingNodes.push(node);
-              }
-            }
+            if (node && node.querySelectorAll) scanMedia(node);
           }
         } else if (record.type === 'attributes') {
           var node = record.target;
@@ -828,9 +694,6 @@
           }
         }
       }
-      if (pendingNodes.length > 0 && !scanTimeout) {
-        scanTimeout = setTimeout(flushPendingNodes, 100);
-      }
     });
     observer.observe(document.documentElement || document.body, {
       childList: true,
@@ -840,7 +703,28 @@
     });
   }
 
-
+  // --- Text selection bridge ---
+  if (!window.__auroraSelectionActive) {
+    window.__auroraSelectionActive = true;
+    var __auroraLastSelection = '';
+    var __auroraLastSelectionAt = 0;
+    document.addEventListener('selectionchange', function() {
+      try {
+        var sel = window.getSelection ? window.getSelection() : null;
+        if (!sel || sel.rangeCount === 0) return;
+        var text = String(sel.toString() || '').trim();
+        if (text.length < 2) return;
+        if (text.length > 400) text = text.slice(0, 400);
+        var now = Date.now();
+        if (text === __auroraLastSelection && (now - __auroraLastSelectionAt) < 350) return;
+        __auroraLastSelection = text;
+        __auroraLastSelectionAt = now;
+        if (window.TextSelectionChannel && TextSelectionChannel.postMessage) {
+          TextSelectionChannel.postMessage(text);
+        }
+      } catch (_) {}
+    });
+  }
 
 
   // --- Interactive Element Picker ---
@@ -911,6 +795,8 @@
       activeBorder.style.animation = 'aurora-picker-dash 1.5s ease-in-out infinite';
       activeBorder.style.pointerEvents = 'none';
       activeBorder.style.zIndex = '2147483647';
+      activeBorder.style.opacity = '0';
+      activeBorder.style.transition = 'opacity 0.16s ease-out';
       document.body.appendChild(activeBorder);
 
       // Create overlay confirmation panel with Tick and Cross
@@ -938,6 +824,9 @@
       confirmOverlay.style.display = 'flex';
       confirmOverlay.style.gap = '12px';
       confirmOverlay.style.boxShadow = '0 4px 12px rgba(0,0,0,0.6)';
+      confirmOverlay.style.opacity = '0';
+      confirmOverlay.style.transform = 'scale(0.92)';
+      confirmOverlay.style.transition = 'opacity 0.16s ease-out, transform 0.16s ease-out';
 
       var tickBtn = document.createElement('button');
       tickBtn.innerText = '✔';
@@ -980,7 +869,112 @@
       confirmOverlay.appendChild(tickBtn);
       confirmOverlay.appendChild(crossBtn);
       document.body.appendChild(confirmOverlay);
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          if (activeBorder) activeBorder.style.opacity = '1';
+          if (confirmOverlay) {
+            confirmOverlay.style.opacity = '1';
+            confirmOverlay.style.transform = 'scale(1)';
+          }
+        });
+      });
     }, true);
+  })();
+
+  // --- Page Meta Extraction ---
+  // Extracts OG meta tags, JSON-LD structured data, and the document title,
+  // then posts them via PageMetaChannel (consumed in sniffer_screen.dart to
+  // generate meaningful download filenames instead of raw WebView titles).
+  //
+  // This channel was registered but NEVER populated — without it every download
+  // gets named from the raw <title> tag containing site branding like
+  // "SULASOK - BEST FREE PINAY PORN..." or "Search results for ...".
+  (function() {
+    if (window.__auroraPageMetaActive) return;
+    window.__auroraPageMetaActive = true;
+
+    function extractPageMeta() {
+      try {
+        var meta = {
+          title: '',
+          ogTitle: '',
+          ogVideoWidth: '',
+          ogVideoHeight: '',
+          ldName: '',
+        };
+
+        meta.title = document.title || '';
+
+        // OG meta tags (property="" or name="" forms)
+        var metas = document.querySelectorAll(
+          'meta[property^="og:"], meta[name^="og:"]'
+        );
+        for (var i = 0; i < metas.length; i++) {
+          var prop =
+            metas[i].getAttribute('property') ||
+            metas[i].getAttribute('name') ||
+            '';
+          var content = metas[i].getAttribute('content') || '';
+          if (prop === 'og:title') meta.ogTitle = content;
+          else if (prop === 'og:video:width') meta.ogVideoWidth = content;
+          else if (prop === 'og:video:height') meta.ogVideoHeight = content;
+        }
+
+        // JSON-LD structured data
+        var ldScripts = document.querySelectorAll(
+          'script[type="application/ld+json"]'
+        );
+        for (var j = 0; j < ldScripts.length; j++) {
+          try {
+            var ld = JSON.parse(ldScripts[j].textContent || '{}');
+            // Walk common LD shapes: direct, @graph, @id containers
+            var items = ld['@graph'] || [ld];
+            for (var k = 0; k < items.length; k++) {
+              var item = items[k];
+              if (item && item.name && item.name !== meta.ogTitle) {
+                meta.ldName = item.name;
+                break;
+              }
+            }
+            if (!meta.ogTitle && ld.headline) {
+              meta.ogTitle = ld.headline;
+            }
+          } catch (_) {}
+        }
+
+        return meta;
+      } catch (_) {
+        return { title: document.title || '' };
+      }
+    }
+
+    function postMeta() {
+      var m = extractPageMeta();
+      try {
+        PageMetaChannel.postMessage(JSON.stringify(m));
+      } catch (_) {}
+    }
+
+    // Immediate post for SSR pages + delayed for SPAs / client-rendered content.
+    // MutationObserver on <title> catches SPA route changes.
+    postMeta();
+    setTimeout(postMeta, 600);
+    setTimeout(postMeta, 1800);
+
+    // Observe <title> for client-side navigation (SPA apps like Next.js)
+    try {
+      var titleEl = document.querySelector('head title');
+      if (titleEl) {
+        var titleObserver = new MutationObserver(function () {
+          postMeta();
+        });
+        titleObserver.observe(titleEl, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+      }
+    } catch (_) {}
   })();
 
   window.__auroraGuardVersion = (window.__auroraGuardVersion || 0) + 1;

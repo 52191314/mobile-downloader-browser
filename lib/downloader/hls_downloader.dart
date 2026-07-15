@@ -179,7 +179,7 @@ class HlsDownloader implements BaseDownloader {
         if (task.onTokenExpired != null) {
           try {
             task.errorMessage =
-                'Server returned ${code ?? "error"}, refreshing…';
+                'Server responded with ${code ?? "an error"}. Aurora is refreshing the link.';
             _taskUpdateController.add(task);
             final newUrl = await task.onTokenExpired!(forceReload: false);
             if (newUrl != null && newUrl != _currentPlaylistUrl) {
@@ -218,7 +218,7 @@ class HlsDownloader implements BaseDownloader {
           final detail = keyError.toString();
           final match = RegExp(r'status (\d{3})').firstMatch(detail);
           final code = match?.group(1);
-          task.errorMessage = 'Key fetch failed (${code ?? "error"}), refreshing…';
+          task.errorMessage = 'Couldn\'t fetch encryption key (${code ?? "error"}). Aurora is refreshing the link.';
           _taskUpdateController.add(task);
           final newUrl = await task.onTokenExpired!(forceReload: false);
           if (newUrl != null && newUrl != _currentPlaylistUrl) {
@@ -314,8 +314,8 @@ class HlsDownloader implements BaseDownloader {
         ) {
           if (task.onTokenExpired == null) break;
           task.errorMessage = attempt == 0
-              ? 'Token expired, refreshing...'
-              : 'Still expired, refreshing again...';
+              ? 'Access token expired. Aurora is fetching a fresh one.'
+              : 'Token still expired. Aurora is trying again with a fresh reload.';
           _taskUpdateController.add(task);
           final newUrl = await task.onTokenExpired!(forceReload: attempt > 0);
           if (newUrl == null || newUrl == _currentPlaylistUrl) break;
@@ -335,7 +335,7 @@ class HlsDownloader implements BaseDownloader {
         if (_needsRefresh && _staleSegmentIndexes.isNotEmpty) {
           task.failureReason = DownloadFailure.hlsTokenExpired;
           task.errorMessage =
-              'Token refresh failed — the stream URL may have expired. Re-sniff from the page.';
+              'Token refresh didn\'t work. The stream URL may have expired. Re-sniff from the page.';
           _taskUpdateController.add(task);
         }
       }
@@ -352,7 +352,7 @@ class HlsDownloader implements BaseDownloader {
           !playlist.hasFmp4 &&
           p.extension(mergedPath).toLowerCase() == '.ts') {
         final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
-        task.errorMessage = 'Converting to MP4...';
+        task.errorMessage = 'Converting .ts to .mp4 so it plays in any app.';
         _taskUpdateController.add(task);
         final remux = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
         if (remux.success) {
@@ -370,7 +370,7 @@ class HlsDownloader implements BaseDownloader {
             eventType: LogEventType.error,
             taskId: task.id,
           );
-          task.errorMessage = 'Could not convert to MP4 (kept as .ts). '
+          task.errorMessage = 'Couldn\'t convert to .mp4 — keeping original .ts. '
               '${remux.error ?? "The stream may use an unsupported codec."}';
         }
       }
@@ -425,7 +425,7 @@ class HlsDownloader implements BaseDownloader {
     }
 
     // 4. HEAD probe phase
-    task.errorMessage = 'Calculating size…';
+    task.errorMessage = 'Estimating total size from sample segments.';
     _taskUpdateController.add(task);
 
     // Collect all unique segment URIs + init segment URI
@@ -453,6 +453,7 @@ class HlsDownloader implements BaseDownloader {
         request.headers.addAll(task.headers!);
       }
       final response = await client.send(request).timeout(const Duration(seconds: 4));
+      await response.stream.listen((_) {}, onError: (_) {}).cancel();
       if (response.statusCode == 200) {
         final len = response.contentLength;
         if (len != null && len > 0) {
@@ -495,6 +496,7 @@ class HlsDownloader implements BaseDownloader {
             request.headers.addAll(task.headers!);
           }
           final response = await client.send(request).timeout(const Duration(seconds: 4));
+          await response.stream.listen((_) {}, onError: (_) {}).cancel();
           if (response.statusCode == 200) {
             final len = response.contentLength;
             if (len != null && len > 0) {
@@ -540,7 +542,7 @@ class HlsDownloader implements BaseDownloader {
   /// re-runs start() with the original URL.
   Future<void> retryWithRefresh({bool forceReload = false}) async {
     if (task.onTokenExpired != null) {
-      task.errorMessage = 'Refreshing from page...';
+      task.errorMessage = 'Refreshing link from the page.';
       _taskUpdateController.add(task);
       final newUrl = await task.onTokenExpired!(forceReload: forceReload);
       if (newUrl != null && newUrl != task.url) {
@@ -801,6 +803,7 @@ class HlsDownloader implements BaseDownloader {
         'HLS key request failed: status ${response.statusCode} $bodyPreview',
         '',
       );
+      await response.stream.listen((_) {}, onError: (_) {}).cancel();
       throw HttpException(
         'HLS key request failed with status ${response.statusCode}',
         uri: key.uri,
@@ -1167,9 +1170,9 @@ class HlsDownloader implements BaseDownloader {
               task.state = DownloadState.failed;
               task.failureReason = DownloadFailure.hlsCircuitBreaker;
               task.errorMessage =
-                  'Server blocked access ($_consecutiveSegmentFailures consecutive 403s). '
-                  'The CDN may have rate-limited or blocked this device. '
-                  'Wait a few minutes and try again, or re-sniff from the video page.';
+                  'CDN blocked access after $_consecutiveSegmentFailures failed requests. '
+                  'Aurora is stopping to avoid getting your IP blocked. '
+                  'Wait a few minutes and re-sniff from the video page.';
               _taskUpdateController.add(task);
               AuroraLog.instance.error(
                 'Circuit breaker tripped: $_consecutiveSegmentFailures consecutive 403/401 failures — aborting to prevent Cloudflare IP block',
@@ -1186,7 +1189,7 @@ class HlsDownloader implements BaseDownloader {
             _needsRefresh = true;
             _staleSegmentIndexes.add(index);
             task.state = DownloadState.downloading;
-            task.errorMessage = 'Token expired, refreshing...';
+            task.errorMessage = 'Access token expired. Aurora is fetching a fresh one.';
             _taskUpdateController.add(task);
             // Return a dummy file — the merge step will detect it as a
             // stub and refuse to produce a partial/corrupt file.
@@ -1194,6 +1197,9 @@ class HlsDownloader implements BaseDownloader {
             await file.writeAsString('');
             return file;
           }
+          // Drain the error response body to release the HTTP connection
+          // before throwing.
+          await response.stream.listen((_) {}, onError: (_) {}).cancel();
           throw HttpException(
             'HLS segment request failed with status ${response.statusCode}',
             uri: uri,

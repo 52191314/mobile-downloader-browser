@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
-import 'package:aurora_downloader/theme/aurora_colors.dart';
+import 'package:aurora_downloader/theme/aurora_palette.dart';
 import 'package:aurora_downloader/ui/notifications/aurora_snackbar.dart';
 
 /// Shows the "Media Information" bottom sheet for [item]. Replaces the body
@@ -32,7 +32,7 @@ void showMediaInfoSheet(
     showDragHandle: true,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: AuroraColors.surface,
+    backgroundColor: AuroraPalette.of(context).surfacePanel,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
@@ -86,7 +86,7 @@ void showMediaInfoSheet(
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
-                    'Media Information',
+                    'Media details',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -146,7 +146,7 @@ void showMediaInfoSheet(
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
-                        fontFamily: 'monospace',
+                        fontFamily: 'JetBrainsMono',
                       ),
                     ),
                   ),
@@ -159,7 +159,7 @@ void showMediaInfoSheet(
                     ),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: item.url));
-                      AuroraSnackbar.show(ctx, 'URL copied to clipboard');
+                      AuroraSnackbar.show(ctx, 'URL copied');
                     },
                     tooltip: 'Copy URL',
                   ),
@@ -170,7 +170,7 @@ void showMediaInfoSheet(
                 item.sourcePageUrl!.isNotEmpty) ...[
               const SizedBox(height: 16),
               const Text(
-                'Source Page URL',
+                'Source page',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 12,
@@ -219,7 +219,7 @@ void showMediaInfoSheet(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Type',
+                        'Media type',
                         style: TextStyle(
                           color: Colors.white54,
                           fontSize: 12,

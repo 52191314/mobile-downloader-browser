@@ -20,7 +20,7 @@ class _CompactNavButton extends StatelessWidget {
       child: IconButton(
         padding: EdgeInsets.zero,
         icon: Icon(icon, size: 18),
-        color: enabled ? AuroraColors.text : AuroraColors.disabledText,
+        color: enabled ? context.ac.textPrimary : context.ac.textDisabled,
         onPressed: enabled ? onTap : null,
       ),
     );
@@ -86,7 +86,7 @@ class _CaptureStatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chipColor = color ?? AuroraColors.mutedDeep;
+    final chipColor = color ?? context.ac.textTertiary;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Container(
@@ -126,21 +126,21 @@ class _MiniPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AuroraColors.surfaceCard,
+        color: context.ac.surfaceCard,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AuroraColors.glassBorder),
+        border: Border.all(color: context.ac.glassBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 12, color: AuroraColors.mutedText),
+            Icon(icon, size: 12, color: context.ac.textSecondary),
             const SizedBox(width: 4),
             Text(
               label,
-              style: const TextStyle(
-                color: AuroraColors.mutedText,
+              style: TextStyle(
+                color: context.ac.textSecondary,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
@@ -233,8 +233,8 @@ class _CaptureMediaTile extends StatelessWidget {
       child: IntrinsicHeight(
         child: Container(
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AuroraColors.gradientMid, AuroraColors.surface],
+            gradient: LinearGradient(
+              colors: [context.ac.gradientMid, context.ac.surfacePanel],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -242,7 +242,7 @@ class _CaptureMediaTile extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? colors.primary
-                  : AuroraColors.glassBorder,
+                  : context.ac.glassBorder,
               width: selected ? 2.0 : 1.0,
             ),
             boxShadow: selected
@@ -349,7 +349,7 @@ class _CaptureMediaTile extends StatelessWidget {
                                 if (recommended)
                                   const _MiniPill(
                                     icon: Icons.auto_awesome,
-                                    label: 'Best',
+                                    label: 'Best quality',
                                   ),
                                 if (qualityLabel != null && qualityLabel != 'HLS')
                                   _MiniPill(
@@ -384,7 +384,7 @@ class _CaptureMediaTile extends StatelessWidget {
                         children: [
                           IconButton(
                             key: infoKey,
-                            tooltip: 'Info',
+                            tooltip: 'View details',
                             icon: const Icon(
                               Icons.info_outline,
                               color: Colors.white70,
@@ -396,7 +396,7 @@ class _CaptureMediaTile extends StatelessWidget {
                           if (onPreview != null)
                             IconButton(
                               key: previewKey,
-                              tooltip: 'Preview',
+                              tooltip: 'Play preview',
                               icon: Icon(
                                 Icons.play_circle,
                                 color: colors.primary,
@@ -407,7 +407,7 @@ class _CaptureMediaTile extends StatelessWidget {
                             ),
                           IconButton(
                             key: downloadKey,
-                            tooltip: 'Download',
+                            tooltip: 'Download this item',
                             icon: const Icon(
                               Icons.download,
                               color: Colors.tealAccent,
@@ -467,7 +467,7 @@ class _CaptureActionBar extends StatelessWidget {
             Expanded(
               child: Text(
                 selectedCount == 0
-                    ? '$totalCount ready to capture'
+                    ? '$totalCount items ready'
                     : '$selectedCount selected',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -479,8 +479,8 @@ class _CaptureActionBar extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: onDownloadSelected == null
-                        ? [AuroraColors.surfaceVariant, AuroraColors.surface]
-                        : [AuroraColors.accent, const Color(0xFF5E81AC)],
+                        ? [context.ac.surfaceElevated, context.ac.surfacePanel]
+                        : [context.ac.accentFrost, const Color(0xFF5E81AC)],
                     begin: Alignment.centerLeft,
                     end: Alignment.centerRight,
                   ),
@@ -488,7 +488,7 @@ class _CaptureActionBar extends StatelessWidget {
                   boxShadow: onDownloadSelected != null
                       ? [
                           BoxShadow(
-                            color: AuroraColors.accent.withValues(alpha: 0.3),
+                            color: context.ac.accentFrost.withValues(alpha: 0.3),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
@@ -499,7 +499,7 @@ class _CaptureActionBar extends StatelessWidget {
                   key: const Key('batch_download_btn'),
                   icon: const Icon(Icons.download, color: Colors.white),
                   label: const Text(
-                    'Download selected',
+                    'Download selected items',
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -541,7 +541,7 @@ class _SniffedMediaControls extends StatelessWidget {
           Expanded(
             child: DropdownButtonFormField<SniffedMediaSort>(
               value: settings.sniffedMediaSort,
-              decoration: const InputDecoration(labelText: 'Sort'),
+              decoration: const InputDecoration(labelText: 'Sort by'),
               isExpanded: true,
               items: SniffedMediaSort.values
                   .map(
@@ -561,7 +561,7 @@ class _SniffedMediaControls extends StatelessWidget {
           Expanded(
             child: DropdownButtonFormField<SniffedMediaDisplayMode>(
               value: settings.sniffedMediaDisplayMode,
-              decoration: const InputDecoration(labelText: 'Show'),
+              decoration: const InputDecoration(labelText: 'Show type'),
               isExpanded: true,
               items: SniffedMediaDisplayMode.values
                   .map(

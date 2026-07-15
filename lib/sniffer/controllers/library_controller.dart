@@ -88,7 +88,7 @@ class LibraryController {
   }) async {
     final url = await activeTab.controller.currentUrl();
     if (url == null || url.isEmpty || url.startsWith('file:')) {
-      showSnack('Cannot bookmark this page.');
+      showSnack('Can\'t bookmark this page right now.');
       return;
     }
 
@@ -125,9 +125,9 @@ class LibraryController {
     await save(updated);
 
     if (selection.folderName != null && selection.folderName!.isNotEmpty) {
-      showSnack('Bookmarked in "${selection.folderName}".');
+      showSnack('Saved to "${selection.folderName}".');
     } else {
-      showSnack('Bookmarked.');
+      showSnack('Page bookmarked.');
     }
   }
 
@@ -141,7 +141,7 @@ class LibraryController {
   }) async {
     final url = await activeTab.controller.currentUrl();
     if (url == null || url.isEmpty || url.startsWith('file:')) {
-      showSnack('Cannot save this page.');
+      showSnack('Can\'t save this page right now.');
       return;
     }
 
@@ -153,7 +153,7 @@ class LibraryController {
         'document.documentElement.outerHTML',
       );
       if (html is! String || html.isEmpty) {
-        showSnack('Failed to get page content.');
+        showSnack('Could not read this page\'s content. Try again.');
         return;
       }
 
@@ -176,9 +176,9 @@ class LibraryController {
         savedPages: [...library.savedPages, savedPage],
       );
       await save(updated);
-      showSnack('Page saved.');
+      showSnack('Page saved offline.');
     } catch (e) {
-      showSnack('Failed to save page: $e');
+      showSnack('Could not save this page: $e');
     } finally {
       isSavingPage = false;
       onLibraryChanged?.call();

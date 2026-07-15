@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../sniffer/models/sniffed_media.dart' show MediaType;
+import '../backup/auto_backup_models.dart';
 
 enum SniffedMediaSort { newest, name, type, size, duration }
 
@@ -483,6 +484,10 @@ class DownloadSettings {
   /// direct .ts downloads; HLS streams already remux via HlsDownloader.
   final bool remuxTsToMp4;
 
+  /// When true, the filename includes a quality suffix like "(720p)" when
+  /// a resolution label (e.g. 720p, 1080p) is detected in the media URL.
+  final bool includeQualitySuffix;
+
   /// Optional overrides: file extension → folder name.
   /// E.g. `{".mp4": "Movies", ".mkv": "Movies"}` routes all MP4s and MKVs
   /// into a "Movies" subfolder instead of the default "Videos" folder.
@@ -499,6 +504,7 @@ class DownloadSettings {
   final bool autoBackupQueue;
   final bool autoBackupSettings;
   final int lastBackupTimestamp;
+  final AutoBackupInterval autoBackupInterval;
 
   const DownloadSettings({
     required this.maxConcurrentDownloads,
@@ -542,6 +548,7 @@ class DownloadSettings {
     this.partialDownloadThreshold = 0.95,
     this.autoClassifyEnabled = true,
     this.remuxTsToMp4 = true,
+    this.includeQualitySuffix = true,
     this.autoClassifyMappings = const {},
     this.showSnackbars = true,
     this.autoBackupEnabled = false,
@@ -552,6 +559,7 @@ class DownloadSettings {
     this.autoBackupQueue = true,
     this.autoBackupSettings = true,
     this.lastBackupTimestamp = 0,
+    this.autoBackupInterval = AutoBackupInterval.daily,
   });
 
   static const trustedAdblockSources = [
@@ -578,6 +586,7 @@ class DownloadSettings {
     minSpeedThresholdKbps: 10,
     autoClassifyEnabled: true,
     remuxTsToMp4: true,
+    includeQualitySuffix: true,
     showSnackbars: true,
   );
 
@@ -623,6 +632,7 @@ class DownloadSettings {
     double? partialDownloadThreshold,
     bool? autoClassifyEnabled,
     bool? remuxTsToMp4,
+    bool? includeQualitySuffix,
     Map<String, String>? autoClassifyMappings,
     bool? showSnackbars,
     bool? autoBackupEnabled,
@@ -633,6 +643,7 @@ class DownloadSettings {
     bool? autoBackupQueue,
     bool? autoBackupSettings,
     int? lastBackupTimestamp,
+    AutoBackupInterval? autoBackupInterval,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -645,6 +656,8 @@ class DownloadSettings {
       autoClassifyEnabled:
           autoClassifyEnabled ?? this.autoClassifyEnabled,
       remuxTsToMp4: remuxTsToMp4 ?? this.remuxTsToMp4,
+      includeQualitySuffix:
+          includeQualitySuffix ?? this.includeQualitySuffix,
       autoClassifyMappings:
           autoClassifyMappings ?? this.autoClassifyMappings,
       showSnackbars: showSnackbars ?? this.showSnackbars,
@@ -656,6 +669,7 @@ class DownloadSettings {
       autoBackupQueue: autoBackupQueue ?? this.autoBackupQueue,
       autoBackupSettings: autoBackupSettings ?? this.autoBackupSettings,
       lastBackupTimestamp: lastBackupTimestamp ?? this.lastBackupTimestamp,
+      autoBackupInterval: autoBackupInterval ?? this.autoBackupInterval,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -747,6 +761,7 @@ class DownloadSettings {
     'partialDownloadThreshold': partialDownloadThreshold,
     'autoClassifyEnabled': autoClassifyEnabled,
     'remuxTsToMp4': remuxTsToMp4,
+    'includeQualitySuffix': includeQualitySuffix,
     'autoClassifyMappings': autoClassifyMappings,
     'showSnackbars': showSnackbars,
     'autoBackupEnabled': autoBackupEnabled,
@@ -757,6 +772,7 @@ class DownloadSettings {
     'autoBackupQueue': autoBackupQueue,
     'autoBackupSettings': autoBackupSettings,
     'lastBackupTimestamp': lastBackupTimestamp,
+    'autoBackupInterval': autoBackupInterval.name,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -857,6 +873,8 @@ class DownloadSettings {
           json['autoClassifyEnabled'] as bool? ?? true,
       remuxTsToMp4:
           json['remuxTsToMp4'] as bool? ?? true,
+      includeQualitySuffix:
+          json['includeQualitySuffix'] as bool? ?? true,
       autoClassifyMappings:
           json['autoClassifyMappings'] is Map
               ? Map<String, String>.from(
@@ -883,6 +901,8 @@ class DownloadSettings {
           json['autoBackupSettings'] as bool? ?? true,
       lastBackupTimestamp:
           (json['lastBackupTimestamp'] as num?)?.round() ?? 0,
+      autoBackupInterval:
+          AutoBackupInterval.fromName(json['autoBackupInterval'] as String?),
     );
   }
 

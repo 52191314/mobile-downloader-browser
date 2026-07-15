@@ -44,7 +44,7 @@ import 'session_recovery.dart';
 import 'autofill_store.dart';
 import 'safe_browsing_service.dart';
 import 'sniffer_url_utils.dart';
-import '../theme/aurora_colors.dart';
+import '../theme/aurora_palette.dart';
 
 import 'actions/autofill_action.dart';
 import 'actions/context_menu_action.dart';
@@ -57,6 +57,8 @@ import 'sheets/media_preview_sheet.dart';
 import 'sheets/saved_pages_sheet.dart';
 import 'sheets/sniffed_media_sheet.dart';
 import 'sheets/tabs_sheet.dart';
+import 'aurora_video_player.dart';
+import 'widgets/floating_video_button.dart';
 
 part 'widgets/capture_widgets.dart';
 part 'widgets/add_queue_dialog.dart';
@@ -420,6 +422,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   int _lastBarsToggleAtMs = 0;
   bool _barsVisible = true;
   bool _isContextMenuShowing = false;
+
+  /// Latest sniffed video media for the floating video button.
+  /// Updated with priority: HLS > large MP4 > small MP4 > other.
+  /// `null` when no video has been detected on the current page.
+  SniffedMedia? _latestVideoMedia;
 
   /// Set of tab IDs whose WebViews have already been built (lazy creation).
   /// Only tabs in this set get a real [BrowserWidget] — others render an empty
@@ -989,113 +996,113 @@ class _SnifferScreenState extends State<SnifferScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(
-                          Icons.file_upload_outlined,
-                          color: AuroraColors.accent,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          'Export Library',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AuroraColors.text,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.file_upload_outlined,
+                            color: context.ac.accentFrost,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    SwitchListTile(
-                      activeColor: AuroraColors.accent,
-                      title: const Text(
-                        'Favorites',
-                        style: TextStyle(color: AuroraColors.text),
-                      ),
-                      subtitle: Text(
-                        '${_library.favorites.length} favorites, ${_library.folders.length} folders',
-                        style: const TextStyle(color: AuroraColors.mutedText),
-                      ),
-                      value: exportFavorites,
-                      onChanged: (val) =>
-                          setModalState(() => exportFavorites = val),
-                    ),
-                    SwitchListTile(
-                      activeColor: AuroraColors.accent,
-                      title: const Text(
-                        'Web History',
-                        style: TextStyle(color: AuroraColors.text),
-                      ),
-                      subtitle: Text(
-                        '${_library.history.length} history entries',
-                        style: const TextStyle(color: AuroraColors.mutedText),
-                      ),
-                      value: exportHistory,
-                      onChanged: (val) =>
-                          setModalState(() => exportHistory = val),
-                    ),
-                    SwitchListTile(
-                      activeColor: AuroraColors.accent,
-                      title: const Text(
-                        'Saved Pages',
-                        style: TextStyle(color: AuroraColors.text),
-                      ),
-                      subtitle: Text(
-                        '${_library.savedPages.length} offline pages',
-                        style: const TextStyle(color: AuroraColors.mutedText),
-                      ),
-                      value: exportSavedPages,
-                      onChanged: (val) =>
-                          setModalState(() => exportSavedPages = val),
-                    ),
-                    SwitchListTile(
-                      activeColor: AuroraColors.accent,
-                      title: const Text(
-                        'Download History',
-                        style: TextStyle(color: AuroraColors.text),
-                      ),
-                      subtitle: Text(
-                        '${_downloadQueue.allTasks.length} tasks',
-                        style: const TextStyle(color: AuroraColors.mutedText),
-                      ),
-                      value: exportQueue,
-                      onChanged: (val) =>
-                          setModalState(() => exportQueue = val),
-                    ),
-                    SwitchListTile(
-                      activeColor: AuroraColors.accent,
-                      title: const Text(
-                        'App Settings',
-                        style: TextStyle(color: AuroraColors.text),
-                      ),
-                      subtitle: const Text(
-                        'Toggles, concurrent limits, search engine defaults',
-                        style: TextStyle(color: AuroraColors.mutedText),
-                      ),
-                      value: exportSettings,
-                      onChanged: (val) =>
-                          setModalState(() => exportSettings = val),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(color: AuroraColors.mutedText),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Export your data',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: context.ac.textPrimary,
+                            ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'Favorites',
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          key: const Key('confirm_export_button'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AuroraColors.accent,
-                            foregroundColor: AuroraColors.background,
+                        subtitle: Text(
+                          '${_library.favorites.length} favorites, ${_library.folders.length} folders',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportFavorites,
+                        onChanged: (val) =>
+                            setModalState(() => exportFavorites = val),
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'Web History',
+                          style: TextStyle(color: context.ac.textPrimary),
+                        ),
+                        subtitle: Text(
+                          '${_library.history.length} history entries',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportHistory,
+                        onChanged: (val) =>
+                            setModalState(() => exportHistory = val),
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'Saved Pages',
+                          style: TextStyle(color: context.ac.textPrimary),
+                        ),
+                        subtitle: Text(
+                          '${_library.savedPages.length} offline pages',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportSavedPages,
+                        onChanged: (val) =>
+                            setModalState(() => exportSavedPages = val),
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'Download History',
+                          style: TextStyle(color: context.ac.textPrimary),
+                        ),
+                        subtitle: Text(
+                          '${_downloadQueue.allTasks.length} tasks',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportQueue,
+                        onChanged: (val) =>
+                            setModalState(() => exportQueue = val),
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
+                          'App Settings',
+                          style: TextStyle(color: context.ac.textPrimary),
+                        ),
+                        subtitle: Text(
+                          'Toggles, concurrent limits, search engine defaults',
+                          style: TextStyle(color: context.ac.textSecondary),
+                        ),
+                        value: exportSettings,
+                        onChanged: (val) =>
+                            setModalState(() => exportSettings = val),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(color: context.ac.textSecondary),
+                            ),
                           ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            key: const Key('confirm_export_button'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: context.ac.accentFrost,
+                              foregroundColor: context.ac.surfaceField,
+                            ),
                           onPressed:
                               (!exportFavorites &&
                                   !exportHistory &&
@@ -1229,29 +1236,29 @@ class _SnifferScreenState extends State<SnifferScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(
                             Icons.file_download_outlined,
-                            color: AuroraColors.accent,
+                            color: context.ac.accentFrost,
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Text(
-                            'Import Library',
+                            'Import your data',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: AuroraColors.text,
+                              color: context.ac.textPrimary,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
                           'Favorites / Bookmarks',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                         value: importFavorites,
                         onChanged: (hasFavorites || isLegacy)
@@ -1260,10 +1267,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
                           'Web History',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                         value: importHistory,
                         onChanged: (hasHistory || isLegacy)
@@ -1271,10 +1278,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
                           'Saved Pages',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                         value: importSavedPages,
                         onChanged: (hasSavedPages || isLegacy)
@@ -1283,10 +1290,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
                           'Download History (Queue)',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                         value: importQueue,
                         onChanged: hasQueue
@@ -1294,10 +1301,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                             : null,
                       ),
                       SwitchListTile(
-                        activeColor: AuroraColors.accent,
-                        title: const Text(
+                        activeColor: context.ac.accentFrost,
+                        title: Text(
                           'App Settings',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                         value: importSettings,
                         onChanged: hasSettings
@@ -1310,16 +1317,16 @@ class _SnifferScreenState extends State<SnifferScreen>
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx),
-                            child: const Text(
+                            child: Text(
                               'Cancel',
-                              style: TextStyle(color: AuroraColors.mutedText),
+                              style: TextStyle(color: context.ac.textSecondary),
                             ),
                           ),
                           const SizedBox(width: 8),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AuroraColors.accent,
-                              foregroundColor: AuroraColors.background,
+                              backgroundColor: context.ac.accentFrost,
+                              foregroundColor: context.ac.surfaceField,
                             ),
                             onPressed:
                                 (!importFavorites &&
@@ -1744,6 +1751,9 @@ class _SnifferScreenState extends State<SnifferScreen>
           eventType: LogEventType.sniff,
         );
         tab.snifferEngine.clearCache();
+        if (tab == _activeTab) {
+          _latestVideoMedia = null;
+        }
       } else {
         AuroraLog.instance.debug(
           'Same-page navigation ($url) — keeping media cache '
@@ -2011,8 +2021,8 @@ class _SnifferScreenState extends State<SnifferScreen>
           // capture sheet to review and add to queue.
           _showSnack(
             suggestedFilename != null
-                ? 'Download captured: $suggestedFilename — tap the capture badge to add to queue.'
-                : 'Download URL captured — tap the capture badge to add to queue.',
+                ? 'Captured $suggestedFilename — open the capture tray to add it to the queue.'
+                : 'URL captured — open the capture tray to add it to the queue.',
           );
         case DownloadLinkBehavior.autoDownload:
           // Add directly to the download queue without prompting.
@@ -2028,6 +2038,59 @@ class _SnifferScreenState extends State<SnifferScreen>
       _sniffIntakeController.scheduleMediaRebuild();
       _sniffIntakeController.scheduleMediaSave(tab);
     });
+
+    // Listen for video detections to show the floating video button.
+    // Only the active tab's detections update the overlay.
+    // Priority: HLS (.m3u8) > large MP4/size known > any other video.
+    tab.mediaSubscription?.cancel();
+    tab.mediaSubscription = tab.snifferEngine.onMediaDetected.listen((media) {
+      if (!mounted) return;
+      if (media.type != MediaType.video) return;
+      if (tab != _activeTab) return;
+      if (_shouldReplaceVideo(media)) {
+        setState(() => _latestVideoMedia = media);
+      }
+    });
+  }
+
+  /// Returns `true` if [incoming] should replace the current [_latestVideoMedia]
+  /// for the floating video button. Keeps the best candidate: HLS > large > other.
+  bool _shouldReplaceVideo(SniffedMedia incoming) {
+    final current = _latestVideoMedia;
+    if (current == null) return true;
+
+    final incomingIsHls = _isHlsUrl(incoming.url);
+    final currentIsHls = _isHlsUrl(current.url);
+
+    // HLS always beats non-HLS.
+    if (incomingIsHls && !currentIsHls) return true;
+    if (!incomingIsHls && currentIsHls) return false;
+
+    // Among same type, prefer larger content length (avoid short previews).
+    final incomingSize = incoming.contentLengthBytes ?? 0;
+    final currentSize = current.contentLengthBytes ?? 0;
+    if (incomingSize > 0 && currentSize > 0) {
+      // Only replace if incoming is significantly larger (>2x) or current is tiny.
+      if (incomingSize > currentSize * 2) return true;
+      if (currentSize < 500 * 1024 && incomingSize > currentSize) return true;
+      if (incomingSize < 500 * 1024 && currentSize >= 500 * 1024) return false;
+    }
+
+    // If current has no size info and incoming does, prefer incoming.
+    if (currentSize <= 0 && incomingSize > 0) return true;
+    if (incomingSize <= 0 && currentSize > 0) return false;
+
+    // Prefer videos with non-null content-type (more likely a real stream vs ad).
+    if (incoming.contentType != null && current.contentType == null) return true;
+    if (incoming.contentType == null && current.contentType != null) return false;
+
+    return false; // Keep current by default.
+  }
+
+  /// Returns `true` if [url] is an HLS playlist URL.
+  static bool _isHlsUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('.m3u8') || lower.contains('mpegurl');
   }
 
   static final RegExp _mediaFastPathRegExp = RegExp(
@@ -2297,15 +2360,15 @@ class _SnifferScreenState extends State<SnifferScreen>
             Text(uri.toString()),
             const SizedBox(height: 8),
             Text(
-              result.reason ?? 'This URL appears on a phishing blocklist.',
+              result.reason ?? 'This site is flagged as unsafe. Only open it if you are sure it is legitimate.',
               style: const TextStyle(fontSize: 12),
             ),
             if (result.source != null)
               Text(
                 'Source: ${result.source}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: AuroraColors.mutedText,
+                  color: ctx.ac.textSecondary,
                 ),
               ),
           ],
@@ -2407,7 +2470,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _showStrictRedirectPrompt(
         tab: tab,
         uri: uri,
-        title: 'Popup blocked',
+        title: 'Popup blocked by Aurora',
         method: event.reason,
         sourcePageUrl: event.sourcePageUrl,
       ),
@@ -2438,7 +2501,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _showStrictRedirectPrompt(
         tab: tab,
         uri: uri,
-        title: 'Redirect blocked',
+        title: 'Redirect blocked by Aurora',
         method: data['method'] as String? ?? 'script',
         sourcePageUrl: data['sourcePageUrl'] as String?,
       ),
@@ -2461,7 +2524,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _showStrictRedirectPrompt(
         tab: tab,
         uri: uri,
-        title: 'Redirect blocked',
+        title: 'Redirect blocked by Aurora',
         method: event.method,
         sourcePageUrl: event.sourceUrl,
       ),
@@ -2594,7 +2657,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<void> _startElementPicker() async {
     await _elementPickerController.startPicker();
     _showPickerSnack(
-      'Tap an ad or page element to block. Press Back to cancel.',
+      'Tap any ad or element to block it. Tap Stop when you are done.',
       onCancel: () => _cancelElementPicker(),
     );
   }
@@ -2643,7 +2706,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Blocked. Undo?'),
+          content: const Text('Element blocked. Undo?'),
           duration: const Duration(seconds: 3),
           action: SnackBarAction(
             label: 'Undo',
@@ -2677,7 +2740,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     // holds the master playlist body, so the enricher can re-parse it
     // and regenerate variant items.
     _reEnrichHlsItems();
-    _showSnack('Page rescanned for media');
+    _showSnack('Page re-scanned for media');
   }
 
   /// Re-enqueues HLS playlist items in the active tab's sniffer engine
@@ -2742,26 +2805,26 @@ class _SnifferScreenState extends State<SnifferScreen>
           child: Container(
             height: 44,
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: AuroraColors.surfaceVariant,
+                  color: context.ac.surfaceElevated,
                   width: 0.5,
                 ),
               ),
             ),
             child: Row(
               children: [
-                Icon(icon, size: 16, color: AuroraColors.accent),
+                Icon(icon, size: 16, color: context.ac.accentFrost),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     suggestion.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AuroraColors.text,
+                      color: context.ac.textPrimary,
                     ),
                   ),
                 ),
@@ -2769,9 +2832,9 @@ class _SnifferScreenState extends State<SnifferScreen>
                   suggestion.url,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AuroraColors.mutedDeep,
+                    color: context.ac.textTertiary,
                   ),
                 ),
               ],
@@ -2783,13 +2846,14 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   Widget _buildTabStrip() {
+    final ac = context.ac;
     final activeColor = _privateMode
-        ? AuroraColors.accentPurple
-        : AuroraColors.accent;
+        ? ac.accentPurple
+        : ac.accentFrost;
     return Container(
       key: const Key('browser_tab_strip'),
       height: 34,
-      color: AuroraColors.dockSurface,
+      color: ac.dockSurface,
       child: Row(
         children: [
           if (_privateMode)
@@ -2799,7 +2863,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                 child: Icon(
                   Icons.visibility_off_outlined,
                   size: 12,
-                  color: AuroraColors.accentPurple,
+                  color: ac.accentPurple,
                 ),
               ),
             ),
@@ -2840,7 +2904,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                               fontSize: 12,
                               color: isActive
                                   ? activeColor
-                                  : AuroraColors.mutedText,
+                                  : ac.textSecondary,
                             ),
                           ),
                         ),
@@ -2848,14 +2912,14 @@ class _SnifferScreenState extends State<SnifferScreen>
                           GestureDetector(
                             key: Key('browser_tab_close_$i'),
                             onTap: () => _tabLifecycleController.closeTab(i),
-                            child: const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Icon(
-                                Icons.close,
-                                size: 12,
-                                color: AuroraColors.mutedTextAlt,
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Icon(
+                                  Icons.close,
+                                  size: 12,
+                                  color: ac.textSecondary,
+                                ),
                               ),
-                            ),
                           ),
                       ],
                     ),
@@ -2865,10 +2929,10 @@ class _SnifferScreenState extends State<SnifferScreen>
             ),
           ),
           IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.add,
               size: 16,
-              color: AuroraColors.mutedText,
+              color: ac.textSecondary,
             ),
             onPressed: () => _tabLifecycleController.openNewTab(),
             tooltip: 'New tab',
@@ -2901,7 +2965,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       height: topHeight,
       child: Material(
         elevation: 4,
-        color: AuroraColors.overlay,
+        color: context.ac.overlay,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [if (_findVisible) _buildFindBar()],
@@ -2928,7 +2992,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       height: bottomHeight,
       child: Material(
         elevation: 8,
-        color: AuroraColors.dockSurface,
+        color: context.ac.dockSurface,
         child: Stack(
           children: [
             // The main bottom bar content (tab strip + address bar + toolbar)
@@ -2946,9 +3010,9 @@ class _SnifferScreenState extends State<SnifferScreen>
                   ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: AuroraColors.glassSurface,
+                      color: context.ac.glassSurface,
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AuroraColors.glassBorder),
+                      border: Border.all(color: context.ac.glassBorder),
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(24),
@@ -2965,8 +3029,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                                         ? Icons.star
                                         : Icons.star_border,
                                     color: _isCurrentPageFavorited()
-                                        ? AuroraColors.accentAmber
-                                        : AuroraColors.mutedText,
+                                        ? context.ac.accentAmber
+                                        : context.ac.textSecondary,
                                     size: 18,
                                   ),
                                   onPressed: _toggleFavorite,
@@ -3017,10 +3081,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                                     });
                                   }
                                 },
-                                child: const Icon(
+                                child: Icon(
                                   Icons.lock,
                                   size: 12,
-                                  color: AuroraColors.mutedText,
+                                  color: context.ac.textSecondary,
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -3033,7 +3097,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                                         autofocus: true,
                                         decoration: const InputDecoration(
                                           isDense: true,
-                                          hintText: 'Search or enter URL',
+                                          hintText: 'Type a URL or search term',
                                           border: InputBorder.none,
                                           contentPadding: EdgeInsets.symmetric(
                                             horizontal: 8,
@@ -3078,12 +3142,12 @@ class _SnifferScreenState extends State<SnifferScreen>
                                           ),
                                           child: Text(
                                             _addressLabel().isEmpty
-                                                ? 'Search or enter URL'
+                                                ? 'Type a URL or search term'
                                                 : _addressLabel(),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: AuroraColors.text,
+                                            style: TextStyle(
+                                              color: context.ac.textPrimary,
                                               fontSize: 13,
                                             ),
                                           ),
@@ -3157,7 +3221,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                 height: suggestionHeight,
                 child: Material(
                   elevation: 12,
-                  color: AuroraColors.overlay,
+                  color: context.ac.overlay,
                   borderRadius: BorderRadius.circular(16),
                   child: _buildSuggestionPanel(),
                 ),
@@ -3241,6 +3305,16 @@ class _SnifferScreenState extends State<SnifferScreen>
               topBar,
               bottomBar,
               if (_elementPickerActive) _buildPickerCancelButton(),
+              // Floating video button — appears when a video is detected.
+              if (_latestVideoMedia != null && _barsVisible)
+                Positioned(
+                  bottom: bottomHeight + 12,
+                  right: 12,
+                  child: FloatingVideoButton(
+                    onTap: () => _openVideoPlayer(_latestVideoMedia!),
+                    onDismiss: () => setState(() => _latestVideoMedia = null),
+                  ),
+                ),
             ],
           ),
         ),
@@ -3277,9 +3351,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: AuroraColors.overlaySurface,
+            color: context.ac.overlaySurface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AuroraColors.border),
+            border: Border.all(color: context.ac.borderStrong),
           ),
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -3324,8 +3398,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                               elevation: 4,
                               shape: const CircleBorder(),
                               color: badgeCount > 0
-                                  ? AuroraColors.accentAmber
-                                  : AuroraColors.accent,
+                                  ? context.ac.accentAmber
+                                  : context.ac.accentFrost,
                               child: InkWell(
                                 customBorder: const CircleBorder(),
                                 onTap: _showSniffedMediaSheet,
@@ -3341,7 +3415,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                                     child: Icon(
                                       badgeCount > 0 ? Icons.radar : Icons.add,
                                       size: 22,
-                                      color: AuroraColors.background,
+                                      color: context.ac.surfaceField,
                                     ),
                                   ),
                                 ),
@@ -3412,22 +3486,22 @@ class _SnifferScreenState extends State<SnifferScreen>
               ? const EdgeInsets.all(8)
               : const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: AuroraColors.glassSurface,
+            color: context.ac.glassSurface,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AuroraColors.glassBorder),
+            border: Border.all(color: context.ac.glassBorder),
           ),
           child: compact
-              ? Icon(icon, size: 20, color: AuroraColors.mutedText)
+              ? Icon(icon, size: 20, color: context.ac.textSecondary)
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(icon, size: 18, color: AuroraColors.mutedText),
+                    Icon(icon, size: 18, color: context.ac.textSecondary),
                     const SizedBox(width: 6),
                     Text(
                       label,
                       style: TextStyle(
                         fontSize: 12,
-                        color: AuroraColors.mutedText,
+                        color: context.ac.textSecondary,
                       ),
                     ),
                   ],
@@ -3459,7 +3533,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       color = Colors.redAccent;
     } else if (isAllowlisted) {
       icon = Icons.shield_outlined;
-      color = AuroraColors.mutedText;
+      color = context.ac.textSecondary;
     } else {
       icon = Icons.shield;
       color = Colors.green;
@@ -3473,9 +3547,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         child: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: AuroraColors.glassSurface,
+            color: context.ac.glassSurface,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AuroraColors.glassBorder),
+            border: Border.all(color: context.ac.glassBorder),
           ),
           child: Stack(
             clipBehavior: Clip.none,
@@ -3521,7 +3595,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (host.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('No site loaded')));
+      ).showSnackBar(const SnackBar(content: Text('Open a page first to adjust adblock settings.')));
       return;
     }
     final isAllowlisted = settings.adblockAllowlist.contains(host);
@@ -3533,7 +3607,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           children: [
             const Icon(Icons.shield, color: Colors.green),
             const SizedBox(width: 8),
-            const Text('Adblock'),
+            const Text('Adblock on this site'),
           ],
         ),
         content: Column(
@@ -3545,21 +3619,21 @@ class _SnifferScreenState extends State<SnifferScreen>
             Text(
               settings.adblockEnabled
                   ? (isAllowlisted
-                        ? 'Status: disabled for this site'
-                        : 'Status: active')
-                  : 'Status: globally disabled',
+                        ? 'Adblock is paused — ads may show on this site.'
+                        : 'Adblock is protecting this page.')
+                  : 'Adblock is turned off globally.',
             ),
             const SizedBox(height: 4),
-            Text('Blocked: $blocked requests on this page'),
+            Text('Blocked $blocked requests on this page'),
             const Divider(),
             SwitchListTile(
               title: Text(
-                isAllowlisted ? 'Block ads on $host' : 'Allow ads on $host',
+                isAllowlisted ? 'Resume adblock on $host' : 'Pause adblock on $host',
               ),
               subtitle: Text(
                 isAllowlisted
-                    ? 'Re-enable adblock for this site'
-                    : 'Temporarily disable adblock for this site',
+                    ? 'Block ads and trackers on this site again.'
+                    : 'Let this site show ads. Use this when a page breaks because adblock blocked something it needs.',
               ),
               value: !isAllowlisted,
               contentPadding: EdgeInsets.zero,
@@ -3598,9 +3672,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: AuroraColors.overlaySurface,
+            color: context.ac.overlaySurface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AuroraColors.border),
+            border: Border.all(color: context.ac.borderStrong),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -3881,7 +3955,7 @@ class _SnifferScreenState extends State<SnifferScreen>
               .toList(growable: false),
         ),
       );
-      _showSnack('Favorite removed.');
+      _showSnack('Bookmark removed.');
       return;
     }
 
@@ -4051,9 +4125,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       await _saveLibrary(
         _library.copyWith(savedPages: [savedPage, ..._library.savedPages]),
       );
-      _showSnack('Page saved.');
+      _showSnack('Page saved offline.');
     } catch (error) {
-      _showSnack('Could not save page: $error');
+      _showSnack('Could not save this page: $error');
     } finally {
       if (mounted) setState(() => _isSavingPage = false);
     }
@@ -4069,13 +4143,13 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<void> _shareCurrentUrlViaSystem() async {
     final url = await _activeTab.controller.currentUrl();
     if (url == null || url.isEmpty) {
-      _showSnack('No URL to share.');
+      _showSnack('Nothing to share — no page is loaded.');
       return;
     }
     try {
       await PublicDownloadsService.shareUrl(url);
     } catch (error) {
-      _showSnack('Could not share: $error');
+      _showSnack('Could not share this page: $error');
     }
   }
 
@@ -4116,12 +4190,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     final tab = _activeTab;
     final currentUrl = await tab.controller.currentUrl();
     if (currentUrl == null || currentUrl.isEmpty) {
-      _showSnack('Open a page first.');
+      _showSnack('Open a page to zoom.');
       return;
     }
     final host = (Uri.tryParse(currentUrl)?.host ?? '').toLowerCase();
     if (host.isEmpty) {
-      _showSnack('No host for zoom.');
+      _showSnack('Could not detect the current site to zoom.');
       return;
     }
     final newScale = (_effectiveZoomFor(host) + delta).clamp(0.5, 3.0);
@@ -4150,7 +4224,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       context: context,
       builder: (ctx) => SimpleDialog(
         title: const Text('Select User-Agent'),
-        backgroundColor: AuroraColors.surface,
+        backgroundColor: context.ac.surfacePanel,
         children: [
           for (var i = 0; i < profiles.length; i++) ...[
             if (i > 0) const Divider(height: 1),
@@ -4182,7 +4256,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (currentUrl.isNotEmpty) {
         unawaited(_editSiteUserAgent(currentUrl));
       } else {
-        _showSnack('Open a page first to set a per-site UA.');
+        _showSnack('Open a page first to set a custom user agent.');
       }
       return;
     }
@@ -4199,13 +4273,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (_activeTab.addressController.text.isNotEmpty) {
       await _activeTab.controller.reload();
     }
-    _showSnack('User-Agent set to ${_uaProfileLabels[result] ?? result}.');
+    _showSnack('UA switched to ${_uaProfileLabels[result] ?? result}.');
   }
 
   Future<void> _editSiteUserAgent(String currentUrl) async {
     final host = (Uri.tryParse(currentUrl)?.host ?? '').toLowerCase();
     if (host.isEmpty) {
-      _showSnack('No host for UA override.');
+      _showSnack('Open a page first to set a custom UA.');
       return;
     }
     final existing = widget.settings.siteUserAgents[host] ?? '';
@@ -4251,7 +4325,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       await _activeTab.controller.setUserAgent(ua);
     }
     await _activeTab.controller.reload();
-    _showSnack('Saved UA for $host.');
+    _showSnack('Custom UA saved for $host.');
   }
 
   BookmarkFolder get _unsortedFolder => BookmarkFolder(
@@ -4405,7 +4479,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       context: context,
       showDragHandle: true,
       useSafeArea: true,
-      backgroundColor: AuroraColors.overlay,
+      backgroundColor: context.ac.overlay,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -4435,7 +4509,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     'Blocked popups: ${_activeTab.controller.blockedPopupsCount}',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AuroraColors.mutedText,
+                      color: ctx.ac.textSecondary,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -4451,7 +4525,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                       _buildMenuItem(
                         icon: Icons.star_rounded,
                         label: 'Favorites',
-                        color: AuroraColors.accentAmber,
+                        color: ctx.ac.accentAmber,
                         onTap: () {
                           Navigator.pop(ctx);
                           _showFavoritesSheet();
@@ -4523,7 +4597,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                       _buildMenuItem(
                         icon: Icons.undo,
                         label: 'Reset Blocks',
-                        color: AuroraColors.mutedText,
+                        color: ctx.ac.textSecondary,
                         onTap: () {
                           Navigator.pop(ctx);
                           _resetPageElementBlocks();
@@ -4538,7 +4612,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                             : (isAllowlisted ? 'Ads Allowed' : 'Adblock: On'),
                         color: !settings.adblockEnabled
                             ? Colors.redAccent
-                            : (isAllowlisted ? AuroraColors.mutedText : Colors.green),
+                            : (isAllowlisted ? ctx.ac.textSecondary : Colors.green),
                         onTap: () {
                           Navigator.pop(ctx);
                           _showAdblockPopup(_activeTab);
@@ -4649,6 +4723,110 @@ class _SnifferScreenState extends State<SnifferScreen>
     onOpen: onOpen,
     onDelete: onDelete,
   );
+
+  /// Opens the floating video button player, showing a quality picker if the
+  /// detected video is an HLS master playlist with variants.
+  void _openVideoPlayer(SniffedMedia media) async {
+    if (media.url.contains('.m3u8') || media.url.contains('mpegurl')) {
+      // Check for enriched variants from the same master.
+      final variants = _activeTab.snifferEngine.detectedMedia
+          .where((m) => m.masterUrl == media.url && m.type == MediaType.video)
+          .toList();
+      if (variants.isNotEmpty) {
+        final selected = await _showHlsQualityPicker(context, variants);
+        if (selected == null || !mounted) return;
+        _showMediaPreview(selected);
+        return;
+      }
+    }
+    _showMediaPreview(media);
+  }
+
+  /// Shows a bottom sheet listing HLS variant qualities. Returns the selected
+  /// variant, or `null` if the user cancels.
+  Future<SniffedMedia?> _showHlsQualityPicker(
+    BuildContext context,
+    List<SniffedMedia> variants,
+  ) async {
+    final sorted = List<SniffedMedia>.from(variants)
+      ..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
+
+    return showModalBottomSheet<SniffedMedia>(
+      context: context,
+      backgroundColor: context.ac.surfacePanel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Select quality',
+                    style: TextStyle(
+                      color: ctx.ac.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                ...sorted.map((variant) {
+                  final resolution = variant.width != null && variant.height != null
+                      ? '${variant.height}p'
+                      : 'Auto';
+                  final bandwidth = variant.bandwidth != null
+                      ? ' (${_formatBandwidth(variant.bandwidth!)})'
+                      : '';
+                  return ListTile(
+                    leading: Icon(Icons.high_quality_rounded,
+                        color: ctx.ac.accentFrost, size: 20),
+                    title: Text(
+                      '$resolution$bandwidth',
+                      style: TextStyle(color: ctx.ac.textPrimary),
+                    ),
+                    subtitle: variant.name.isNotEmpty
+                        ? Text(
+                            variant.name,
+                            style: TextStyle(
+                                color: ctx.ac.textSecondary, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(ctx, variant),
+                  );
+                }),
+                if (sorted.length != variants.length)
+                  ListTile(
+                    leading: Icon(Icons.link_rounded,
+                        color: ctx.ac.textSecondary, size: 20),
+                    title: Text(
+                      'Master playlist',
+                      style: TextStyle(color: ctx.ac.textSecondary),
+                    ),
+                    onTap: () => Navigator.pop(ctx, variants.firstWhere(
+                      (v) => v.masterUrl == null,
+                      orElse: () => variants.first,
+                    )),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatBandwidth(int bps) {
+    if (bps >= 1_000_000) return '${(bps / 1_000_000).toStringAsFixed(1)} Mbps';
+    if (bps >= 1_000) return '${(bps / 1_000).toStringAsFixed(0)} Kbps';
+    return '$bps bps';
+  }
 
   Future<void> _showMediaPreview(SniffedMedia media) => showMediaPreview(
     context,
@@ -4765,9 +4943,10 @@ class _SnifferScreenState extends State<SnifferScreen>
                 h = int.tryParse(m.group(2)!);
               }
             }
+            final resLabel = h != null ? '${h}p ' : '';
             return SniffedMedia(
               url: v.uri.toString(),
-              name: MediaSnifferEngine.bandwidthLabel(v.bandwidth),
+              name: '$resLabel${MediaSnifferEngine.bandwidthLabel(v.bandwidth)}'.trim(),
               type: MediaType.video,
               bandwidth: v.bandwidth,
               width: w,
@@ -5027,7 +5206,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     IconData icon,
     MediaFilter current,
     ValueChanged<MediaFilter> onSelected,
-  ) => compactFilterChip(label, value, icon, current, onSelected);
+  ) => compactFilterChip(context, label, value, icon, current, onSelected);
 
   _filteredGroups(List<CaptureGroup> groups) =>
       _mediaCatchController.filteredGroups(groups);
@@ -5179,7 +5358,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     _downloadQueue.addTask(task, force: force);
 
     if (mounted) {
-      _showSnack('Download started: $suggestedName');
+      _showSnack('Started downloading $suggestedName');
     }
   }
 
@@ -5193,7 +5372,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Download detected'),
+        title: const Text('Start download?'),
         content: Text(name.isNotEmpty ? 'File: $name' : 'URL: $url'),
         actions: [
           TextButton(
@@ -5202,14 +5381,14 @@ class _SnifferScreenState extends State<SnifferScreen>
               // Add to queue (ask once).
               unawaited(_enqueueDirectDownload(tab, url, suggestedFilename));
             },
-            child: const Text('Add to Queue'),
+            child: const Text('Download'),
           ),
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               // Block this specific download silently.
             },
-            child: const Text('Block'),
+            child: const Text('Skip'),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -5269,7 +5448,26 @@ class _SnifferScreenState extends State<SnifferScreen>
     final tabTitle = _activeTab.title?.trim() ?? '';
     final bestTitle = metaTitle.isNotEmpty ? metaTitle : tabTitle;
 
-    var ext = mediaName.contains('.') ? '.${mediaName.split('.').last}' : '';
+    // Strip parenthetical metadata (e.g., bandwidth labels like "(0.6 Mbps)")
+    // before extracting the file extension — dots inside parenthetical values
+    // would hijack the extension and produce ".6 Mbps)" instead of ".m3u8".
+    final cleanName = mediaName
+        .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+        .trim();
+    final rawExt = cleanName.contains('.')
+        ? '.${cleanName.split('.').last}'
+        : '';
+    final hasRealExt = rawExt.isNotEmpty &&
+        RegExp(r'^\.[a-zA-Z0-9]{2,5}$').hasMatch(rawExt);
+
+    // Compute the base BEFORE stripping playlist extensions, so the
+    // extension-stripping regex removes the real file extension — not
+    // bandwidth-label dots like ".6" in "0.6 Mbps".
+    final base = hasRealExt
+        ? cleanName.replaceAll(RegExp(r'\.[^.]+$'), '').trim()
+        : cleanName;
+
+    var ext = hasRealExt ? rawExt : '';
     if (ext.toLowerCase() == '.m3u8') {
       ext = ''; // Let the HLS downloader pick .ts/.mp4/.m4a
     } else if (ext.toLowerCase() == '.mpd') {
@@ -5278,26 +5476,51 @@ class _SnifferScreenState extends State<SnifferScreen>
       ext = ''; // Disguised playlist (e.g. index.jpg with #EXTM3U body)
     }
 
+    // Extract a meaningful video identifier from the source page URL when
+    // the page title is an error page (e.g., "fc2-ppv-4912494" from
+    // "https://missav.ws/en/fc2-ppv-4912494"). This produces a distinguishing
+    // filename instead of a generic fallback like "master_720p".
+    String sourceId = '';
+    final srcUrl = media?.sourcePageUrl;
+    if (srcUrl != null && srcUrl.isNotEmpty) {
+      final srcUri = Uri.tryParse(srcUrl);
+      if (srcUri != null) {
+        final segments = srcUri.pathSegments
+            .where((s) => s.isNotEmpty && s != 'en' && s != 'ja' && s != 'cn')
+            .toList();
+        if (segments.isNotEmpty) {
+          sourceId = segments.last;
+        }
+      }
+    }
+
     String qualityLabel = '';
     if (mediaUrl != null) {
       final qMatch = RegExp(r'(\d+)p').firstMatch(mediaUrl);
       if (qMatch != null) qualityLabel = qMatch.group(1)!;
     }
 
-    final base = mediaName.replaceAll(RegExp(r'\.[^.]+$'), '').trim();
-
     if (bestTitle.isNotEmpty) {
       final sanitized = bestTitle
           .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
           .trim();
-      if (sanitized.isNotEmpty) {
-        if (qualityLabel.isNotEmpty) {
+      if (sanitized.isNotEmpty &&
+          !_isErrorPageTitle(sanitized) &&
+          (qualityLabel.isEmpty || sanitized.length >= 4)) {
+        if (widget.settings.includeQualitySuffix && qualityLabel.isNotEmpty) {
           return _truncateFilename('$sanitized (${qualityLabel}p)$ext');
         }
-        // Append base name when title is generic (e.g., domain)
-        final baseSuffix = base.isNotEmpty && base != sanitized ? '_$base' : '';
-        return _truncateFilename('$sanitized$baseSuffix$ext');
+        return _truncateFilename('$sanitized$ext');
       }
+    }
+
+    // Title was empty or an error page — use the source page identifier
+    // (e.g., "fc2-ppv-4912494") for a distinguishing filename.
+    if (sourceId.isNotEmpty) {
+      if (qualityLabel.isNotEmpty) {
+        return _truncateFilename('${sourceId}_${qualityLabel}p$ext');
+      }
+      return _truncateFilename('$sourceId$ext');
     }
 
     if (qualityLabel.isNotEmpty) {
@@ -5425,6 +5648,33 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
+  static final Set<String> _errorPageTitles = <String>{
+    'web page not available',
+    'this page could not be loaded',
+    'this site can\'t be reached',
+    'page not found',
+    'universal widget',
+    'this page has been blocked',
+    'access denied',
+    'site cannot be reached',
+    'the page has been blocked',
+  };
+
+  static final RegExp _errorPagePattern = RegExp(
+    r'^(err_|error\s|http\s?\d{3}\s|403\s|404\s|500\s|502\s|503\s)',
+    caseSensitive: false,
+  );
+
+  /// Returns true when [title] is a known Android WebView error page title
+  /// or a generic interstitial placeholder. Such titles should not be used
+  /// as download filenames — fall back to the URL-derived name instead.
+  static bool _isErrorPageTitle(String title) {
+    final low = title.trim().toLowerCase();
+    if (low.isEmpty) return false;
+    if (_errorPagePattern.hasMatch(low)) return true;
+    return _errorPageTitles.contains(low);
+  }
+
   String _cleanTitle(String? title, String? url) {
     final trimmed = title?.trim();
     if (trimmed != null && trimmed.isNotEmpty) return trimmed;
@@ -5484,7 +5734,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (url == null || url.isEmpty) return;
     final original = _extractOriginalFromTranslateUrl(url);
     if (original == null) {
-      _showSnack('No original URL detected.');
+      _showSnack('Could not find the original page URL.');
       return;
     }
     unawaited(_loadUrlWithHostSettings(tab, original));
@@ -5506,7 +5756,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     try {
       await tab.controller.evaluateJavaScript('window.print()');
     } catch (_) {
-      _showSnack('Print to PDF not supported on this page.');
+      _showSnack('This page does not support print to PDF.');
     }
   }
 
@@ -5516,7 +5766,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     try {
       await PublicDownloadsService.openUrl(url);
     } catch (_) {
-      _showSnack('Could not open UC Browser.');
+      _showSnack('Could not open this page in UC Browser.');
     }
   }
 
@@ -5547,15 +5797,15 @@ class _SnifferScreenState extends State<SnifferScreen>
     final tab = _activeTab;
     final host = (Uri.tryParse(url)?.host ?? '').toLowerCase();
     if (host.isEmpty) {
-      _showSnack('No host to clear.');
+      _showSnack('Open a page first to clear its data.');
       return;
     }
     try {
       await tab.controller.clearSiteData(url);
       await tab.controller.reload();
-      _showSnack('Cleared cookies, storage and cache for $host.');
+      _showSnack('Cleared data for $host.');
     } catch (error) {
-      _showSnack('Could not clear data: $error');
+      _showSnack('Could not clear data for this page: $error');
     }
   }
 
@@ -5804,27 +6054,27 @@ class _PickerCancelChipState extends State<_PickerCancelChip>
                 child: CircularProgressIndicator(
                   value: 1.0 - _controller.value,
                   strokeWidth: 3.0,
-                  color: AuroraColors.accent,
-                  backgroundColor: AuroraColors.surfaceVariant,
+                  color: context.ac.accentFrost,
+                  backgroundColor: context.ac.surfaceElevated,
                 ),
               ),
               Material(
-                color: AuroraColors.overlaySurface,
+                color: context.ac.overlaySurface,
                 elevation: 8,
                 borderRadius: BorderRadius.circular(20),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(20),
                   onTap: widget.onCancel,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.close, size: 18, color: AuroraColors.text),
-                        SizedBox(width: 6),
+                        Icon(Icons.close, size: 18, color: context.ac.textPrimary),
+                        const SizedBox(width: 6),
                         Text(
                           'Cancel',
-                          style: TextStyle(color: AuroraColors.text),
+                          style: TextStyle(color: context.ac.textPrimary),
                         ),
                       ],
                     ),

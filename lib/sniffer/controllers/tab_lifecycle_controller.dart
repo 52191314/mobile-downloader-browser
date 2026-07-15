@@ -518,10 +518,10 @@ class TabLifecycleController {
   void reopenLastClosedTab() {
     final url = tabManager.reopenLastClosedTab();
     if (url == null) {
-      host.showSnack('No recently closed tabs.');
+      host.showSnack('No tabs to reopen.');
       return;
     }
     openNewTab(url: url);
-    host.showSnack('Reopened ${host.titleForUrl(url)}.');
+    host.showSnack('Reopened ${host.titleForUrl(url)} tab.');
   }
 }

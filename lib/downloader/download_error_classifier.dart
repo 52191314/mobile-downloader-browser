@@ -97,130 +97,165 @@ class DownloadErrorClassifier {
       case DownloadFailure.dnsLookupFailed:
         final h = host ?? _extractHost(detail);
         return h != null
-            ? 'Cannot reach the server — DNS lookup failed for "$h". '
-                'Check your internet connection.'
-            : 'Cannot reach the server — DNS lookup failed. '
-                'Check your internet connection.';
+            ? 'Couldn\'t reach $h. '
+                'Aurora couldn\'t translate the address to a server. '
+                'Check the URL is correct and try again.'
+            : 'Couldn\'t reach the server. '
+                'Aurora couldn\'t translate the address to a server. '
+                'Check the URL and try again.';
       case DownloadFailure.connectionRefused:
-        return 'The server refused the connection. '
-            'It may be down or blocking your region.';
+        return 'Couldn\'t connect. '
+            'The server refused the connection. '
+            'Check the server is online and try again.';
       case DownloadFailure.connectionTimeout:
-        return 'Connection timed out. '
-            'The server is not responding — it may be overloaded or blocked.';
+        return 'Couldn\'t connect. '
+            'The server didn\'t respond in time. '
+            'Check the server is online and try again.';
       case DownloadFailure.responseTimeout:
-        return 'The server stopped responding mid-download. '
+        return 'Couldn\'t finish the download. '
+            'The server stopped responding mid-stream. '
             'Try again — if it keeps happening, the server may be overloaded.';
       case DownloadFailure.connectionReset:
-        return 'The connection was interrupted. '
-            'Your ISP or the CDN may have reset the connection. Retry to resume.';
+        return 'Couldn\'t keep the connection open. '
+            'A network device or the server reset the link. '
+            'Try again to resume.';
 
       // ── HTTP ──
       case DownloadFailure.httpUnauthorized:
-        return 'Access denied (401). '
-            'Authentication is required — the URL may need a fresh token.';
+        return 'Couldn\'t download. '
+            'Server requires authentication (401). '
+            'The URL may need a fresh token or login.';
       case DownloadFailure.httpForbidden:
-        return 'Access denied (403). '
-            'The server blocked this request — the URL may have expired '
-            'or your IP was rate-limited.';
+        return 'Couldn\'t download. '
+            'The server blocked the request (403). '
+            'The URL may have expired or your IP was rate-limited. '
+            'Go back to the source and get a fresh link.';
       case DownloadFailure.httpNotFound:
-        return 'File not found (404). '
-            'The resource was removed or the URL is invalid.';
+        return 'Couldn\'t download. '
+            'Server says the file doesn\'t exist (404). '
+            'The resource may have been removed.';
       case DownloadFailure.httpRateLimited:
-        return 'Rate limited (429). '
-            'The server is throttling downloads. Wait a few minutes and retry.';
+        return 'Couldn\'t download. '
+            'Server is throttling requests (429). '
+            'Wait a few minutes, then try again.';
       case DownloadFailure.httpServerError:
         final code = httpStatus != null ? ' ($httpStatus)' : '';
-        return 'Server error$code. '
-            'The server is having problems — try again later.';
+        return 'Couldn\'t download. '
+            'The server had a problem$code. '
+            'Try again later.';
       case DownloadFailure.httpUnexpectedStatus:
         final code = httpStatus != null ? ' ($httpStatus)' : '';
-        return 'Unexpected server response$code. '
-            'The download could not proceed.'
+        return 'Couldn\'t download. '
+            'Server returned an unexpected response$code.'
             '${detail != null ? ' $detail' : ''}';
 
       // ── Content ──
       case DownloadFailure.urlExpired:
-        return 'The download URL has expired. '
+        return 'Couldn\'t download. '
+            'The link has expired. '
             'Go back to the source page and get a fresh link.';
       case DownloadFailure.urlInvalid:
-        return detail ?? 'The URL is invalid or unsupported.';
+        return detail ?? 'Couldn\'t download. '
+            'The URL is not valid or isn\'t supported. '
+            'Check the link and try again.';
       case DownloadFailure.contentMismatch:
-        return 'The server returned an HTML page instead of the media file. '
-            'The URL may have expired or require authentication.';
+        return 'Couldn\'t download. '
+            'The server sent an HTML page instead of a media file. '
+            'The URL may have expired or need authentication. '
+            'Re-sniff from the source page.';
       case DownloadFailure.hashMismatch:
-        return 'File integrity check failed — the downloaded file is corrupt. '
-            '${detail ?? 'Retry the download.'}';
+        return 'Couldn\'t verify the download. '
+            'The file is corrupt or was modified. '
+            '${detail ?? 'Try downloading again.'}';
       case DownloadFailure.emptyResponse:
-        return 'The server returned an empty file (0 bytes). '
-            'The URL may have expired or require authentication.';
+        return 'Couldn\'t download. '
+            'The server returned an empty file (0 bytes). '
+            'The URL may have expired or need authentication. '
+            'Re-sniff from the source page.';
       case DownloadFailure.resourceChanged:
-        return 'The file on the server has changed since the download started. '
-            'The download will restart with the updated file.';
+        return 'Couldn\'t finish. '
+            'The file changed on the server during the download. '
+            'The download will restart with the updated version.';
 
       // ── HLS ──
       case DownloadFailure.hlsPlaylistEmpty:
-        return 'The HLS playlist did not contain any media segments. '
-            'The stream may have ended or the URL is invalid.';
+        return 'Couldn\'t download. '
+            'The streaming playlist has no media segments. '
+            'The stream may have ended or the link is invalid. '
+            'Re-sniff from the video page.';
       case DownloadFailure.hlsPlaylistFetchFailed:
-        return 'Could not fetch the HLS playlist. '
+        return 'Couldn\'t fetch the streaming playlist. '
             '${detail ?? 'Re-sniff the link from the video page.'}';
       case DownloadFailure.hlsKeyFetchFailed:
-        return 'Could not fetch the encryption key for this stream. '
+        return 'Couldn\'t get the decryption key for this stream. '
             'Re-sniff the link from the video page.';
       case DownloadFailure.hlsTokenExpired:
-        return 'The stream URL has expired and could not be refreshed. '
-            'Go back to the video page and re-sniff the link.';
+        return 'Couldn\'t download. '
+            'The stream link expired and couldn\'t be refreshed. '
+            'Go back to the video page and re-sniff.';
       case DownloadFailure.hlsCircuitBreaker:
-        return 'The CDN blocked access after repeated 403 errors. '
+        return 'Couldn\'t download. '
+            'The CDN blocked access after too many rejections (403). '
             'Wait a few minutes, then re-sniff from the video page.';
 
       // ── File I/O ──
       case DownloadFailure.diskFull:
-        return 'Not enough storage space. '
-            'Free up space on your device and retry.';
+        return 'Couldn\'t save the file. '
+            'Not enough storage space. '
+            'Free up space on your device and try again.';
       case DownloadFailure.permissionDenied:
-        return 'Cannot write to the download folder — '
-            'storage permission is missing or the folder is read-only.';
+        return 'Couldn\'t save the file. '
+            'Storage permission is missing or the download folder is read-only. '
+            'Check folder permissions in Settings.';
       case DownloadFailure.fileSystemError:
-        return 'A file system error occurred. '
+        return 'Couldn\'t save the file. '
             '${detail ?? 'Check that the download folder exists and is writable.'}';
 
       // ── Download integrity ──
       case DownloadFailure.chunkIncomplete:
-        return 'Download interrupted — not all parts completed. '
-            'Retry to resume from where it stopped.';
+        return 'Couldn\'t finish the download. '
+            'Not all parts completed. '
+            'Try again to resume from where it stopped.';
       case DownloadFailure.chunkCorrupt:
-        return detail ?? 'A downloaded part is corrupt or missing. '
+        return detail ?? 'Couldn\'t verify a downloaded part. '
+            'A chunk is corrupt or missing. '
             'Retry will re-download the affected parts.';
       case DownloadFailure.mergeInterrupted:
-        return 'The download was interrupted while merging saved parts. '
-            'Retry to re-merge.';
+        return 'Couldn\'t finish merging. '
+            'The download was interrupted while joining parts. '
+            'Try again to complete the merge.';
       case DownloadFailure.mergeFailed:
-        return detail ?? 'Could not merge the downloaded parts into a file.';
+        return detail ?? 'Couldn\'t combine the downloaded parts into a single file. '
+            'Try again.';
 
       // ── Stall / Speed ──
       case DownloadFailure.speedStall:
         final threshold = thresholdLabel ?? 'the configured minimum';
         final timeout = stallTimeoutSeconds ?? 20;
-        return '[Speed stall] Speed stayed below $threshold '
-            'for ${timeout}s. Auto-retrying...';
+        return 'Download slowed down. '
+            'Speed stayed below $threshold for ${timeout}s. '
+            'Aurora is retrying automatically.';
       case DownloadFailure.partialDownload:
         final pct = percentage ?? '?';
-        return '[Download stalled at $pct%] '
-            'Use "Force Merge" to salvage the partial file, or tap Retry to resume.';
+        return 'Download stalled at $pct%. '
+            'Use Force Merge to save the partial file, '
+            'or tap Retry to resume.';
 
       // ── Torrent ──
       case DownloadFailure.nativeEngineUnavailable:
-        return detail ?? 'The native torrent engine is not available. '
-            'Torrent downloads require the native engine.';
+        return detail ?? 'Couldn\'t start the torrent engine. '
+            'This device doesn\'t support the required native engine.';
       case DownloadFailure.torrentMetadataFailed:
-        return detail ?? 'Could not parse the torrent file or fetch metadata.';
+        return detail ?? 'Couldn\'t read the torrent file. '
+            'The file may be corrupt or the tracker isn\'t responding.';
       case DownloadFailure.torrentEngineError:
-        return detail ?? 'The torrent engine reported an error.';
+        return detail ?? 'Couldn\'t run the torrent download. '
+            'The torrent engine reported an error. Try again.';
 
       // ── Other ──
       case DownloadFailure.unknown:
-        return detail ?? 'Download failed due to an unexpected error.';
+        return detail ?? 'Couldn\'t download. '
+            'Something unexpected went wrong. Try again.';
     }
   }
 

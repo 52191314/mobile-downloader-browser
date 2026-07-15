@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 import 'panel.dart';
 
 class EmptyQueue extends StatefulWidget {
@@ -9,7 +9,7 @@ class EmptyQueue extends StatefulWidget {
 
   const EmptyQueue({
     super.key,
-    this.message = 'No downloads yet',
+    this.message = 'No downloads yet. Paste a link above to add one.',
     this.icon = Icons.inbox_outlined,
   });
 
@@ -57,7 +57,7 @@ class _EmptyQueueState extends State<EmptyQueue>
                 ),
                 child: Icon(
                   widget.icon,
-                  color: AuroraColors.mutedDeep,
+                  color: context.ac.textTertiary,
                   size: 48,
                 ),
               ),
@@ -65,8 +65,9 @@ class _EmptyQueueState extends State<EmptyQueue>
               Text(
                 widget.message,
                 style: TextStyle(
+                  fontFamily: 'Inter',
                   fontSize: 14,
-                  color: AuroraColors.mutedText,
+                  color: context.ac.textSecondary,
                   fontWeight: FontWeight.w500,
                 ),
               ),

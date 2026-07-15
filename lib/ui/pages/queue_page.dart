@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../downloader/downloader.dart';
 import '../../platform/public_downloads_service.dart';
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/edge_swipe_card.dart';
 import '../widgets/empty_queue.dart';
@@ -55,6 +55,8 @@ class QueuePage extends StatefulWidget {
   final void Function(String url)? onOpenUrlInBrowser;
   final Future<void> Function(DownloadTask task)? onResniffAuto;
   final Future<void> Function(DownloadTask task)? onResniffManual;
+  final Future<void> Function(DownloadTask task) onShareDownload;
+  final Future<void> Function(DownloadTask task)? onExportDownload;
 
   const QueuePage({
     super.key,
@@ -71,6 +73,8 @@ class QueuePage extends StatefulWidget {
     this.onOpenUrlInBrowser,
     this.onResniffAuto,
     this.onResniffManual,
+    required this.onShareDownload,
+    this.onExportDownload,
   });
 
   @override
@@ -182,7 +186,7 @@ class _QueuePageState extends State<QueuePage> {
 
     return Scaffold(
         appBar: AppBar(
-          title: const Text('Downloads'),
+          title: const Text('Queue'),
           actions: [
             Icon(Icons.cloud_done,
                 color: Theme.of(context).colorScheme.primary),
@@ -190,7 +194,7 @@ class _QueuePageState extends State<QueuePage> {
               IconButton(
                 icon: Icon(
                     _viewMode ? Icons.list_rounded : Icons.grid_view_rounded),
-                tooltip: _viewMode ? 'List view' : 'Grid view',
+                tooltip: _viewMode ? 'Show as list' : 'Show as grid',
                 onPressed: () => setState(() => _viewMode = !_viewMode),
               ),
           ],
@@ -211,6 +215,7 @@ class _QueuePageState extends State<QueuePage> {
     List<DownloadTask> completed,
     List<DownloadTask> failed,
   ) {
+    final ac = context.ac;
     final folders = <String>{};
     for (final task in tasks) {
       final f = _getTaskFolder(task);
@@ -288,11 +293,12 @@ class _QueuePageState extends State<QueuePage> {
                   key: Key('folder_tab_$folder'),
                   label: Text(folder),
                   selected: isSelected,
-                  selectedColor: AuroraColors.accent.withValues(alpha: 0.2),
+                  selectedColor: ac.accentFrost.withValues(alpha: 0.2),
                   labelStyle: TextStyle(
+                    fontFamily: 'Inter',
                     color: isSelected
-                        ? AuroraColors.accent
-                        : AuroraColors.mutedText,
+                        ? ac.accentFrost
+                        : ac.textSecondary,
                     fontWeight:
                         isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
@@ -336,6 +342,7 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _buildTaskSliver(List<DownloadTask> filteredTasks) {
+    final ac = context.ac;
     if (filteredTasks.isEmpty) {
       return SliverToBoxAdapter(child: _buildEmptyHint(context));
     }
@@ -346,13 +353,13 @@ class _QueuePageState extends State<QueuePage> {
           .toList(growable: false);
 
       if (completed.isEmpty) {
-        return const SliverToBoxAdapter(
+        return SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.only(top: 40),
+            padding: const EdgeInsets.only(top: 40),
             child: Center(
               child: Text(
                 'No completed downloads yet',
-                style: TextStyle(color: AuroraColors.mutedText),
+                style: TextStyle(fontFamily: 'Inter', color: ac.textSecondary),
               ),
             ),
           ),
@@ -392,13 +399,13 @@ class _QueuePageState extends State<QueuePage> {
               EmptyQueue(
                 icon: Icons.search_off,
                 message: _searchQuery.isNotEmpty
-                    ? 'No results for "$_searchQuery"'
-                    : 'No tasks match the current filter',
+                    ? 'Nothing matches "$_searchQuery"'
+                    : 'No downloads match this filter',
               ),
               const SizedBox(height: 4),
               TextButton.icon(
                 icon: const Icon(Icons.clear_all, size: 16),
-                label: const Text('Clear filters'),
+                label: const Text('Reset filters'),
                 onPressed: () {
                   setState(() {
                     _searchQuery = '';
@@ -422,15 +429,16 @@ class _QueuePageState extends State<QueuePage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildUrlInputBar(BuildContext context) {
+    final ac = context.ac;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTap: () => _urlFocusNode.requestFocus(),
       child: Card(
-        color: AuroraColors.glassSurface,
+        color: ac.glassSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: BorderSide(color: AuroraColors.glassBorder),
+          side: BorderSide(color: ac.glassBorder),
         ),
         child: Padding(
           padding: const EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 4),
@@ -441,18 +449,19 @@ class _QueuePageState extends State<QueuePage> {
                   controller: widget.urlController,
                   focusNode: _urlFocusNode,
                   decoration: InputDecoration(
-                    hintText: 'Paste a URL to download…',
+                    hintText: 'Paste a link to download…',
                     hintStyle: TextStyle(
-                      color: AuroraColors.mutedDeep,
+                      fontFamily: 'Inter',
+                      color: ac.textTertiary,
                       fontSize: 13,
                     ),
                     prefixIcon: Icon(Icons.link,
-                        color: AuroraColors.accent, size: 18),
+                        color: ac.accentFrost, size: 18),
                     suffixIcon: _hasUrlText
                         ? IconButton(
                             icon: Icon(Icons.clear,
                                 size: 18,
-                                color: AuroraColors.mutedText),
+                                color: ac.textSecondary),
                             onPressed: () {
                               widget.urlController.clear();
                               _urlFocusNode.requestFocus();
@@ -464,7 +473,7 @@ class _QueuePageState extends State<QueuePage> {
                           )
                         : null,
                     filled: true,
-                    fillColor: AuroraColors.surface,
+                    fillColor: ac.surfacePanel,
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
@@ -479,13 +488,13 @@ class _QueuePageState extends State<QueuePage> {
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide(
-                        color: AuroraColors.accent.withValues(alpha: 0.5),
+                        color: ac.accentFrost.withValues(alpha: 0.5),
                         width: 1,
                       ),
                     ),
                   ),
-                  style: const TextStyle(
-                      fontSize: 13, color: AuroraColors.text),
+                  style: TextStyle(
+                      fontSize: 13, color: ac.textPrimary),
                   keyboardType: TextInputType.url,
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => widget.onAddDownload(),
@@ -499,8 +508,8 @@ class _QueuePageState extends State<QueuePage> {
                   onPressed: widget.onAddDownload,
                   icon: const Icon(Icons.add, size: 20),
                   style: IconButton.styleFrom(
-                    backgroundColor: AuroraColors.accent,
-                    foregroundColor: AuroraColors.background,
+                    backgroundColor: ac.accentFrost,
+                    foregroundColor: ac.surfaceField,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -521,30 +530,32 @@ class _QueuePageState extends State<QueuePage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildSearchBar(BuildContext context) {
+    final ac = context.ac;
     return Card(
-      color: AuroraColors.glassSurface,
+      color: ac.glassSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: AuroraColors.glassBorder),
+        side: BorderSide(color: ac.glassBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.only(left: 4, right: 4, top: 2, bottom: 2),
         child: TextField(
           controller: _searchController,
           decoration: InputDecoration(
-            hintText: 'Search URL or filename…',
+            hintText: 'Search by URL or name…',
             hintStyle: TextStyle(
-              color: AuroraColors.mutedDeep,
+              fontFamily: 'Inter',
+              color: ac.textTertiary,
               fontSize: 13,
             ),
             prefixIcon: Icon(Icons.search,
-                color: AuroraColors.accent, size: 18),
+                color: ac.accentFrost, size: 18),
             suffixIcon: _searchQuery.isNotEmpty
                 ? IconButton(
                     icon: Icon(Icons.clear,
                         size: 18,
-                        color: AuroraColors.mutedText),
+                        color: ac.textSecondary),
                     onPressed: () {
                       _searchController.clear();
                       setState(() => _searchQuery = '');
@@ -556,7 +567,7 @@ class _QueuePageState extends State<QueuePage> {
                   )
                 : null,
             filled: true,
-            fillColor: AuroraColors.surface,
+            fillColor: ac.surfacePanel,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12, vertical: 10),
@@ -571,13 +582,13 @@ class _QueuePageState extends State<QueuePage> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(20),
               borderSide: BorderSide(
-                color: AuroraColors.accent.withValues(alpha: 0.5),
+                color: ac.accentFrost.withValues(alpha: 0.5),
                 width: 1,
               ),
             ),
           ),
-          style: const TextStyle(
-              fontSize: 13, color: AuroraColors.text),
+          style: TextStyle(
+              fontSize: 13, color: ac.textPrimary),
           textInputAction: TextInputAction.search,
         ),
       ),
@@ -617,35 +628,38 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _buildSortChip(BuildContext context) {
+    final ac = context.ac;
     final sortLabel = _sortLabel(_sortBy);
     final arrowIcon = _sortDescending
         ? Icons.arrow_downward_rounded
         : Icons.arrow_upward_rounded;
     return ActionChip(
-      avatar: Icon(arrowIcon, size: 14, color: AuroraColors.accent),
-      label: Text(sortLabel, style: const TextStyle(fontSize: 11)),
-      backgroundColor: AuroraColors.glassSurface,
-      side: BorderSide(color: AuroraColors.glassBorder),
+      avatar: Icon(arrowIcon, size: 14, color: ac.accentFrost),
+      label: Text(sortLabel, style: TextStyle(fontFamily: 'Inter', fontSize: 11)),
+      backgroundColor: ac.glassSurface,
+      side: BorderSide(color: ac.glassBorder),
       onPressed: () => _showSortPicker(context),
     );
   }
 
   Widget _buildStateChip(_StateFilterOption option) {
+    final ac = context.ac;
     final isSelected = _stateFilter == option.states;
     return ChoiceChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(option.icon, size: 13,
-              color: isSelected ? AuroraColors.accent : AuroraColors.mutedText),
+              color: isSelected ? ac.accentFrost : ac.textSecondary),
           const SizedBox(width: 4),
-          Text(option.label, style: const TextStyle(fontSize: 11)),
+          Text(option.label, style: TextStyle(fontFamily: 'Inter', fontSize: 11)),
         ],
       ),
       selected: isSelected,
-      selectedColor: AuroraColors.accent.withValues(alpha: 0.2),
+      selectedColor: ac.accentFrost.withValues(alpha: 0.2),
       labelStyle: TextStyle(
-        color: isSelected ? AuroraColors.accent : AuroraColors.mutedText,
+        fontFamily: 'Inter',
+        color: isSelected ? ac.accentFrost : ac.textSecondary,
         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
       ),
       onSelected: (_) {
@@ -657,10 +671,11 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   void _showSortPicker(BuildContext context) {
+    final ac = context.ac;
     showModalBottomSheet(
       context: context,
       useSafeArea: true,
-      backgroundColor: AuroraColors.surfaceCard,
+      backgroundColor: ac.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -673,9 +688,10 @@ class _QueuePageState extends State<QueuePage> {
               children: [
                 Text('Sort by',
                     style: TextStyle(
+                      fontFamily: 'Inter',
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: AuroraColors.text,
+                      color: ac.textPrimary,
                     )),
                 const SizedBox(height: 12),
                 const Divider(height: 1),
@@ -702,10 +718,11 @@ class _QueuePageState extends State<QueuePage> {
                             child: Text(
                               _sortLabel(field),
                               style: TextStyle(
+                                fontFamily: 'Inter',
                                 fontSize: 13,
                                 color: _sortBy == field
-                                    ? AuroraColors.accent
-                                    : AuroraColors.text,
+                                    ? ac.accentFrost
+                                    : ac.textPrimary,
                                 fontWeight: _sortBy == field
                                     ? FontWeight.w600
                                     : FontWeight.normal,
@@ -718,7 +735,7 @@ class _QueuePageState extends State<QueuePage> {
                                   ? Icons.arrow_downward_rounded
                                   : Icons.arrow_upward_rounded,
                               size: 16,
-                              color: AuroraColors.accent,
+                              color: ac.accentFrost,
                             ),
                         ],
                       ),
@@ -793,11 +810,11 @@ class _QueuePageState extends State<QueuePage> {
                 builder: (ctx) => AlertDialog(
                   title: const Text('Cancel active downloads?'),
                   content: const Text(
-                    'Remove all active and queued downloads?\nTemporary files will be deleted.',
+                    'This removes all active and queued downloads.\nTemporary files will be deleted.',
                   ),
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove All')),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove all')),
                   ],
                 ),
               );
@@ -815,13 +832,14 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _actionChip(IconData icon, String label, VoidCallback onPressed) {
+    final ac = context.ac;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ActionChip(
-        avatar: Icon(icon, size: 16, color: AuroraColors.accent),
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        backgroundColor: AuroraColors.glassSurface,
-        side: BorderSide(color: AuroraColors.glassBorder),
+        avatar: Icon(icon, size: 16, color: ac.accentFrost),
+        label: Text(label, style: TextStyle(fontFamily: 'Inter', fontSize: 12)),
+        backgroundColor: ac.glassSurface,
+        side: BorderSide(color: ac.glassBorder),
         onPressed: onPressed,
       ),
     );
@@ -839,12 +857,13 @@ class _QueuePageState extends State<QueuePage> {
     required int failedCount,
     required double totalSpeed,
   }) {
+    final ac = context.ac;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AuroraColors.surfaceCard,
+        color: ac.surfaceCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AuroraColors.glassBorder),
+        border: Border.all(color: ac.glassBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -853,31 +872,31 @@ class _QueuePageState extends State<QueuePage> {
           Row(
             children: [
               _statBadge(Icons.bolt, '$activeCount', 'Active',
-                  AuroraColors.accent),
+                  ac.accentFrost),
               const SizedBox(width: 8),
               _statBadge(Icons.pending_actions, '$queuedCount', 'Queued',
-                  AuroraColors.accentPurple),
+                  ac.accentPurple),
               const SizedBox(width: 8),
               _statBadge(Icons.done_all, '$completedCount', 'Done',
-                  AuroraColors.nordGreen),
+                  ac.statusSuccess),
               const SizedBox(width: 8),
               _statBadge(Icons.error_outline, '$failedCount', 'Failed',
-                  AuroraColors.nordRed),
+                  ac.statusError),
             ],
           ),
           if (activeCount > 0 || queuedCount > 0) ...[
             const SizedBox(height: 8),
             Row(
               children: [
-                Icon(Icons.speed, size: 14, color: AuroraColors.mutedText),
+                Icon(Icons.speed, size: 14, color: ac.textSecondary),
                 const SizedBox(width: 4),
                 Text(
                   formatSpeed(totalSpeed),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: AuroraColors.accent,
-                    fontFamily: 'monospace',
+                    color: ac.accentFrost,
+                    fontFamily: 'JetBrainsMono',
                   ),
                 ),
                 const Spacer(),
@@ -885,8 +904,9 @@ class _QueuePageState extends State<QueuePage> {
                   Text(
                     'limit ${widget.speedLimitKbps.round()} KB/s',
                     style: TextStyle(
+                      fontFamily: 'Inter',
                       fontSize: 11,
-                      color: AuroraColors.mutedDeep,
+                      color: ac.textTertiary,
                     ),
                   ),
               ],
@@ -898,6 +918,7 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _statBadge(IconData icon, String count, String label, Color color) {
+    final ac = context.ac;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -913,14 +934,15 @@ class _QueuePageState extends State<QueuePage> {
             Text(
               count,
               style: TextStyle(
+                fontFamily: 'Inter',
                 fontWeight: FontWeight.w700,
                 fontSize: 14,
-                color: AuroraColors.text,
+                color: ac.textPrimary,
               ),
             ),
             Text(
               label,
-              style: TextStyle(fontSize: 10, color: AuroraColors.mutedText),
+              style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: ac.textSecondary),
             ),
           ],
         ),
@@ -933,16 +955,17 @@ class _QueuePageState extends State<QueuePage> {
   // ---------------------------------------------------------------------------
 
   Color _statusColor(DownloadState state) {
+    final ac = context.ac;
     switch (state) {
       case DownloadState.downloading:
       case DownloadState.idle:
-        return AuroraColors.accent; // Teal, pulsing
+        return ac.accentFrost; // Teal, pulsing
       case DownloadState.paused:
-        return AuroraColors.accentAmber; // Amber
+        return ac.accentAmber; // Amber
       case DownloadState.completed:
-        return AuroraColors.nordGreen; // Green (Nord)
+        return ac.statusSuccess; // Green (Nord)
       case DownloadState.failed:
-        return AuroraColors.nordRed; // Red (Nord)
+        return ac.statusError; // Red (Nord)
       case DownloadState.merging:
         return Colors.orange;
     }
@@ -963,7 +986,7 @@ class _QueuePageState extends State<QueuePage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Removed "${_taskDisplayName(task)}"'),
+        content: Text('Done — Removed "${_taskDisplayName(task)}".'),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
@@ -988,6 +1011,7 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _buildTaskRow(BuildContext context, DownloadTask task) {
+    final ac = context.ac;
     final color = _statusColor(task.state);
     // null = unknown total → indeterminate bar animates instead of showing 0%
     final progress = task.totalBytes > 0
@@ -1012,20 +1036,20 @@ class _QueuePageState extends State<QueuePage> {
       switch (task.state) {
         case DownloadState.idle:
         case DownloadState.downloading:
-          icon = const Icon(Icons.pause, color: AuroraColors.accent);
+          icon = Icon(Icons.pause, color: ac.accentFrost);
         case DownloadState.paused:
-          icon = const Icon(Icons.play_arrow, color: AuroraColors.accent);
+          icon = Icon(Icons.play_arrow, color: ac.accentFrost);
         case DownloadState.failed:
-          icon = const Icon(Icons.refresh, color: AuroraColors.accent);
+          icon = Icon(Icons.refresh, color: ac.accentFrost);
         case DownloadState.completed:
-          icon = const Icon(Icons.open_in_new, color: AuroraColors.accent);
+          icon = Icon(Icons.open_in_new, color: ac.accentFrost);
         case DownloadState.merging:
           return null; // not swipeable
       }
       return Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        color: AuroraColors.accent.withValues(alpha: 0.2),
+        color: ac.accentFrost.withValues(alpha: 0.2),
         child: icon,
       );
     }
@@ -1036,8 +1060,8 @@ class _QueuePageState extends State<QueuePage> {
       return Container(
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.only(left: 20),
-        color: AuroraColors.nordRed.withValues(alpha: 0.2),
-        child: const Icon(Icons.delete_outline, color: AuroraColors.nordRed),
+        color: ac.statusError.withValues(alpha: 0.2),
+        child: Icon(Icons.delete_outline, color: ac.statusError),
       );
     }
 
@@ -1075,9 +1099,9 @@ class _QueuePageState extends State<QueuePage> {
         child: Container(
           constraints: const BoxConstraints(minHeight: 72),
           decoration: BoxDecoration(
-            color: AuroraColors.surfaceCard,
+            color: ac.surfaceCard,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AuroraColors.glassBorder),
+            border: Border.all(color: ac.glassBorder),
           ),
           child: IntrinsicHeight(
             child: Row(
@@ -1100,10 +1124,11 @@ class _QueuePageState extends State<QueuePage> {
                     children: [
                       _buildNameWidget(
                         task,
-                        const TextStyle(
+                        TextStyle(
+                          fontFamily: 'Inter',
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
-                          color: AuroraColors.text,
+                          color: ac.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -1120,7 +1145,7 @@ class _QueuePageState extends State<QueuePage> {
                               value: progress,
                               minHeight: 2,
                               backgroundColor:
-                                  AuroraColors.surfaceVariant,
+                                  ac.surfaceElevated,
                               valueColor: AlwaysStoppedAnimation<Color>(color),
                             ),
                           ),
@@ -1136,8 +1161,8 @@ class _QueuePageState extends State<QueuePage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 8.5,
-                          fontFamily: 'monospace',
-                          color: AuroraColors.mutedDeep,
+                          fontFamily: 'JetBrainsMono',
+                          color: ac.textTertiary,
                         ),
                       ),
                     ],
@@ -1175,6 +1200,7 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Widget _buildTaskActions(DownloadTask task, Color color) {
+    final ac = context.ac;
     // ── Primary action icon (visible outside popup) ──────────────
     Widget? primaryAction;
 
@@ -1182,33 +1208,33 @@ class _QueuePageState extends State<QueuePage> {
         task.state == DownloadState.idle) {
       primaryAction = _compactButton(
         icon: Icons.pause_rounded,
-        color: AuroraColors.accent,
+        color: ac.accentFrost,
         tooltip: 'Pause',
         onPressed: () => widget.onPauseTask?.call(task)?.call(),
       );
     } else if (task.state == DownloadState.paused) {
       primaryAction = _compactButton(
         icon: Icons.play_arrow_rounded,
-        color: AuroraColors.accent,
+        color: ac.accentFrost,
         tooltip: 'Resume',
         onPressed: () => widget.onResumeTask?.call(task)?.call(),
       );
     } else if (task.state == DownloadState.merging) {
-      primaryAction = const SizedBox(
+      primaryAction = SizedBox(
         width: 32,
         height: 32,
         child: Padding(
-          padding: EdgeInsets.all(6),
+          padding: const EdgeInsets.all(6),
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(AuroraColors.accent),
+            valueColor: AlwaysStoppedAnimation<Color>(ac.accentFrost),
           ),
         ),
       );
     } else if (task.state == DownloadState.failed) {
       primaryAction = _compactButton(
         icon: Icons.refresh_rounded,
-        color: AuroraColors.nordRed,
+        color: ac.statusError,
         tooltip: 'Retry',
         onPressed: () => widget.onRetryTask?.call(task),
       );
@@ -1227,7 +1253,7 @@ class _QueuePageState extends State<QueuePage> {
       popupItems.add(
         PopupMenuItem(
           value: 'force_merge',
-          child: _popupRow(Icons.merge_type, Colors.orange, 'Force Merge'),
+          child: _popupRow(Icons.merge_type, Colors.orange, 'Force merge'),
         ),
       );
     }
@@ -1240,7 +1266,7 @@ class _QueuePageState extends State<QueuePage> {
         PopupMenuItem(
           value: 'resniff_auto',
           child: _popupRow(
-              Icons.find_replace_rounded, AuroraColors.accent, 'Resniff (Auto)'),
+              Icons.find_replace_rounded, ac.accentFrost, 'Refresh link'),
         ),
       );
     }
@@ -1252,7 +1278,7 @@ class _QueuePageState extends State<QueuePage> {
         PopupMenuItem(
           value: 'resniff_manual',
           child: _popupRow(Icons.open_in_browser_rounded,
-              AuroraColors.accentPurple, 'Resniff (Manual)'),
+              ac.accentPurple, 'Scan in browser'),
         ),
       );
     }
@@ -1263,7 +1289,7 @@ class _QueuePageState extends State<QueuePage> {
         PopupMenuItem(
           value: 'open_source',
           child:
-              _popupRow(Icons.open_in_new, AuroraColors.accentPurple, 'Open Source Page'),
+              _popupRow(Icons.open_in_new, ac.accentPurple, 'View source page'),
         ),
       );
     }
@@ -1273,7 +1299,7 @@ class _QueuePageState extends State<QueuePage> {
     popupItems.add(
       PopupMenuItem(
         value: 'delete',
-        child: _popupRow(Icons.delete_outline, AuroraColors.nordRed,
+        child: _popupRow(Icons.delete_outline, ac.statusError,
             isCompleted ? 'Remove' : 'Cancel'),
       ),
     );
@@ -1282,7 +1308,7 @@ class _QueuePageState extends State<QueuePage> {
     popupItems.add(
       PopupMenuItem(
         value: 'properties',
-        child: _popupRow(Icons.info_outline, AuroraColors.mutedText, 'Properties'),
+        child: _popupRow(Icons.info_outline, ac.textSecondary, 'Properties'),
       ),
     );
 
@@ -1314,13 +1340,13 @@ class _QueuePageState extends State<QueuePage> {
                 height: 26,
                 child: PopupMenuButton<String>(
                   icon: Icon(Icons.more_vert, size: 14,
-                      color: AuroraColors.mutedText),
+                      color: ac.textSecondary),
                   padding: EdgeInsets.zero,
                   splashRadius: 14,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  color: AuroraColors.surfaceCard,
+                  color: ac.surfaceCard,
                   elevation: 4,
                   onSelected: (value) async {
                     switch (value) {
@@ -1342,6 +1368,8 @@ class _QueuePageState extends State<QueuePage> {
                             onOpenDownload: widget.onOpenDownload,
                             onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
                             onTaskUpdated: (t) => widget.queue.emitTask(t),
+                            onShareDownload: widget.onShareDownload,
+                            onExport: widget.onExportDownload,
                           ),
                         ).then((_) {
                           if (mounted) setState(() {});
@@ -1504,14 +1532,15 @@ class _QueuePageState extends State<QueuePage> {
 
 
   Widget _buildGridTile(DownloadTask task) {
+    final ac = context.ac;
     return GestureDetector(
       onTap: () => widget.onOpenDownload(task),
       onLongPress: () => widget.onOpenDownload(task),
       child: Container(
         decoration: BoxDecoration(
-          color: AuroraColors.surfaceCard,
+          color: ac.surfaceCard,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AuroraColors.glassBorder),
+          border: Border.all(color: ac.glassBorder),
         ),
         padding: const EdgeInsets.all(10),
         child: Column(
@@ -1520,15 +1549,16 @@ class _QueuePageState extends State<QueuePage> {
             Icon(
               Icons.check_circle_outline,
               size: 32,
-              color: AuroraColors.nordGreen,
+              color: ac.statusSuccess,
             ),
             const SizedBox(height: 8),
             _buildNameWidget(
               task,
-              const TextStyle(
+              TextStyle(
+                fontFamily: 'Inter',
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
-                color: AuroraColors.text,
+                color: ac.textPrimary,
               ),
               centered: true,
             ),
@@ -1538,8 +1568,8 @@ class _QueuePageState extends State<QueuePage> {
                 formatBytes(task.totalBytes),
                 style: TextStyle(
                   fontSize: 10,
-                  color: AuroraColors.mutedDeep,
-                  fontFamily: 'monospace',
+                  color: ac.textTertiary,
+                  fontFamily: 'JetBrainsMono',
                 ),
               ),
             ],
@@ -1556,11 +1586,11 @@ class _QueuePageState extends State<QueuePage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Partial download detected'),
+        title: const Text('Save partial file?'),
         content: Text(
           'The server closed the connection at $pct% completion.\n\n'
-          'You can merge the partial file to keep what was downloaded, '
-          'or retry to attempt downloading the remaining data.',
+          'Merge the partial file to keep what finished, '
+          'or retry to download the rest.',
         ),
         actions: [
           TextButton(
@@ -1583,13 +1613,13 @@ class _QueuePageState extends State<QueuePage> {
                   AuroraSnackbar.show(
                     context,
                     ok
-                        ? 'Partial file merged successfully.'
-                        : 'Failed to merge partial file.',
+                        ? 'Done — Partial file saved.'
+                        : "Couldn't merge. The file may be incomplete. Try retrying the download.",
                   );
                 }
               }
             },
-            child: const Text('Merge & Save'),
+            child: const Text('Merge and save'),
           ),
         ],
       ),
@@ -1610,12 +1640,11 @@ class _QueuePageState extends State<QueuePage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Duplicate Link Detected'),
+        title: const Text('Link already queued'),
         content: Text(
-          'This media URL is already in your download queue.\n\n'
-          'The link may have changed (e.g. token refresh). Would you '
-          'like to update the existing download with the new link, '
-          'or create a separate new download?',
+          'This link is already in your download queue.\n\n'
+          'The URL may have changed (token refresh). Update the existing '
+          'download with the new link, or create a separate one.',
         ),
         actions: [
           TextButton(
@@ -1642,11 +1671,11 @@ class _QueuePageState extends State<QueuePage> {
                 );
                 widget.queue.addTask(newTask, force: true);
                 if (mounted) {
-                  AuroraSnackbar.show(context, 'New download added for refreshed link.');
+                  AuroraSnackbar.show(context, 'Done — New download created with refreshed link.');
                 }
               }
             },
-            child: const Text('Create New'),
+            child: const Text('Create new'),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1672,13 +1701,13 @@ class _QueuePageState extends State<QueuePage> {
                 if (mounted) {
                   AuroraSnackbar.show(
                     context,
-                    'Download link updated. The download will retry.',
+                    'Done — Link updated. Download will retry.',
                   );
                   setState(() {});
                 }
               }
             },
-            child: const Text('Update Existing'),
+            child: const Text('Update existing'),
           ),
         ],
       ),

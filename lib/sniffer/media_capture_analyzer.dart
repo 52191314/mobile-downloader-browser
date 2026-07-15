@@ -218,7 +218,7 @@ class MediaCaptureAnalyzer {
           '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
           'expanded master (variants show its qualities)',
         );
-        return 'expanded master';
+        return 'Master already expanded';
       }
     }
 
@@ -229,7 +229,7 @@ class MediaCaptureAnalyzer {
       }
       if (_looksLikeAssetName(name)) {
         debugPrint('[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): site asset (name)');
-        return 'site asset';
+        return 'Site asset';
       }
       final size = media.contentLengthBytes;
       if (size != null && size < 64 * 1024) {
@@ -244,7 +244,7 @@ class MediaCaptureAnalyzer {
             '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
             'tiny image (${size}B < 64KB)',
           );
-          return 'tiny image';
+          return 'Tiny image';
         }
       }
     }
@@ -255,12 +255,12 @@ class MediaCaptureAnalyzer {
           '[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): '
           'HLS segment (size=$size, name=$name)',
         );
-        return 'HLS segment';
+        return 'Video segment';
       }
     }
     if (_looksLikeTracker(path)) {
       debugPrint('[CaptureAnalyzer] HIDDEN ($_urlSnippet(media)): tracking media');
-      return 'tracking media';
+      return 'Tracking pixel';
     }
     return null;
   }

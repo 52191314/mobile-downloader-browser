@@ -358,20 +358,20 @@ class BrowserLibraryStore {
   Future<BrowserLibrary> importFromFile(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) {
-      throw Exception('Import file not found: $filePath');
+      throw Exception('Could not find that import file at: $filePath');
     }
     final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map) throw Exception('Invalid library file format');
+    if (decoded is! Map) throw Exception('This file is not a valid library backup.');
     return BrowserLibrary.fromJson(Map<String, dynamic>.from(decoded));
   }
 
   Future<Map<String, dynamic>> readImportMap(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) {
-      throw Exception('Import file not found: $filePath');
+      throw Exception('Could not find that import file at: $filePath');
     }
     final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map) throw Exception('Invalid library file format');
+    if (decoded is! Map) throw Exception('This file is not a valid library backup.');
     return Map<String, dynamic>.from(decoded);
   }
 

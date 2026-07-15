@@ -42,7 +42,7 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
     final uri = Uri.tryParse(widget.media.url);
     if (uri == null || (!uri.hasScheme)) {
       setState(() {
-        _error = 'Invalid media URL';
+        _error = 'Could not open this media. The URL is not valid.';
         _initialized = true;
       });
       return;
@@ -79,7 +79,7 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not play: $e';
+          _error = 'Could not play this media.';
           _initialized = true;
         });
       }
@@ -101,7 +101,7 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
         actions: [
           IconButton(
             icon: const Icon(Icons.download),
-            tooltip: 'Download',
+            tooltip: 'Download this item',
             onPressed: () => Navigator.pop(context, 'download'),
           ),
           IconButton(
@@ -145,7 +145,7 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
             errorBuilder: (context, error, stack) {
               return Center(
                 child: Text(
-                  'Could not load image',
+                  'Could not load this image.',
                   style: const TextStyle(color: Colors.white70),
                 ),
               );
@@ -163,7 +163,7 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
 
     return const Center(
       child: Text(
-        'Preview not available',
+        'Preview is not available for this item.',
         style: TextStyle(color: Colors.white70),
       ),
     );

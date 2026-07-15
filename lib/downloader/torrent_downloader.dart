@@ -9,19 +9,12 @@ import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'magnet_link.dart';
 import 'torrent_metadata.dart';
-import '../logging/aurora_log.dart';
-import 'download_error_classifier.dart';
+import 'download_logger.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[TorrentDownloader] $context: $error';
   debugPrint(message);
-  AuroraLog.instance.error(
-    message,
-    category: LogCategory.torrent,
-    screen: LogScreen.background,
-    eventType: LogEventType.error,
-    stackTrace: stack,
-  );
+  DownloadLogger.instance.error(message);
 }
 
 class TorrentDownloader implements BaseDownloader {
@@ -67,20 +60,6 @@ class TorrentDownloader implements BaseDownloader {
       return;
     }
 
-    // Production guard: if native engine is unavailable and we are NOT in
-    // test mode (syntheticDataLength is null), fail fast with a clear error
-    // instead of silently running the simulated Dart downloader.
-    if (syntheticDataLength == null) {
-      task.state = DownloadState.failed;
-      task.failureReason = DownloadFailure.nativeEngineUnavailable;
-      task.errorMessage =
-          '[Native engine required] The native torrent engine is not available. '
-          'Torrent downloads require the native engine.';
-      task.speed = 0.0;
-      _taskUpdateController.add(task);
-      return;
-    }
-
     if (task.state == DownloadState.downloading) {
       if (!_isPaused) return;
     }
@@ -105,9 +84,7 @@ class TorrentDownloader implements BaseDownloader {
       _timer = Timer.periodic(tickInterval, (timer) async => _tick());
     } catch (e) {
       task.state = DownloadState.failed;
-      final classified = DownloadErrorClassifier.classifyAndMessage(e);
-      task.failureReason = classified.reason;
-      task.errorMessage = classified.message;
+      task.errorMessage = e.toString();
       task.speed = 0.0;
       _taskUpdateController.add(task);
     }
@@ -190,9 +167,7 @@ class TorrentDownloader implements BaseDownloader {
       }
     } catch (e) {
       task.state = DownloadState.failed;
-      final classified = DownloadErrorClassifier.classifyAndMessage(e);
-      task.failureReason = classified.reason;
-      task.errorMessage = classified.message;
+      task.errorMessage = e.toString();
       task.speed = 0.0;
       _taskUpdateController.add(task);
     }
@@ -208,16 +183,7 @@ class TorrentDownloader implements BaseDownloader {
     task.totalBytes = info.totalWanted > 0 ? info.totalWanted : task.totalBytes;
     task.downloadedBytes = info.totalDone;
     task.speed = info.downloadRate.toDouble();
-    if (info.errorMsg.isEmpty) {
-      task.errorMessage = null;
-      task.failureReason = null;
-    } else {
-      final classified = DownloadErrorClassifier.classifyAndMessage(
-        Exception(info.errorMsg),
-      );
-      task.failureReason = classified.reason;
-      task.errorMessage = classified.message;
-    }
+    task.errorMessage = info.errorMsg.isEmpty ? null : info.errorMsg;
 
     if (info.totalWanted > 0) {
       task.chunks = [
@@ -457,9 +423,7 @@ class TorrentDownloader implements BaseDownloader {
     } catch (e) {
       _timer?.cancel();
       task.state = DownloadState.failed;
-      final classified = DownloadErrorClassifier.classifyAndMessage(e);
-      task.failureReason = classified.reason;
-      task.errorMessage = classified.message;
+      task.errorMessage = e.toString();
       task.speed = 0.0;
       _taskUpdateController.add(task);
     } finally {
@@ -523,11 +487,7 @@ class TorrentDownloader implements BaseDownloader {
       await parent.create(recursive: true);
     }
 
-    // FileMode.write (not append) preserves existing content and allows
-    // seeking, so setPosition(offset) writes the piece at its correct
-    // computed offset. FileMode.append would force every write to EOF,
-    // corrupting multi-file torrents whose pieces land at arbitrary offsets.
-    final raf = await file.open(mode: FileMode.write);
+    final raf = await file.open(mode: FileMode.append);
     try {
       await raf.setPosition(offset);
       await raf.writeFrom(segment);

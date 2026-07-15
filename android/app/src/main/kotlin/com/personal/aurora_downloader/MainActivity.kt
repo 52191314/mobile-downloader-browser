@@ -47,11 +47,18 @@ class MainActivity : FlutterActivity() {
     private val intentChannelName = "aurora_downloader/intent"
     private var intentUrlChannel: MethodChannel? = null
     private var pendingImportResult: MethodChannel.Result? = null
+    private var pendingExportResult: MethodChannel.Result? = null
+    private var pendingExportSourcePath: String? = null
+    private var pendingPickUriResult: MethodChannel.Result? = null
+    private var pendingPickDirectoryResult: MethodChannel.Result? = null
     private lateinit var nativeDownloadEngine: NativeDownloadEngine
 
     companion object {
         private const val TAG = "AuroraMain"
         private const val PICK_IMPORT_FILE = 1001
+        private const val REQUEST_EXPORT_FILE = 1002
+        private const val REQUEST_PICK_EXPORT_URI = 1003
+        private const val REQUEST_PICK_DIRECTORY = 1004
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val NETWORK_TAG = "AuroraNet"
     }
@@ -72,6 +79,13 @@ class MainActivity : FlutterActivity() {
                     "listBackupFiles" -> listBackupFiles(call, result)
                     "deleteBackupFile" -> deleteBackupFile(call, result)
                     "readBackupFile" -> readBackupFile(call, result)
+                    "exportFile" -> exportFile(call, result)
+                    "selectExportUri" -> selectExportUri(call, result)
+                    "writeExportFile" -> writeExportFile(call, result)
+                    "selectExportDirectory" -> selectExportDirectory(result)
+                    "writeExportFileToDirectory" -> writeExportFileToDirectory(call, result)
+                    "listAutoBackups" -> listAutoBackups(result)
+                    "restoreAutoBackupFile" -> restoreAutoBackupFile(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -600,6 +614,48 @@ class MainActivity : FlutterActivity() {
                 pendingImportResult?.success(null)
             }
             pendingImportResult = null
+        } else if (requestCode == REQUEST_EXPORT_FILE && pendingExportResult != null) {
+            val sourcePath = pendingExportSourcePath
+            if (resultCode == Activity.RESULT_OK && data?.data != null && sourcePath != null) {
+                val uri = data.data!!
+                try {
+                    val source = File(sourcePath)
+                    contentResolver.openOutputStream(uri)?.use { output ->
+                        FileInputStream(source).use { input -> input.copyTo(output) }
+                    }
+                    pendingExportResult?.success(true)
+                } catch (error: Exception) {
+                    pendingExportResult?.error("write_failed", error.message, null)
+                }
+            } else {
+                pendingExportResult?.success(false)
+            }
+            pendingExportResult = null
+            pendingExportSourcePath = null
+        } else if (requestCode == REQUEST_PICK_EXPORT_URI && pendingPickUriResult != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                try {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (_: Exception) {}
+                pendingPickUriResult?.success(uri.toString())
+            } else {
+                pendingPickUriResult?.success(null)
+            }
+            pendingPickUriResult = null
+        } else if (requestCode == REQUEST_PICK_DIRECTORY && pendingPickDirectoryResult != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                val takeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                try {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (_: Exception) {}
+                pendingPickDirectoryResult?.success(uri.toString())
+            } else {
+                pendingPickDirectoryResult?.success(null)
+            }
+            pendingPickDirectoryResult = null
         }
     }
 
@@ -1037,6 +1093,204 @@ class MainActivity : FlutterActivity() {
             result.success(destFile.absolutePath)
         } catch (e: Exception) {
             result.error("read_failed", e.message, null)
+        }
+    }
+
+    private fun exportFile(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (sourcePath.isNullOrBlank() || displayName.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath and displayName are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Completed file not found: $sourcePath", null)
+            return
+        }
+
+        pendingExportResult = result
+        pendingExportSourcePath = sourcePath
+
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, displayName)
+        }
+
+        try {
+            startActivityForResult(intent, REQUEST_EXPORT_FILE)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingExportResult = null
+            pendingExportSourcePath = null
+        }
+    }
+
+    private fun selectExportUri(call: MethodCall, result: MethodChannel.Result) {
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (displayName.isNullOrBlank()) {
+            result.error("bad_args", "displayName is required.", null)
+            return
+        }
+
+        pendingPickUriResult = result
+
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, displayName)
+        }
+
+        try {
+            startActivityForResult(intent, REQUEST_PICK_EXPORT_URI)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingPickUriResult = null
+        }
+    }
+
+    private fun writeExportFile(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val exportUri = call.argument<String>("exportUri")
+
+        if (sourcePath.isNullOrBlank() || exportUri.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath and exportUri are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Source file not found: $sourcePath", null)
+            return
+        }
+
+        try {
+            val uri = Uri.parse(exportUri)
+            contentResolver.openOutputStream(uri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            }
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("write_failed", error.message, null)
+        }
+    }
+
+    private fun selectExportDirectory(result: MethodChannel.Result) {
+        pendingPickDirectoryResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        try {
+            startActivityForResult(intent, REQUEST_PICK_DIRECTORY)
+        } catch (error: Exception) {
+            result.error("picker_error", error.message, null)
+            pendingPickDirectoryResult = null
+        }
+    }
+
+    private fun writeExportFileToDirectory(call: MethodCall, result: MethodChannel.Result) {
+        val sourcePath = call.argument<String>("sourcePath")
+        val directoryUriStr = call.argument<String>("directoryUri")
+        val displayName = call.argument<String>("displayName")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+
+        if (sourcePath.isNullOrBlank() || directoryUriStr.isNullOrBlank() || displayName.isNullOrBlank()) {
+            result.error("bad_args", "sourcePath, directoryUri, and displayName are required.", null)
+            return
+        }
+
+        val source = File(sourcePath)
+        if (!source.exists() || !source.isFile) {
+            result.error("missing_file", "Source file not found: $sourcePath", null)
+            return
+        }
+
+        try {
+            val treeUri = Uri.parse(directoryUriStr)
+            val documentId = DocumentsContract.getTreeDocumentId(treeUri)
+            val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+            val newFileUri = DocumentsContract.createDocument(contentResolver, parentDocumentUri, mimeType, displayName)
+            if (newFileUri == null) {
+                result.error("create_failed", "Could not create document in tree.", null)
+                return
+            }
+            contentResolver.openOutputStream(newFileUri)?.use { output ->
+                FileInputStream(source).use { input -> input.copyTo(output) }
+            }
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("write_failed", error.message, null)
+        }
+    }
+
+    private fun listAutoBackups(result: MethodChannel.Result) {
+        val resolver = applicationContext.contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH
+        )
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("Aurora Downloader/Auto Backup/%", "Download/Aurora Downloader/Auto Backup/%")
+        val entries = mutableListOf<Map<String, String>>()
+        try {
+            resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val relCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                val prefixLegacy = "Aurora Downloader/Auto Backup/"
+                val prefixModern = "Download/Aurora Downloader/Auto Backup/"
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameCol) ?: continue
+                    val rel = cursor.getString(relCol) ?: continue
+                    val timestamp = if (rel.startsWith(prefixModern)) {
+                        rel.substring(prefixModern.length)
+                            .trim('/')
+                            .split("/")
+                            .firstOrNull() ?: continue
+                    } else if (rel.startsWith(prefixLegacy)) {
+                        rel.substring(prefixLegacy.length)
+                            .trim('/')
+                            .split("/")
+                            .firstOrNull() ?: continue
+                    } else {
+                        continue
+                    }
+                    if (timestamp.isEmpty()) continue
+                    val id = cursor.getLong(idCol)
+                    val uri = ContentUris.withAppendedId(collection, id).toString()
+                    entries.add(mapOf("timestamp" to timestamp, "name" to name, "uri" to uri))
+                }
+            }
+            result.success(entries)
+        } catch (e: Exception) {
+            result.error("list_failed", e.message, null)
+        }
+    }
+
+    private fun restoreAutoBackupFile(call: MethodCall, result: MethodChannel.Result) {
+        val uriString = call.argument<String>("uri")
+        val destPath = call.argument<String>("destPath")
+        if (uriString.isNullOrBlank() || destPath.isNullOrBlank()) {
+            result.error("bad_args", "uri and destPath are required.", null)
+            return
+        }
+        try {
+            val uri = Uri.parse(uriString)
+            val resolver = applicationContext.contentResolver
+            resolver.openInputStream(uri)?.use { input ->
+                File(destPath).outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalStateException("Could not open backup input stream.")
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("restore_failed", e.message, null)
         }
     }
 }

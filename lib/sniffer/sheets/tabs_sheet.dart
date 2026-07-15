@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/browser_tab.dart';
-import '../../theme/aurora_colors.dart';
+import '../../theme/aurora_palette.dart';
 
 /// Shows the bottom sheet that lists all open browser tabs grouped by
 /// their `groupName`, with controls to add a new tab, switch to an
@@ -27,7 +27,7 @@ void showTabsSheet(
     showDragHandle: true,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: AuroraColors.background,
+    backgroundColor: AuroraPalette.of(context).surfaceField,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (ctx, setTabsState) {
@@ -56,16 +56,16 @@ void showTabsSheet(
                     children: [
                       Text(
                         'Tabs (${tabs.length})',
-                        style: const TextStyle(
-                          color: AuroraColors.text,
+                        style: TextStyle(
+                          color: ctx.ac.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.layers_clear_outlined,
-                          color: AuroraColors.mutedText,
+                          color: ctx.ac.textSecondary,
                         ),
                         tooltip: 'Close all tabs',
                         onPressed: () {
@@ -74,9 +74,9 @@ void showTabsSheet(
                         },
                       ),
                       IconButton(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.add,
-                          color: AuroraColors.accent,
+                          color: ctx.ac.accentFrost,
                         ),
                         onPressed: () {
                           onOpenNewTab();
@@ -101,14 +101,14 @@ void showTabsSheet(
                               ),
                               title: Text(
                                 '$groupName (${tabs.where((t) => t.groupName == groupName).length})',
-                                style: const TextStyle(
-                                  color: AuroraColors.accent,
+                                style: TextStyle(
+                                  color: ctx.ac.accentFrost,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),
                               ),
-                              iconColor: AuroraColors.accent,
-                              collapsedIconColor: AuroraColors.mutedText,
+                              iconColor: ctx.ac.accentFrost,
+                              collapsedIconColor: ctx.ac.textSecondary,
                               childrenPadding: const EdgeInsets.only(left: 8),
                               children: [
                                 for (final tab in tabs.where(
@@ -134,15 +134,15 @@ void showTabsSheet(
                         // 2. Ungrouped Tabs (Direct List at the Bottom)
                         if (ungroupedTabs.isNotEmpty) ...[
                           if (groupNames.isNotEmpty) ...[
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 8,
                               ),
                               child: Text(
                                 'Ungrouped Tabs',
                                 style: TextStyle(
-                                  color: AuroraColors.mutedText,
+                                  color: ctx.ac.textSecondary,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -193,11 +193,11 @@ Widget buildTabCard(
 }) {
   final isActive = originalIndex == activeTabIndex;
   return Card(
-    color: isActive ? AuroraColors.surfaceVariant : AuroraColors.surface,
+    color: isActive ? ctx.ac.surfaceElevated : ctx.ac.surfacePanel,
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(8),
       side: BorderSide(
-        color: isActive ? AuroraColors.accent : Colors.transparent,
+        color: isActive ? ctx.ac.accentFrost : Colors.transparent,
         width: 1.5,
       ),
     ),
@@ -211,17 +211,17 @@ Widget buildTabCard(
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AuroraColors.text,
+                color: ctx.ac.textPrimary,
                 fontWeight: isActive ? FontWeight.bold : null,
               ),
             ),
           ),
           if (!isActive && !builtWebViewTabIds.contains(tab.id)) ...[
             const SizedBox(width: 6),
-            const Icon(
+            Icon(
               Icons.snooze_outlined,
               size: 14,
-              color: AuroraColors.mutedText,
+              color: ctx.ac.textSecondary,
             ),
           ],
         ],
@@ -232,16 +232,16 @@ Widget buildTabCard(
             : tab.addressController.text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12, color: AuroraColors.mutedText),
+        style: TextStyle(fontSize: 12, color: ctx.ac.textSecondary),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.more_vert,
               size: 18,
-              color: AuroraColors.mutedText,
+              color: ctx.ac.textSecondary,
             ),
             onPressed: () {
               showTabGroupMenu(
@@ -263,10 +263,10 @@ Widget buildTabCard(
           ),
           if (tabs.length > 1)
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.close,
                 size: 18,
-                color: AuroraColors.mutedText,
+                color: ctx.ac.textSecondary,
               ),
               onPressed: () {
                 setTabsState(() {
@@ -328,20 +328,20 @@ void showTabGroupMenu(
                 vertical: 8,
               ),
               child: Text(
-                'Manage Group for "${getTabLabel(tab)}"',
-                style: const TextStyle(
+                'Move or regroup',
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: AuroraColors.text,
+                  color: menuCtx.ac.textPrimary,
                 ),
               ),
             ),
             if (tab.groupName != null)
               ListTile(
                 leading: const Icon(Icons.link_off, color: Colors.redAccent),
-                title: const Text(
-                  'Remove from Group',
-                  style: TextStyle(color: AuroraColors.text),
+                title: Text(
+                  'Remove from this group',
+                  style: TextStyle(color: menuCtx.ac.textPrimary),
                 ),
                 onTap: () {
                   setTabsState(() {
@@ -352,14 +352,14 @@ void showTabGroupMenu(
                 },
               ),
             ListTile(
-              leading: const Icon(
+              leading: Icon(
                 Icons.create_new_folder_outlined,
-                color: AuroraColors.accent,
+                color: menuCtx.ac.accentFrost,
               ),
-              title: const Text(
-                'Create New Group...',
-                style: TextStyle(color: AuroraColors.text),
-              ),
+                title: Text(
+                  'New group...',
+                  style: TextStyle(color: menuCtx.ac.textPrimary),
+                ),
               onTap: () {
                 Navigator.pop(menuCtx);
                 onShowCreateGroupDialog(context, tab, setTabsState);
@@ -367,13 +367,13 @@ void showTabGroupMenu(
             ),
             if (existingGroups.isNotEmpty) ...[
               const Divider(),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Text(
                   'Move to existing group:',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AuroraColors.mutedText,
+                    color: menuCtx.ac.textSecondary,
                   ),
                 ),
               ),
@@ -386,13 +386,13 @@ void showTabGroupMenu(
                     if (group == tab.groupName)
                       return const SizedBox.shrink();
                     return ListTile(
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.folder_open,
-                        color: AuroraColors.accent,
+                        color: menuCtx.ac.accentFrost,
                       ),
                       title: Text(
                         group,
-                        style: const TextStyle(color: AuroraColors.text),
+                        style: TextStyle(color: menuCtx.ac.textPrimary),
                       ),
                       onTap: () {
                         setTabsState(() {
@@ -429,32 +429,32 @@ void showCreateTabGroupDialog(
     context: context,
     builder: (dialogCtx) {
       return AlertDialog(
-        backgroundColor: AuroraColors.surface,
-        title: const Text(
-          'Create New Group',
-          style: TextStyle(color: AuroraColors.text),
+        backgroundColor: dialogCtx.ac.surfacePanel,
+        title: Text(
+          'New group',
+          style: TextStyle(color: dialogCtx.ac.textPrimary),
         ),
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: const TextStyle(color: AuroraColors.text),
-          decoration: const InputDecoration(
+          style: TextStyle(color: dialogCtx.ac.textPrimary),
+          decoration: InputDecoration(
             hintText: 'Enter group name (e.g. Work, Shopping)',
-            hintStyle: TextStyle(color: AuroraColors.mutedText),
+            hintStyle: TextStyle(color: dialogCtx.ac.textSecondary),
             enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: AuroraColors.border),
+              borderSide: BorderSide(color: dialogCtx.ac.borderStrong),
             ),
             focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: AuroraColors.accent),
+              borderSide: BorderSide(color: dialogCtx.ac.accentFrost),
             ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text(
+            child: Text(
               'Cancel',
-              style: TextStyle(color: AuroraColors.mutedText),
+              style: TextStyle(color: dialogCtx.ac.textSecondary),
             ),
           ),
           TextButton(
@@ -468,9 +468,9 @@ void showCreateTabGroupDialog(
               }
               Navigator.pop(dialogCtx);
             },
-            child: const Text(
+            child: Text(
               'Create',
-              style: TextStyle(color: AuroraColors.accent),
+              style: TextStyle(color: dialogCtx.ac.accentFrost),
             ),
           ),
         ],

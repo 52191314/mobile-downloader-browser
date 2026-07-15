@@ -324,7 +324,7 @@ class AdBlockEngine {
             AdblockSourceStatus(
               url: source.url,
               state: AdblockSourceLoadState.failed,
-              errorMessage: 'Invalid URL',
+              errorMessage: 'Could not load — invalid filter URL.',
             ),
           );
           continue;
@@ -369,10 +369,10 @@ class AdBlockEngine {
                 } catch (_) {}
               }
             } else {
-              errorMessage = 'HTTP ${response.statusCode}';
+              errorMessage = 'Server returned error ${response.statusCode}';
             }
           } on TimeoutException {
-            errorMessage = 'Timed out';
+            errorMessage = 'Request timed out.';
           } catch (error) {
             errorMessage = '$error';
           }
@@ -398,7 +398,7 @@ class AdBlockEngine {
               AdblockSourceStatus(
                 url: source.url,
                 state: AdblockSourceLoadState.failed,
-                errorMessage: 'Parse failed: $error',
+                errorMessage: 'Could not parse filters: $error',
               ),
             );
           }
@@ -407,7 +407,7 @@ class AdBlockEngine {
             AdblockSourceStatus(
               url: source.url,
               state: AdblockSourceLoadState.failed,
-              errorMessage: errorMessage ?? 'Failed to load',
+              errorMessage: errorMessage ?? 'Could not load this filter list.',
             ),
           );
         }

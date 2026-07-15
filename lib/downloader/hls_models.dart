@@ -16,13 +16,11 @@ class HlsVariant {
   final Uri uri;
   final int bandwidth;
   final String? resolution;
-  final String? codecs;
 
   const HlsVariant({
     required this.uri,
     required this.bandwidth,
     this.resolution,
-    this.codecs,
   });
 
   String get displayLabel {

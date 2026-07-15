@@ -18,7 +18,7 @@ import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/controllers/media_catch_controller.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
-import 'package:aurora_downloader/theme/aurora_colors.dart';
+import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 /// Filter options for the rich catch sheet segmented control.
 /// Mirrors the `MediaFilter` enum that previously lived at the top of
@@ -136,7 +136,7 @@ Widget buildCatchSheetHeader(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Capture Media',
+                'Media on this page',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
@@ -145,7 +145,7 @@ Widget buildCatchSheetHeader(
               ),
               Text(
                 totalShown == 0
-                    ? 'Browse a page to detect downloads'
+                    ? 'Browse to find downloadable media'
                     : '$selectedCount selected from $totalShown shown',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -155,7 +155,7 @@ Widget buildCatchSheetHeader(
           ),
         ),
         IconButton(
-          tooltip: 'Re-scan page for media',
+          tooltip: 'Rescan page for new media',
           icon: const Icon(Icons.refresh_rounded, color: Colors.cyanAccent),
           onPressed: onRescan,
         ),
@@ -173,7 +173,7 @@ Widget buildCatchSheetHeader(
           onPressed: totalShown == 0 ? null : onSelectBest,
         ),
         IconButton(
-          tooltip: 'Clear captured media',
+          tooltip: 'Clear all detected media',
           icon: const Icon(Icons.delete_sweep, color: Colors.redAccent),
           onPressed: totalShown == 0 ? null : onClearCaptured,
         ),
@@ -186,6 +186,7 @@ Widget buildCatchSheetHeader(
 ///
 /// Replaces the body of `_SnifferScreenState._compactFilterChip`.
 Widget compactFilterChip(
+  BuildContext context,
   String label,
   MediaFilter value,
   IconData icon,
@@ -199,11 +200,11 @@ Widget compactFilterChip(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: isSelected
-            ? AuroraColors.accent.withValues(alpha: 0.2)
-            : AuroraColors.glassSurface,
+            ? context.ac.accentFrost.withValues(alpha: 0.2)
+            : context.ac.glassSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isSelected ? AuroraColors.accent : AuroraColors.glassBorder,
+          color: isSelected ? context.ac.accentFrost : context.ac.glassBorder,
         ),
       ),
       child: Row(
@@ -212,7 +213,7 @@ Widget compactFilterChip(
           Icon(
             icon,
             size: 14,
-            color: isSelected ? AuroraColors.accent : AuroraColors.mutedText,
+            color: isSelected ? context.ac.accentFrost : context.ac.textSecondary,
           ),
           const SizedBox(width: 4),
           Text(
@@ -220,7 +221,7 @@ Widget compactFilterChip(
             style: TextStyle(
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-              color: isSelected ? AuroraColors.accent : AuroraColors.mutedText,
+              color: isSelected ? context.ac.accentFrost : context.ac.textSecondary,
             ),
           ),
         ],
@@ -452,6 +453,7 @@ void showSniffedMediaSheet(
                               child: Row(
                                 children: [
                                   compactFilterChip(
+                                    ctx,
                                     'All',
                                     MediaFilter.all,
                                     Icons.all_inclusive,
@@ -465,6 +467,7 @@ void showSniffedMediaSheet(
                                   ),
                                   const SizedBox(width: 6),
                                   compactFilterChip(
+                                    ctx,
                                     'Video',
                                     MediaFilter.video,
                                     Icons.movie,
@@ -478,6 +481,7 @@ void showSniffedMediaSheet(
                                   ),
                                   const SizedBox(width: 6),
                                   compactFilterChip(
+                                    ctx,
                                     'Audio',
                                     MediaFilter.audio,
                                     Icons.audiotrack,
@@ -491,6 +495,7 @@ void showSniffedMediaSheet(
                                   ),
                                   const SizedBox(width: 6),
                                   compactFilterChip(
+                                    ctx,
                                     'HLS',
                                     MediaFilter.hls,
                                     Icons.queue_music,
@@ -504,6 +509,7 @@ void showSniffedMediaSheet(
                                   ),
                                   const SizedBox(width: 6),
                                   compactFilterChip(
+                                    ctx,
                                     'Torrent',
                                     MediaFilter.torrent,
                                     Icons.hub,
@@ -517,6 +523,7 @@ void showSniffedMediaSheet(
                                   ),
                                   const SizedBox(width: 6),
                                   compactFilterChip(
+                                    ctx,
                                     'Image',
                                     MediaFilter.image,
                                     Icons.image,
@@ -544,8 +551,8 @@ void showSniffedMediaSheet(
                             ),
                             subtitle: Text(
                               mediaCatchController.captureShowAllMedia
-                                  ? 'Showing likely media and noisy assets'
-                                  : 'Showing likely media only',
+                                  ? 'Show every detected URL, including non-media assets'
+                                  : 'Show only URLs that look like playable media',
                               style: const TextStyle(fontSize: 11),
                             ),
                             value: mediaCatchController.captureShowAllMedia,
@@ -593,7 +600,7 @@ void showSniffedMediaSheet(
                                     ),
                                   _CaptureStatChip(
                                     icon: Icons.visibility_off,
-                                    label: '${captureResult.hiddenCount} hidden',
+                                    label: '${captureResult.hiddenCount} filtered',
                                     color: Colors.grey,
                                   ),
                                 ],
@@ -603,16 +610,16 @@ void showSniffedMediaSheet(
                         ),
                         const SliverToBoxAdapter(child: SizedBox(height: 12)),
                         if (filteredGroups.isEmpty)
-                          const SliverFillRemaining(
+                          SliverFillRemaining(
                             hasScrollBody: false,
                             child: Center(
                               child: Padding(
-                                padding: EdgeInsets.all(24),
+                                padding: const EdgeInsets.all(24),
                                 child: Text(
-                                  'No captured media yet.\nKeep browsing, then tap links or play media on the page.',
+                                  'No media detected on this page.\nTry playing a video or scrolling further.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                    color: AuroraColors.mutedText,
+                                    color: ctx.ac.textSecondary,
                                   ),
                                 ),
                               ),
@@ -661,10 +668,10 @@ void showSniffedMediaSheet(
                                     ),
                                     child: Container(
                                       decoration: BoxDecoration(
-                                        gradient: const LinearGradient(
+                                        gradient: LinearGradient(
                                           colors: [
-                                            AuroraColors.gradientMid,
-                                            AuroraColors.surface,
+                                            context.ac.gradientMid,
+                                            context.ac.surfacePanel,
                                           ],
                                           begin: Alignment.topLeft,
                                           end: Alignment.bottomRight,
@@ -673,14 +680,14 @@ void showSniffedMediaSheet(
                                             BorderRadius.circular(12),
                                         border: Border.all(
                                           color: isSelected
-                                              ? AuroraColors.accent
-                                              : AuroraColors.glassBorder,
+                                              ? context.ac.accentFrost
+                                              : context.ac.glassBorder,
                                           width: isSelected ? 2.0 : 1.0,
                                         ),
                                         boxShadow: isSelected
                                             ? [
                                                 BoxShadow(
-                                                  color: AuroraColors.accent
+                                                  color: context.ac.accentFrost
                                                       .withValues(alpha: 0.25),
                                                   blurRadius: 6,
                                                 ),
@@ -760,16 +767,17 @@ void showSniffedMediaSheet(
                                                                 overflow:
                                                                     TextOverflow
                                                                         .ellipsis,
-                                                                style:
-                                                                    const TextStyle(
-                                                                  color: AuroraColors
-                                                                      .text,
-                                                                  fontSize:
-                                                                      13,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600,
-                                                                ),
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color: context
+                                                                        .ac
+                                                                        .textPrimary,
+                                                                    fontSize:
+                                                                        13,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                  ),
                                                               ),
                                                             ),
                                                             const SizedBox(
@@ -820,9 +828,10 @@ void showSniffedMediaSheet(
                                                         if (subtitleText.isNotEmpty)
                                                           Text(
                                                             subtitleText,
-                                                            style: const TextStyle(
-                                                                color: AuroraColors
-                                                                    .mutedText,
+                                                            style: TextStyle(
+                                                                color: context
+                                                                    .ac
+                                                                    .textSecondary,
                                                                 fontSize: 11),
                                                           ),
                                                       ],
@@ -849,9 +858,10 @@ void showSniffedMediaSheet(
                                                             .play_circle_outline,
                                                         size: 18,
                                                       ),
-                                                      color: AuroraColors
-                                                          .accent,
-                                                      tooltip: 'Preview',
+                                                      color: context
+                                                          .ac
+                                                          .accentFrost,
+                                                      tooltip: 'Preview item',
                                                       onPressed: () {
                                                         Navigator.pop(ctx);
                                                         onPreview(item);
@@ -873,7 +883,7 @@ void showSniffedMediaSheet(
                                                       size: 18,
                                                     ),
                                                     color: Colors.teal,
-                                                    tooltip: 'Download',
+                                                    tooltip: 'Download this',
                                                     onPressed: () {
                                                       Navigator.pop(ctx);
                                                       onAddToQueue(
@@ -901,9 +911,10 @@ void showSniffedMediaSheet(
                                                       Icons.info_outline,
                                                       size: 18,
                                                     ),
-                                                    color: AuroraColors
-                                                        .mutedText,
-                                                    tooltip: 'Info',
+                                                    color: context
+                                                        .ac
+                                                        .textSecondary,
+                                                    tooltip: 'Details',
                                                     onPressed: () => onInfo(
                                                       parentContext,
                                                       item,

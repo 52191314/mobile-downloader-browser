@@ -214,9 +214,9 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
               'From: ${selectedMedia.sourcePageUrl ?? widget.tab.addressController.text}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AuroraColors.mutedText,
+                color: context.ac.textSecondary,
               ),
             ),
             const SizedBox(height: 4),
@@ -224,9 +224,9 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
               'Link: ${selectedMedia.url}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AuroraColors.mutedText,
+                color: context.ac.textSecondary,
               ),
             ),
             const SizedBox(height: 12),
@@ -236,20 +236,20 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Filename',
                         style: TextStyle(
-                          color: AuroraColors.mutedText,
+                          color: context.ac.textSecondary,
                           fontSize: 12,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         filenameController.text,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: AuroraColors.text,
+                          color: context.ac.textPrimary,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -270,7 +270,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                 ),
                 IconButton(
                   key: const Key('dialog_rename_pencil_button'),
-                  icon: const Icon(Icons.edit, color: AuroraColors.accent),
+                  icon: Icon(Icons.edit, color: context.ac.accentFrost),
                   onPressed: isResolving ? null : _showRenameDialog,
                 ),
               ],

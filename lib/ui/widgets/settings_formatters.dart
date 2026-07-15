@@ -7,7 +7,7 @@ String driveStatusText(DriveConnectionStatus status) {
     DriveConnectionStatus.connected => 'Google Drive linked',
     DriveConnectionStatus.syncing => 'Syncing to Google Drive',
     DriveConnectionStatus.error => 'Google Drive needs attention',
-    DriveConnectionStatus.connecting => 'Linking Google Drive',
+    DriveConnectionStatus.connecting => 'Connecting to Google Drive',
     DriveConnectionStatus.disconnected => 'Google Drive disconnected',
   };
 }

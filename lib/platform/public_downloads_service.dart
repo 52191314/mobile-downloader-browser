@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../downloader/downloader.dart';
+import '../downloader/models.dart';
+import '../backup/auto_backup_models.dart';
 
 class PublicDownloadsService implements CompletedDownloadPublisher {
   static const MethodChannel _channel = MethodChannel(
@@ -17,13 +19,31 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
 
   @override
   Future<PublishedDownload?> publishCompletedFile(DownloadTask task) async {
+    if (task.exportDirectoryUri != null &&
+        task.exportDirectoryUri!.isNotEmpty) {
+      try {
+        final success = await writeExportFileToDirectory(
+          sourcePath: task.savePath,
+          directoryUri: task.exportDirectoryUri!,
+          displayName: p.basename(task.savePath),
+          mimeType: mimeTypeForName(task.savePath),
+        );
+        if (success) {
+          return PublishedDownload(
+            uri: task.exportDirectoryUri!,
+            pathLabel: 'Saved to custom folder',
+          );
+        }
+      } catch (_) {}
+    }
+
     final entityType = await FileSystemEntity.type(task.savePath);
     if (entityType == FileSystemEntityType.notFound) {
-      throw StateError('Completed file was not found: ${task.savePath}');
+      throw StateError("Couldn't publish — completed file not found: ${task.savePath}");
     }
     if (entityType == FileSystemEntityType.directory) {
       throw UnsupportedError(
-        'Folder publishing is not available yet; individual files publish to Downloads.',
+        "Aurora can publish single files to Downloads. Folder publishing isn't available yet.",
       );
     }
 
@@ -72,7 +92,7 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
   Future<void> open(DownloadTask task) async {
     final uri = task.publicUri;
     if (uri == null || uri.isEmpty) {
-      throw StateError('This download has not been published yet.');
+      throw StateError("This download hasn't been published yet. Files publish after they finish.");
     }
     await _channel.invokeMethod<void>('openUri', {
       'uri': uri,
@@ -122,6 +142,119 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
       'uri': uri,
     });
     return result;
+  }
+
+  Future<bool> exportFile({
+    required String sourcePath,
+    required String displayName,
+    required String mimeType,
+  }) async {
+    final result = await _channel.invokeMethod<bool>('exportFile', {
+      'sourcePath': sourcePath,
+      'displayName': displayName,
+      'mimeType': mimeType,
+    });
+    return result ?? false;
+  }
+
+  Future<String?> selectExportUri({
+    required String displayName,
+    required String mimeType,
+  }) async {
+    final result = await _channel.invokeMethod<String>('selectExportUri', {
+      'displayName': displayName,
+      'mimeType': mimeType,
+    });
+    return result;
+  }
+
+  Future<bool> writeExportFile({
+    required String sourcePath,
+    required String exportUri,
+  }) async {
+    final result = await _channel.invokeMethod<bool>('writeExportFile', {
+      'sourcePath': sourcePath,
+      'exportUri': exportUri,
+    });
+    return result ?? false;
+  }
+
+  Future<String?> selectExportDirectory() async {
+    final result = await _channel.invokeMethod<String>('selectExportDirectory');
+    return result;
+  }
+
+  Future<bool> writeExportFileToDirectory({
+    required String sourcePath,
+    required String directoryUri,
+    required String displayName,
+    required String mimeType,
+  }) async {
+    final result = await _channel.invokeMethod<bool>('writeExportFileToDirectory', {
+      'sourcePath': sourcePath,
+      'directoryUri': directoryUri,
+      'displayName': displayName,
+      'mimeType': mimeType,
+    });
+    return result ?? false;
+  }
+
+  static Future<bool> backupFileToDownloads({
+    required String sourcePath,
+    required String displayName,
+    required String relativePath,
+  }) async {
+    try {
+      final result = await _channel.invokeMapMethod<String, Object?>(
+        'publishFile',
+        {
+          'sourcePath': sourcePath,
+          'displayName': displayName,
+          'mimeType': 'application/json',
+          'relativePath': relativePath,
+        },
+      );
+      final uri = result?['uri'] as String?;
+      return uri != null && uri.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<List<AutoBackupFile>> listAutoBackups() async {
+    try {
+      final result = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
+        'listAutoBackups',
+      );
+      if (result == null) return const [];
+      final entries = <AutoBackupFile>[];
+      for (final raw in result) {
+        final timestamp = raw['timestamp'] as String? ?? '';
+        final name = raw['name'] as String? ?? '';
+        final uri = raw['uri'] as String? ?? '';
+        if (timestamp.isEmpty || name.isEmpty || uri.isEmpty) continue;
+        if (name == 'backup_manifest.json') continue;
+        entries.add(AutoBackupFile(timestamp: timestamp, name: name, uri: uri));
+      }
+      return entries;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Future<bool> restoreBackupFile({
+    required String uri,
+    required String destPath,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'restoreAutoBackupFile',
+        {'uri': uri, 'destPath': destPath},
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> openUrl(String url) async {

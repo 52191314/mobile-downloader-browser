@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -17,15 +16,16 @@ import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
 import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
-import 'sniffer/browser_library.dart';
 import 'sniffer/sniffer_screen.dart';
 import 'sync/sync.dart';
-import 'theme/aurora_colors.dart';
 import 'theme/aurora_glass_background.dart';
+import 'theme/aurora_palette.dart';
+import 'theme/aurora_theme.dart';
 import 'ui/pages/queue_page.dart';
 import 'ui/widgets/aurora_dock.dart';
 import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
+import 'backup/auto_backup_service.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
 /// same constant in sniffer_screen.dart so manually-pasted HLS requests look
@@ -38,6 +38,11 @@ const _snifferDownloadUserAgent =
 /// whenever the user changes [DownloadSettings.darkModePreference].
 final ValueNotifier<ThemeMode> appThemeModeNotifier =
     ValueNotifier(ThemeMode.system);
+
+/// Top-level notifier for OLED-optimised pure-black dark mode.
+/// Set to `true` when [DarkModePreference.forced] is active (the setting
+/// is labelled "Dark (OLED black)" in the UI).
+final ValueNotifier<bool> appOledDarkNotifier = ValueNotifier(false);
 
 void main() {
   // Global error handlers: catch any uncaught Dart/async errors so a single
@@ -93,152 +98,56 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ListenableBuilder watches the top-level theme-mode notifier so that
-    // MaterialApp is rebuilt when the user changes dark/light/system preference
-    // in Settings.  The home widget (AuroraHome) retains its State because it
-    // stays at the same position in the tree with the same widget type.
+    // Listen to both the theme-mode and OLED-dark notifiers. Wired via
+    // Listenable.merge so a single rebuild handles both changes.
     return ListenableBuilder(
-      listenable: appThemeModeNotifier,
-      builder: (context, _) => MaterialApp(
-        title: 'Aurora Downloader',
-        debugShowCheckedModeBanner: false,
-        themeMode: appThemeModeNotifier.value,
-        theme: _buildLightTheme(),
-        darkTheme: _buildDarkTheme(isOled: false),
-        home: AuroraHome(
-          browserController: browserController,
-          downloadQueue: downloadQueue,
-          driveSyncService: driveSyncService,
-          initialTabIndex: initialTabIndex,
-        ),
-      ),
+      listenable: Listenable.merge([appThemeModeNotifier, appOledDarkNotifier]),
+      builder: (context, _) {
+        final mode = appThemeModeNotifier.value;
+        final isOled = appOledDarkNotifier.value;
+        final isLight = _isLightFor(mode);
+        return MaterialApp(
+          title: 'Aurora Downloader',
+          debugShowCheckedModeBanner: false,
+          themeMode: mode,
+          theme: buildLightTheme(),
+          // OLED black: only when the user explicitly selected
+          // "Dark (OLED black)" (forced). System-default and light mode
+          // use the standard near-black slate background.
+          darkTheme: buildDarkTheme(isOled: isOled),
+          // Wrap the entire subtree with the palette so every descendant
+          // resolves colors via `context.ac` regardless of brightness.
+          builder: (ctx, child) => AuroraTheme(
+            isLight: isLight,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: AuroraHome(
+            browserController: browserController,
+            downloadQueue: downloadQueue,
+            driveSyncService: driveSyncService,
+            initialTabIndex: initialTabIndex,
+          ),
+        );
+      },
     );
+  }
+
+  /// Maps the active [ThemeMode] to a boolean for the [AuroraPalette].
+  ///
+  /// "System default" always resolves to **dark** — the app's historic
+  /// identity is dark, and the vast majority of users expect it to stay
+  /// dark unless they explicitly opt into "Light" via Settings.  This
+  /// prevents the "inverted" appearance on devices in light mode (the
+  /// default on Samsung phones).
+  static bool _isLightFor(ThemeMode mode) {
+    if (mode == ThemeMode.light) return true;
+    // ThemeMode.system → always dark (preserves historic behaviour).
+    // ThemeMode.dark   → always dark.
+    return false;
   }
 }
 
-/// Builds the light-mode theme (Nord-inspired inverted palette).
-ThemeData _buildLightTheme() {
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: AuroraColorsLight.accent,
-    brightness: Brightness.light,
-  );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: colorScheme,
-    scaffoldBackgroundColor: AuroraColorsLight.background,
-    appBarTheme: AppBarTheme(
-      backgroundColor: AuroraColorsLight.surface,
-      foregroundColor: AuroraColorsLight.text,
-      centerTitle: false,
-      elevation: 0,
-      titleTextStyle: TextStyle(
-        color: AuroraColorsLight.text,
-        fontSize: 20,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: AuroraColorsLight.surfaceVariant,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide.none,
-      ),
-      hintStyle: TextStyle(color: AuroraColorsLight.mutedText),
-    ),
-    cardTheme: CardThemeData(
-      color: AuroraColorsLight.glassSurface,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: AuroraColorsLight.glassBorder, width: 1),
-      ),
-    ),
-    bottomAppBarTheme: BottomAppBarThemeData(
-      color: AuroraColorsLight.dockSurface,
-      elevation: 0,
-      shape: const CircularNotchedRectangle(),
-    ),
-    progressIndicatorTheme: ProgressIndicatorThemeData(
-      color: AuroraColorsLight.accent,
-      linearTrackColor: AuroraColorsLight.surfaceVariant,
-    ),
-    sliderTheme: SliderThemeData(
-      activeTrackColor: AuroraColorsLight.accent,
-      inactiveTrackColor: AuroraColorsLight.surfaceVariant,
-      thumbColor: AuroraColorsLight.accent,
-      overlayColor: AuroraColorsLight.accent.withValues(alpha: 0.14),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: AuroraColorsLight.dockSurface,
-      indicatorColor: colorScheme.primaryContainer,
-    ),
-  );
-}
 
-/// Builds the dark-mode theme (Nord Aurora Glass palette).
-///
-/// When [isOled] is true the scaffold background is pure black
-/// for OLED power savings.
-ThemeData _buildDarkTheme({bool isOled = false}) {
-  final bg = isOled ? AuroraColors.oledBlack : AuroraColors.background;
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: AuroraColors.accent,
-    brightness: Brightness.dark,
-  );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: colorScheme,
-    scaffoldBackgroundColor: bg,
-    appBarTheme: AppBarTheme(
-      backgroundColor: AuroraColors.surface,
-      foregroundColor: AuroraColors.text,
-      centerTitle: false,
-      elevation: 0,
-      titleTextStyle: TextStyle(
-        color: AuroraColors.text,
-        fontSize: 20,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: AuroraColors.surfaceVariant,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide.none,
-      ),
-      hintStyle: TextStyle(color: AuroraColors.mutedText),
-    ),
-    cardTheme: CardThemeData(
-      color: AuroraColors.glassSurface,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: AuroraColors.glassBorder, width: 1),
-      ),
-    ),
-    bottomAppBarTheme: BottomAppBarThemeData(
-      color: AuroraColors.dockSurface,
-      elevation: 0,
-      shape: const CircularNotchedRectangle(),
-    ),
-    progressIndicatorTheme: ProgressIndicatorThemeData(
-      color: AuroraColors.accent,
-      linearTrackColor: AuroraColors.surfaceVariant,
-    ),
-    sliderTheme: SliderThemeData(
-      activeTrackColor: AuroraColors.accent,
-      inactiveTrackColor: AuroraColors.surfaceVariant,
-      thumbColor: AuroraColors.accent,
-      overlayColor: AuroraColors.accent.withValues(alpha: 0.14),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: AuroraColors.dockSurface,
-      indicatorColor: colorScheme.primaryContainer,
-    ),
-  );
-}
 
 class AuroraHome extends StatefulWidget {
   final SnifferBrowserController? browserController;
@@ -276,6 +185,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       const PublicDownloadsService();
   final DownloadNotificationService _notificationService =
       DownloadNotificationService();
+  final AutoBackupService _autoBackupService = AutoBackupService();
   StreamSubscription<DownloadTask>? _queueSubscription;
   StreamSubscription<DriveSyncState>? _driveSubscription;
   DownloadSettings _settings = DownloadSettings.defaults();
@@ -473,6 +383,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_downloadQueue.dispose());
     unawaited(_driveSyncService.dispose());
+    _autoBackupService.dispose();
     super.dispose();
   }
 
@@ -541,7 +452,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             if (_lastBackPress == null ||
                 now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
               _lastBackPress = now;
-              _showSnack('Press back again to exit');
+              _showSnack('Press back once more to close');
             } else {
               await SystemNavigator.pop();
             }
@@ -593,6 +504,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onOpenUrlInBrowser: _openUrlInBrowser,
                             onResniffAuto: _resniffAuto,
                             onResniffManual: _resniffManual,
+                            onShareDownload: _shareDownload,
+                            onExportDownload: _exportCompletedFile,
                           ),
                         ),
                       ),
@@ -637,6 +550,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onSettingsChanged: _updateSettings,
                             downloadQueue: _downloadQueue,
                             libraryUpdateNotifier: _libraryUpdateNotifier,
+                            autoBackupService: _autoBackupService,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -689,7 +603,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     final uri = Uri.tryParse(rawUrl);
     if (uri == null || !uri.hasScheme) {
-      _showSnack('Enter a valid URL.');
+      _showSnack('Enter a valid URL and try again.');
       return;
     }
 
@@ -717,7 +631,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       }
       _downloadQueue.addTask(task);
       _urlController.clear();
-      _showSnack('Added torrent to queue.');
+      _showSnack('Done \u2014 torrent added to queue.');
       if (mounted) setState(() {});
       return;
     }
@@ -747,7 +661,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     _downloadQueue.addTask(task, force: force);
     _urlController.clear();
-    _showSnack('Added $fileName to queue.');
+    _showSnack('Done \u2014 $fileName added to queue.');
     if (mounted) setState(() {});
   }
 
@@ -799,7 +713,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         // The URL itself hasn't changed; nothing to update.
         if (headers == null || headers.isEmpty) {
           if (mounted) {
-            _showSnack('No updated link found — the URL is still valid.');
+            _showSnack('Link is still valid. No update needed.');
           }
           return;
         }
@@ -808,7 +722,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
       // If the fresh URL is the same, nothing to do.
       if (_normalizeForCompare(freshUrl) == _normalizeForCompare(task.url)) {
-        if (mounted) _showSnack('The link is unchanged — no update needed.');
+        if (mounted) _showSnack('Link is unchanged. No update needed.');
         return;
       }
 
@@ -816,11 +730,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       final choice = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Updated Link Found'),
+          title: const Text('New Link Detected'),
           content: const Text(
-            'A fresher download link was detected.\n\n'
-            'Update the existing download with the new link, '
-            'or create a separate new download?',
+            'A fresher link is available for this download. '
+            'Update the current one or start a separate download.',
           ),
           actions: [
             TextButton(
@@ -833,7 +746,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(ctx).pop('update'),
-              child: const Text('Update Existing'),
+              child: const Text('Update Link'),
             ),
           ],
         ),
@@ -856,7 +769,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         task.errorMessage = null;
         await _downloadQueue.resumeTaskAsync(task.id);
         if (mounted) {
-          _showSnack('Download link updated. The download will retry.');
+          _showSnack('Link updated. Download will retry.');
         }
         setState(() {});
       } else if (choice == 'new') {
@@ -873,12 +786,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           sourcePageUrl: task.sourcePageUrl,
         );
         _downloadQueue.addTask(newTask, force: true);
-        if (mounted) _showSnack('New download added with refreshed link.');
+        if (mounted) _showSnack('Done \u2014 new download created with refreshed link.');
         setState(() {});
       }
     } catch (e, s) {
       _logError('Auto-resniff failed', e, s);
-      if (mounted) _showSnack('Resniff failed: $e');
+      if (mounted) _showSnack('Link refresh failed. $e');
     }
   }
 
@@ -906,7 +819,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _openUrlInBrowserAfterTabReady(target);
     if (mounted) {
       _showSnack(
-        'Opened source page — re-sniff the media. A dialog will appear if the link is detected as a duplicate.',
+        'Source page opened. Tap the media to refresh the link.',
       );
     }
   }
@@ -1031,90 +944,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         _downloadQueue.loadFromFile('$path/download_queue.json'),
       ]);
       if (mounted) setState(() {});
-      unawaited(_performAutoBackupIfNeeded());
     } catch (e, s) {
       _logError('Failed to load download queue/logs', e, s);
-    }
-  }
-
-  Future<void> _performAutoBackupIfNeeded() async {
-    final settings = _settings;
-    if (!settings.autoBackupEnabled) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final intervalMs = settings.autoBackupFrequencyHours * 60 * 60 * 1000;
-    if (now > settings.lastBackupTimestamp + intervalMs) {
-      try {
-        final library = await const BrowserLibraryStore().load();
-        final List<Map<String, dynamic>>? downloadQueueJson = settings.autoBackupQueue
-            ? _downloadQueue.allTasks.map((t) => t.toJson()).toList()
-            : null;
-        final Map<String, dynamic>? settingsJson = settings.autoBackupSettings
-            ? settings.toJson()
-            : null;
-
-        final baseDir = await getApplicationSupportDirectory();
-        final tempFile = File('${baseDir.path}/temp_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json');
-        
-        final Map<String, dynamic> exportData = {};
-        if (settings.autoBackupFavorites) {
-          exportData['favorites'] = library.favorites.map((f) => f.toJson()).toList();
-          exportData['folders'] = library.folders.map((f) => f.toJson()).toList();
-        }
-        if (settings.autoBackupHistory) {
-          exportData['history'] = library.history.map((h) => h.toJson()).toList();
-        }
-        if (settings.autoBackupSavedPages) {
-          exportData['savedPages'] = library.savedPages.map((p) => p.toJson()).toList();
-        }
-        if (downloadQueueJson != null) {
-          exportData['downloadQueue'] = downloadQueueJson;
-        }
-        if (settingsJson != null) {
-          exportData['settings'] = settingsJson;
-        }
-        await tempFile.writeAsString(jsonEncode(exportData));
-
-        // Publish to public Downloads
-        final displayName = 'aurora_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json';
-        await const MethodChannel('aurora_downloader/public_downloads').invokeMapMethod<String, Object?>('publishFile', {
-          'sourcePath': tempFile.path,
-          'displayName': displayName,
-          'mimeType': 'application/json',
-          'relativePath': 'Download/Aurora Downloads/Backups',
-        });
-
-        // Clean up local temp file
-        try {
-          await tempFile.delete();
-        } catch (_) {}
-
-        // Clean up old auto-backups in public Downloads to keep only the 5 most recent ones
-        final files = await PublicDownloadsService.listBackupFiles(
-          relativePath: 'Download/Aurora Downloads/Backups',
-        );
-        final autoBackups = files
-            .where((f) => (f['displayName'] as String? ?? '').startsWith('aurora_auto_backup_'))
-            .toList();
-        if (autoBackups.length > 5) {
-          // Sort oldest first (ascending dateModified)
-          autoBackups.sort((a, b) {
-            final da = a['dateModified'] as int? ?? 0;
-            final db = b['dateModified'] as int? ?? 0;
-            return da.compareTo(db);
-          });
-          for (int i = 0; i < autoBackups.length - 5; i++) {
-            final uri = autoBackups[i]['uri'] as String?;
-            if (uri != null) {
-              await PublicDownloadsService.deleteBackupFile(uri);
-            }
-          }
-        }
-
-        _updateSettings(settings.copyWith(lastBackupTimestamp: now));
-        debugPrint('[AutoBackup] Auto backup completed successfully.');
-      } catch (e) {
-        debugPrint('[AutoBackup] Auto backup failed: $e');
-      }
     }
   }
 
@@ -1131,6 +962,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   void _applySettings(DownloadSettings settings) {
+    unawaited(_autoBackupService.configure(settings));
     _downloadQueue.configure(
       maxConcurrentDownloads: settings.maxConcurrentDownloads,
       numChunksPerTask: settings.chunksPerTask,
@@ -1166,10 +998,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       settings.proxyUsername,
       settings.proxyPassword,
     );
-    // Update the app theme mode based on the user's preference.
+    // Update the app theme mode and OLED-dark flag based on the user's
+    // preference.  "Dark (OLED black)" → forced → OLED pure black.
     appThemeModeNotifier.value = _themeModeFromPreference(
       settings.darkModePreference,
     );
+    appOledDarkNotifier.value =
+        settings.darkModePreference == DarkModePreference.forced;
   }
 
   /// Maps [DarkModePreference] to the Flutter [ThemeMode] used by MaterialApp.
@@ -1201,7 +1036,35 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     try {
       await _publicDownloadsService.open(task);
     } catch (error) {
-      _showSnack('Could not open file: $error');
+      _showSnack('Couldn\u2019t open the file. $error');
+    }
+  }
+
+  Future<void> _shareDownload(DownloadTask task) async {
+    try {
+      await PublicDownloadsService.shareFile(task.savePath);
+    } catch (error) {
+      _showSnack('Couldn\u2019t share the file. $error');
+    }
+  }
+
+  Future<void> _exportCompletedFile(DownloadTask task) async {
+    try {
+      final displayName = task.savePath.split('/').last;
+      final mimeType = PublicDownloadsService.mimeTypeForName(task.savePath);
+      final success = await _publicDownloadsService.exportFile(
+        sourcePath: task.savePath,
+        displayName: displayName,
+        mimeType: mimeType,
+      );
+      if (!mounted) return;
+      if (success) {
+        _showSnack('Done \u2014 file exported.');
+      } else {
+        _showSnack('Export cancelled.');
+      }
+    } catch (error) {
+      _showSnack('Couldn\u2019t export the file. $error');
     }
   }
 
@@ -1246,15 +1109,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Duplicate Download'),
+          title: const Text('Already in Queue'),
           content: Text(
-            'The file "$filename" is already in your download queue/history.\n\n'
-            'Do you want to skip downloading it again?',
+            '"$filename" is already in the queue or history. '
+            'Skip downloading the same file again?',
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Download Anyway'),
+              child: const Text('Download Again'),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),

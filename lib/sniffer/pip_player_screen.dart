@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 
-import '../theme/aurora_colors.dart';
+import '../theme/aurora_palette.dart';
 
 class PipPlayerScreen extends StatefulWidget {
   final String url;
@@ -37,12 +37,13 @@ class _PipPlayerScreenState extends State<PipPlayerScreen> {
     final uri = Uri.tryParse(widget.url);
     if (uri == null || !uri.hasScheme) {
       setState(() {
-        _error = 'Invalid video URL';
+        _error = 'Could not play this video. The URL is not valid.';
         _initialized = true;
       });
       return;
     }
     try {
+      final accentColor = AuroraPalette.of(context).accentFrost;
       final controller = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: widget.headers,
@@ -58,8 +59,8 @@ class _PipPlayerScreenState extends State<PipPlayerScreen> {
         showControls: true,
         showControlsOnInitialize: true,
         materialProgressColors: ChewieProgressColors(
-          playedColor: AuroraColors.accent,
-          handleColor: AuroraColors.accent,
+          playedColor: accentColor,
+          handleColor: accentColor,
           backgroundColor: Colors.white24,
           bufferedColor: Colors.white12,
         ),
@@ -71,7 +72,7 @@ class _PipPlayerScreenState extends State<PipPlayerScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not play this media: $e';
+          _error = 'Could not play this video.';
           _initialized = true;
         });
       }
@@ -96,7 +97,7 @@ class _PipPlayerScreenState extends State<PipPlayerScreen> {
         title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
-            tooltip: 'Toggle fullscreen',
+            tooltip: 'Enter fullscreen',
             icon: const Icon(Icons.fullscreen),
             onPressed: () {
               _chewieController?.enterFullScreen();

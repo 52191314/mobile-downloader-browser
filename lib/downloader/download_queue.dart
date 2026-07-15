@@ -200,7 +200,7 @@ class DownloadQueue {
       this.maxConcurrentDownloads = maxConcurrentDownloads.clamp(1, 12).toInt();
     }
     if (numChunksPerTask != null) {
-      this.numChunksPerTask = numChunksPerTask.clamp(1, 32).toInt();
+      this.numChunksPerTask = numChunksPerTask.clamp(1, 16).toInt();
     }
     if (completedDownloadPublisher != null) {
       this.completedDownloadPublisher = completedDownloadPublisher;
@@ -215,7 +215,7 @@ class DownloadQueue {
       this.autoRetry = autoRetry;
     }
     if (retryLimit != null) {
-      this.retryLimit = retryLimit.clamp(1, 999999).toInt();
+      this.retryLimit = retryLimit.clamp(1, 10).toInt();
     }
     if (minSpeedThresholdBytesPerSec != null) {
       this.minSpeedThresholdBytesPerSec = minSpeedThresholdBytesPerSec.clamp(0, 100 * 1024 * 1024).toInt();
@@ -296,7 +296,7 @@ class DownloadQueue {
       task.state = DownloadState.failed;
       task.failureReason = DownloadFailure.urlInvalid;
       task.errorMessage =
-          'Blob URLs (MediaSource) cannot be downloaded directly. '
+          'Aurora can\'t download blob: URLs directly. '
           'Look for the .m3u8 or .mpd playlist URL in the captured media list instead.';
       _emitTask(task);
       return;
@@ -415,9 +415,8 @@ class DownloadQueue {
                     (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
                 updatedTask.failureReason = DownloadFailure.partialDownload;
                 updatedTask.errorMessage =
-                    '[Download stalled near completion] '
-                    '$alreadyMb MB already downloaded. '
-                    'Use "Force Merge" to salvage, or tap Retry to resume.';
+                    'Download stalled at $alreadyMb MB. '
+                    'Try Force Merge to save what\'s downloaded, or tap Retry.';
                 _emitTask(updatedTask);
                 return;
               }
@@ -427,7 +426,7 @@ class DownloadQueue {
                 _autoRetryAttempts[updatedTask.id] = nextAttempt;
                 final originalError = updatedTask.errorMessage ?? 'Unknown error';
                 final limitStr = retryLimit >= 999999 ? '∞' : '$retryLimit';
-                updatedTask.errorMessage = '[Retrying in 1s, attempt $nextAttempt/$limitStr] $originalError';
+                updatedTask.errorMessage = 'Retrying in 1s (attempt $nextAttempt/$limitStr). $originalError';
                 _emitTask(updatedTask);
 
                 Future.delayed(const Duration(seconds: 1), () {
@@ -444,9 +443,9 @@ class DownloadQueue {
                   taskId: updatedTask.id,
                 );
                 final originalError = updatedTask.errorMessage ?? 'Unknown error';
-                final cleanError = originalError.replaceFirst(RegExp(r'^\[Retrying in [12]s, attempt \d+/(?:\d+|∞)\] '), '');
+                final cleanError = originalError.replaceFirst(RegExp(r'^Retrying in [12]s \(attempt \d+/(?:\d+|∞)\)\. '), '');
                 final failLimitStr = retryLimit >= 999999 ? 'infinite' : '$retryLimit';
-                updatedTask.errorMessage = '[Auto-retry failed after $failLimitStr attempts] $cleanError';
+                updatedTask.errorMessage = 'Auto-retry exhausted after $failLimitStr attempts. $cleanError';
                 _emitTask(updatedTask);
               }
             }
@@ -502,6 +501,8 @@ class DownloadQueue {
       await pauseFuture;
     }
   }
+
+
 
   void resumeTask(String taskId) {
     unawaited(resumeTaskAsync(taskId));
@@ -583,7 +584,7 @@ class DownloadQueue {
         taskId: task.id,
       );
       task.failureReason = DownloadFailure.mergeFailed;
-      task.errorMessage = '[Force merge refused] Task is still downloading.';
+      task.errorMessage = 'Can\'t force merge while the task is still downloading.';
       _emitTask(task);
       return false;
     }
@@ -633,7 +634,7 @@ class DownloadQueue {
         task.state = DownloadState.failed;
         task.failureReason = DownloadFailure.mergeFailed;
         task.errorMessage =
-            '[Force merge failed] No chunk data on disk to merge.';
+            'Force merge had no data to work with. No partial chunks found on disk.';
         _emitTask(task);
         return false;
       }
@@ -687,7 +688,7 @@ class DownloadQueue {
       _logError('Exception during force merge', e, s);
       task.state = DownloadState.failed;
       task.failureReason = DownloadFailure.mergeFailed;
-      task.errorMessage = '[Force merge failed] Error: $e';
+      task.errorMessage = 'Force merge failed. Error: $e';
       _emitTask(task);
       if (queuePath != null && !_isLoading) {
         unawaited(saveToFile(queuePath!));
@@ -878,7 +879,7 @@ class DownloadQueue {
           } else if (task.state == DownloadState.merging) {
             task.state = DownloadState.failed;
             task.failureReason = DownloadFailure.mergeInterrupted;
-            task.errorMessage = '[Merge interrupted] The download was interrupted while merging saved parts. Retry to re-merge.';
+            task.errorMessage = 'Merge was interrupted while combining saved parts. Tap Retry to re-merge.';
           }
           addTask(task);
         } catch (e, s) {
@@ -1255,7 +1256,7 @@ class DownloadQueue {
     bool descending = true,
   }) {
     tasks.sort((a, b) {
-      int c;
+      int c = 0;
       switch (field) {
         case TaskSortField.date:
           c = a.createdAt.compareTo(b.createdAt);
