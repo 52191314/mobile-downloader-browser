@@ -245,6 +245,10 @@
     while ((matches = urlRegex.exec(text)) !== null && count < 100) {
       var u = matches[1];
       if (u) {
+        // Skip URLs containing JavaScript template literal placeholders (${...}).
+        // These are unresolved templates captured from <script> body text before
+        // the page's JS evaluates them. They'd always fail at download time.
+        if (u.indexOf('${') !== -1) continue;
         u = u.replace(/\\/g, '');
         try {
           var resolved = new URL(u, document.baseURI).href;

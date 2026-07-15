@@ -1111,8 +1111,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         return AlertDialog(
           title: const Text('Already in Queue'),
           content: Text(
-            '"$filename" is already in the queue or history. '
-            'Skip downloading the same file again?',
+            'This download link has already been added to your queue.\n\n'
+            'Download it again anyway?',
           ),
           actions: <Widget>[
             TextButton(

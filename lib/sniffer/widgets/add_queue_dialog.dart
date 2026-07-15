@@ -414,15 +414,15 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         context: context,
                         builder: (BuildContext context) {
                           return AlertDialog(
-                            title: const Text('Duplicate Download'),
+                            title: const Text('Already in Queue'),
                             content: Text(
-                              'The file "$filename" is already in your download queue/history.\n\n'
-                              'Do you want to skip downloading it again?',
+                              'This download link has already been added to your queue.\n\n'
+                              'Download it again anyway?',
                             ),
                             actions: <Widget>[
                               TextButton(
                                 onPressed: () => Navigator.of(context).pop(false),
-                                child: const Text('Download Anyway'),
+                                child: const Text('Download Again'),
                               ),
                               TextButton(
                                 onPressed: () => Navigator.of(context).pop(true),

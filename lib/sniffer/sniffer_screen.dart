@@ -299,7 +299,7 @@ String? _firstNonEmpty(Iterable<String?> values) {
   return null;
 }
 
-enum _RedirectPromptAction { foreground, background, ignore }
+enum _RedirectPromptAction { foreground, background, currentTab, ignore }
 
 /// Filter options for the rich catch sheet segmented control are defined
 /// in `sheets/sniffed_media_sheet.dart` (re-declared so the file is
@@ -2499,8 +2499,6 @@ class _SnifferScreenState extends State<SnifferScreen>
       background-color: #111418 !important;
       color: #E5E9F0 !important;
     }
-    html.aurora-dark img,
-    html.aurora-dark picture,
     html.aurora-dark video,
     html.aurora-dark iframe,
     html.aurora-dark canvas {
@@ -2709,6 +2707,11 @@ class _SnifferScreenState extends State<SnifferScreen>
                   Navigator.of(ctx).pop(_RedirectPromptAction.background),
               child: const Text('Background'),
             ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(_RedirectPromptAction.currentTab),
+              child: const Text('Current tab'),
+            ),
             FilledButton(
               onPressed: () =>
                   Navigator.of(ctx).pop(_RedirectPromptAction.foreground),
@@ -2733,6 +2736,9 @@ class _SnifferScreenState extends State<SnifferScreen>
             buildImmediately: true,
           );
           _showSnack('Opened in background: $targetHost');
+          break;
+        case _RedirectPromptAction.currentTab:
+          unawaited(_loadUrlWithHostSettings(tab, uri));
           break;
         case _RedirectPromptAction.ignore:
         case null:
@@ -4440,12 +4446,12 @@ class _SnifferScreenState extends State<SnifferScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
+                  Text(
                     'Browser Tools',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: ctx.ac.textPrimary,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -4626,8 +4632,8 @@ class _SnifferScreenState extends State<SnifferScreen>
               const SizedBox(height: 8),
               Text(
                 label,
-                style: const TextStyle(
-                  color: Colors.white70,
+                style: TextStyle(
+                  color: context.ac.textSecondary,
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
@@ -5973,15 +5979,15 @@ class _SnifferScreenState extends State<SnifferScreen>
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Duplicate Download'),
+          title: const Text('Already in Queue'),
           content: Text(
-            'The file "$filename" is already in your download queue/history.\n\n'
-            'Do you want to skip downloading it again?',
+            'This download link has already been added to your queue.\n\n'
+            'Download it again anyway?',
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Download Anyway'),
+              child: const Text('Download Again'),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),

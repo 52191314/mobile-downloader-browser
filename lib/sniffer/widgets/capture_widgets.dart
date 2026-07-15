@@ -667,6 +667,12 @@ class _BrowserDockState extends State<_BrowserDock> {
         onTap: widget.onBrowserTools,
       ),
       _CompactNavButton(
+        key: const Key('slide2_sniffer_button'),
+        icon: badgeCount > 0 ? Icons.radar : Icons.add,
+        enabled: true,
+        onTap: widget.onSniffer,
+      ),
+      _CompactNavButton(
         key: const Key('mini_dock_settings'),
         icon: Icons.tune_rounded,
         enabled: true,
