@@ -93,4 +93,40 @@ class NetworkBindingService {
       return null;
     }
   }
+
+  /// Streams a binary resource (HLS segment, etc.) to [filePath] using
+  /// Android native [HttpURLConnection] + WebView [CookieManager] cookies.
+  ///
+  /// This is the high-throughput path (similar to 1DM): no Dart TLS, no
+  /// WebView base64 bridge. Returns `{statusCode, bytesWritten}` or null.
+  static Future<Map<String, dynamic>?> streamSegmentToFile(
+    String url,
+    String filePath, {
+    Map<String, String>? headers,
+    String? cookieHeader,
+  }) async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'streamSegmentToFile',
+        {
+          'url': url,
+          'filePath': filePath,
+          'referer': headers?['Referer'] ?? headers?['referer'] ?? '',
+          'origin': headers?['Origin'] ?? headers?['origin'] ?? '',
+          'userAgent': headers?['User-Agent'] ?? headers?['user-agent'] ?? '',
+          if (cookieHeader != null && cookieHeader.isNotEmpty)
+            'cookie': cookieHeader,
+        },
+      );
+      return result;
+    } on MissingPluginException {
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[NetworkBindingService] streamSegmentToFile error: $e');
+      }
+      return null;
+    }
+  }
 }

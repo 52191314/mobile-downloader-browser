@@ -136,7 +136,9 @@ class WebViewFetchDelegate {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '$safeUrl', true);
     xhr.onload = function() {
-      if (xhr.status >= 200 && xhr.status < 300) {
+      // Accept 2xx and 3xx — matches fetchPlaylistBodyViaJavaScript.
+      // Some CDNs return 302-followed bodies; others use 206 for partials.
+      if (xhr.status >= 200 && xhr.status < 400) {
         window.flutter_inappwebview.callHandler('$channelName', 'OK:' + xhr.responseText);
       } else {
         window.flutter_inappwebview.callHandler('$channelName', 'ERROR:STATUS:' + xhr.status);

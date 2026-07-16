@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/downloader/downloader.dart';
 import 'package:aurora_downloader/platform/public_downloads_service.dart';
+import 'package:aurora_downloader/sniffer/hls_playlist_cache_lookup.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/sniffer_url_utils.dart';
 
@@ -421,8 +422,9 @@ Future<void> addContextTargetToQueue(
     task.onTokenExpired = ({bool forceReload = false}) =>
         reloadForFreshUrl(tab, curUrl, forceReload: forceReload);
     task.fetchViaWebView = (url, {headers}) =>
-        tab.controller.fetchViaJavaScript(url, headers: headers);
-    task.hlsPlaylistCache = (url) => tab.hlsPlaylistCache[url];
+        tab.controller.fetchPlaylistBodyViaJavaScript(url);
+    task.hlsPlaylistCache =
+        (url) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, url);
     task.fetchBinaryViaWebView =
         (url) => tab.controller.fetchBinaryViaJavaScript(url);
     task.cookieProvider = (url) =>

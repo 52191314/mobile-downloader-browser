@@ -8,7 +8,7 @@ Before searching broadly, read:
 2. `../docs/code-maps/projects/aurora_downloader.md`
 3. Recent `../docs/sessions/` entries for `aurora_downloader`
 
-When changing Aurora structure, major features, important classes, or important methods, update `../docs/code-maps/projects/aurora_downloader.md` in the same session.
+When changing Aurora structure, major features, important classes, or important methods, update `../docs/code-maps/projects/aurora_downloader.md` in the same session. When appropriate (such as introducing user-facing features, changing project setup, or updating build/install instructions), also update the repository's main `README.md` in the same session.
 
 ## Build (incremental — fast)
 
@@ -145,8 +145,8 @@ This applies regardless of whether the command was given directly or through the
 
 ## Active Branch Constraint
 
-- All development, testing, builds, and commits in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`) must occur on the **`opencode/witty-river`** branch.
-- Never check out, switch to, or pull changes from other branches (such as `ui/redesign-2.0`) in this repository.
+- All development, testing, builds, and commits in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`) must occur on the **`Post-Gate-Production`** branch.
+- Never check out, switch to, or pull changes from other branches in this repository.
 
 ## Freemium / Pro implementation tracker
 

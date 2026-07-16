@@ -138,13 +138,11 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: [
             _buildProfileHeader(),
             const SizedBox(height: 20),
-            _buildSectionTitle('Downloads'),
-            const SizedBox(height: 8),
-            _buildCardGrid(),
+            _buildSettingsHub(),
           ],
         ),
       ),
@@ -158,200 +156,326 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildProfileHeader() {
     final state = widget.driveSyncService.state;
     final connected = _driveConnected;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.ac.glassSurface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openPage(_buildDrivePage()),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.ac.glassBorder),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor:
-                connected ? context.ac.statusSuccess : context.ac.textTertiary,
-            radius: 24,
-            child: Icon(
-              connected ? Icons.cloud_done : Icons.cloud_outlined,
-              color: context.ac.surfaceField,
-              size: 24,
-            ),
+        child: Ink(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: context.ac.glassSurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: context.ac.glassBorder),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Aurora Downloader',
-                    style: TextStyle(
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: connected
+                    ? context.ac.statusSuccess.withValues(alpha: 0.22)
+                    : context.ac.surfaceElevated,
+                radius: 24,
+                child: Icon(
+                  connected ? Icons.cloud_done_rounded : Icons.cloud_outlined,
+                  color: connected
+                      ? context.ac.statusSuccess
+                      : context.ac.textSecondary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Aurora Downloader',
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: context.ac.textPrimary)),
-                const SizedBox(height: 2),
-                Text(
-                  connected
-                    ? 'Google Drive: ${state.account ?? "Connected"}'
-                    : 'Google Drive not linked',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          connected ? context.ac.accentFrost : context.ac.textSecondary),
+                        letterSpacing: -0.3,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      connected
+                          ? 'Drive · ${state.account ?? 'Connected'}'
+                          : 'Google Drive not linked',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: connected
+                            ? context.ac.accentFrost
+                            : context.ac.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.ac.textTertiary,
+              ),
+            ],
           ),
-          TextButton.icon(
-            icon: Icon(connected ? Icons.sync : Icons.link, size: 16),
-            label: Text(connected ? 'Sync' : 'Link'),
-            onPressed: () {
-              if (connected) {
-                widget.driveSyncService.disconnect();
-              } else if (!widget.proEntitlement.isPro) {
-                showProUpsell(context, ProFeature.driveSync);
-              } else {
-                widget.driveSyncService.connect();
-              }
-            },
-          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hub: grouped navigation rows (replaces uneven 2-col card grid)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSettingsHub() {
+    return ListenableBuilder(
+      listenable: widget.proEntitlement,
+      builder: (context, _) {
+        final isPro = widget.proEntitlement.isPro;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSectionTitle('Downloads'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.download_rounded,
+                title: 'Defaults',
+                subtitle: 'Save location, concurrency, retries',
+                onTap: () => _openPage(_buildDefaultsPage()),
+              ),
+              _NavItem(
+                icon: Icons.wifi_rounded,
+                title: 'Network',
+                subtitle: 'Proxy and browser identity',
+                onTap: () => _openPage(_buildNetworkPage()),
+              ),
+              _NavItem(
+                icon: Icons.rule_rounded,
+                title: 'Rules',
+                subtitle: 'Auto-rename and organize',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildRulesPage()),
+              ),
+              _NavItem(
+                icon: Icons.schedule_rounded,
+                title: 'Schedule',
+                subtitle: 'Download later / night mode',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildSchedulePage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Browser'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.shield_rounded,
+                title: 'Adblock',
+                subtitle: 'Ads, popups, filter lists',
+                onTap: () => _openPage(_buildAdblockPage()),
+              ),
+              _NavItem(
+                icon: Icons.search_rounded,
+                title: 'Search',
+                subtitle: _settings.searchEngine.name,
+                onTap: () => _openPage(_buildSearchPage()),
+              ),
+              _NavItem(
+                icon: Icons.tune_rounded,
+                title: 'Sniffer',
+                subtitle: 'Media types and site player',
+                onTap: () => _openPage(_buildSnifferPage()),
+              ),
+              _NavItem(
+                icon: Icons.people_outline_rounded,
+                title: 'Profiles',
+                subtitle: 'Per-site browser settings',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildProfilesPage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Appearance'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.palette_outlined,
+                title: 'Theme',
+                subtitle: 'Dark mode and display',
+                onTap: () => _openPage(_buildAppearancePage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Data & account'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.cloud_outlined,
+                title: 'Google Drive',
+                subtitle: _driveConnected
+                    ? 'Linked · manage sync'
+                    : 'Link account for backup sync',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildDrivePage()),
+              ),
+              _NavItem(
+                icon: Icons.backup_rounded,
+                title: 'Backup',
+                subtitle: 'Save and restore app data',
+                onTap: () => _openPage(_buildBackupPage()),
+              ),
+              _NavItem(
+                icon: isPro
+                    ? Icons.auto_awesome
+                    : Icons.auto_awesome_outlined,
+                title: 'Aurora Pro',
+                subtitle: isPro
+                    ? 'Premium features unlocked'
+                    : 'Unlock premium features',
+                onTap: () => _openPage(_buildProPage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('About'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.info_outline_rounded,
+                title: 'About',
+                subtitle: 'v1.1.9 · diagnostics · battery',
+                onTap: () => _openPage(_buildAboutPage()),
+              ),
+            ]),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: context.ac.textTertiary,
+          letterSpacing: 0.9,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavGroup(List<_NavItem> items) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.ac.surfaceCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.ac.borderHairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 56,
+                color: context.ac.borderHairline,
+              ),
+            _buildNavRow(items[i]),
+          ],
         ],
       ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Section title
-  // ---------------------------------------------------------------------------
-
-  Widget _buildSectionTitle(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 4),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: context.ac.textSecondary,
-              letterSpacing: 0.5)),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Dashboard card grid
-  // ---------------------------------------------------------------------------
-
-  Widget _buildCardGrid() {
-    return Column(
-      children: [
-        Row(children: [
-          Expanded(child: _buildCard(Icons.download_rounded, 'Defaults',
-              'Where files save, how many at once, and how Aurora handles drops', () => _openPage(_buildDefaultsPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.shield_rounded, 'Adblock',
-              'Block ads, popups, and unwanted redirects',
-              () => _openPage(_buildAdblockPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(Icons.search_rounded, 'Search',
-              'Powered by ${_settings.searchEngine.name}',
-              () => _openPage(_buildSearchPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.tune_rounded, 'Sniffer',
-              'Media types and Aurora player for site videos', () => _openPage(_buildSnifferPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(Icons.palette_outlined, 'Appearance',
-              'Pick theme, dark mode, and in-app alerts', () => _openPage(_buildAppearancePage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.wifi_rounded, 'Network',
-              'Set proxy server and browser identity', () => _openPage(_buildNetworkPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                Icons.rule_rounded,
-                'Rules',
-                isPro
-                    ? 'Auto-rename and organize downloads'
-                    : 'Pro feature',
-                () => _openPage(_buildRulesPage()),
-              );
-            },
-          )),
-          const SizedBox(width: 12),
-          const Expanded(child: SizedBox.shrink()),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(
-              Icons.people_outline, 'Profiles', 'Per-site browser and download settings', () => _openPage(_buildProfilesPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(
-              Icons.backup_rounded, 'Backup', 'Save and restore your data', () => _openPage(_buildBackupPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                Icons.schedule,
-                'Schedule',
-                isPro ? 'Download later / night mode' : 'Pro feature',
-                () => _openPage(_buildSchedulePage()),
-              );
-            },
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(
-              Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                isPro ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-                'Aurora Pro',
-                isPro ? 'Pro features unlocked' : 'Unlock premium features',
-                () => _openPage(_buildProPage()),
-              );
-            },
-          )),
-          const Expanded(child: SizedBox.shrink()),
-        ]),
-      ],
-    );
-  }
-
-  Widget _buildCard(
-      IconData icon, String title, String subtitle, VoidCallback onTap) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
+  Widget _buildNavRow(_NavItem item) {
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: item.onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(icon, color: context.ac.accentFrost, size: 28),
-            const SizedBox(height: 10),
-            Text(title,
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: context.ac.textPrimary)),
-            const SizedBox(height: 2),
-            Text(subtitle,
-                style:
-                    TextStyle(fontSize: 11, color: context.ac.textTertiary)),
-          ]),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: context.ac.accentFrost.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  item.icon,
+                  size: 20,
+                  color: context.ac.accentFrost,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.title,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.2,
+                              color: context.ac.textPrimary,
+                            ),
+                          ),
+                        ),
+                        if (item.badge != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: context.ac.accentPurple
+                                  .withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              item.badge!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                                color: context.ac.accentPurple,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.ac.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.ac.textTertiary,
+                size: 22,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1844,6 +1968,23 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildRulesPage() {
     return _RulesPage(proEntitlement: widget.proEntitlement);
   }
+}
+
+/// One row in the Settings hub navigation list.
+class _NavItem {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final VoidCallback onTap;
+
+  const _NavItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.badge,
+  });
 }
 
 /// Detail page for Drive Sync settings with live state subscription.

@@ -10,8 +10,6 @@ class _AddQueueDialogContent extends StatefulWidget {
   final String? baseTemp;
   final Future<Map<String, String>> Function(String) getCookiesForUrl;
   final DownloadQueue downloadQueue;
-  final Future<String> Function(String, Map<String, String>)
-  refreshM3u8IfNeeded;
   final Future<String?> Function({bool forceReload})? onTokenExpired;
   final Future<List<SniffedMedia>> Function(String url)?
       fetchMasterPlaylistVariants;
@@ -26,7 +24,6 @@ class _AddQueueDialogContent extends StatefulWidget {
     required this.baseTemp,
     required this.getCookiesForUrl,
     required this.downloadQueue,
-    required this.refreshM3u8IfNeeded,
     this.onTokenExpired,
     this.fetchMasterPlaylistVariants,
   });
@@ -38,10 +35,15 @@ class _AddQueueDialogContent extends StatefulWidget {
 class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
   late TextEditingController filenameController;
   DownloadPriority selectedPriority = DownloadPriority.medium;
-  bool isResolving = false;
+  /// True while master-playlist variants are loading for the quality dropdown.
+  bool isResolvingVariants = false;
+  /// True while the Download button handler is running (cookies + enqueue).
+  bool isSubmitting = false;
   String selectedFolder = '';
   late SniffedMedia selectedMedia;
   List<SniffedMedia> _variants = [];
+
+  bool get _busy => isResolvingVariants || isSubmitting;
 
   @override
   void initState() {
@@ -104,7 +106,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       return aIsVariant.compareTo(bIsVariant); // 0 (master) sorts first
     });
 
-    setState(() => isResolving = true);
+    setState(() => isResolvingVariants = true);
     try {
       List<SniffedMedia> fetched = const [];
       for (final url in m3u8Urls) {
@@ -155,7 +157,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
         }
       });
     } finally {
-      if (mounted) setState(() => isResolving = false);
+      if (mounted) setState(() => isResolvingVariants = false);
     }
   }
 
@@ -284,7 +286,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                 IconButton(
                   key: const Key('dialog_rename_pencil_button'),
                   icon: Icon(Icons.edit, color: context.ac.accentFrost),
-                  onPressed: isResolving ? null : _showRenameDialog,
+                  onPressed: _busy ? null : _showRenameDialog,
                 ),
               ],
             ),
@@ -311,7 +313,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                   child: Text(priority.name.toUpperCase()),
                 );
               }).toList(),
-              onChanged: isResolving
+              onChanged: _busy
                   ? null
                   : (val) {
                       if (val != null) {
@@ -319,7 +321,11 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                       }
                     },
             ),
-            if (isResolving) ...[
+            // Only show spinner while loading quality options — not on Download.
+            // Pre-download m3u8 "refresh" was removed: the selected quality URL
+            // is already the right media playlist; mid-download onTokenExpired
+            // handles real 403 recovery.
+            if (isResolvingVariants) ...[
               const SizedBox(height: 16),
               const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -331,7 +337,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                   ),
                   SizedBox(width: 12),
                   Text(
-                    'Refreshing media URL...',
+                    'Loading quality options...',
                     style: TextStyle(fontSize: 13),
                   ),
                 ],
@@ -343,7 +349,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       actions: [
         TextButton(
           key: const Key('dialog_cancel_button'),
-          onPressed: isResolving
+          onPressed: isSubmitting
               ? null
               : () {
                   Navigator.of(context).pop();
@@ -352,7 +358,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
         ),
         ElevatedButton(
           key: const Key('dialog_add_button'),
-          onPressed: isResolving
+          onPressed: isSubmitting
               ? null
               : () async {
                   var filename = filenameController.text.trim();
@@ -366,7 +372,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                   }
                   final navigator = Navigator.of(context);
 
-                  setState(() => isResolving = true);
+                  setState(() => isSubmitting = true);
 
                   try {
                     final baseDir = widget.baseDir ?? Directory.systemTemp.path;
@@ -382,10 +388,10 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                       currentUrl: widget.currentUrl,
                     );
 
-                    final refreshedUrl = await widget.refreshM3u8IfNeeded(
-                      selectedMedia.url,
-                      taskHeaders,
-                    );
+                    // Use the sniffer/quality-picker URL as-is. No pre-flight
+                    // playlist refresh — that only delayed the queue and often
+                    // 403'd on Cloudflare while the selected URL was already fine.
+                    final mediaUrl = selectedMedia.url;
 
                     final taskId = DateTime.now().millisecondsSinceEpoch
                         .toString();
@@ -399,7 +405,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     );
                     final task = DownloadTask(
                       id: taskId,
-                      url: refreshedUrl,
+                      url: mediaUrl,
                       sourcePageUrl: selectedMedia.sourcePageUrl,
                       savePath: savePath,
                       tempDir: '$baseTemp${Platform.pathSeparator}temp_$taskId',
@@ -418,19 +424,19 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     // browser's networking stack (Cloudflare clearance
                     // cookies, raw UA, correct TLS fingerprint).
                     task.fetchViaWebView = (url, {headers}) =>
-                        widget.tab.controller.fetchViaJavaScript(url, headers: headers);
+                        widget.tab.controller.fetchPlaylistBodyViaJavaScript(url);
                     // Wire up the HLS playlist body cache so the
                     // downloader can use browser-captured playlist
                     // bodies directly (zero network requests).
                     task.hlsPlaylistCache = (url) =>
-                        widget.tab.hlsPlaylistCache[url];
+                        lookupHlsPlaylistCache(widget.tab.hlsPlaylistCache, url);
                     task.fetchBinaryViaWebView = (url) =>
                         widget.tab.controller.fetchBinaryViaJavaScript(url);
                     task.cookieProvider = (url) =>
                         widget.tab.controller.getCookiesForDomain(url: url);
 
                     bool force = false;
-                    if (widget.downloadQueue.urlExists(refreshedUrl)) {
+                    if (widget.downloadQueue.urlExists(mediaUrl)) {
                       if (!context.mounted) return;
                       final choice = await showDialog<DuplicateChoice>(
                         context: context,
@@ -460,14 +466,14 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                       );
                       if (choice == null || choice == DuplicateChoice.skip) {
                         if (mounted) {
-                          setState(() => isResolving = false);
+                          setState(() => isSubmitting = false);
                         }
                         return;
                       }
                       if (choice == DuplicateChoice.updateExisting) {
                         final existingId =
                             widget.downloadQueue.resniffPendingTaskId ??
-                            widget.downloadQueue.getTaskByUrl(refreshedUrl)?.id ??
+                            widget.downloadQueue.getTaskByUrl(mediaUrl)?.id ??
                             widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
                         if (existingId != null) {
                           await widget.downloadQueue.updateTaskFromDonor(
@@ -500,7 +506,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     AuroraSnackbar.show(context, 'Added "$filename" to queue.');
                   } catch (e) {
                     if (mounted) {
-                      setState(() => isResolving = false);
+                      setState(() => isSubmitting = false);
                     }
                     AuroraSnackbar.show(
                       context,
@@ -508,7 +514,13 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     );
                   }
                 },
-          child: const Text('Download'),
+          child: isSubmitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Download'),
         ),
       ],
     );

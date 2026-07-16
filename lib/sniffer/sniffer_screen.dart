@@ -31,6 +31,7 @@ import 'controllers/tab_manager.dart';
 import 'idm_backup_parser.dart';
 import 'browser_search.dart';
 import 'browser_widget.dart';
+import 'hls_playlist_cache_lookup.dart';
 import 'media_capture_analyzer.dart';
 import 'media_sniffer_engine.dart';
 import 'models/address_suggestion.dart';
@@ -3972,11 +3973,15 @@ class _SnifferScreenState extends State<SnifferScreen>
     final tab = _findTabForTask(task) ?? _activeTab;
     final sourcePage = task.sourcePageUrl ?? tab.addressController.text;
 
+    // Same playlist body path as MediaEnricher/sniffer (not generic
+    // fetchViaJavaScript — that path was returning null/network error while
+    // fetchPlaylistBodyViaJavaScript still got real #EXTM3U from missav tabs).
     task.fetchViaWebView = (fetchUrl, {Map<String, String>? headers}) =>
-        tab.controller.fetchViaJavaScript(fetchUrl, headers: headers);
+        tab.controller.fetchPlaylistBodyViaJavaScript(fetchUrl);
     task.fetchBinaryViaWebView =
         (binaryUrl) => tab.controller.fetchBinaryViaJavaScript(binaryUrl);
-    task.hlsPlaylistCache = (cacheUrl) => tab.hlsPlaylistCache[cacheUrl];
+    task.hlsPlaylistCache =
+        (cacheUrl) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
     task.cookieProvider =
         (url) => tab.controller.getCookiesForDomain(url: url);
     task.onTokenExpired = ({bool forceReload = false}) =>
@@ -5290,13 +5295,11 @@ class _SnifferScreenState extends State<SnifferScreen>
           screen: LogScreen.browser,
           eventType: LogEventType.sniff,
         );
-        // 1st fallback: WebView JavaScript fetch() — it sends cookies and
-        // has Cloudflare clearance from the page session.
+        // 1st fallback: WebView playlist-body fetch (same as sniffer enricher).
         String? jsBody;
         try {
-          jsBody = await _activeTab.controller.fetchViaJavaScript(
+          jsBody = await _activeTab.controller.fetchPlaylistBodyViaJavaScript(
             url,
-            headers: headers,
           );
         } catch (e) {
           AuroraLog.instance.error(
@@ -5620,9 +5623,11 @@ class _SnifferScreenState extends State<SnifferScreen>
       totalBytes: media?.contentLengthBytes ?? -1,
     );
     // Wire up the WebView JS fetch bridge for HLS / Cloudflare.
+    // Use playlist-body path (sniffer-grade), not generic fetchViaJavaScript.
     task.fetchViaWebView = (fetchUrl, {Map<String, String>? headers}) =>
-        tab.controller.fetchViaJavaScript(fetchUrl, headers: headers);
-    task.hlsPlaylistCache = (cacheUrl) => tab.hlsPlaylistCache[cacheUrl];
+        tab.controller.fetchPlaylistBodyViaJavaScript(fetchUrl);
+    task.hlsPlaylistCache =
+        (cacheUrl) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
     task.fetchBinaryViaWebView = (binaryUrl) =>
         tab.controller.fetchBinaryViaJavaScript(binaryUrl);
     task.cookieProvider = (url) => tab.controller.getCookiesForDomain(url: url);
@@ -5740,7 +5745,6 @@ class _SnifferScreenState extends State<SnifferScreen>
           baseTemp: _baseTemp,
           getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
           downloadQueue: _downloadQueue,
-          refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
           fetchMasterPlaylistVariants: _fetchMasterPlaylistVariants,
           onTokenExpired: ({bool forceReload = false}) => _reloadForFreshUrl(
             tab,

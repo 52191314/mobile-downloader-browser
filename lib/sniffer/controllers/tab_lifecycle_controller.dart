@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../downloader/headless_webview_fetcher.dart';
 import '../../settings/download_settings.dart';
 import '../browser_controller.dart';
+import '../hls_playlist_cache_lookup.dart';
 import '../media_sniffer_engine.dart';
 import '../models/browser_tab.dart';
 import '../safe_browsing_service.dart';
@@ -415,7 +416,8 @@ class TabLifecycleController {
     tab.headlessFetcher = HeadlessWebViewFetcher();
     tab.snifferEngine.fetchPlaylistBodyViaHeadlessWebView = (url) =>
         tab.headlessFetcher!.fetchText(url);
-    tab.snifferEngine.hlsPlaylistCache = (url) => tab.hlsPlaylistCache[url];
+    tab.snifferEngine.hlsPlaylistCache =
+        (url) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, url);
     host.setupTabCallbacks(tab);
     unawaited(host.configureTabAdblock(tab));
     if (baseDir != null) {
