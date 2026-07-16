@@ -1,6 +1,6 @@
 # Aurora Downloader — Code Map
 
-> Maintained per AGENTS.md. Last updated: 2026-07-15.
+> Maintained per AGENTS.md. Last updated: 2026-07-16.
 
 ## Overview
 Aurora Downloader is a Flutter (Android) media downloader with an integrated
@@ -64,6 +64,7 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 | HLS variant downloading | Implemented | Master→variant select, .ts dl+AES decrypt+merge+TS→MP4 remux. **User quality picker added** (add-queue dialog dropdown, resolves master playlist variants). |
 | Torrent support | Partial (documented limitation) | Metadata/magnet parsing + native engine present but OFF by default; Dart fallback is synthetic (no real BT protocol); no UI toggle. Tracked as a known limitation, not a defect. |
 | Log Server | Implemented (debug-only) | `lib/log_server.dart` HTTP server exposing `DownloadLogger` buffer (HTML + `/json`). Started only in debug builds via `startLogServerIfDebug()` (guarded by `kDebugMode`, tree-shaken from release). Reachable at `http://localhost:8080`. |
+| Battery Optimization | Implemented | Prompt on launch to exclude from optimization, with "Never ask again" settings option. |
 
 ## Known Refinement Items
 - Timer leaks on frozen tabs (FIXED 2026-07-14): `_guardRefreshTimer` and
@@ -87,3 +88,7 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 - Debug-only Log Server added (2026-07-14): `lib/log_server.dart`, started via
   `startLogServerIfDebug()` in `main.dart` after logger init; no-op in release.
 - Consolidated Backup (2026-07-15): backup data files merged into a single consolidated `aurora_backup.json` to avoid multi-file copy issues, with backward-compatible fallback for restoring older backups.
+- WebView performance optimizations (2026-07-15): disabled `transparentBackground` and `useOnLoadResource` bridge callback, added `rendererPriorityPolicy` set to `RENDERER_PRIORITY_IMPORTANT` and `waivedWhenNotVisible: true`, and migrated media sniffer detection from `onLoadResource` into `shouldInterceptRequestCallback` to reduce bridge chatter.
+- WebView performance optimizations Phase 3 & 4 (2026-07-15): Added selective cookie cache clearing per host, optimized progress indicator with a ValueNotifier to eliminate full page rebuilds during load, implemented auto-cancellation of the periodic video poll timer after 3 consecutive empty cycles, and simplified browser guard re-injection logic.
+- Three-way duplicate download choices (2026-07-16): Added `DuplicateChoice` (downloadAgain, updateExisting, skip) to prompt the user when a duplicate URL is detected, allowing them to update the existing download task (resetting progress if URL changed, and resuming) or create a separate one.
+- Battery Optimization Check on Launch (2026-07-16): Added a custom dialog on launch to prompt users to disable battery optimization for uninterrupted background downloads, with a corresponding "neverAskBatteryOpt" setting/toggle switch in Settings.

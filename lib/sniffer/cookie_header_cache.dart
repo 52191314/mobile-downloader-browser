@@ -39,4 +39,21 @@ class CookieHeaderCache {
     _cache.clear();
     _cacheTimestamps.clear();
   }
+
+  /// Clears entries matching a specific host domain.
+  void clearForHost(String host) {
+    final lowHost = host.toLowerCase();
+    _cache.removeWhere((url, _) {
+      final uri = Uri.tryParse(url);
+      if (uri == null) return false;
+      final uriHost = uri.host.toLowerCase();
+      return uriHost == lowHost || uriHost.endsWith('.$lowHost') || lowHost.endsWith('.$uriHost');
+    });
+    _cacheTimestamps.removeWhere((url, _) {
+      final uri = Uri.tryParse(url);
+      if (uri == null) return false;
+      final uriHost = uri.host.toLowerCase();
+      return uriHost == lowHost || uriHost.endsWith('.$lowHost') || lowHost.endsWith('.$uriHost');
+    });
+  }
 }

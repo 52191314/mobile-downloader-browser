@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
+import '../downloader/media_file_types.dart';
 import 'media_enricher.dart';
 import 'models/sniffed_media.dart';
 import 'sniffed_media_cache.dart';
@@ -26,6 +27,11 @@ class MediaSnifferEngine implements MediaEnricherHost {
   bool get capReached => cache.capReached;
 
   Set<MediaType> disabledMediaTypes = const {};
+
+  /// Tracks URLs that have already been enqueued for enrichment.
+  /// Used to skip re-enrichment when a content-type update or re-classification
+  /// fires for an already-enriched item, preventing redundant HTTP probe chains.
+  final Set<String> _enrichedUrls = {};
 
   bool _isDisposed = false;
   bool get isDisposed => _isDisposed;
@@ -76,7 +82,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
 
   MediaSnifferEngine({
     http.Client? client,
-    this.dedupDuration = const Duration(seconds: 5),
+    this.dedupDuration = const Duration(seconds: 30),
     int maxDetectedMedia = 200,
     this.disabledMediaTypes = const {},
   }) : client = client ?? http.Client() {
@@ -180,12 +186,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
   /// a URL path. Returns `null` when the path has no recognizable extension.
   /// Used by [sniff] to look up the container format label.
   static String? _extensionFromPath(String path) {
-    if (path.isEmpty) return null;
-    final slash = path.lastIndexOf('/');
-    final lastSegment = slash >= 0 ? path.substring(slash + 1) : path;
-    final dot = lastSegment.lastIndexOf('.');
-    if (dot <= 0 || dot == lastSegment.length - 1) return null;
-    return lastSegment.substring(dot).toLowerCase();
+    return MediaFileTypes.extensionOf(path);
   }
 
   /// Maps a URL path's lowercased extension to a canonical container format
@@ -196,50 +197,9 @@ class MediaSnifferEngine implements MediaEnricherHost {
   /// UI can show "MP4" / "WebM" / "FLAC" etc. alongside size and duration
   /// without waiting for the enricher to finish probing bytes.
   static String? containerFormatForExtension(String ext) {
-    switch (ext) {
-      case '.mp4':
-      case '.m4v':
-      case '.m4a':
-        return 'mp4';
-      case '.webm':
-        return 'webm';
-      case '.mkv':
-        return 'matroska';
-      case '.mp3':
-        return 'mp3';
-      case '.flac':
-        return 'flac';
-      case '.ogg':
-        return 'ogg';
-      case '.ts':
-      case '.m2ts':
-      case '.mts':
-        return 'mpeg-ts';
-      case '.avi':
-        return 'avi';
-      case '.mov':
-        return 'quicktime';
-      case '.wav':
-        return 'wav';
-      case '.aac':
-        return 'aac';
-      case '.opus':
-        return 'opus';
-      case '.flv':
-        return 'flv';
-      case '.3gp':
-        return '3gp';
-      case '.ogv':
-        return 'ogv';
-      case '.wmv':
-        return 'wmv';
-      case '.hevc':
-        return 'hevc';
-      case '.m4s':
-        return 'fmp4';
-      default:
-        return null;
-    }
+    // Delegates to the shared media-type table so sniffer UI labels stay
+    // in sync with publish MIME maps and auto-classify categories.
+    return MediaFileTypes.containerFormatForExtension(ext);
   }
 
   void sniff(
@@ -247,6 +207,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
     String? contentDisposition,
     String? contentType,
     String? sourcePageUrl,
+    String? pageTitle,
     Map<String, String> headers = const {},
     SniffSource sniffSource = SniffSource.javascript,
     int? contentLength,
@@ -296,6 +257,12 @@ class MediaSnifferEngine implements MediaEnricherHost {
       if (contentLength != null && existing.contentLengthBytes != contentLength) {
         updated = updated.copyWith(contentLengthBytes: contentLength);
       }
+      // Backfill page title when a later sniff has one and the item does not.
+      if (pageTitle != null &&
+          pageTitle.trim().isNotEmpty &&
+          (existing.pageTitle == null || existing.pageTitle!.trim().isEmpty)) {
+        updated = updated.copyWith(pageTitle: pageTitle.trim());
+      }
       if (contentType != null) {
         final ct = contentType.toLowerCase().split(';').first.trim();
         final isHls = ct == 'application/vnd.apple.mpegurl' ||
@@ -310,7 +277,11 @@ class MediaSnifferEngine implements MediaEnricherHost {
             type: MediaType.video,
             containerFormat: containerFormat,
           );
-          if (!url.startsWith('blob:')) {
+          // Skip re-enrichment if this normalized URL was already enriched.
+          // HLS/DASH reclassify is always a downloadable-priority type.
+          if (!url.startsWith('blob:') &&
+              !_enrichedUrls.contains(normalizedUrl)) {
+            _enrichedUrls.add(normalizedUrl);
             enricher.enqueue(updated);
           }
         }
@@ -450,17 +421,36 @@ class MediaSnifferEngine implements MediaEnricherHost {
         headers: headers,
         sniffSource: sniffSource,
         containerFormat: containerFormat,
+        pageTitle: (pageTitle != null && pageTitle.trim().isNotEmpty)
+            ? pageTitle.trim()
+            : null,
       );
       cache.detectedMedia.add(item);
       _mediaDetectedController.add(item);
       cache.mediaChangedController.add(item);
-      if (!url.startsWith('blob:')) {
+      // Eager-enrich only downloadable-priority types so thumbnail/doc
+      // floods do not trigger HEAD/Range storms mid page-load. Images,
+      // documents, archives, etc. stay listed in the capture UI.
+      if (!url.startsWith('blob:') &&
+          _shouldEagerEnrich(type) &&
+          !_enrichedUrls.contains(normalizedUrl)) {
+        _enrichedUrls.add(normalizedUrl);
         enricher.enqueue(item);
       } else if (enricher.enrichQueue.isEmpty &&
           enricher.activeEnrichCount == 0) {
         cache.evictToLimit();
       }
     }
+  }
+
+  /// Types that get HTTP enrichment probes during sniff.
+  /// Non-priority types (image/document/archive/subtitle/executable) are
+  /// still listed but skip eager HEAD/Range probes.
+  static bool _shouldEagerEnrich(MediaType type) {
+    return type == MediaType.video ||
+        type == MediaType.audio ||
+        type == MediaType.playlist ||
+        type == MediaType.torrent;
   }
 
   /// When a URL was already registered with a wrong type (e.g. a disguised
@@ -491,7 +481,9 @@ class MediaSnifferEngine implements MediaEnricherHost {
     cache.detectedMedia[index] = updated;
     cache.mediaChangedController.add(updated);
     // Enqueue for HLS/DASH enrichment with the corrected type.
-    if (!url.startsWith('blob:')) {
+    // Skip if this URL was already enqueued for enrichment.
+    if (!url.startsWith('blob:') && !_enrichedUrls.contains(url)) {
+      _enrichedUrls.add(url);
       enricher.enqueue(updated);
     }
   }
@@ -544,6 +536,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
 
   void clearCache() {
     cache.clear();
+    _enrichedUrls.clear();
   }
 
   /// Clears the per-engine and global dedup caches without removing any

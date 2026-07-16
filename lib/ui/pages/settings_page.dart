@@ -4,11 +4,13 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../downloader/downloader.dart';
+import '../../downloader/download_rules.dart';
 import '../../platform/public_downloads_service.dart';
 import '../../platform/download_foreground_service.dart';
 import '../../sniffer/browser_library.dart';
@@ -17,7 +19,11 @@ import '../../backup/auto_backup_service.dart';
 import '../../backup/auto_backup_models.dart';
 
 import '../../settings/download_settings.dart';
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_features.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../../sniffer/media_sniffer_engine.dart';
+import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
 import '../../theme/aurora_palette.dart';
@@ -38,6 +44,7 @@ class SettingsPage extends StatefulWidget {
   final DownloadQueue downloadQueue;
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
+  final ProEntitlement proEntitlement;
 
   const SettingsPage({
     super.key,
@@ -52,6 +59,7 @@ class SettingsPage extends StatefulWidget {
     required this.downloadQueue,
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
+    required this.proEntitlement,
   });
 
   @override
@@ -198,6 +206,8 @@ class _SettingsPageState extends State<SettingsPage> {
             onPressed: () {
               if (connected) {
                 widget.driveSyncService.disconnect();
+              } else if (!widget.proEntitlement.isPro) {
+                showProUpsell(context, ProFeature.driveSync);
               } else {
                 widget.driveSyncService.connect();
               }
@@ -246,7 +256,7 @@ class _SettingsPageState extends State<SettingsPage> {
               () => _openPage(_buildSearchPage()))),
           const SizedBox(width: 12),
           Expanded(child: _buildCard(Icons.tune_rounded, 'Sniffer',
-              'Choose which media types Aurora detects', () => _openPage(_buildSnifferPage()))),
+              'Media types and Aurora player for site videos', () => _openPage(_buildSnifferPage()))),
         ]),
         const SizedBox(height: 12),
         Row(children: [
@@ -258,11 +268,64 @@ class _SettingsPageState extends State<SettingsPage> {
         ]),
         const SizedBox(height: 12),
         Row(children: [
+          Expanded(child: ListenableBuilder(
+            listenable: widget.proEntitlement,
+            builder: (context, _) {
+              final isPro = widget.proEntitlement.isPro;
+              return _buildCard(
+                Icons.rule_rounded,
+                'Rules',
+                isPro
+                    ? 'Auto-rename and organize downloads'
+                    : 'Pro feature',
+                () => _openPage(_buildRulesPage()),
+              );
+            },
+          )),
+          const SizedBox(width: 12),
+          const Expanded(child: SizedBox.shrink()),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: _buildCard(
+              Icons.people_outline, 'Profiles', 'Per-site browser and download settings', () => _openPage(_buildProfilesPage()))),
+          const SizedBox(width: 12),
           Expanded(child: _buildCard(
               Icons.backup_rounded, 'Backup', 'Save and restore your data', () => _openPage(_buildBackupPage()))),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: ListenableBuilder(
+            listenable: widget.proEntitlement,
+            builder: (context, _) {
+              final isPro = widget.proEntitlement.isPro;
+              return _buildCard(
+                Icons.schedule,
+                'Schedule',
+                isPro ? 'Download later / night mode' : 'Pro feature',
+                () => _openPage(_buildSchedulePage()),
+              );
+            },
+          )),
           const SizedBox(width: 12),
           Expanded(child: _buildCard(
               Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: ListenableBuilder(
+            listenable: widget.proEntitlement,
+            builder: (context, _) {
+              final isPro = widget.proEntitlement.isPro;
+              return _buildCard(
+                isPro ? Icons.auto_awesome : Icons.auto_awesome_outlined,
+                'Aurora Pro',
+                isPro ? 'Pro features unlocked' : 'Unlock premium features',
+                () => _openPage(_buildProPage()),
+              );
+            },
+          )),
+          const Expanded(child: SizedBox.shrink()),
         ]),
       ],
     );
@@ -397,7 +460,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               SwitchListTile(
                 title: const Text('Convert .ts to .mp4'),
-                subtitle: const Text('Aurora converts .ts streams to .mp4 so they play in any app. Turn off if you prefer the original .ts.'),
+                subtitle: const Text('After download, Aurora remuxes MPEG-TS (.ts) — including HLS — to .mp4 so files play in any app. Turn off to keep the original .ts.'),
                 value: local.remuxTsToMp4,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(remuxTsToMp4: v));
@@ -430,6 +493,84 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildDownloadBehaviorDropdown(local, setLocal),
               const SizedBox(height: 20),
               _buildSpeedSection(local, setLocal),
+              const Divider(height: 24),
+              // Wi‑Fi only — Pro-gated
+              SwitchListTile(
+                title: const Text('Wi‑Fi only downloads'),
+                subtitle: Text(
+                  local.wifiOnly
+                      ? 'Downloads only proceed on Wi‑Fi. Turn off to use mobile data.'
+                      : 'Enable to restrict downloads to Wi‑Fi networks.',
+                  style: TextStyle(
+                      fontSize: 12, color: context.ac.textSecondary),
+                ),
+                value: local.wifiOnly,
+                onChanged: (v) {
+                  if (v && !widget.proEntitlement.isPro) {
+                    showProUpsell(context, ProFeature.wifiOnly);
+                    return;
+                  }
+                  setLocal(() => local = local.copyWith(wifiOnly: v));
+                  _update(local);
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+              if (widget.proEntitlement.isPro) ...[
+                const SizedBox(height: 8),
+                Text('Pro: Advanced stall controls',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.ac.accentFrost)),
+                const SizedBox(height: 8),
+                _label('Stall timeout (seconds)'),
+                _slider(
+                    local.stallTimeoutSeconds.toDouble(), 5, 120, 23,
+                    '${local.stallTimeoutSeconds}s',
+                    (v) {
+                      setLocal(() =>
+                          local = local.copyWith(stallTimeoutSeconds: v.round()));
+                      _update(local);
+                    }),
+                const SizedBox(height: 8),
+                _label('Min speed threshold (KB/s)'),
+                _slider(
+                    local.minSpeedThresholdKbps.toDouble(), 1, 500, 50,
+                    '${local.minSpeedThresholdKbps} KB/s',
+                    (v) {
+                      setLocal(() => local =
+                          local.copyWith(minSpeedThresholdKbps: v.round()));
+                      _update(local);
+                    }),
+                const SizedBox(height: 8),
+                _label('Partial download merge threshold'),
+                _slider(
+                    (local.partialDownloadThreshold * 100).roundToDouble(),
+                    50, 100, 50,
+                    '${(local.partialDownloadThreshold * 100).round()}%',
+                    (v) {
+                      setLocal(() => local = local.copyWith(
+                          partialDownloadThreshold: v / 100));
+                      _update(local);
+                    }),
+              ] else ...[
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: Icon(Icons.lock_outline,
+                      size: 18, color: context.ac.textTertiary),
+                  title: Text('Advanced stall controls',
+                      style: TextStyle(
+                          fontSize: 13, color: context.ac.textSecondary)),
+                  subtitle: Text(
+                      'Stall timeout, speed threshold, and partial merge (Pro)',
+                      style: TextStyle(
+                          fontSize: 12, color: context.ac.textTertiary)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  onTap: () =>
+                      showProUpsell(context, ProFeature.advancedStall),
+                ),
+              ],
             ])),
           ],
         ),
@@ -551,6 +692,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     _update(local);
                   },
                   contentPadding: EdgeInsets.zero),
+              // Tracker blocking (Pro-gated)
+              SwitchListTile(
+                  title: const Text('Block trackers (Pro)'),
+                  subtitle: Text(
+                      local.trackerBlockingEnabled
+                          ? 'Block known tracker domains and analytics scripts. '
+                              'Requires Aurora Pro.'
+                          : 'Block known tracker domains. Pro feature.',
+                      style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
+                  value: local.trackerBlockingEnabled,
+                  onChanged: (v) {
+                    if (v && !widget.proEntitlement.isPro) {
+                      showProUpsell(context, ProFeature.trackerPack);
+                      return;
+                    }
+                    setLocal(() => local = local.copyWith(trackerBlockingEnabled: v));
+                    _update(local);
+                  },
+                  contentPadding: EdgeInsets.zero),
               ListTile(
                 title: const Text('Per-site allowlist'),
                 subtitle: Text(
@@ -581,6 +741,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     children: [
                       TextButton(
                         onPressed: () {
+                          final isPro = widget.proEntitlement.isPro;
+                          final totalCount = local.adblockFilterSources.length;
+                          if (!isPro &&
+                              totalCount > ProFeatures.freeFilterListSlots) {
+                            showProUpsell(context, ProFeature.extraFilterLists);
+                            return;
+                          }
                           final updatedSources = local.adblockFilterSources
                               .map((s) => s.copyWith(enabled: true))
                               .toList();
@@ -616,15 +783,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
               const SizedBox(height: 8),
-              ..._buildAdblockSourceTiles(local, setLocal),
+              ..._buildAdblockSourceTiles(local, setLocal, widget.proEntitlement.isPro),
               const SizedBox(height: 12),
               TextField(
                   controller: widget.adblockSourceController,
                   decoration: InputDecoration(
-                    hintText: 'Add custom filter URL',
+                    hintText: widget.proEntitlement.isPro
+                        ? 'Add custom filter URL'
+                        : 'Custom filter URLs (Pro only)',
                     suffixIcon: IconButton(
                         icon: const Icon(Icons.add),
                         onPressed: () {
+                          if (!widget.proEntitlement.isPro) {
+                            showProUpsell(context, ProFeature.customFilterListUrl);
+                            return;
+                          }
                           final url = widget.adblockSourceController.text.trim();
                           if (url.isNotEmpty) {
                             final updated = local.copyWith(
@@ -651,7 +824,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   List<Widget> _buildAdblockSourceTiles(
-      DownloadSettings local, void Function(void Function()) setLocal) {
+      DownloadSettings local, void Function(void Function()) setLocal, bool isPro) {
     final trustedUrls = {
       for (final s in AdblockFilterSource.trustedSources) s.url,
     };
@@ -664,6 +837,18 @@ class _SettingsPageState extends State<SettingsPage> {
             title: Text(source.name, style: const TextStyle(fontSize: 13)),
             value: source.enabled,
             onChanged: (v) {
+              if (v == true && !isPro) {
+                // User is enabling a new source — count enabled.
+                final enabledCount = local.adblockFilterSources
+                    .where((s) => s.enabled)
+                    .length;
+                if (enabledCount >= ProFeatures.freeFilterListSlots &&
+                    !source.enabled) {
+                  // Would exceed free cap.
+                  showProUpsell(context, ProFeature.extraFilterLists);
+                  return;
+                }
+              }
               final updatedSources = List<AdblockFilterSource>.from(
                   local.adblockFilterSources);
               updatedSources[index] = source.copyWith(enabled: v ?? false);
@@ -761,12 +946,33 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSnifferPage() {
     var localDisabled = Set<MediaType>.from(_settings.disabledMediaTypes);
+    var localReplacePlayer = _settings.replaceSitePlayer;
     return Scaffold(
       appBar: AppBar(title: const Text('Media Sniffer')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            PanelHeader(icon: Icons.play_circle_outline_rounded, title: 'In-app player'),
+            const SizedBox(height: 8),
+            Panel(
+              child: SwitchListTile(
+                title: const Text('Replace site player with Aurora'),
+                subtitle: Text(
+                  localReplacePlayer
+                      ? 'When a page plays video or audio, Aurora opens its own player with the page session (cookies). Turn off to use the site\'s player.'
+                      : 'Site players run normally. Turn on to auto-open Aurora\'s player (like UC Browser) with cookies and headers.',
+                  style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
+                ),
+                value: localReplacePlayer,
+                onChanged: (v) {
+                  setLocal(() => localReplacePlayer = v);
+                  _update(_settings.copyWith(replaceSitePlayer: v));
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            const SizedBox(height: 16),
             PanelHeader(icon: Icons.tune_rounded, title: 'Disabled Media Types'),
             const SizedBox(height: 8),
             Panel(child: Wrap(
@@ -802,6 +1008,7 @@ class _SettingsPageState extends State<SettingsPage> {
       folderController: widget.folderController,
       initialState: widget.driveSyncService.state,
       initialConnected: _driveConnected,
+      proEntitlement: widget.proEntitlement,
     );
   }
 
@@ -881,6 +1088,7 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               DropdownButtonFormField<ProxyType>(
                 value: localProxyType,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Proxy type',
                   isDense: true,
@@ -900,6 +1108,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
                 onChanged: (v) {
+                  if (v != null && v != ProxyType.none &&
+                      !widget.proEntitlement.isPro) {
+                    showProUpsell(context, ProFeature.proxy);
+                    return;
+                  }
                   localProxyType = v ?? ProxyType.none;
                   _update(_settings.copyWith(
                     proxyType: localProxyType,
@@ -991,6 +1204,7 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               DropdownButtonFormField<String>(
                 value: localUaProfile,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Global User-Agent profile',
                   isDense: true,
@@ -1009,63 +1223,111 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
               const SizedBox(height: 16),
-              Text('Per-site browser identity overrides',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.ac.accentFrost)),
-              const SizedBox(height: 8),
-              // List of current overrides
-              if (localSiteUas.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text('No site-specific overrides yet. Tap "Add override" to create one.',
-                      style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
-                )
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: localSiteUas.entries.length,
-                  itemBuilder: (context, index) {
-                    final entry = localSiteUas.entries.elementAt(index);
-                    final host = entry.key;
-                    final profile = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(host,
-                                style: TextStyle(fontSize: 13, color: context.ac.textPrimary)),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(': $profile',
-                              style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 16),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                            onPressed: () {
-                              localSiteUas.remove(host);
-                              _update(_settings.copyWith(
-                                siteUserAgents: Map<String, String>.from(localSiteUas),
-                              ));
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              const SizedBox(height: 8),
-              // Add new override button
-              TextButton.icon(
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add override'),
-                onPressed: () => _showAddSiteUaDialog(localSiteUas),
-              ),
+              // Per-site UA overrides — Pro feature
+              _buildPerSiteUaSection(localSiteUas),
             ],
           )),
         ],
       ),
+    );
+  }
+
+  Widget _buildPerSiteUaSection(Map<String, String> localSiteUas) {
+    final isPro = widget.proEntitlement.isPro;
+    if (!isPro) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Per-site browser identity overrides',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: context.ac.textTertiary)),
+          const SizedBox(height: 6),
+          ListTile(
+            leading: Icon(Icons.lock_outline,
+                size: 18, color: context.ac.textTertiary),
+            title: Text('Per-site User‑Agent (Pro)',
+                style: TextStyle(
+                    fontSize: 13, color: context.ac.textSecondary)),
+            subtitle: Text(
+                'Set different browser identities per site',
+                style: TextStyle(
+                    fontSize: 12, color: context.ac.textTertiary)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            onTap: () => showProUpsell(context, ProFeature.perSiteUA),
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Per-site browser identity overrides',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: context.ac.accentFrost)),
+        const SizedBox(height: 8),
+        if (localSiteUas.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+                'No site-specific overrides yet. '
+                    'Tap "Add override" to create one.',
+                style: TextStyle(
+                    fontSize: 13, color: context.ac.textSecondary)),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: localSiteUas.entries.length,
+            itemBuilder: (context, index) {
+              final entry = localSiteUas.entries.elementAt(index);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(entry.key,
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: context.ac.textPrimary)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(': ${entry.value}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: context.ac.textSecondary)),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                          minWidth: 28, minHeight: 28),
+                      onPressed: () {
+                        localSiteUas.remove(entry.key);
+                        _update(_settings.copyWith(
+                          siteUserAgents:
+                              Map<String, String>.from(localSiteUas),
+                        ));
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add override'),
+          onPressed: () => _showAddSiteUaDialog(localSiteUas),
+        ),
+      ],
     );
   }
 
@@ -1121,6 +1383,112 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Profiles page
+  // ---------------------------------------------------------------------------
+
+  Widget _buildProfilesPage() {
+    return ListenableBuilder(
+      listenable: widget.proEntitlement,
+      builder: (context, _) {
+        if (!widget.proEntitlement.isPro) {
+          return _buildProfilesLockedPage();
+        }
+        return _ProfilesPageContent(proEntitlement: widget.proEntitlement);
+      },
+    );
+  }
+
+  Widget _buildProfilesLockedPage() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Profiles')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.people_outline,
+                  size: 64, color: context.ac.textTertiary),
+              const SizedBox(height: 16),
+              Text('Per-site Profiles',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: context.ac.textPrimary)),
+              const SizedBox(height: 8),
+              Text(
+                'Create custom browser and download settings for '
+                'individual sites. This is a Pro feature.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13, color: context.ac.textSecondary),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                label: const Text('Unlock with Pro'),
+                onPressed: () =>
+                    showProUpsell(context, ProFeature.siteProfiles),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSchedulePage() {
+    return ListenableBuilder(
+      listenable: widget.proEntitlement,
+      builder: (context, _) {
+        if (!widget.proEntitlement.isPro) {
+          return _buildScheduleLockedPage();
+        }
+        return _SchedulePageContent(downloadQueue: widget.downloadQueue);
+      },
+    );
+  }
+
+  Widget _buildScheduleLockedPage() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Schedule')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.schedule,
+                  size: 64, color: context.ac.textTertiary),
+              const SizedBox(height: 16),
+              Text('Scheduled Downloads',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: context.ac.textPrimary)),
+              const SizedBox(height: 8),
+              Text(
+                'Schedule downloads to start later — perfect for '
+                'night-time queuing. This is a Pro feature.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13, color: context.ac.textSecondary),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                label: const Text('Unlock with Pro'),
+                onPressed: () =>
+                    showProUpsell(context, ProFeature.scheduledDownloads),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAboutPage() {
     return Scaffold(
       appBar: AppBar(title: const Text('About')),
@@ -1148,6 +1516,18 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               const BatteryOptimizationTile(),
               const Divider(height: 1, indent: 56),
+              SwitchListTile(
+                secondary: Icon(Icons.power_settings_new_rounded, color: context.ac.accentFrost),
+                title: const Text('Check battery optimization on launch'),
+                subtitle: const Text('Notify if background download optimizations are not configured'),
+                value: !_settings.neverAskBatteryOpt,
+                onChanged: (val) {
+                  _update(_settings.copyWith(
+                    neverAskBatteryOpt: !val,
+                  ));
+                },
+              ),
+              const Divider(height: 1, indent: 56),
               ListTile(
                 leading: Icon(Icons.monitor_heart_outlined, color: context.ac.accentFrost),
                 title: const Text('Diagnostics'),
@@ -1160,6 +1540,206 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aurora Pro page
+  // ---------------------------------------------------------------------------
+
+  Widget _buildProPage() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Aurora Pro')),
+      body: ListenableBuilder(
+        listenable: widget.proEntitlement,
+        builder: (context, _) {
+          final isPro = widget.proEntitlement.isPro;
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // Status header
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isPro
+                      ? context.ac.statusSuccess.withOpacity(0.12)
+                      : context.ac.accentFrost.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isPro
+                        ? context.ac.statusSuccess.withOpacity(0.3)
+                        : context.ac.accentFrost.withOpacity(0.25),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isPro ? Icons.auto_awesome : Icons.auto_awesome_outlined,
+                      color: isPro ? context.ac.statusSuccess : context.ac.accentFrost,
+                      size: 36,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isPro ? 'Aurora Pro — Active' : 'Aurora Pro',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: context.ac.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isPro
+                                ? 'All premium features are unlocked.'
+                                : 'Unlock premium features with a one-time purchase.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: context.ac.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Feature comparison
+              PanelHeader(icon: Icons.list_alt, title: 'Features'),
+              const SizedBox(height: 8),
+              Panel(
+                child: Column(
+                  children: _buildFeatureRows(isPro),
+                ),
+              ),
+
+              // Debug toggle (only in debug/profile builds)
+              if (!kReleaseMode) ...[
+                const SizedBox(height: 20),
+                PanelHeader(
+                    icon: Icons.bug_report_outlined, title: 'Debug'),
+                const SizedBox(height: 8),
+                Panel(
+                  child: SwitchListTile(
+                    secondary: Icon(
+                      Icons.developer_mode,
+                      color: context.ac.accentFrost,
+                    ),
+                    title: const Text('Debug: Force Pro'),
+                    subtitle: const Text(
+                        'Treat this device as Pro (resets on restart)'),
+                    value: widget.proEntitlement.isPro,
+                    onChanged: (val) {
+                      widget.proEntitlement.setDebugPro(val);
+                    },
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+
+              // Buy button (visible only when NOT Pro)
+              if (!isPro) ...[
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      // TODO(P0.4): launch Play Billing purchase flow.
+                    },
+                    icon: const Icon(Icons.shopping_cart_outlined, size: 18),
+                    label: const Text('Get Aurora Pro'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      textStyle: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    'One-time purchase — no subscription.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.ac.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<Widget> _buildFeatureRows(bool isPro) {
+    final features = [
+      (ProFeature.extraFilterLists, 'Extra filter lists', '2 free'),
+      (ProFeature.trackerPack, 'Tracker blocking pack', 'Pro only'),
+      (ProFeature.higherConcurrency, 'Concurrent downloads',
+          '${ProFeatures.maxConcurrentFree} free / ${ProFeatures.maxConcurrentPro} Pro'),
+      (ProFeature.higherChunks, 'Chunks per task',
+          '${ProFeatures.chunksPerTaskFree} free / ${ProFeatures.chunksPerTaskPro} Pro'),
+      (ProFeature.unlimitedTabGroups, 'Tab groups',
+          '${ProFeatures.maxFreeTabGroups} free / unlimited Pro'),
+      (ProFeature.autoHostGroups, 'Auto-host groups', 'Pro only'),
+      (ProFeature.unlimitedCosmeticRules, 'Cosmetic rules',
+          '${ProFeatures.maxFreeCosmeticRules} free / unlimited Pro'),
+      (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
+      (ProFeature.scheduledAutoBackup, 'Scheduled auto-backup', 'Pro only'),
+      (ProFeature.proxy, 'HTTP/SOCKS5 proxy', 'Pro only'),
+      (ProFeature.wifiOnly, 'Wi‑Fi only & advanced stall', 'Pro only'),
+      (ProFeature.perSiteUA, 'Per-site User‑Agent', 'Pro only'),
+    ];
+
+    final widgets = <Widget>[];
+    for (int i = 0; i < features.length; i++) {
+      final (feature, name, detail) = features[i];
+      final allowed = ProFeatures.allows(feature, isPro);
+      widgets.add(
+        ListTile(
+          leading: Icon(
+            allowed ? Icons.check_circle : Icons.lock_outline,
+            color: allowed
+                ? context.ac.statusSuccess
+                : context.ac.textTertiary,
+            size: 20,
+          ),
+          title: Text(
+            name,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: context.ac.textPrimary,
+            ),
+          ),
+          trailing: Text(
+            detail,
+            style: TextStyle(
+              fontSize: 11,
+              color: allowed
+                  ? context.ac.statusSuccess
+                  : context.ac.textTertiary,
+            ),
+          ),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+      );
+      if (i < features.length - 1) {
+        widgets.add(
+          Divider(height: 1, indent: 40, color: context.ac.glassBorder),
+        );
+      }
+    }
+    return widgets;
   }
 
   // ---------------------------------------------------------------------------
@@ -1257,7 +1837,12 @@ class _SettingsPageState extends State<SettingsPage> {
       onSettingsChanged: _update,
       libraryUpdateNotifier: widget.libraryUpdateNotifier,
       autoBackupService: widget.autoBackupService,
+      proEntitlement: widget.proEntitlement,
     );
+  }
+
+  Widget _buildRulesPage() {
+    return _RulesPage(proEntitlement: widget.proEntitlement);
   }
 }
 
@@ -1267,12 +1852,14 @@ class _DriveSyncPageContent extends StatefulWidget {
   final TextEditingController folderController;
   final DriveSyncState initialState;
   final bool initialConnected;
+  final ProEntitlement proEntitlement;
 
   const _DriveSyncPageContent({
     required this.driveSyncService,
     required this.folderController,
     required this.initialState,
     required this.initialConnected,
+    required this.proEntitlement,
   });
 
   @override
@@ -1316,7 +1903,9 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
               trailing: TextButton(
                   onPressed: _connected
                       ? () => widget.driveSyncService.disconnect()
-                      : () => widget.driveSyncService.connect(),
+                      : !widget.proEntitlement.isPro
+                          ? () => showProUpsell(context, ProFeature.driveSync)
+                          : () => widget.driveSyncService.connect(),
                   child: Text(_connected ? 'Disconnect' : 'Link'))),
           const SizedBox(height: 8),
           Panel(
@@ -1356,8 +1945,13 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                         SwitchListTile(
                             title: const Text('Auto upload completed files'),
                             value: _state.autoSyncEnabled,
-                            onChanged: (v) =>
-                                widget.driveSyncService.setAutoSyncEnabled(v),
+                            onChanged: (v) {
+                              if (v && !widget.proEntitlement.isPro) {
+                                showProUpsell(context, ProFeature.driveSync);
+                              } else {
+                                widget.driveSyncService.setAutoSyncEnabled(v);
+                              }
+                            },
                             contentPadding: EdgeInsets.zero),
                       ],
                     )
@@ -1366,13 +1960,18 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                           style: TextStyle(
                               color: context.ac.textSecondary, fontSize: 13)),
                       const SizedBox(height: 16),
-                      SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                              icon: const Icon(Icons.link),
-                              label: const Text('Link Google Drive'),
-                              onPressed: () =>
-                                  widget.driveSyncService.connect())),
+                          SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.link),
+                                  label: const Text('Link Google Drive'),
+                                  onPressed: () {
+                                    if (!widget.proEntitlement.isPro) {
+                                      showProUpsell(context, ProFeature.driveSync);
+                                    } else {
+                                      widget.driveSyncService.connect();
+                                    }
+                                  })),
                     ])),
         ],
       ),
@@ -1386,6 +1985,7 @@ class BackupPage extends StatefulWidget {
   final ValueChanged<DownloadSettings> onSettingsChanged;
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
+  final ProEntitlement proEntitlement;
 
   const BackupPage({
     super.key,
@@ -1394,6 +1994,7 @@ class BackupPage extends StatefulWidget {
     required this.onSettingsChanged,
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
+    required this.proEntitlement,
   });
 
   @override
@@ -2121,6 +2722,10 @@ class _BackupPageState extends State<BackupPage> {
                           ),
                           value: widget.settings.autoBackupEnabled,
                           onChanged: (enabled) {
+                            if (enabled && !widget.proEntitlement.isPro) {
+                              showProUpsell(context, ProFeature.scheduledAutoBackup);
+                              return;
+                            }
                             setState(() {
                               widget.onSettingsChanged(
                                 widget.settings.copyWith(autoBackupEnabled: enabled),
@@ -2134,7 +2739,12 @@ class _BackupPageState extends State<BackupPage> {
                           dropdownColor: context.ac.surfaceElevated,
                           decoration: InputDecoration(
                             labelText: 'Backup frequency',
-                            labelStyle: TextStyle(color: context.ac.textSecondary, fontSize: 12),
+                            labelStyle: TextStyle(
+                              color: widget.proEntitlement.isPro
+                                  ? context.ac.textSecondary
+                                  : context.ac.textTertiary,
+                              fontSize: 12,
+                            ),
                           ),
                           items: AutoBackupInterval.values
                               .map((interval) => DropdownMenuItem(
@@ -2142,14 +2752,16 @@ class _BackupPageState extends State<BackupPage> {
                                     child: Text(interval.label, style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                                   ))
                               .toList(),
-                          onChanged: (interval) {
-                            if (interval == null) return;
-                            setState(() {
-                              widget.onSettingsChanged(
-                                widget.settings.copyWith(autoBackupInterval: interval),
-                              );
-                            });
-                          },
+                          onChanged: widget.proEntitlement.isPro
+                              ? (interval) {
+                                  if (interval == null) return;
+                                  setState(() {
+                                    widget.onSettingsChanged(
+                                      widget.settings.copyWith(autoBackupInterval: interval),
+                                    );
+                                  });
+                                }
+                              : null,
                         ),
                         const SizedBox(height: 16),
                         Row(
@@ -2367,7 +2979,7 @@ class BatteryOptimizationTile extends StatefulWidget {
 }
 
 class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
-  bool _isExempt = true;
+  bool? _isExempt;
 
   @override
   void initState() {
@@ -2385,9 +2997,53 @@ class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
     }
   }
 
+  void _showOemGuidanceDialog(String oem) {
+    final label = DownloadForegroundService.oemLabel(oem);
+    final name = DownloadForegroundService.oemName(oem);
+    if (label == null || name == null) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Background downloads on $name'),
+        content: Text(
+          'Some $name devices also require enabling "$label" for Aurora '
+          'to keep downloading in the background.\n\n'
+          'Do you want to open the system settings?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(DownloadForegroundService.openOemAutostartPage());
+            },
+            child: const Text('Open settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isExempt) {
+    // Loading state — check in progress
+    if (_isExempt == null) {
+      return ListTile(
+        leading: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2, color: context.ac.accentFrost),
+        ),
+        title: const Text('Battery Optimization'),
+        subtitle: const Text('Checking status\u2026'),
+      );
+    }
+
+    if (_isExempt == true) {
       return ListTile(
         leading: Icon(Icons.battery_saver_rounded, color: context.ac.accentFrost),
         title: const Text('Battery Optimization'),
@@ -2402,11 +3058,1208 @@ class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
       subtitle: const Text('Aurora may pause downloads in the background. Tap to request an exception.'),
       trailing: Icon(Icons.warning_amber_rounded, color: context.ac.accentAmber),
       onTap: () async {
-        await DownloadForegroundService.requestBatteryOptimizationExemption();
+        final oemInfo =
+            await DownloadForegroundService.requestBatteryOptimizationExemption();
         // Check again after a delay in case the user approved it
         await Future.delayed(const Duration(seconds: 1));
         await _checkStatus();
+
+        final oem = oemInfo['oem'] as String?;
+        if (oem != null && mounted) {
+          _showOemGuidanceDialog(oem);
+        }
       },
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Download Rules Page
+// ---------------------------------------------------------------------------
+
+/// Settings sub-page for managing download rules (Pro feature).
+class _RulesPage extends StatefulWidget {
+  final ProEntitlement proEntitlement;
+
+  const _RulesPage({required this.proEntitlement});
+
+  @override
+  State<_RulesPage> createState() => _RulesPageState();
+}
+
+class _RulesPageState extends State<_RulesPage> {
+  final DownloadRulesStore _store = const DownloadRulesStore();
+  List<DownloadRule> _rules = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRules();
+  }
+
+  Future<void> _loadRules() async {
+    final rules = await _store.load();
+    if (mounted) {
+      setState(() {
+        _rules = rules;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _saveRules() async {
+    await _store.save(_rules);
+  }
+
+  void _addRule(DownloadRule rule) {
+    setState(() => _rules.add(rule));
+    _saveRules();
+  }
+
+  void _updateRule(int index, DownloadRule rule) {
+    setState(() => _rules[index] = rule);
+    _saveRules();
+  }
+
+  void _deleteRule(int index) {
+    setState(() => _rules.removeAt(index));
+    _saveRules();
+  }
+
+  String _hostLabel(DownloadRule rule) {
+    if (rule.hostPattern == null || rule.hostPattern!.isEmpty) {
+      return 'All hosts';
+    }
+    return rule.hostPattern!;
+  }
+
+  String _typeLabel(DownloadRule rule) {
+    if (rule.typeFilter == null || rule.typeFilter!.isEmpty) {
+      return 'All types';
+    }
+    return rule.typeFilter!.join(', ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isPro = widget.proEntitlement.isPro;
+
+    if (!isPro) {
+      return _buildLockedPage();
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Download Rules'),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add Rule'),
+            onPressed: () => _showRuleDialog(),
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _rules.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.rule_rounded,
+                            size: 56, color: context.ac.textTertiary),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No download rules yet',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: context.ac.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Rules let you auto-rename files, route downloads '
+                          'to custom folders, and set conditions like Wi‑Fi only.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: context.ac.textSecondary,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Create your first rule'),
+                          onPressed: () => _showRuleDialog(),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _rules.length,
+                  itemBuilder: (context, index) {
+                    final rule = _rules[index];
+                    return _buildRuleCard(rule, index);
+                  },
+                ),
+    );
+  }
+
+  Widget _buildLockedPage() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Download Rules')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline,
+                  size: 56, color: context.ac.textTertiary),
+              const SizedBox(height: 16),
+              Text(
+                'Pro Feature',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: context.ac.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Download rules let you auto-rename files, organize by host, '
+                'and set download conditions like Wi‑Fi or time windows.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.ac.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: const Text('Unlock with Pro'),
+                onPressed: () =>
+                    showProUpsell(context, ProFeature.downloadRules),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRuleCard(DownloadRule rule, int index) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => _showRuleDialog(rule: rule, index: index),
+        onLongPress: () => _confirmDelete(index),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      rule.name,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _hostLabel(rule),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.ac.accentFrost,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      _typeLabel(rule),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.ac.textTertiary,
+                      ),
+                    ),
+                    if (rule.destinationFolder != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        '→ ${rule.destinationFolder}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.ac.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Switch(
+                value: rule.enabled,
+                onChanged: (v) {
+                  _updateRule(index, rule.copyWith(enabled: v));
+                },
+                activeColor: context.ac.accentFrost,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showRuleDialog({DownloadRule? rule, int? index}) async {
+    final isEditing = rule != null;
+    final nameController = TextEditingController(text: rule?.name ?? '');
+    final hostController =
+        TextEditingController(text: rule?.hostPattern ?? '');
+    final renameController =
+        TextEditingController(text: rule?.renameTemplate ?? '');
+    final destController =
+        TextEditingController(text: rule?.destinationFolder ?? '');
+
+    var typeVideo = rule?.typeFilter?.contains('video') ?? false;
+    var typeAudio = rule?.typeFilter?.contains('audio') ?? false;
+    var typeHls = rule?.typeFilter?.contains('hls') ?? false;
+    var typeImage = rule?.typeFilter?.contains('image') ?? false;
+    var requireWifi = rule?.requireWifi ?? false;
+    var requireCharging = rule?.requireCharging ?? false;
+    var timeWindowStart = rule?.timeWindowStartHour;
+    var timeWindowEnd = rule?.timeWindowEndHour;
+    var timeWindowEnabled =
+        timeWindowStart != null || timeWindowEnd != null;
+
+    if (timeWindowEnabled) {
+      timeWindowStart ??= 0;
+      timeWindowEnd ??= 23;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(isEditing ? 'Edit Rule' : 'Add Rule'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Rule name',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: hostController,
+                      decoration: const InputDecoration(
+                        labelText: 'Host pattern (glob)',
+                        hintText: 'e.g. *.youtube.com',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Match media types',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        FilterChip(
+                          label: const Text('Video'),
+                          selected: typeVideo,
+                          onSelected: (v) =>
+                              setDialogState(() => typeVideo = v),
+                        ),
+                        FilterChip(
+                          label: const Text('Audio'),
+                          selected: typeAudio,
+                          onSelected: (v) =>
+                              setDialogState(() => typeAudio = v),
+                        ),
+                        FilterChip(
+                          label: const Text('HLS'),
+                          selected: typeHls,
+                          onSelected: (v) =>
+                              setDialogState(() => typeHls = v),
+                        ),
+                        FilterChip(
+                          label: const Text('Image'),
+                          selected: typeImage,
+                          onSelected: (v) =>
+                              setDialogState(() => typeImage = v),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: renameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Rename template (optional)',
+                        hintText: '{host}_{quality}_{title}.{ext}',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Tokens: {host} {ext} {quality} {title} {date}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: context.ac.textTertiary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: destController,
+                      decoration: const InputDecoration(
+                        labelText: 'Destination folder (optional)',
+                        hintText: 'e.g. YouTube',
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      title: const Text('Require Wi‑Fi'),
+                      value: requireWifi,
+                      onChanged: (v) =>
+                          setDialogState(() => requireWifi = v),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    SwitchListTile(
+                      title: const Text('Require charging'),
+                      value: requireCharging,
+                      onChanged: (v) =>
+                          setDialogState(() => requireCharging = v),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    SwitchListTile(
+                      title: const Text('Time window'),
+                      subtitle: timeWindowEnabled
+                          ? Text(
+                              '$timeWindowStart:00 – $timeWindowEnd:00',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.ac.accentFrost,
+                              ),
+                            )
+                          : null,
+                      value: timeWindowEnabled,
+                      onChanged: (v) {
+                        setDialogState(() {
+                          timeWindowEnabled = v;
+                          if (v) {
+                            timeWindowStart ??= 0;
+                            timeWindowEnd ??= 6;
+                          } else {
+                            timeWindowStart = null;
+                            timeWindowEnd = null;
+                          }
+                        });
+                      },
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    if (timeWindowEnabled) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Start hour',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.ac.textSecondary,
+                                  ),
+                                ),
+                                DropdownButtonFormField<int>(
+                                  value: timeWindowStart ?? 0,
+                                  isDense: true,
+                                  items: List.generate(
+                                    24,
+                                    (i) => DropdownMenuItem(
+                                      value: i,
+                                      child: Text('${i.toString().padLeft(2, '0')}:00'),
+                                    ),
+                                  ),
+                                  onChanged: (v) {
+                                    if (v != null) {
+                                      setDialogState(
+                                          () => timeWindowStart = v);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'End hour',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.ac.textSecondary,
+                                  ),
+                                ),
+                                DropdownButtonFormField<int>(
+                                  value: timeWindowEnd ?? 23,
+                                  isDense: true,
+                                  items: List.generate(
+                                    24,
+                                    (i) => DropdownMenuItem(
+                                      value: i,
+                                      child: Text('${i.toString().padLeft(2, '0')}:00'),
+                                    ),
+                                  ),
+                                  onChanged: (v) {
+                                    if (v != null) {
+                                      setDialogState(
+                                          () => timeWindowEnd = v);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                if (isEditing)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _confirmDelete(index!);
+                    },
+                    child: Text(
+                      'Delete',
+                      style: TextStyle(color: context.ac.statusError),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final name = nameController.text.trim();
+                    if (name.isEmpty) return;
+
+                    final typeFilter = <String>{};
+                    if (typeVideo) typeFilter.add('video');
+                    if (typeAudio) typeFilter.add('audio');
+                    if (typeHls) typeFilter.add('hls');
+                    if (typeImage) typeFilter.add('image');
+
+                    final now = DateTime.now();
+                    final newRule = DownloadRule(
+                      id: isEditing
+                          ? rule!.id
+                          : now.microsecondsSinceEpoch.toString(),
+                      name: name,
+                      enabled: isEditing ? rule!.enabled : true,
+                      hostPattern: hostController.text.trim().isEmpty
+                          ? null
+                          : hostController.text.trim(),
+                      typeFilter: typeFilter.isEmpty ? null : typeFilter,
+                      renameTemplate: renameController.text.trim().isEmpty
+                          ? null
+                          : renameController.text.trim(),
+                      destinationFolder: destController.text.trim().isEmpty
+                          ? null
+                          : destController.text.trim(),
+                      requireWifi: requireWifi ? true : null,
+                      requireCharging: requireCharging ? true : null,
+                      timeWindowStartHour: timeWindowStart,
+                      timeWindowEndHour: timeWindowEnd,
+                      createdAt: isEditing ? rule!.createdAt : now,
+                    );
+
+                    if (isEditing) {
+                      _updateRule(index!, newRule);
+                    } else {
+                      _addRule(newRule);
+                    }
+
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                  child: Text(isEditing ? 'Save' : 'Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDelete(int index) async {
+    final rule = _rules[index];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Rule'),
+        content: Text('Delete "${rule.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.ac.statusError,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      _deleteRule(index);
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Profiles page content — Pro-only live-editable list of SiteProfiles.
+// -----------------------------------------------------------------------------
+
+class _ProfilesPageContent extends StatefulWidget {
+  final ProEntitlement proEntitlement;
+
+  const _ProfilesPageContent({required this.proEntitlement});
+
+  @override
+  State<_ProfilesPageContent> createState() => _ProfilesPageContentState();
+}
+
+class _ProfilesPageContentState extends State<_ProfilesPageContent> {
+  final SiteProfileStore _store = const SiteProfileStore();
+  List<SiteProfile> _profiles = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final profiles = await _store.load();
+    if (mounted) {
+      setState(() {
+        _profiles = profiles;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    await _store.save(_profiles);
+  }
+
+  void _addProfile() {
+    _showProfileDialog();
+  }
+
+  void _editProfile(SiteProfile profile) {
+    _showProfileDialog(existing: profile);
+  }
+
+  Future<void> _deleteProfile(SiteProfile profile) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete profile'),
+        content: Text(
+            'Remove "${profile.name}" (${profile.hostPattern})?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Delete',
+                style: TextStyle(color: context.ac.statusError)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _profiles.removeWhere((p) => p.id == profile.id));
+    await _save();
+  }
+
+  Future<void> _showProfileDialog({SiteProfile? existing}) async {
+    final isNew = existing == null;
+    var name = existing?.name ?? '';
+    var hostPattern = existing?.hostPattern ?? '';
+    var enabled = existing?.enabled ?? true;
+
+    // Tri-state fields: null = "Use global", true = "On", false = "Off"
+    var desktopMode = existing?.desktopMode;
+    var userAgentProfile = existing?.userAgentProfile;
+    var adblockEnabled = existing?.adblockEnabled;
+    var replaceSitePlayer = existing?.replaceSitePlayer;
+    var downloadFolder = existing?.downloadFolder ?? '';
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final ac = context.ac;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text(isNew ? 'Add Profile' : 'Edit Profile'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                        labelText: 'Name', hintText: 'e.g. YouTube'),
+                    controller: TextEditingController(text: name),
+                    onChanged: (v) => name = v.trim(),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    decoration: const InputDecoration(
+                        labelText: 'Host pattern',
+                        hintText: 'e.g. *.youtube.com'),
+                    controller: TextEditingController(text: hostPattern),
+                    onChanged: (v) => hostPattern = v.trim(),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    title: const Text('Enabled'),
+                    value: enabled,
+                    onChanged: (v) =>
+                        setDialogState(() => enabled = v),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                  const Divider(height: 24),
+                  Text('Browser overrides',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: ac.textSecondary)),
+                  const SizedBox(height: 8),
+                  _buildTriStateDropdown<String>(
+                    context: context,
+                    label: 'Desktop mode',
+                    value: _triStateBool(desktopMode),
+                    items: const [
+                      DropdownMenuItem(
+                          value: '',
+                          child: Text('Use global setting')),
+                      DropdownMenuItem(
+                          value: 'true',
+                          child: Text('Force desktop')),
+                      DropdownMenuItem(
+                          value: 'false',
+                          child: Text('Force mobile')),
+                    ],
+                    onChanged: (v) => setDialogState(() {
+                      if (v == '') {
+                        desktopMode = null;
+                      } else {
+                        desktopMode = v == 'true';
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildTriStateDropdown<String>(
+                    context: context,
+                    label: 'User-Agent',
+                    value: userAgentProfile ?? '',
+                    items: const [
+                      DropdownMenuItem(
+                          value: '', child: Text('Use global setting')),
+                      DropdownMenuItem(
+                          value: 'mobile', child: Text('Mobile')),
+                      DropdownMenuItem(
+                          value: 'desktop_chrome',
+                          child: Text('Desktop Chrome')),
+                      DropdownMenuItem(
+                          value: 'desktop_firefox',
+                          child: Text('Desktop Firefox')),
+                      DropdownMenuItem(
+                          value: 'safari', child: Text('Safari')),
+                    ],
+                    onChanged: (v) => setDialogState(() {
+                      userAgentProfile =
+                          (v == null || v.isEmpty) ? null : v;
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildTriStateDropdown<String>(
+                    context: context,
+                    label: 'Adblock',
+                    value: _triStateBool(adblockEnabled),
+                    items: const [
+                      DropdownMenuItem(
+                          value: '',
+                          child: Text('Use global setting')),
+                      DropdownMenuItem(
+                          value: 'true', child: Text('Enabled')),
+                      DropdownMenuItem(
+                          value: 'false', child: Text('Disabled')),
+                    ],
+                    onChanged: (v) => setDialogState(() {
+                      if (v == '') {
+                        adblockEnabled = null;
+                      } else {
+                        adblockEnabled = v == 'true';
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildTriStateDropdown<String>(
+                    context: context,
+                    label: 'Replace site player',
+                    value: _triStateBool(replaceSitePlayer),
+                    items: const [
+                      DropdownMenuItem(
+                          value: '',
+                          child: Text('Use global setting')),
+                      DropdownMenuItem(
+                          value: 'true', child: Text('Enabled')),
+                      DropdownMenuItem(
+                          value: 'false', child: Text('Disabled')),
+                    ],
+                    onChanged: (v) => setDialogState(() {
+                      if (v == '') {
+                        replaceSitePlayer = null;
+                      } else {
+                        replaceSitePlayer = v == 'true';
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Download overrides',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: ac.textSecondary)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(
+                        labelText: 'Download folder (optional)',
+                        hintText: 'Leave empty for global default'),
+                    controller:
+                        TextEditingController(text: downloadFolder),
+                    onChanged: (v) => downloadFolder = v.trim(),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  if (name.isEmpty || hostPattern.isEmpty) return;
+                  final now = DateTime.now();
+                  final profile = SiteProfile(
+                    id: existing?.id ??
+                        now.millisecondsSinceEpoch.toString(),
+                    name: name,
+                    hostPattern: hostPattern,
+                    enabled: enabled,
+                    desktopMode: desktopMode,
+                    userAgentProfile: userAgentProfile,
+                    adblockEnabled: adblockEnabled,
+                    replaceSitePlayer: replaceSitePlayer,
+                    downloadFolder: downloadFolder.isNotEmpty
+                        ? downloadFolder
+                        : null,
+                    createdAt: existing?.createdAt ?? now,
+                    updatedAt: now,
+                  );
+                  setState(() {
+                    if (isNew) {
+                      _profiles.add(profile);
+                    } else {
+                      final idx =
+                          _profiles.indexWhere((p) => p.id == profile.id);
+                      if (idx >= 0) {
+                        _profiles[idx] = profile;
+                      }
+                    }
+                  });
+                  await _save();
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                },
+                child: Text(isNew ? 'Add' : 'Save'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Convert a nullable bool to a tri-state string: `''` = null, `'true'` = true,
+  /// `'false'` = false.
+  String _triStateBool(bool? value) {
+    if (value == null) return '';
+    return value.toString();
+  }
+
+  Widget _buildTriStateDropdown<T>({
+    required BuildContext context,
+    required String label,
+    required String value,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8)),
+      ),
+      items: items,
+      onChanged: onChanged,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Profiles'),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add'),
+            onPressed: _addProfile,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _profiles.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.people_outline,
+                            size: 56, color: context.ac.textTertiary),
+                        const SizedBox(height: 12),
+                        Text('No profiles yet',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: context.ac.textPrimary)),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Create a profile to override browser and '
+                          'download settings for a specific site.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: context.ac.textSecondary),
+                        ),
+                        const SizedBox(height: 20),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Add your first profile'),
+                          onPressed: _addProfile,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    PanelHeader(
+                        icon: Icons.people_outline,
+                        title:
+                            '${_profiles.length} profile${_profiles.length == 1 ? '' : 's'}'),
+                    const SizedBox(height: 8),
+                    Panel(
+                      child: Column(
+                        children: [
+                          for (int i = 0; i < _profiles.length; i++)
+                            _buildProfileTile(_profiles[i],
+                                isLast: i == _profiles.length - 1),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+
+  Widget _buildProfileTile(SiteProfile profile, {bool isLast = false}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          leading: Icon(
+            profile.enabled
+                ? Icons.web_asset_rounded
+                : Icons.web_asset_outlined,
+            color: profile.enabled
+                ? context.ac.accentFrost
+                : context.ac.textTertiary,
+          ),
+          title: Text(profile.name,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.ac.textPrimary)),
+          subtitle: Text(profile.hostPattern,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: profile.enabled
+                      ? context.ac.textSecondary
+                      : context.ac.textTertiary,
+                  fontFamily: 'JetBrainsMono')),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  profile.enabled
+                      ? Icons.toggle_on
+                      : Icons.toggle_off_outlined,
+                  color: profile.enabled
+                      ? context.ac.statusSuccess
+                      : context.ac.textTertiary,
+                ),
+                tooltip: profile.enabled ? 'Enabled' : 'Disabled',
+                onPressed: () async {
+                  final updated = profile.copyWith(
+                      enabled: !profile.enabled, updatedAt: DateTime.now());
+                  setState(() {
+                    final idx =
+                        _profiles.indexWhere((p) => p.id == profile.id);
+                    if (idx >= 0) _profiles[idx] = updated;
+                  });
+                  await _save();
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                tooltip: 'Edit',
+                onPressed: () => _editProfile(profile),
+              ),
+              IconButton(
+                icon: Icon(Icons.delete_outline,
+                    size: 18, color: context.ac.statusError),
+                tooltip: 'Delete',
+                onPressed: () => _deleteProfile(profile),
+              ),
+            ],
+          ),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+        ),
+        if (!isLast)
+          Divider(
+              height: 1, indent: 48, color: context.ac.glassBorder),
+      ],
+    );
+  }
+}
+
+/// Detail page for Scheduled / Night queue settings.
+class _SchedulePageContent extends StatefulWidget {
+  final DownloadQueue downloadQueue;
+
+  const _SchedulePageContent({required this.downloadQueue});
+
+  @override
+  State<_SchedulePageContent> createState() => _SchedulePageContentState();
+}
+
+class _SchedulePageContentState extends State<_SchedulePageContent> {
+  StreamSubscription<DownloadTask>? _sub;
+  List<DownloadTask> _scheduledTasks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    _sub = widget.downloadQueue.onTaskUpdated.listen((_) {
+      if (mounted) _refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  void _refresh() {
+    setState(() {
+      _scheduledTasks = widget.downloadQueue.queryTasks(
+        states: {DownloadState.scheduled},
+        sortBy: TaskSortField.date,
+        sortDescending: false,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Schedule')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PanelHeader(icon: Icons.schedule, title: 'Scheduled Downloads'),
+          const SizedBox(height: 8),
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Schedule downloads to start at a specific time. '
+                  'New downloads can be scheduled directly from the Queue page '
+                  'by tapping the clock icon.',
+                  style: TextStyle(
+                      fontSize: 13, color: context.ac.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                if (_scheduledTasks.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          Icon(Icons.schedule_send_outlined,
+                              size: 48, color: context.ac.textTertiary),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No scheduled downloads',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: context.ac.textPrimary),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Add a download and choose "Download later" '
+                            'to schedule it here.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: context.ac.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ..._scheduledTasks.map(
+                    (task) => ListTile(
+                      leading: Icon(Icons.schedule,
+                          color: context.ac.accentFrost, size: 20),
+                      title: Text(
+                        task.savePath.split('/').last,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 13, color: context.ac.textPrimary),
+                      ),
+                      subtitle: Text(
+                        task.scheduledStartAt != null
+                            ? _formatScheduledTime(task.scheduledStartAt!)
+                            : 'No time set',
+                        style: TextStyle(
+                            fontSize: 11, color: context.ac.textSecondary),
+                      ),
+                      trailing: IconButton(
+                        icon: Icon(Icons.cancel_outlined,
+                            size: 18, color: context.ac.statusError),
+                        tooltip: 'Cancel scheduled download',
+                        onPressed: () {
+                          widget.downloadQueue.cancelTask(task.id);
+                        },
+                      ),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatScheduledTime(DateTime dt) {
+    final now = DateTime.now();
+    final diff = dt.difference(now);
+    String pad(int n) => n.toString().padLeft(2, '0');
+
+    if (diff.isNegative) {
+      return 'Starting now...';
+    }
+    if (diff.inDays > 0) {
+      return '${dt.year}-${pad(dt.month)}-${pad(dt.day)} '
+          '${pad(dt.hour)}:${pad(dt.minute)} '
+          '(${diff.inDays}d ${diff.inHours % 24}h remaining)';
+    }
+    if (diff.inHours > 0) {
+      return '${pad(dt.hour)}:${pad(dt.minute)} '
+          '(${diff.inHours}h ${diff.inMinutes % 60}m remaining)';
+    }
+    if (diff.inMinutes > 0) {
+      return '${pad(dt.hour)}:${pad(dt.minute)} '
+          '(${diff.inMinutes}m remaining)';
+    }
+    return '${pad(dt.hour)}:${pad(dt.minute)} (less than a minute)';
   }
 }

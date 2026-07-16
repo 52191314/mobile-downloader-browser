@@ -72,6 +72,8 @@ class HlsPlaylist {
   double get durationSeconds =>
       segments.fold<double>(0, (sum, segment) => sum + segment.durationSeconds);
 
+  /// Exact sum of EXT-X-BYTERANGE lengths when every media segment has one.
+  /// Does not include the init segment (probed separately).
   int? get totalByteRangeLength {
     if (segments.isEmpty) return null;
     int total = 0;
@@ -81,4 +83,7 @@ class HlsPlaylist {
     }
     return total > 0 ? total : null;
   }
+
+  /// True when every media segment carries an EXT-X-BYTERANGE length.
+  bool get hasFullByteRanges => totalByteRangeLength != null;
 }

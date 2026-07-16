@@ -94,6 +94,11 @@ abstract interface class SnifferBrowserController {
   int get blockedInvisibleRedirectsCount;
   void incrementBlockedInvisibleRedirects();
   Future<void> setInvisibleRedirectBlocking(bool enabled);
+
+  /// When true, injected JS intercepts site media `play()` and routes
+  /// playback to Aurora's in-app player instead.
+  Future<void> setReplaceSitePlayer(bool enabled);
+
   int get blockedRequestCount;
   List<String> get adblockAllowlist;
   void updateAdblockAllowlist(List<String> allowlist);
@@ -260,7 +265,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void Function(int)? _onProgressChanged;
   void Function(StrictRedirectEvent event)? _onStrictRedirectDetected;
   String? _pendingOpenUrl;
-  String? _pendingOpenInNewTabUrl;
+  /// Queued external "open in new tab" URLs when SnifferScreen has not
+  /// registered [setOnOpenUrlInNewTab] yet (e.g. first visit to Browser).
+  final List<String> _pendingOpenInNewTabUrls = [];
 
   final Map<String, void Function(String)> _jsChannels = {};
 
@@ -290,6 +297,12 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Timer? _loadResourceTimer;
   final Set<String> _pendingResourceUrls = {};
   static const int _maxPendingResourceUrls = 80;
+
+  /// Debounces the force-reinstall of browser guards so that
+  /// [onLoadStop] and [onUpdateVisitedHistory] (which fire back-to-back
+  /// on initial page loads) only trigger a single 40 KB
+  /// [evaluateJavascript] call instead of two.
+  Timer? _guardReinstallDebounce;
 
   // Custom history stack that survives app restarts. The native WebView
   // history is only valid for the current session.
@@ -417,6 +430,19 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
           ?.evaluateJavascript(
             source:
                 'window.__auroraInvisibleRedirectBlockingEnabled = '
+                '${enabled ? 'true' : 'false'};',
+          )
+          .catchError((_) {});
+    }
+  }
+
+  @override
+  Future<void> setReplaceSitePlayer(bool enabled) async {
+    if (_webViewCreated) {
+      await _controller
+          ?.evaluateJavascript(
+            source:
+                'window.__auroraReplaceSitePlayer = '
                 '${enabled ? 'true' : 'false'};',
           )
           .catchError((_) {});
@@ -635,6 +661,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       );
     }
 
+    // Media detection deliberately NOT here — it is handled exclusively
+    // in [onLoadResource] to avoid duplicating the same regex/classification
+    // work on every subresource.  Keeping it in one place halves the hot-path
+    // work on the WebView→Dart bridge.
+
     return null; // allow
   }
 
@@ -724,13 +755,13 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (urlStr.isNotEmpty) {
       _setCurrentUrl(urlStr);
     }
-    _guardInstaller.installBrowserGuards(force: true);
+    _scheduleGuardReinstall();
     _onPageFinished?.call(urlStr);
   }
 
   /// Called by InAppWebView onUpdateVisitedHistory
   void onUpdateVisitedHistory(WebUri? url, bool? isReload) {
-    _guardInstaller.installBrowserGuards(force: true);
+    _scheduleGuardReinstall();
     if (url != null) {
       final urlStr = url.toString();
       _setCurrentUrl(urlStr);
@@ -748,6 +779,19 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void onProgressChanged(int progress) {
     // Guards already installed via onLoadStart/onLoadStop
     _onProgressChanged?.call(progress);
+  }
+
+  /// Debounces force-reinstall of browser guards so that back-to-back
+  /// callbacks ([onLoadStop] + [onUpdateVisitedHistory]) on initial page
+  /// loads only trigger a single 40 KB [evaluateJavascript] call.
+  /// SPA navigations (where only [onUpdateVisitedHistory] fires) are
+  /// unaffected — the debounce window is short enough that the single
+  /// callback still triggers the reinstall.
+  void _scheduleGuardReinstall() {
+    _guardReinstallDebounce?.cancel();
+    _guardReinstallDebounce = Timer(const Duration(milliseconds: 300), () {
+      _guardInstaller.installBrowserGuards(force: true);
+    });
   }
 
   /// Called by InAppWebView shouldOverrideUrlLoading
@@ -1454,22 +1498,39 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   @override
   void openUrlInNewTab(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
     final callback = _onOpenUrlInNewTab;
     if (callback == null) {
-      _pendingOpenInNewTabUrl = url;
+      debugPrint(
+        '[BrowserController] openUrlInNewTab("$trimmed") — callback null, '
+        'queued (pending=${_pendingOpenInNewTabUrls.length + 1})',
+      );
+      _pendingOpenInNewTabUrls.add(trimmed);
       return;
     }
-    callback(url);
+    debugPrint(
+      '[BrowserController] openUrlInNewTab("$trimmed") — invoking callback',
+    );
+    callback(trimmed);
   }
 
   /// Registers a callback for [openUrlInNewTab]. Passing `null` clears it.
   @override
   void setOnOpenUrlInNewTab(void Function(String url)? callback) {
     _onOpenUrlInNewTab = callback;
-    final pending = _pendingOpenInNewTabUrl;
-    if (callback != null && pending != null && pending.isNotEmpty) {
-      _pendingOpenInNewTabUrl = null;
-      scheduleMicrotask(() => callback(pending));
+    if (callback != null && _pendingOpenInNewTabUrls.isNotEmpty) {
+      final pending = List<String>.from(_pendingOpenInNewTabUrls);
+      _pendingOpenInNewTabUrls.clear();
+      debugPrint(
+        '[BrowserController] setOnOpenUrlInNewTab: flushing ${pending.length} '
+        'pending URL(s)',
+      );
+      scheduleMicrotask(() {
+        for (final u in pending) {
+          callback(u);
+        }
+      });
     }
   }
 
@@ -1521,6 +1582,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _guardInstaller.dispose();
     _adblockInjector.dispose();
     _loadResourceTimer?.cancel();
+    _guardReinstallDebounce?.cancel();
     _pendingResourceUrls.clear();
     _controller?.dispose();
     _controller = null;
@@ -1550,7 +1612,7 @@ class MockBrowserController implements SnifferBrowserController {
 
   void Function(String)? _onOpenUrlRequest;
   String? _pendingOpenUrl;
-  String? _pendingOpenInNewTabUrl;
+  final List<String> _pendingOpenInNewTabUrls = [];
   void Function(String)? _onOpenUrlInNewTab;
   Future<bool> Function()? _onSystemBackRequested;
   void Function()? _onNavStateChanged;
@@ -1558,21 +1620,27 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   void openUrlInNewTab(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
     final callback = _onOpenUrlInNewTab;
     if (callback == null) {
-      _pendingOpenInNewTabUrl = url;
+      _pendingOpenInNewTabUrls.add(trimmed);
       return;
     }
-    callback(url);
+    callback(trimmed);
   }
 
   @override
   void setOnOpenUrlInNewTab(void Function(String url)? callback) {
     _onOpenUrlInNewTab = callback;
-    final pending = _pendingOpenInNewTabUrl;
-    if (callback != null && pending != null && pending.isNotEmpty) {
-      _pendingOpenInNewTabUrl = null;
-      scheduleMicrotask(() => callback(pending));
+    if (callback != null && _pendingOpenInNewTabUrls.isNotEmpty) {
+      final pending = List<String>.from(_pendingOpenInNewTabUrls);
+      _pendingOpenInNewTabUrls.clear();
+      scheduleMicrotask(() {
+        for (final u in pending) {
+          callback(u);
+        }
+      });
     }
   }
 
@@ -1679,6 +1747,9 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> setInvisibleRedirectBlocking(bool enabled) async {
     _invisibleRedirectBlockingEnabled = enabled;
   }
+
+  @override
+  Future<void> setReplaceSitePlayer(bool enabled) async {}
 
   @override
   int get blockedRequestCount => 0;

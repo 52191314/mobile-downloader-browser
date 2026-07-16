@@ -79,7 +79,7 @@ class BrowserGuardInstaller {
   }
 
   Future<void> _installBrowserGuards({bool force = false}) async {
-    if (_userScriptAdded && !force) return; // Skip non-force injection; force re-injection restores hooks overwritten by page JS
+    if (_userScriptAdded) return;
     if (_controller == null) return;
     if (!force && _guardInstalled) return;
     if (force) {

@@ -22,12 +22,39 @@ import '../logging/aurora_log.dart';
 ///    WebView is on the same origin — no CORS restriction.
 /// 4. The headless WebView is kept alive for subsequent segment requests
 ///    to avoid re-navigating for every segment.
+///
+/// Concurrent XHRs are **serialized** (max 2 in flight). Flooding a single
+/// headless WebView with parallel multi‑MB fetches caused mass timeouts on
+/// surrit-style CDNs while speed sat at 0.
 class HeadlessWebViewFetcher {
   HeadlessInAppWebView? _headless;
   InAppWebViewController? _controller;
   String? _originDomain;
   bool _isInitializing = false;
-  final Completer<void> _initCompleter = Completer<void>();
+  Completer<void>? _initCompleter;
+
+  /// Serialize multi‑MB XHRs so the headless bridge is not saturated.
+  static const int _maxInFlight = 2;
+  int _inFlight = 0;
+  final List<Completer<void>> _waiters = [];
+
+  Future<void> _acquire() async {
+    if (_inFlight < _maxInFlight) {
+      _inFlight++;
+      return;
+    }
+    final c = Completer<void>();
+    _waiters.add(c);
+    await c.future;
+    _inFlight++;
+  }
+
+  void _release() {
+    _inFlight = _inFlight > 0 ? _inFlight - 1 : 0;
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0).complete();
+    }
+  }
 
   /// Fetches binary data from [url] using a headless WebView.
   /// Returns `null` if the fetch fails or if the headless WebView
@@ -39,32 +66,34 @@ class HeadlessWebViewFetcher {
     if (uri == null || !uri.hasScheme) return null;
     final origin = '${uri.scheme}://${uri.host}';
 
-    // If the origin changed, we need a new headless WebView.
-    if (_originDomain != null && _originDomain != origin) {
-      await dispose();
-    }
-
-    // Initialize (or wait for existing initialization).
-    if (_controller == null) {
-      if (_isInitializing) {
-        await _initCompleter.future.timeout(
-          const Duration(seconds: 30),
-          onTimeout: () => null,
-        );
-        if (_controller == null) return null;
-      } else {
-        _originDomain = origin;
-        final ok = await _initialize(origin);
-        if (!ok) return null;
-      }
-    }
-
-    if (_controller == null) return null;
-
-    // Make a same-origin XHR to fetch the binary data.
+    await _acquire();
     try {
-      final data = await _xhrFetchBinary(url);
-      return data;
+      // If the origin changed, we need a new headless WebView.
+      if (_originDomain != null && _originDomain != origin) {
+        await dispose();
+      }
+
+      // Initialize (or wait for existing initialization).
+      if (_controller == null) {
+        if (_isInitializing) {
+          final waiting = _initCompleter;
+          if (waiting != null) {
+            await waiting.future.timeout(
+              const Duration(seconds: 45),
+              onTimeout: () {},
+            );
+          }
+          if (_controller == null) return null;
+        } else {
+          _originDomain = origin;
+          final ok = await _initialize(origin);
+          if (!ok) return null;
+        }
+      }
+
+      if (_controller == null) return null;
+
+      return await _xhrFetchBinary(url);
     } catch (e) {
       AuroraLog.instance.debug(
         'HeadlessWebViewFetcher: XHR failed for $url: $e',
@@ -73,23 +102,34 @@ class HeadlessWebViewFetcher {
         eventType: LogEventType.network,
       );
       return null;
+    } finally {
+      _release();
     }
   }
 
   /// Creates the headless WebView and navigates it to [origin].
   Future<bool> _initialize(String origin) async {
     _isInitializing = true;
+    _initCompleter = Completer<void>();
     try {
       final completer = Completer<bool>();
       _headless = HeadlessInAppWebView(
         initialUrlRequest: URLRequest(url: WebUri(origin)),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          // Prefer a real mobile Chrome UA so CF challenge matches the app.
+          userAgent:
+              'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
+        ),
         onLoadStop: (controller, url) {
           if (!completer.isCompleted) {
             completer.complete(true);
           }
         },
         onReceivedError: (controller, request, error) {
-          if (!completer.isCompleted) {
+          // Only fail hard on main-frame errors during init.
+          if (request.isForMainFrame == true && !completer.isCompleted) {
             AuroraLog.instance.debug(
               'HeadlessWebViewFetcher: load error for $origin: ${error.description}',
               category: LogCategory.hls,
@@ -105,13 +145,13 @@ class HeadlessWebViewFetcher {
       _controller = _headless!.webViewController;
 
       if (_controller == null) {
-        if (!_initCompleter.isCompleted) _initCompleter.complete();
+        _completeInit();
         return false;
       }
 
       // Wait for the page to load (Cloudflare challenge + redirect).
       final ok = await completer.future.timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 45),
         onTimeout: () {
           AuroraLog.instance.debug(
             'HeadlessWebViewFetcher: timeout loading $origin',
@@ -123,7 +163,12 @@ class HeadlessWebViewFetcher {
         },
       );
 
-      if (!_initCompleter.isCompleted) _initCompleter.complete();
+      // Brief settle so CF set-cookie + any secondary redirects finish.
+      if (ok) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      }
+
+      _completeInit();
       if (ok) {
         AuroraLog.instance.debug(
           'HeadlessWebViewFetcher: initialized for $origin',
@@ -140,19 +185,24 @@ class HeadlessWebViewFetcher {
         screen: LogScreen.background,
         eventType: LogEventType.network,
       );
-      if (!_initCompleter.isCompleted) _initCompleter.complete();
+      _completeInit();
       return false;
     } finally {
       _isInitializing = false;
     }
   }
 
+  void _completeInit() {
+    final c = _initCompleter;
+    if (c != null && !c.isCompleted) c.complete();
+  }
+
   /// Makes a same-origin XHR from the headless WebView to fetch binary data.
   Future<Uint8List?> _xhrFetchBinary(String url) async {
     if (_controller == null) return null;
-    final safeUrl = url.replaceAll("'", "\\'");
+    final safeUrl = url.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
     final channelName =
-        'HeadlessFetch_${DateTime.now().millisecondsSinceEpoch}';
+        'HeadlessFetch_${DateTime.now().microsecondsSinceEpoch}';
 
     final completer = Completer<Uint8List?>();
     _controller!.addJavaScriptHandler(
@@ -180,16 +230,22 @@ class HeadlessWebViewFetcher {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '$safeUrl', true);
     xhr.responseType = 'blob';
+    xhr.timeout = 40000;
     xhr.onload = function() {
-      if (xhr.status >= 200 && xhr.status < 300) {
+      if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
         try {
           var reader = new FileReader();
           reader.onload = function() {
             try {
-              var dataUrl = reader.result;
-              var b64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+              var dataUrl = reader.result || '';
+              var comma = dataUrl.indexOf(',');
+              var b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
               window.flutter_inappwebview.callHandler('$channelName', 'OK:' + b64);
-            } catch(e) {}
+            } catch(e) {
+              try {
+                window.flutter_inappwebview.callHandler('$channelName', 'ERROR:READER');
+              } catch(e2) {}
+            }
           };
           reader.onerror = function() {
             try {
@@ -218,7 +274,6 @@ class HeadlessWebViewFetcher {
         window.flutter_inappwebview.callHandler('$channelName', 'ERROR:TIMEOUT');
       } catch(e) {}
     };
-    xhr.timeout = 20000;
     xhr.send();
   } catch(e) {
     try {
@@ -229,7 +284,7 @@ class HeadlessWebViewFetcher {
 ''');
 
     final result = await completer.future.timeout(
-      const Duration(seconds: 25),
+      const Duration(seconds: 50),
       onTimeout: () {
         AuroraLog.instance.debug(
           'HeadlessWebViewFetcher: XHR timed out for $url',
@@ -252,9 +307,6 @@ class HeadlessWebViewFetcher {
   /// a headless WebView. Uses same-origin XHR from the CDN's domain,
   /// bypassing both CORS (same origin) and Cloudflare WAF (real Chrome
   /// TLS fingerprint + cf_clearance cookie). Returns null on failure.
-  ///
-  /// Mirrors [fetchBinary] but with `responseType: 'text'` so the result
-  /// is a raw string rather than base64-decoded bytes.
   Future<String?> fetchText(String url) async {
     if (!Platform.isAndroid && !Platform.isIOS) return null;
 
@@ -262,31 +314,32 @@ class HeadlessWebViewFetcher {
     if (uri == null || !uri.hasScheme) return null;
     final origin = '${uri.scheme}://${uri.host}';
 
-    // If the origin changed, we need a new headless WebView.
-    if (_originDomain != null && _originDomain != origin) {
-      await dispose();
-    }
-
-    // Initialize (or wait for existing initialization).
-    if (_controller == null) {
-      if (_isInitializing) {
-        await _initCompleter.future.timeout(
-          const Duration(seconds: 30),
-          onTimeout: () => null,
-        );
-        if (_controller == null) return null;
-      } else {
-        _originDomain = origin;
-        final ok = await _initialize(origin);
-        if (!ok) return null;
-      }
-    }
-
-    if (_controller == null) return null;
-
+    await _acquire();
     try {
-      final data = await _xhrFetchText(url);
-      return data;
+      if (_originDomain != null && _originDomain != origin) {
+        await dispose();
+      }
+
+      if (_controller == null) {
+        if (_isInitializing) {
+          final waiting = _initCompleter;
+          if (waiting != null) {
+            await waiting.future.timeout(
+              const Duration(seconds: 45),
+              onTimeout: () {},
+            );
+          }
+          if (_controller == null) return null;
+        } else {
+          _originDomain = origin;
+          final ok = await _initialize(origin);
+          if (!ok) return null;
+        }
+      }
+
+      if (_controller == null) return null;
+
+      return await _xhrFetchText(url);
     } catch (e) {
       AuroraLog.instance.debug(
         'HeadlessWebViewFetcher: XHR text fetch failed for $url: $e',
@@ -295,15 +348,17 @@ class HeadlessWebViewFetcher {
         eventType: LogEventType.network,
       );
       return null;
+    } finally {
+      _release();
     }
   }
 
   /// Same-origin XHR from the headless WebView to fetch [url] as text.
   Future<String?> _xhrFetchText(String url) async {
     if (_controller == null) return null;
-    final safeUrl = url.replaceAll("'", "\\'");
+    final safeUrl = url.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
     final channelName =
-        'HeadlessTextFetch_${DateTime.now().millisecondsSinceEpoch}';
+        'HeadlessTextFetch_${DateTime.now().microsecondsSinceEpoch}';
 
     final completer = Completer<String?>();
     _controller!.addJavaScriptHandler(
@@ -326,6 +381,7 @@ class HeadlessWebViewFetcher {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '$safeUrl', true);
     xhr.responseType = 'text';
+    xhr.timeout = 30000;
     xhr.onload = function() {
       if (xhr.status >= 200 && xhr.status < 400) {
         window.flutter_inappwebview.callHandler('$channelName', 'OK:' + (xhr.responseText || ''));
@@ -339,7 +395,6 @@ class HeadlessWebViewFetcher {
     xhr.ontimeout = function() {
       window.flutter_inappwebview.callHandler('$channelName', 'ERROR:TIMEOUT');
     };
-    xhr.timeout = 20000;
     xhr.send();
   } catch(e) {
     window.flutter_inappwebview.callHandler('$channelName', 'ERROR:EXCEPTION:' + (e.message || 'unknown'));
@@ -348,7 +403,7 @@ class HeadlessWebViewFetcher {
 ''');
 
     final result = await completer.future.timeout(
-      const Duration(seconds: 25),
+      const Duration(seconds: 35),
       onTimeout: () {
         AuroraLog.instance.debug(
           'HeadlessWebViewFetcher: text XHR timed out for $url',
@@ -376,5 +431,10 @@ class HeadlessWebViewFetcher {
     _controller = null;
     _originDomain = null;
     _isInitializing = false;
+    // Allow a fresh completer on next init.
+    if (_initCompleter != null && !_initCompleter!.isCompleted) {
+      _initCompleter!.complete();
+    }
+    _initCompleter = null;
   }
 }

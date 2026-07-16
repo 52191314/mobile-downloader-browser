@@ -89,6 +89,7 @@ class DownloadNotificationService {
           _showFailedNotification(task);
         case DownloadState.paused:
         case DownloadState.idle:
+        case DownloadState.scheduled:
         case DownloadState.merging:
           break;
       }

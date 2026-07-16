@@ -49,8 +49,12 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
     selectedMedia = widget.media;
     _variants = widget.variants;
     var name = widget.suggestedName;
-    if (name.length > 120) {
-      name = _SnifferScreenState.truncateFilename(name, maxLength: 120);
+    if (FilenameService.utf8ByteLength(name) >
+        FilenameService.defaultMaxFileNameBytes) {
+      name = _SnifferScreenState.truncateFilename(
+        name,
+        maxLength: FilenameService.defaultMaxFileNameBytes,
+      );
     }
     filenameController = TextEditingController(text: name);
     // Pre-populate the folder picker based on auto-classification.
@@ -177,8 +181,12 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       if (ext.isNotEmpty && !newName.toLowerCase().endsWith(ext.toLowerCase())) {
         finalName = '$newName$ext';
       }
-      if (finalName.length > 120) {
-        finalName = _SnifferScreenState.truncateFilename(finalName, maxLength: 120);
+      if (FilenameService.utf8ByteLength(finalName) >
+          FilenameService.defaultMaxFileNameBytes) {
+        finalName = _SnifferScreenState.truncateFilename(
+          finalName,
+          maxLength: FilenameService.defaultMaxFileNameBytes,
+        );
       }
       setState(() {
         filenameController.text = finalName;
@@ -254,11 +262,16 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (widget.suggestedName.length > 120 || filenameController.text.length >= 120) ...[
+                      if (FilenameService.utf8ByteLength(widget.suggestedName) >
+                              FilenameService.defaultMaxFileNameBytes ||
+                          FilenameService.utf8ByteLength(
+                                filenameController.text,
+                              ) >=
+                              FilenameService.defaultMaxFileNameBytes) ...[
                         const SizedBox(height: 6),
-                        const Text(
-                          '⚠️ Filename is too long and was auto-truncated to 120 characters. You can rename it yourself, or the app will use this truncated name.',
-                          style: TextStyle(
+                        Text(
+                          'Filename is long and was auto-truncated to fit Android’s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
+                          style: const TextStyle(
                             color: Colors.redAccent,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -344,8 +357,12 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
               : () async {
                   var filename = filenameController.text.trim();
                   if (filename.isEmpty) return;
-                  if (filename.length > 120) {
-                    filename = _SnifferScreenState.truncateFilename(filename, maxLength: 120);
+                  if (FilenameService.utf8ByteLength(filename) >
+                      FilenameService.defaultMaxFileNameBytes) {
+                    filename = FilenameService.truncate(
+                      filename,
+                      maxBytes: FilenameService.defaultMaxFileNameBytes,
+                    );
                   }
                   final navigator = Navigator.of(context);
 
@@ -375,11 +392,16 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     final saveDir = selectedFolder.isNotEmpty
                         ? '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$selectedFolder'
                         : '$baseDir${Platform.pathSeparator}completed';
+                    final savePath = FilenameService.uniquePath(
+                      '$saveDir${Platform.pathSeparator}$filename',
+                      reservedPaths: widget.downloadQueue.allTasks
+                          .map((t) => t.savePath),
+                    );
                     final task = DownloadTask(
                       id: taskId,
                       url: refreshedUrl,
                       sourcePageUrl: selectedMedia.sourcePageUrl,
-                      savePath: '$saveDir${Platform.pathSeparator}$filename',
+                      savePath: savePath,
                       tempDir: '$baseTemp${Platform.pathSeparator}temp_$taskId',
                       priority: selectedPriority,
                       contentType: selectedMedia.contentType,
@@ -410,33 +432,56 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     bool force = false;
                     if (widget.downloadQueue.urlExists(refreshedUrl)) {
                       if (!context.mounted) return;
-                      final skip = await showDialog<bool>(
+                      final choice = await showDialog<DuplicateChoice>(
                         context: context,
                         builder: (BuildContext context) {
                           return AlertDialog(
                             title: const Text('Already in Queue'),
-                            content: Text(
+                            content: const Text(
                               'This download link has already been added to your queue.\n\n'
-                              'Download it again anyway?',
+                              'What would you like to do?',
                             ),
                             actions: <Widget>[
                               TextButton(
-                                onPressed: () => Navigator.of(context).pop(false),
-                                child: const Text('Download Again'),
+                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
+                                child: const Text('Cancel'),
                               ),
                               TextButton(
-                                onPressed: () => Navigator.of(context).pop(true),
-                                child: const Text('Skip'),
+                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
+                                child: const Text('Create New'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
+                                child: const Text('Update Existing'),
                               ),
                             ],
                           );
                         },
                       );
-                      if (skip ?? true) {
+                      if (choice == null || choice == DuplicateChoice.skip) {
                         if (mounted) {
                           setState(() => isResolving = false);
                         }
                         return;
+                      }
+                      if (choice == DuplicateChoice.updateExisting) {
+                        final existingId =
+                            widget.downloadQueue.resniffPendingTaskId ??
+                            widget.downloadQueue.getTaskByUrl(refreshedUrl)?.id ??
+                            widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
+                        if (existingId != null) {
+                          await widget.downloadQueue.updateTaskFromDonor(
+                            existingId,
+                            task,
+                          );
+                          if (!mounted) return;
+                          navigator.pop();
+                          AuroraSnackbar.show(
+                            context,
+                            'Done — Link updated. Download will retry.',
+                          );
+                          return;
+                        }
                       }
                       force = true;
                     }

@@ -448,7 +448,13 @@ class TabLifecycleController {
       tab.controller.restoreHistory(restoredHistory, restoredHistoryIndex);
     }
     if (url != null) {
-      addressController.text = url;
+      final trimmed = url.trim();
+      addressController.text = trimmed;
+      // So BrowserWidget.initialUrl / setOnRecreated see the target even
+      // before the first loadRequest completes.
+      if (trimmed.isNotEmpty) {
+        tab.currentUrl = trimmed;
+      }
     }
     // Only refresh page info for blank/restored tabs.  When a URL is being
     // loaded, refreshPageInfo's currentUrl() races with loadRequest below and
@@ -465,13 +471,16 @@ class TabLifecycleController {
     // Defer URL load until after the build phase so the new tab's WebView
     // is created before loadRequest runs, avoiding any race between
     // _ready.future and onWebViewCreated.
-    if (url != null) {
+    // BrowserWidget also seeds initialUrlRequest from address/currentUrl as a
+    // backup when the platform view is first created (Queue external opens).
+    if (url != null && url.trim().isNotEmpty) {
+      final loadUrl = url.trim();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (host.isMounted && _tabs.contains(tab)) {
           unawaited(
             host.loadUrlWithHostSettings(
               tab,
-              Uri.parse(url),
+              Uri.parse(loadUrl),
               addToHistory: restoredHistory == null,
             ),
           );
@@ -485,14 +494,12 @@ class TabLifecycleController {
   }
 
   void startVideoPoll(BrowserTab tab) {
-    // Only run the video poll on the active tab. Without this guard every
-    // tab's timer would run simultaneously and waste resources.
+    // Only run the video poll on the active tab.
     if (tab != _activeTab) return;
     tab.videoPollTimer?.cancel();
-    // Restored to 3s (was 2s originally, then 15s after perf optimization).
-    // This poll bypasses CSP restrictions and catches media that the
-    // injected JS guard cannot detect. 3s balances responsiveness vs overhead.
-    tab.videoPollTimer = Timer.periodic(const Duration(seconds: 3), (
+    int emptyPollCount = 0;
+    // Poll interval tuned to 5s (was 3s).
+    tab.videoPollTimer = Timer.periodic(const Duration(seconds: 5), (
       timer,
     ) async {
       if (!host.isMounted || !_tabs.contains(tab)) {
@@ -503,36 +510,33 @@ class TabLifecycleController {
         return;
       }
       try {
-        // Only poll for video/audio src — no guard reinstall, no innerHTML
-        // scan here.
+        // Only poll for video/audio src
         final result = await tab.controller.evaluateJavaScript('''
-(function() {
-  var found = [];
-  function add(u) { if(u && !found.includes(u)) found.push(u); }
-  // .ts is excluded so HLS fragments do not flood the sniffer.
-  var re = /\\.(mp4|m3u8|webm|mkv|avi|flv|mov|3gp|ogv|wmv|m4v|f4v|mpeg|mpg|mts|m2ts|mp3|wav|aac|ogg|m4a|flac)(\\?|\$)/i;
-  // 1. Main window video/audio elements
-  var els = document.querySelectorAll("video,audio");
-  for(var i=0;i<els.length;i++){
-    var src=els[i].currentSrc||els[i].src||"";
-    if(src) add(src);
-  }
-  // 2. Same-origin iframes
-  var ifs = document.querySelectorAll("iframe");
-  for(var i=0;i<ifs.length;i++) try {
-    var d = ifs[i].contentDocument;
-    if(d){
-      var ivids = d.querySelectorAll("video,audio");
-      for(var j=0;j<ivids.length;j++){ var s=ivids[j].currentSrc||ivids[j].src||""; if(s) add(s); }
+  (function() {
+    var found = [];
+    function add(u) { if(u && !found.includes(u)) found.push(u); }
+    // .ts excluded so HLS fragments do not flood the sniffer.
+    var re = /\\.(mp4|m3u8|webm|mkv|avi|flv|mov|3gp|ogv|wmv|m4v|f4v|mpeg|mpg|mts|m2ts|mp3|wav|aac|ogg|m4a|flac)(\\?|\$)/i;
+    // 1. Main window video/audio elements
+    var els = document.querySelectorAll("video,audio");
+    for(var i=0;i<els.length;i++){
+      var src=els[i].currentSrc||els[i].src||"";
+      if(src) add(src);
     }
-  } catch(e) {}
-  // NOTE: performance.getEntriesByType('resource') removed — the
-  // PerformanceObserver in installBrowserGuards already catches these.
-  // Scanning hundreds of resource entries every 15s caused UI freezes.
-  return found.join("|||");
-})()
-''');
+    // 2. Same-origin iframes
+    var ifs = document.querySelectorAll("iframe");
+    for(var i=0;i<ifs.length;i++) try {
+      var d = ifs[i].contentDocument;
+      if(d){
+        var ivids = d.querySelectorAll("video,audio");
+        for(var j=0;j<ivids.length;j++){ var s=ivids[j].currentSrc||ivids[j].src||""; if(s) add(s); }
+      }
+    } catch(e) {}
+    return found.join("|||");
+  })()
+  ''');
         if (result is String && result.trim().isNotEmpty) {
+          emptyPollCount = 0;
           final urls = result.split('|||');
           for (final url in urls) {
             final trimmed = url.trim();
@@ -542,6 +546,14 @@ class TabLifecycleController {
                 trimmed,
                 sourcePageUrl: tab.addressController.text,
               );
+            }
+          }
+        } else {
+          emptyPollCount++;
+          if (emptyPollCount >= 3) {
+            timer.cancel();
+            if (identical(tab.videoPollTimer, timer)) {
+              tab.videoPollTimer = null;
             }
           }
         }

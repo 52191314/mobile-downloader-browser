@@ -22,10 +22,14 @@ const String autoBackupRootRelative = 'Download/Aurora Downloader/Auto Backup';
 /// new storage permissions. Scheduling is in-app (a [Timer] plus a launch
 /// catch-up check) — appropriate for a downloader that is normally running.
 class AutoBackupService {
-  AutoBackupService({AutoBackupStateStore? stateStore})
-      : _stateStore = stateStore ?? const AutoBackupStateStore();
+  AutoBackupService({
+    AutoBackupStateStore? stateStore,
+    bool Function()? isProCallback,
+  })  : _stateStore = stateStore ?? const AutoBackupStateStore(),
+        _isProCallback = isProCallback ?? (() => false);
 
   final AutoBackupStateStore _stateStore;
+  final bool Function() _isProCallback;
   AutoBackupState _state = const AutoBackupState();
   DownloadSettings? _settings;
   Timer? _timer;
@@ -52,6 +56,8 @@ class AutoBackupService {
     _timer = null;
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
+    // Don't start the timer if the user is not Pro.
+    if (!_isProCallback()) return;
     _timer = Timer.periodic(settings.autoBackupInterval.duration, (_) {
       unawaited(_runIfDue());
     });

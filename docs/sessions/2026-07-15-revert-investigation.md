@@ -88,6 +88,23 @@
 - **Agent:** Gemini 3.5 Flash (High)
 - **Task:** Confirmed that the user is working on the correct git branch based on the provided screenshot.
 
+### 2026-07-15 11:23 — User command
+
+> *I remember we once added open to open in ncurrent tab, why is it not here? Add it back*
+> *dont build*
+
+- **Agent:** Gemini 3.5 Flash (High)
+- **Task:** Restored the "Current tab" button to the blocked redirect prompt dialog without performing a device build.
+
+### 2026-07-15 16:26 — User command
+
+> *Why was there even a revert*
+
+- **Agent:** Gemini 3.5 Flash (High)
+- **Task:** Explained the historical reasons why the previous merge attempt yesterday failed and resulted in the code reverting to HEAD.
+
+
+
 
 
 

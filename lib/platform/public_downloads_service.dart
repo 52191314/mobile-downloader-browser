@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../downloader/downloader.dart';
+import '../downloader/media_file_types.dart';
 import '../downloader/models.dart';
 import '../backup/auto_backup_models.dart';
 
@@ -266,60 +267,12 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
   }
 
   static String mimeTypeForName(String path) {
-    final extension = p.extension(path).toLowerCase();
-    return switch (extension) {
-      '.mp4' => 'video/mp4',
-      '.m3u8' => 'application/vnd.apple.mpegurl',
-      '.ts' => 'video/mp2t',
-      '.webm' => 'video/webm',
-      '.mkv' => 'video/x-matroska',
-      '.mov' => 'video/quicktime',
-      '.mp3' => 'audio/mpeg',
-      '.m4a' => 'audio/mp4',
-      '.aac' => 'audio/aac',
-      '.flac' => 'audio/flac',
-      '.ogg' => 'audio/ogg',
-      '.pdf' => 'application/pdf',
-      '.zip' => 'application/zip',
-      '.rar' => 'application/vnd.rar',
-      '.7z' => 'application/x-7z-compressed',
-      '.torrent' => 'application/x-bittorrent',
-      '.txt' => 'text/plain',
-      _ => 'application/octet-stream',
-    };
+    return MediaFileTypes.mimeTypeForName(path);
   }
 
   /// Returns the file extension (including the dot) for a given MIME type,
   /// or `null` if the MIME type is not recognized.
   static String? extensionForMime(String mimeType) {
-    return switch (mimeType.toLowerCase()) {
-      'video/mp4' => '.mp4',
-      'application/vnd.apple.mpegurl' => '.m3u8',
-      'application/x-mpegurl' => '.m3u8',
-      'video/mp2t' => '.ts',
-      'video/webm' => '.webm',
-      'video/x-matroska' => '.mkv',
-      'video/quicktime' => '.mov',
-      'audio/mpeg' => '.mp3',
-      'audio/mp4' => '.m4a',
-      'audio/aac' => '.aac',
-      'audio/flac' => '.flac',
-      'audio/ogg' => '.ogg',
-      'application/pdf' => '.pdf',
-      'application/zip' => '.zip',
-      'application/vnd.rar' => '.rar',
-      'application/x-7z-compressed' => '.7z',
-      'application/x-bittorrent' => '.torrent',
-      'text/plain' => '.txt',
-      'application/dash+xml' => '.mpd',
-      'image/jpeg' => '.jpg',
-      'image/png' => '.png',
-      'image/gif' => '.gif',
-      'image/webp' => '.webp',
-      'application/json' => '.json',
-      'application/xml' => '.xml',
-      'text/html' => '.html',
-      _ => null,
-    };
+    return MediaFileTypes.extensionForMime(mimeType);
   }
 }

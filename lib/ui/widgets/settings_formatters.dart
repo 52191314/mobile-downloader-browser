@@ -54,6 +54,7 @@ String stateLabel(DownloadState state) {
     DownloadState.completed => 'Completed',
     DownloadState.failed => 'Failed',
     DownloadState.paused => 'Paused',
+    DownloadState.scheduled => 'Scheduled',
     DownloadState.downloading => 'Downloading',
     DownloadState.idle => 'Waiting',
     DownloadState.merging => 'Merging',

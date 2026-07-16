@@ -7,23 +7,37 @@ class BrowserWidget extends StatelessWidget {
   final VoidCallback? onSwipeForward;
   final VoidCallback? onRefresh;
 
+  /// When non-null/non-empty, the WebView navigates here on first create.
+  /// Used for external opens (Queue source page, History open-all) so the
+  /// page starts loading even if a deferred [loadRequest] races with
+  /// platform-view creation.
+  final String? initialUrl;
+
   const BrowserWidget({
     super.key,
     required this.controller,
     this.onSwipeForward,
     this.onRefresh,
+    this.initialUrl,
   });
 
   @override
   Widget build(BuildContext context) {
     final ctrl = controller;
     if (ctrl is SnifferWebViewControllerImpl) {
+      final seed = initialUrl?.trim();
+      final initialRequest = (seed != null &&
+              seed.isNotEmpty &&
+              seed != 'about:blank')
+          ? URLRequest(url: WebUri(seed))
+          : null;
       return _GestureWrappedWebView(
         webView: InAppWebView(
+          initialUrlRequest: initialRequest,
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
             useShouldOverrideUrlLoading: true,
-            useOnLoadResource: true,
+            useOnLoadResource: false,
             useOnDownloadStart: true,
             useShouldInterceptRequest: true,
             supportMultipleWindows: false,
@@ -32,7 +46,11 @@ class BrowserWidget extends StatelessWidget {
             domStorageEnabled: true,
             databaseEnabled: true,
             mediaPlaybackRequiresUserGesture: false,
-            transparentBackground: true,
+            transparentBackground: false,
+            rendererPriorityPolicy: RendererPriorityPolicy(
+              rendererRequestedPriority: RendererPriority.RENDERER_PRIORITY_IMPORTANT,
+              waivedWhenNotVisible: true,
+            ),
           ),
           onWebViewCreated: (c) => ctrl.onWebViewCreated(c),
           onLoadStart: (c, url) => ctrl.onLoadStart(url),

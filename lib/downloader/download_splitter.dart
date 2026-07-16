@@ -703,7 +703,8 @@ class DownloadSplitter implements BaseDownloader {
         final mergedPath = task.savePath;
         if (remuxTsToMp4 && p.extension(mergedPath).toLowerCase() == '.ts') {
           final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
-          task.errorMessage = 'Converting .ts to .mp4 so it plays in any app.';
+          task.statusMessage = 'Converting .ts to .mp4 so it plays in any app.';
+          task.errorMessage = null;
           _emitTask();
           final remux = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
           if (remux.success) {
@@ -711,6 +712,7 @@ class DownloadSplitter implements BaseDownloader {
               await File(mergedPath).delete();
             } catch (_) {}
             task.savePath = mp4Path;
+            task.statusMessage = null;
             task.errorMessage = null;
           } else {
             AuroraLog.instance.error(
@@ -721,7 +723,10 @@ class DownloadSplitter implements BaseDownloader {
               eventType: LogEventType.error,
               taskId: task.id,
             );
-            task.errorMessage = 'Couldn\'t convert to .mp4 — keeping original .ts. '
+            task.statusMessage = null;
+            task.errorMessage =
+                'Couldn\'t convert to .mp4 — keeping original .ts. '
+                'Open it in a player that supports MPEG-TS, or re-download. '
                 '${remux.error ?? "The stream may use an unsupported codec."}';
           }
         }

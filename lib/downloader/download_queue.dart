@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
+import '../sniffer/worker_isolate_pool.dart';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +19,8 @@ import '../platform/download_foreground_service.dart';
 import '../settings/download_settings.dart' show ProxyType;
 import '../sniffer/sniffer_url_utils.dart';
 import 'file_classifier.dart';
+import 'filename_service.dart';
+import 'media_file_types.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
@@ -60,6 +62,8 @@ class DownloadQueue {
   bool wifiOnly = false;
   bool autoClassifyEnabled = true;
   bool remuxTsToMp4 = true;
+  /// Optional overrides: file extension → folder name (e.g. `.mp4` → `Movies`).
+  Map<String, String> autoClassifyMappings = const {};
   bool autoRetry = true;
   int retryLimit = 3;
   int minSpeedThresholdBytesPerSec = 0;
@@ -89,6 +93,10 @@ class DownloadQueue {
   /// download), which saturates flash I/O and causes the UI progress bar
   /// to appear frozen.
   Timer? _saveDebounceTimer;
+
+  /// Periodic timer that checks whether any scheduled tasks should start.
+  /// Created on first [scheduleTask] call; cancelled in [dispose].
+  Timer? _scheduleTimer;
 
   /// True while the Android foreground service is active, so we avoid
   /// redundant start/stop calls.
@@ -120,9 +128,19 @@ class DownloadQueue {
   /// Called when a URL is added that duplicates an existing task while
   /// [resniffPendingTaskId] is set.  The queue page uses this to ask the
   /// user whether to update the existing download or create a new one.
-  /// Signature: (existingTaskId, newUrl, contentType)
-  void Function(String existingTaskId, String newUrl, String? contentType)?
+  ///
+  /// Passes the full [newTask] so headers, cookies, and browser bridges
+  /// (WebView fetch / token refresh) can be copied onto the existing task.
+  /// Previously only the URL was passed, so "Update link" after restart
+  /// left tasks without WAF-bypass bridges and they kept failing.
+  void Function(String existingTaskId, DownloadTask newTask)?
       onResniffDuplicate;
+
+  /// Optional host-provided binder that re-attaches runtime browser
+  /// bridges (`fetchViaWebView`, `cookieProvider`, `onTokenExpired`, …)
+  /// which cannot be persisted to JSON. Set by [SnifferScreen] while
+  /// mounted. Called before every task start / retry / link update.
+  void Function(DownloadTask task)? browserContextAttacher;
 
   DownloadQueue({
     this.maxConcurrentDownloads = 3,
@@ -189,6 +207,7 @@ class DownloadQueue {
     CompletedDownloadPublisher? completedDownloadPublisher,
     bool? autoClassifyEnabled,
     bool? remuxTsToMp4,
+    Map<String, String>? autoClassifyMappings,
     bool? autoRetry,
     int? retryLimit,
     int? minSpeedThresholdBytesPerSec,
@@ -211,11 +230,18 @@ class DownloadQueue {
     if (remuxTsToMp4 != null) {
       this.remuxTsToMp4 = remuxTsToMp4;
     }
+    if (autoClassifyMappings != null) {
+      this.autoClassifyMappings = Map.unmodifiable(
+        autoClassifyMappings.map(
+          (k, v) => MapEntry(k.startsWith('.') ? k.toLowerCase() : '.${k.toLowerCase()}', v),
+        ),
+      );
+    }
     if (autoRetry != null) {
       this.autoRetry = autoRetry;
     }
     if (retryLimit != null) {
-      this.retryLimit = retryLimit.clamp(1, 10).toInt();
+      this.retryLimit = retryLimit.clamp(1, 24).toInt();
     }
     if (minSpeedThresholdBytesPerSec != null) {
       this.minSpeedThresholdBytesPerSec = minSpeedThresholdBytesPerSec.clamp(0, 100 * 1024 * 1024).toInt();
@@ -232,6 +258,59 @@ class DownloadQueue {
           minBytesBeforeFullRetry.clamp(0, 1024 * 1024 * 1024).toInt();
     }
     _schedule();
+  }
+
+  /// Creates a periodic timer (every 30 s) that checks when scheduled
+  /// tasks should transition to [DownloadState.idle] and start downloading.
+  void _startScheduleTimer() {
+    _scheduleTimer?.cancel();
+    _scheduleTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _checkScheduledTasks();
+    });
+  }
+
+  /// Scans all [DownloadState.scheduled] tasks whose [scheduledStartAt] has
+  /// passed, moves them to [DownloadState.idle], adds them to the execution
+  /// queue, and triggers [_schedule].
+  void _checkScheduledTasks() {
+    final now = DateTime.now();
+    final ready = <DownloadTask>[];
+    for (final task in _tasks.values) {
+      if (task.state == DownloadState.scheduled &&
+          task.scheduledStartAt != null &&
+          !task.scheduledStartAt!.isAfter(now)) {
+        ready.add(task);
+      }
+    }
+    if (ready.isEmpty) return;
+
+    for (final task in ready) {
+      task.state = DownloadState.idle;
+      if (!_executionQueue.contains(task.id)) {
+        _executionQueue.add(task.id);
+      }
+      _emitTask(task);
+    }
+    _schedule();
+    // Persist the state change so it survives a crash.
+    if (queuePath != null && !_isLoading) {
+      unawaited(saveToFile(queuePath!));
+    }
+  }
+
+  /// Schedules [task] to start at [startAt].  The task is persisted with
+  /// [DownloadState.scheduled] and a periodic timer (started lazily) will
+  /// move it to [DownloadState.idle] when the time arrives.
+  void scheduleTask(DownloadTask task, DateTime startAt) {
+    if (_isDisposed) return;
+    task.scheduledStartAt = startAt;
+    task.state = DownloadState.scheduled;
+    _tasks[task.id] = task;
+    _startScheduleTimer();
+    _emitTask(task);
+    if (queuePath != null && !_isLoading) {
+      unawaited(saveToFile(queuePath!));
+    }
   }
 
   void addTask(DownloadTask task, {bool force = false}) {
@@ -256,7 +335,7 @@ class DownloadQueue {
         if (resniffPendingTaskId != null &&
             onResniffDuplicate != null &&
             resniffPendingTaskId == existing.first.id) {
-          onResniffDuplicate!(resniffPendingTaskId!, task.url, task.contentType);
+          onResniffDuplicate!(resniffPendingTaskId!, task);
           return;
         }
         _warn('Already in queue: ${task.url}');
@@ -271,7 +350,7 @@ class DownloadQueue {
       if (resniffPendingTaskId != null && onResniffDuplicate != null) {
         final pending = _tasks[resniffPendingTaskId];
         if (pending != null && _isLikelySameMedia(pending.url, task.url)) {
-          onResniffDuplicate!(resniffPendingTaskId!, task.url, task.contentType);
+          onResniffDuplicate!(resniffPendingTaskId!, task);
           return;
         }
       }
@@ -280,6 +359,15 @@ class DownloadQueue {
       task.state = DownloadState.paused;
     }
     _tasks[task.id] = task;
+
+    // If the task has a future scheduledStartAt, put it into scheduled state
+    // instead of idle.  The periodic schedule timer will move it to idle when
+    // the time arrives.
+    if (task.state != DownloadState.completed &&
+        task.scheduledStartAt != null &&
+        task.scheduledStartAt!.isAfter(DateTime.now())) {
+      task.state = DownloadState.scheduled;
+    }
 
     // Completed tasks are kept for history only; no downloader needed.
     if (task.state == DownloadState.completed) {
@@ -307,157 +395,14 @@ class DownloadQueue {
       _applyAutoClassification(task);
     }
 
-    if (!_splitters.containsKey(task.id)) {
-      BaseDownloader downloader;
-      if (task.url.startsWith('magnet:') || task.url.endsWith('.torrent')) {
-        downloader = TorrentDownloader(
-          task: task,
-          client: _client,
-          useNativeEngine: useNativeTorrentEngine,
-        );
-      } else if (_isHlsTask(task)) {
-        downloader = HlsDownloader(
-          task: task,
-          client: _client,
-          maxConcurrentSegments: math.min(numChunksPerTask, 8),
-          speedLimiter: speedLimiter,
-        );
-      } else {
-        downloader = DownloadSplitter(
-          task: task,
-          client: _client,
-          numChunks: numChunksPerTask,
-          minSpeedBytesPerSec: minSpeedThresholdBytesPerSec,
-          stallTimeoutSeconds: stallTimeoutSeconds,
-          partialDownloadThreshold: partialDownloadThreshold,
-          remuxTsToMp4: remuxTsToMp4,
-          speedLimiter: speedLimiter,
-        );
-      }
-      _splitters[task.id] = downloader;
-
-      _downloaderSubscriptions[task.id] = downloader.onTaskUpdated.listen((
-        updatedTask,
-      ) async {
-        _emitTask(updatedTask);
-        if (updatedTask.state == DownloadState.completed ||
-            updatedTask.state == DownloadState.failed) {
-          final wasActive = _activeTasks.remove(updatedTask.id);
-          if (updatedTask.state == DownloadState.completed) {
-            _autoRetryAttempts.remove(updatedTask.id);
-            if (wasActive) {
-              if (autoClassifyEnabled) {
-                final oldPath = updatedTask.savePath;
-                _applyAutoClassification(updatedTask);
-                final newPath = updatedTask.savePath;
-                if (oldPath != newPath) {
-                  try {
-                    final oldFile = File(oldPath);
-                    if (await oldFile.exists()) {
-                      final newFile = File(newPath);
-                      await newFile.parent.create(recursive: true);
-                      await oldFile.rename(newPath);
-                      AuroraLog.instance.info(
-                        'Auto-classified completed file moved from $oldPath to $newPath',
-                        category: LogCategory.download,
-                        screen: LogScreen.background,
-                        eventType: LogEventType.fileIo,
-                        taskId: updatedTask.id,
-                      );
-                    }
-                  } catch (e) {
-                    updatedTask.savePath = oldPath;
-                    AuroraLog.instance.error(
-                      'Failed to move auto-classified file: $e',
-                      category: LogCategory.download,
-                      screen: LogScreen.background,
-                      eventType: LogEventType.error,
-                      taskId: updatedTask.id,
-                    );
-                  }
-                }
-              }
-              unawaited(_publishCompletedTask(updatedTask));
-            }
-          }
-          _schedule();
-
-          if (updatedTask.state == DownloadState.failed) {
-            AuroraLog.instance.error(
-              'Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}',
-              category: LogCategory.download,
-              screen: LogScreen.background,
-              eventType: LogEventType.error,
-              taskId: updatedTask.id,
-            );
-            if (autoRetry && !updatedTask.isBackupImport) {
-              final isStallOrTruncation =
-                  updatedTask.failureReason == DownloadFailure.speedStall ||
-                  updatedTask.failureReason == DownloadFailure.partialDownload ||
-                  updatedTask.failureReason == DownloadFailure.chunkIncomplete;
-              final alreadyDownloadedEnough =
-                  updatedTask.downloadedBytes >= minBytesBeforeFullRetry;
-              if (isStallOrTruncation && alreadyDownloadedEnough) {
-                // Don't full-restart. Mark as failed with a
-                // salvageable-data message so the user can Force Merge.
-                AuroraLog.instance.error(
-                  'Skipped auto-retry for '
-                  '${updatedTask.savePath.split("/").last}: '
-                  'already downloaded '
-                  '${(updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB. '
-                  'User can use Force Merge or manual retry.',
-                  category: LogCategory.download,
-                  screen: LogScreen.background,
-                  eventType: LogEventType.error,
-                  taskId: updatedTask.id,
-                );
-                final alreadyMb =
-                    (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
-                updatedTask.failureReason = DownloadFailure.partialDownload;
-                updatedTask.errorMessage =
-                    'Download stalled at $alreadyMb MB. '
-                    'Try Force Merge to save what\'s downloaded, or tap Retry.';
-                _emitTask(updatedTask);
-                return;
-              }
-              final attempts = _autoRetryAttempts[updatedTask.id] ?? 0;
-              if (attempts < retryLimit) {
-                final nextAttempt = attempts + 1;
-                _autoRetryAttempts[updatedTask.id] = nextAttempt;
-                final originalError = updatedTask.errorMessage ?? 'Unknown error';
-                final limitStr = retryLimit >= 999999 ? '∞' : '$retryLimit';
-                updatedTask.errorMessage = 'Retrying in 1s (attempt $nextAttempt/$limitStr). $originalError';
-                _emitTask(updatedTask);
-
-                Future.delayed(const Duration(seconds: 1), () {
-                  if (_tasks[updatedTask.id]?.state == DownloadState.failed) {
-                    retryHlsTaskWithRefresh(updatedTask.id, forceReload: false, isAutoRetry: true);
-                  }
-                });
-              } else {
-                AuroraLog.instance.error(
-                  'Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.',
-                  category: LogCategory.download,
-                  screen: LogScreen.background,
-                  eventType: LogEventType.error,
-                  taskId: updatedTask.id,
-                );
-                final originalError = updatedTask.errorMessage ?? 'Unknown error';
-                final cleanError = originalError.replaceFirst(RegExp(r'^Retrying in [12]s \(attempt \d+/(?:\d+|∞)\)\. '), '');
-                final failLimitStr = retryLimit >= 999999 ? 'infinite' : '$retryLimit';
-                updatedTask.errorMessage = 'Auto-retry exhausted after $failLimitStr attempts. $cleanError';
-                _emitTask(updatedTask);
-              }
-            }
-          }
-        }
-      });
-    }
+    _ensureSplitter(task);
 
     if (task.state == DownloadState.idle) {
       if (!_executionQueue.contains(task.id)) {
         _executionQueue.add(task.id);
       }
+    } else if (task.state == DownloadState.scheduled) {
+      _startScheduleTimer();
     }
     _schedule();
     if (queuePath != null && !_isLoading) {
@@ -535,13 +480,11 @@ class DownloadQueue {
       if (await tempDir.exists()) {
         await tempDir.delete(recursive: true);
       }
-      if (task.state != DownloadState.completed) {
-        final type = await FileSystemEntity.type(task.savePath);
-        if (type == FileSystemEntityType.file) {
-          await File(task.savePath).delete();
-        } else if (type == FileSystemEntityType.directory) {
-          await Directory(task.savePath).delete(recursive: true);
-        }
+      final type = await FileSystemEntity.type(task.savePath);
+      if (type == FileSystemEntityType.file) {
+        await File(task.savePath).delete();
+      } else if (type == FileSystemEntityType.directory) {
+        await Directory(task.savePath).delete(recursive: true);
       }
     } catch (e, s) {
       _logError('Failed to clean files for cancelled task $taskId', e, s);
@@ -721,6 +664,10 @@ class DownloadQueue {
     if (!isAutoRetry) {
       _autoRetryAttempts.remove(taskId);
     }
+    final task = _tasks[taskId];
+    if (task != null) {
+      await prepareBrowserContext(task);
+    }
     final splitter = _splitters[taskId];
     if (splitter is HlsDownloader) {
       await _runTaskOperation(taskId, () async {
@@ -744,6 +691,9 @@ class DownloadQueue {
       _autoRetryAttempts.remove(taskId);
     }
 
+    // Re-attach WebView bridges lost across process death / JSON reload.
+    await prepareBrowserContext(task);
+
     task.state = DownloadState.idle;
     if (!_executionQueue.contains(taskId) && !_activeTasks.contains(taskId)) {
       _executionQueue.add(taskId);
@@ -755,6 +705,287 @@ class DownloadQueue {
     _schedule();
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
+    }
+  }
+
+  /// Re-attach runtime browser bridges and refresh Cookie header.
+  /// Safe to call repeatedly; no-ops when [browserContextAttacher] is null
+  /// except for best-effort cookie refresh via an already-set cookieProvider.
+  Future<void> prepareBrowserContext(DownloadTask task) async {
+    try {
+      browserContextAttacher?.call(task);
+    } catch (e, s) {
+      _logError('browserContextAttacher failed for ${task.id}', e, s);
+    }
+    // Prefer live cookies over the stale Cookie header saved in the queue JSON.
+    if (task.cookieProvider != null) {
+      try {
+        final cookies = await task.cookieProvider!(task.url);
+        if (cookies.isNotEmpty) {
+          final merged = <String, String>{...?task.headers};
+          cookies.forEach((k, v) {
+            // Preserve original header casing if present.
+            final existingKey = merged.keys.firstWhere(
+              (key) => key.toLowerCase() == k.toLowerCase(),
+              orElse: () => k,
+            );
+            merged[existingKey] = v;
+          });
+          task.headers = merged;
+        }
+      } catch (e, s) {
+        _logError('cookie refresh failed for ${task.id}', e, s);
+      }
+    }
+  }
+
+  /// Apply a freshly sniffed [donor] (URL, headers, bridges) onto an
+  /// existing queue task and restart it. Wipes temp segments when the
+  /// media URL changes so old encrypted segments are not reused.
+  Future<void> updateTaskFromDonor(
+    String existingTaskId,
+    DownloadTask donor, {
+    bool wipeOnUrlChange = true,
+  }) async {
+    final existing = _tasks[existingTaskId];
+    if (existing == null) return;
+
+    final urlChanged = !_isLikelySameMedia(existing.url, donor.url) ||
+        existing.url != donor.url;
+    // Query-token change counts as a URL change for wipe purposes even when
+    // path matches (signed CDN tokens).
+    final tokenChanged = existing.url != donor.url;
+
+    existing.url = donor.url;
+    if (donor.headers != null && donor.headers!.isNotEmpty) {
+      existing.headers = Map<String, String>.from(donor.headers!);
+    }
+    if (donor.contentType != null) {
+      // contentType is final on some versions — check if mutable
+    }
+    // sourcePageUrl is final — cannot reassign; bridges use donor's page via
+    // onTokenExpired closure which captures donor.sourcePageUrl when set.
+
+    existing.copyBrowserBridgesFrom(donor);
+    // Prefer donor's source page for token refresh if existing has none.
+    // (sourcePageUrl is final — attach via bridge only)
+
+    if (tokenChanged) {
+      existing.downloadedBytes = 0;
+      existing.totalBytes = donor.totalBytes > 0 ? donor.totalBytes : 0;
+      if (wipeOnUrlChange) {
+        await _wipeTaskTemp(existing);
+      }
+    }
+
+    existing.failureReason = null;
+    existing.errorMessage = null;
+    existing.statusMessage = null;
+
+    if (existing.state == DownloadState.failed ||
+        existing.state == DownloadState.paused ||
+        existing.state == DownloadState.completed) {
+      existing.state = DownloadState.idle;
+    }
+
+    await prepareBrowserContext(existing);
+
+    AuroraLog.instance.info(
+      'Updated task $existingTaskId from donor '
+      '(urlChanged=$urlChanged tokenChanged=$tokenChanged '
+      'bridges: fetch=${existing.fetchViaWebView != null} '
+      'cookie=${existing.cookieProvider != null} '
+      'token=${existing.onTokenExpired != null})',
+      category: LogCategory.download,
+      screen: LogScreen.background,
+      eventType: LogEventType.stateChange,
+      taskId: existingTaskId,
+    );
+
+    await resumeTaskAsync(existingTaskId);
+  }
+
+  Future<void> _wipeTaskTemp(DownloadTask task) async {
+    try {
+      final tempDir = Directory(task.tempDir);
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    } catch (e, s) {
+      _logError('Failed to wipe temp for ${task.id}', e, s);
+    }
+    // Also drop any in-memory splitter so the next start is a clean resume
+    // detection against an empty temp dir.
+    final splitter = _splitters.remove(task.id);
+    if (splitter != null) {
+      try {
+        await splitter.dispose();
+      } catch (_) {}
+    }
+    final sub = _downloaderSubscriptions.remove(task.id);
+    await sub?.cancel();
+    // Re-create splitter on next add/schedule path — ensure it exists.
+    _ensureSplitter(task);
+  }
+
+  void _ensureSplitter(DownloadTask task) {
+    if (_splitters.containsKey(task.id)) return;
+    if (task.state == DownloadState.completed) return;
+    if (task.url.startsWith('blob:')) return;
+
+    BaseDownloader downloader;
+    if (task.url.startsWith('magnet:') || task.url.endsWith('.torrent')) {
+      downloader = TorrentDownloader(
+        task: task,
+        client: _client,
+        useNativeEngine: useNativeTorrentEngine,
+      );
+    } else if (_isHlsTask(task)) {
+      downloader = HlsDownloader(
+        task: task,
+        client: _client,
+        maxConcurrentSegments: math.min(numChunksPerTask, 8),
+        remuxTsToMp4: remuxTsToMp4,
+        speedLimiter: speedLimiter,
+      );
+    } else {
+      downloader = DownloadSplitter(
+        task: task,
+        client: _client,
+        numChunks: numChunksPerTask,
+        minSpeedBytesPerSec: minSpeedThresholdBytesPerSec,
+        stallTimeoutSeconds: stallTimeoutSeconds,
+        partialDownloadThreshold: partialDownloadThreshold,
+        remuxTsToMp4: remuxTsToMp4,
+        speedLimiter: speedLimiter,
+      );
+    }
+    _splitters[task.id] = downloader;
+    _downloaderSubscriptions[task.id] = downloader.onTaskUpdated.listen(
+      _onDownloaderTaskUpdated,
+    );
+  }
+
+  Future<void> _onDownloaderTaskUpdated(DownloadTask updatedTask) async {
+    _emitTask(updatedTask);
+    if (updatedTask.state != DownloadState.completed &&
+        updatedTask.state != DownloadState.failed) {
+      return;
+    }
+
+    final wasActive = _activeTasks.remove(updatedTask.id);
+    if (updatedTask.state == DownloadState.completed) {
+      _autoRetryAttempts.remove(updatedTask.id);
+      if (wasActive) {
+        if (autoClassifyEnabled) {
+          final oldPath = updatedTask.savePath;
+          _applyAutoClassification(updatedTask);
+          final newPath = updatedTask.savePath;
+          if (oldPath != newPath) {
+            try {
+              final oldFile = File(oldPath);
+              if (await oldFile.exists()) {
+                final newFile = File(newPath);
+                await newFile.parent.create(recursive: true);
+                await oldFile.rename(newPath);
+                AuroraLog.instance.info(
+                  'Auto-classified completed file moved from $oldPath to $newPath',
+                  category: LogCategory.download,
+                  screen: LogScreen.background,
+                  eventType: LogEventType.fileIo,
+                  taskId: updatedTask.id,
+                );
+              }
+            } catch (e) {
+              updatedTask.savePath = oldPath;
+              AuroraLog.instance.error(
+                'Failed to move auto-classified file: $e',
+                category: LogCategory.download,
+                screen: LogScreen.background,
+                eventType: LogEventType.error,
+                taskId: updatedTask.id,
+              );
+            }
+          }
+        }
+        unawaited(_publishCompletedTask(updatedTask));
+      }
+    }
+    _schedule();
+
+    if (updatedTask.state == DownloadState.failed) {
+      AuroraLog.instance.error(
+        'Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}',
+        category: LogCategory.download,
+        screen: LogScreen.background,
+        eventType: LogEventType.error,
+        taskId: updatedTask.id,
+      );
+      if (autoRetry && !updatedTask.isBackupImport) {
+        final isStallOrTruncation =
+            updatedTask.failureReason == DownloadFailure.speedStall ||
+            updatedTask.failureReason == DownloadFailure.partialDownload ||
+            updatedTask.failureReason == DownloadFailure.chunkIncomplete;
+        final alreadyDownloadedEnough =
+            updatedTask.downloadedBytes >= minBytesBeforeFullRetry;
+        if (isStallOrTruncation && alreadyDownloadedEnough) {
+          AuroraLog.instance.error(
+            'Skipped auto-retry for '
+            '${updatedTask.savePath.split("/").last}: '
+            'already downloaded '
+            '${(updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB. '
+            'User can use Force Merge or manual retry.',
+            category: LogCategory.download,
+            screen: LogScreen.background,
+            eventType: LogEventType.error,
+            taskId: updatedTask.id,
+          );
+          final alreadyMb =
+              (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
+          updatedTask.failureReason = DownloadFailure.partialDownload;
+          updatedTask.errorMessage =
+              'Download stalled at $alreadyMb MB. '
+              'Try Force Merge to save what\'s downloaded, or tap Retry.';
+          _emitTask(updatedTask);
+          return;
+        }
+        final attempts = _autoRetryAttempts[updatedTask.id] ?? 0;
+        if (attempts < retryLimit) {
+          final nextAttempt = attempts + 1;
+          _autoRetryAttempts[updatedTask.id] = nextAttempt;
+          final originalError = updatedTask.errorMessage ?? 'Unknown error';
+          final limitStr = '$retryLimit';
+          updatedTask.errorMessage =
+              'Retrying in 1s (attempt $nextAttempt/$limitStr). $originalError';
+          _emitTask(updatedTask);
+
+          Future.delayed(const Duration(seconds: 1), () {
+            if (_tasks[updatedTask.id]?.state == DownloadState.failed) {
+              retryHlsTaskWithRefresh(
+                updatedTask.id,
+                forceReload: false,
+                isAutoRetry: true,
+              );
+            }
+          });
+        } else {
+          AuroraLog.instance.error(
+            'Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.',
+            category: LogCategory.download,
+            screen: LogScreen.background,
+            eventType: LogEventType.error,
+            taskId: updatedTask.id,
+          );
+          final originalError = updatedTask.errorMessage ?? 'Unknown error';
+          final cleanError = originalError.replaceFirst(
+            RegExp(r'^Retrying in [12]s \(attempt \d+/(?:\d+|∞)\)\. '),
+            '',
+          );
+          updatedTask.errorMessage =
+              'Auto-retry exhausted after $retryLimit attempts. $cleanError';
+          _emitTask(updatedTask);
+        }
+      }
     }
   }
 
@@ -798,7 +1029,10 @@ class DownloadQueue {
       // Persist all tasks, including completed history, so the queue survives
       // app restarts and ADB installs.
       final data = _tasks.values.map((t) => t.toJson()).toList(growable: false);
-      final jsonString = await Isolate.run(() => jsonEncode(data));
+      final jsonString = await WorkerIsolatePool.instance.execute(
+        'jsonEncode',
+        {'data': data},
+      ) as String;
       await tempFile.writeAsString(jsonString, flush: true);
       // Backup existing file (best-effort).
       try {
@@ -838,7 +1072,10 @@ class DownloadQueue {
       // Run JSON parsing on a background isolate to avoid blocking the UI
       // thread.  This matters when the queue file is large (many completed
       // tasks in history).
-      final decoded = await Isolate.run(() => jsonDecode(json));
+      final decoded = await WorkerIsolatePool.instance.execute(
+        'jsonDecode',
+        {'json': json},
+      );
       if (decoded is! List) {
         await _preserveCorruptQueueFile(file, 'Queue file was not a list.');
         return;
@@ -876,6 +1113,15 @@ class DownloadQueue {
             task.state = DownloadState.paused;
           } else if (task.state == DownloadState.downloading) {
             task.state = DownloadState.idle;
+          } else if (task.state == DownloadState.scheduled) {
+            // If the scheduled time has already passed, start immediately.
+            if (task.scheduledStartAt == null ||
+                !task.scheduledStartAt!.isAfter(DateTime.now())) {
+              task.state = DownloadState.idle;
+            } else {
+              // Still in the future — ensure the periodic checker is running.
+              _startScheduleTimer();
+            }
           } else if (task.state == DownloadState.merging) {
             task.state = DownloadState.failed;
             task.failureReason = DownloadFailure.mergeInterrupted;
@@ -992,6 +1238,12 @@ class DownloadQueue {
       if (!_activeTasks.contains(taskId) || _isDisposed) return;
     }
     try {
+      final task = _tasks[taskId];
+      if (task != null) {
+        // Always rebind bridges + cookies before start (post-restart safety).
+        await prepareBrowserContext(task);
+        _ensureSplitter(task);
+      }
       final splitter = _splitters[taskId];
       if (splitter == null) {
         // Task was cancelled/disposed between scheduling and start.
@@ -1001,7 +1253,6 @@ class DownloadQueue {
           '',
         );
         _activeTasks.remove(taskId);
-        final task = _tasks[taskId];
         if (task != null) {
           task.state = DownloadState.idle;
           _emitTask(task);
@@ -1023,6 +1274,16 @@ class DownloadQueue {
   List<DownloadTask> get allTasks => List.unmodifiable(_tasks.values);
 
   DownloadTask? getTask(String id) => _tasks[id];
+
+  DownloadTask? getTaskByUrl(String url) {
+    final normalized = _normalizeUrl(url);
+    for (final task in _tasks.values) {
+      if (_normalizeUrl(task.url) == normalized) {
+        return task;
+      }
+    }
+    return null;
+  }
 
   static String _normalizeUrl(String url) {
     // Matches SniffedMediaCache.normalizeUrl — strips common tracking params.
@@ -1075,6 +1336,8 @@ class DownloadQueue {
             t.state == DownloadState.downloading ||
             t.state == DownloadState.paused;
       }
+      // Scheduled tasks don't block future downloads of the same URL.
+      if (t.state == DownloadState.scheduled) return false;
       return true;
     });
   }
@@ -1296,23 +1559,46 @@ class DownloadQueue {
   /// Returns the lowercased file extension (including the dot) from a URL
   /// or file path, or `null` when there is no recognizable extension.
   static String? _extensionFromUrl(String url) {
-    try {
-      final uri = Uri.parse(url);
-      final path = uri.path;
-      final slash = path.lastIndexOf('/');
-      final lastSegment = slash >= 0 ? path.substring(slash + 1) : path;
-      final dot = lastSegment.lastIndexOf('.');
-      if (dot <= 0 || dot == lastSegment.length - 1) return null;
-      return lastSegment.substring(dot).toLowerCase();
-    } catch (_) {
-      return null;
+    return MediaFileTypes.extensionOf(url);
+  }
+
+  /// Deletes temp workspaces for failed tasks older than [maxAge].
+  /// Keeps failed-task metadata in the queue so the user can still retry
+  /// after a fresh re-sniff, but frees disk from abandoned segment trees.
+  Future<int> purgeStaleFailedTemps({
+    Duration maxAge = const Duration(days: 3),
+  }) async {
+    final cutoff = DateTime.now().subtract(maxAge);
+    var purged = 0;
+    for (final task in _tasks.values) {
+      if (task.state != DownloadState.failed) continue;
+      if (task.createdAt.isAfter(cutoff)) continue;
+      if (_activeTasks.contains(task.id)) continue;
+      try {
+        final tempDir = Directory(task.tempDir);
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+          purged++;
+          AuroraLog.instance.info(
+            'Purged stale failed temp for ${task.savePath.split("/").last}',
+            category: LogCategory.download,
+            screen: LogScreen.background,
+            eventType: LogEventType.fileIo,
+            taskId: task.id,
+          );
+        }
+      } catch (e, s) {
+        _logError('Failed to purge temp for ${task.id}', e, s);
+      }
     }
+    return purged;
   }
 
   /// Applies auto-classification to [task.savePath], inserting a category
   /// subfolder (e.g. "Videos", "Documents") between `/completed/` and the
-  /// filename. No-op when the path already has a user-chosen subfolder or
-  /// does not live under `/completed/`.
+  /// filename. Honors [autoClassifyMappings] for per-extension folder overrides.
+  /// No-op when the path already has a user-chosen subfolder or does not live
+  /// under `/completed/`. Avoids on-disk collisions with ` (1)`, ` (2)`, …
   void _applyAutoClassification(DownloadTask task) {
     final normalized = task.savePath.replaceAll('\\', '/');
     const sep = '/completed/';
@@ -1329,10 +1615,19 @@ class DownloadQueue {
       after = parts.last;
     }
 
-    final category = FileClassifier.classify(after);
-    final label = FileClassifier.categoryLabel(category);
+    final label = FileClassifier.folderLabelFor(
+      after,
+      customMappings: autoClassifyMappings,
+    );
     final base = task.savePath.substring(0, idx + sep.length - 1);
-    task.savePath = '$base/$label/$after';
+    final candidate = '$base/$label/$after';
+    // Avoid clobbering an existing completed file with the same name.
+    task.savePath = FilenameService.uniquePath(
+      candidate,
+      reservedPaths: _tasks.values
+          .where((t) => t.id != task.id)
+          .map((t) => t.savePath),
+    );
   }
 
   /// Removes oldest completed/failed tasks when the history limit is exceeded.
@@ -1360,6 +1655,18 @@ class DownloadQueue {
       final id = terminal[i].key;
       if (_activeTasks.contains(id) || _taskOperations.containsKey(id)) {
         continue;
+      }
+      final task = _tasks[id];
+      // Best-effort: free temp workspace when dropping a failed history row.
+      if (task != null && task.state == DownloadState.failed) {
+        unawaited(() async {
+          try {
+            final tempDir = Directory(task.tempDir);
+            if (await tempDir.exists()) {
+              await tempDir.delete(recursive: true);
+            }
+          } catch (_) {}
+        }());
       }
       _tasks.remove(id);
       if (!_taskRemovedController.isClosed) _taskRemovedController.add(id);
@@ -1435,6 +1742,7 @@ class DownloadQueue {
     _splitters.clear();
 
     _saveDebounceTimer?.cancel();
+    _scheduleTimer?.cancel();
     if (!_taskUpdateController.isClosed) {
       await _taskUpdateController.close();
     }

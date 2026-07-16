@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:isolate';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'media_binary_parsers.dart';
+import 'worker_isolate_pool.dart';
+
 import '../downloader/hls_playlist_parser.dart';
+import '../downloader/hls_size_estimator.dart';
 import '../logging/aurora_log.dart';
 import 'dash_playlist_parser.dart';
 import 'media_sniffer_engine.dart';
@@ -148,100 +153,86 @@ class MediaEnricher {
     }
 
     try {
-      // Tier 1: HEAD Request
-      final headResp = await host.client
-          .head(uri, headers: headers)
-          .timeout(const Duration(seconds: 10))
-          .catchError((_) => http.Response('', 500));
-      if (headResp.statusCode >= 200 && headResp.statusCode < 400) {
-        final headContentRange = headResp.headers['content-range'] ?? '';
+      // Tier 1: HEAD Request (offloaded to isolate)
+      final headResult = await _probeInIsolate(
+        method: 'HEAD',
+        url: item.url,
+        headers: headers,
+        onlySuccess: true,
+      );
+      if (headResult != null) {
+        final headContentRange = headResult['contentRange'] as String? ?? '';
         final headRangeMatch = RegExp(
           r'bytes \d+-\d+/(\d+)',
         ).firstMatch(headContentRange);
         if (headRangeMatch != null) {
           contentLength = int.tryParse(headRangeMatch.group(1)!);
         } else {
-          contentLength = int.tryParse(
-            headResp.headers['content-length'] ?? '',
-          );
+          contentLength = headResult['contentLength'] as int?;
         }
-        contentType = headResp.headers['content-type'];
+        contentType = headResult['contentType'] as String?;
         debugPrint(
-          '[MediaEnricher] Tier 1 HEAD ${headResp.statusCode} '
+          '[MediaEnricher] Tier 1 HEAD '
           'content-length=$contentLength for ${item.url}',
         );
       } else {
         debugPrint(
-          '[MediaEnricher] Tier 1 HEAD failed ${headResp.statusCode} '
-          'for ${item.url}',
+          '[MediaEnricher] Tier 1 HEAD failed for ${item.url}',
         );
-        // Tier 2: Streamed GET with Range: bytes=0-0 (immediately cancel stream to avoid downloading body)
+        // Tier 2: GET with Range: bytes=0-0 (offloaded to isolate)
         bool gotSize = false;
         try {
-          final request = http.Request('GET', uri);
-          request.headers.addAll({...headers, 'Range': 'bytes=0-0'});
-          request.followRedirects = true;
-
-          final response = await host.client
-              .send(request)
-              .timeout(const Duration(seconds: 10));
-          if (response.statusCode >= 200 && response.statusCode < 400) {
-            final resHeaders = response.headers;
-            final contentRange = resHeaders['content-range'] ?? '';
+          final rangeResult = await _probeInIsolate(
+            method: 'GET',
+            url: item.url,
+            headers: headers,
+            range: 'bytes=0-0',
+            onlySuccess: true,
+          );
+          if (rangeResult != null) {
+            final cr = rangeResult['contentRange'] as String? ?? '';
             final rangeMatch = RegExp(
               r'bytes \d+-\d+/(\d+)',
-            ).firstMatch(contentRange);
-            final lengthHeader = resHeaders['content-length'] ?? '';
+            ).firstMatch(cr);
+            final lengthInt = rangeResult['contentLength'] as int?;
             if (rangeMatch != null) {
               contentLength = int.tryParse(rangeMatch.group(1)!);
               gotSize = true;
-            } else if (lengthHeader.isNotEmpty) {
-              final parsed = int.tryParse(lengthHeader);
-              // Guard: a 206 response to Range: bytes=0-0 returns
-              // Content-Length: 1 (the single requested byte). Treat
-              // values <= 1 as "no size" so Tiers 3/4 still run.
-              if (parsed != null && parsed > 1) {
-                contentLength = parsed;
-                gotSize = true;
-              }
+            } else if (lengthInt != null && lengthInt > 1) {
+              contentLength = lengthInt;
+              gotSize = true;
             }
-            contentType = resHeaders['content-type'];
+            contentType = rangeResult['contentType'] as String?;
           }
           debugPrint(
             '[MediaEnricher] Tier 2 Range-GET '
             'gotSize=$gotSize content-length=$contentLength for ${item.url}',
           );
-          unawaited(response.stream.listen((_) {}).cancel().catchError((_) {}));
         } catch (e) {
           debugPrint(
             '[MediaEnricher] Tier 2 Range-GET threw for ${item.url}: $e',
           );
         }
 
-        // Tier 3: If Tier 2 failed/no size resolved, try standard Streamed GET without Range header
+        // Tier 3: If Tier 2 failed/no size resolved, try plain GET without Range
         if (!gotSize) {
           try {
-            final request = http.Request('GET', uri);
-            request.headers.addAll(headers);
-            request.followRedirects = true;
-
-            final response = await host.client
-                .send(request)
-                .timeout(const Duration(seconds: 10));
-            if (response.statusCode >= 200 && response.statusCode < 400) {
-              final resHeaders = response.headers;
-              final lengthHeader = resHeaders['content-length'] ?? '';
-              if (lengthHeader.isNotEmpty) {
-                contentLength = int.tryParse(lengthHeader);
+            final getResult = await _probeInIsolate(
+              method: 'GET',
+              url: item.url,
+              headers: headers,
+              onlySuccess: true,
+            );
+            if (getResult != null) {
+              final lengthInt = getResult['contentLength'] as int?;
+              if (lengthInt != null) {
+                contentLength = lengthInt;
               }
-              contentType = resHeaders['content-type'];
+              contentType = getResult['contentType'] as String?;
             }
             debugPrint(
               '[MediaEnricher] Tier 3 GET '
               'content-length=$contentLength for ${item.url}',
-            );
-            unawaited(
-              response.stream.listen((_) {}).cancel().catchError((_) {}),
             );
           } catch (e) {
             debugPrint(
@@ -299,12 +290,14 @@ class MediaEnricher {
 
     if (item.type == MediaType.image) {
       try {
-        final imgResp = await host.client
-            .get(uri, headers: {...headers, 'Range': 'bytes=0-2047'})
-            .timeout(const Duration(seconds: 10))
-            .catchError((_) => http.Response('', 500));
-        if (imgResp.statusCode == 206 || imgResp.statusCode == 200) {
-          final b = imgResp.bodyBytes;
+        final imgResult = await _probeInIsolate(
+          method: 'GET',
+          url: item.url,
+          headers: headers,
+          range: 'bytes=0-2047',
+        );
+        if (imgResult != null) {
+          final b = Uint8List.fromList((imgResult['bodyBytes'] as List<int>?) ?? []);
           final dims = await _parseImageDimensionsInIsolate(b);
           if (dims != null) {
             videoWidth = dims['width'] as int;
@@ -341,12 +334,14 @@ class MediaEnricher {
 
     if (item.type == MediaType.audio) {
       try {
-        final aResp = await host.client
-            .get(uri, headers: {...headers, 'Range': 'bytes=0-32767'})
-            .timeout(const Duration(seconds: 10))
-            .catchError((_) => http.Response('', 500));
-        if (aResp.statusCode == 206 || aResp.statusCode == 200) {
-          final b = aResp.bodyBytes;
+        final aResult = await _probeInIsolate(
+          method: 'GET',
+          url: item.url,
+          headers: headers,
+          range: 'bytes=0-32767',
+        );
+        if (aResult != null) {
+          final b = Uint8List.fromList((aResult['bodyBytes'] as List<int>?) ?? []);
           final audioResult = await _parseAudioHeadersInIsolate(b);
           if (audioResult != null) {
             audioCodec = audioResult['codec'] as String?;
@@ -365,12 +360,14 @@ class MediaEnricher {
     if (item.type == MediaType.video && !_isHlsUri(uri, item) &&
         !uri.path.toLowerCase().endsWith('.mpd')) {
       try {
-        final vResp = await host.client
-            .get(uri, headers: {...headers, 'Range': 'bytes=0-65535'})
-            .timeout(const Duration(seconds: 10))
-            .catchError((_) => http.Response('', 500));
-        if (vResp.statusCode == 206 || vResp.statusCode == 200) {
-          final b = vResp.bodyBytes;
+        final vResult = await _probeInIsolate(
+          method: 'GET',
+          url: item.url,
+          headers: headers,
+          range: 'bytes=0-65535',
+        );
+        if (vResult != null) {
+          final b = Uint8List.fromList((vResult['bodyBytes'] as List<int>?) ?? []);
           final videoResult = await _parseVideoMp4AtomsInIsolate(b);
           if (videoResult != null) {
             final vw = videoResult['width'] as int?;
@@ -784,95 +781,61 @@ class MediaEnricher {
             duration = Duration(
               milliseconds: (playlist.durationSeconds * 1000).round(),
             );
-            final totalByteRangeLength = playlist.totalByteRangeLength;
-            if (totalByteRangeLength != null) {
-              contentLength = totalByteRangeLength;
-            } else if (playlist.segments.isNotEmpty) {
-              // Sample up to 3 segments (first, middle, last) and average
-              // their sizes for a more accurate VBR estimate.
-              final segs = playlist.segments;
-              final sampleIndices = <int>{};
-              if (segs.length > 0) sampleIndices.add(segs.length ~/ 4);
-              if (segs.length > 1) sampleIndices.add(segs.length ~/ 2);
-              if (segs.length > 2) sampleIndices.add(segs.length * 3 ~/ 4);
-              if (sampleIndices.isEmpty) sampleIndices.add(0);
-              final sampleSizes = <int>[];
+            // Best-in-class size estimate:
+            // byte-range exact → duration-weighted samples → avg×count
+            // → bandwidth×duration.
+            final segs = playlist.segments;
+            int initBytes = 0;
+            if (playlist.initSegmentUri != null) {
+              initBytes = await _probeSegmentContentLength(
+                    playlist.initSegmentUri!,
+                    headers,
+                  ) ??
+                  0;
+            }
 
-              for (final si in sampleIndices) {
+            final samples = <HlsSizeSample>[];
+            if (playlist.totalByteRangeLength == null && segs.isNotEmpty) {
+              final indices = HlsSizeEstimator.selectSampleIndices(
+                segs.length,
+                maxSamples: segs.length <= 12 ? segs.length : 8,
+              );
+              for (final si in indices) {
                 final segmentUri = segs[si].uri;
-                int? segmentSize;
-                try {
-                  final headResp = await host.client
-                      .head(segmentUri, headers: headers)
-                      .timeout(const Duration(seconds: 5))
-                      .catchError((_) => http.Response('', 500));
-                  if (headResp.statusCode >= 200 &&
-                      headResp.statusCode < 400) {
-                    segmentSize = int.tryParse(
-                      headResp.headers['content-length'] ?? '',
-                    );
-                  } else {
-                    final request = http.Request('GET', segmentUri);
-                    request.headers.addAll({...headers, 'Range': 'bytes=0-0'});
-                    request.followRedirects = true;
-                    final response = await host.client
-                        .send(request)
-                        .timeout(const Duration(seconds: 5));
-                    if (response.statusCode >= 200 &&
-                        response.statusCode < 400) {
-                      final cr = response.headers['content-range'] ?? '';
-                      final rm = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
-                      if (rm != null) {
-                        segmentSize = int.tryParse(rm.group(1)!);
-                      } else {
-                        final lh = response.headers['content-length'] ?? '';
-                        final parsed = int.tryParse(lh);
-                        if (parsed != null && parsed > 1) {
-                          segmentSize = parsed;
-                        }
-                      }
-                    }
-                    unawaited(
-                      response.stream.listen((_) {}).cancel().catchError((_) {}),
-                    );
-                  }
-                } catch (_) {}
-
-                if (segmentSize == null && host.fetchViaWebView != null) {
-                  try {
-                    final jsHeaders = await host.fetchViaWebView!(
-                      segmentUri.toString(),
-                    );
-                    final statusCode = int.tryParse(
-                      jsHeaders?['statusCode'] ?? '',
-                    );
-                    if (statusCode != null &&
-                        statusCode >= 200 &&
-                        statusCode < 400) {
-                      final lengthHeader =
-                          jsHeaders?['content-length'] ?? '';
-                      if (lengthHeader.isNotEmpty) {
-                        segmentSize = int.tryParse(lengthHeader);
-                      }
-                    }
-                  } catch (_) {}
-                }
-
-                if (segmentSize != null && segmentSize > 0) {
-                  sampleSizes.add(segmentSize);
+                final segmentSize =
+                    await _probeSegmentContentLength(segmentUri, headers);
+                if (segmentSize != null &&
+                    segmentSize >= HlsSizeEstimator.minSegmentBytes &&
+                    segmentSize <= HlsSizeEstimator.maxSegmentBytes) {
+                  samples.add(HlsSizeSample(
+                    index: si,
+                    bytes: segmentSize,
+                    durationSeconds: segs[si].durationSeconds,
+                  ));
                 }
               }
+            }
 
-              if (sampleSizes.isNotEmpty) {
-                final avgSize =
-                    sampleSizes.reduce((a, b) => a + b) ~/ sampleSizes.length;
-                contentLength = avgSize * segs.length;
-                debugPrint(
-                  '[MediaEnricher] HLS segment sampling: '
-                  '${sampleSizes.length} samples, avg=${avgSize}B, '
-                  'total estimate=${contentLength}B for ${item.url}',
-                );
-              }
+            final estimate = HlsSizeEstimator.estimate(
+              playlist: playlist,
+              samples: samples,
+              bandwidthBps: item.bandwidth,
+              initSegmentBytes: initBytes,
+            );
+            if (estimate.totalBytes != null && estimate.totalBytes! > 0) {
+              contentLength = estimate.totalBytes;
+              estimated = estimate.isEstimated;
+              debugPrint(
+                '[MediaEnricher] HLS size ${estimate.source.name}: '
+                '${estimate.totalBytes}B (${estimate.detail}) for ${item.url}',
+              );
+              AuroraLog.instance.info(
+                'HLS size ${estimate.source.name}: ${estimate.totalBytes}B '
+                '(${estimate.detail}) for ${item.url}',
+                category: LogCategory.sniffer,
+                screen: LogScreen.browser,
+                eventType: LogEventType.sniff,
+              );
             }
           }
           contentType ??= 'application/vnd.apple.mpegurl';
@@ -1168,30 +1131,38 @@ class MediaEnricher {
     final mediaItem = host.mutableDetectedMedia[index];
     final existingSize = mediaItem.contentLengthBytes;
     int? finalSize;
+    // Preserve whether contentLength came from a real probe vs estimate.
+    // The HLS branch above sets `estimated` when using samples/bandwidth.
+    var sizeIsEstimated = estimated;
     if (isHlsPlaylist || isDashManifest) {
-      // For HLS / DASH manifests, the HTTP-probed contentLength is the
-      // size of the .m3u8 / .mpd body (a few hundred bytes / a few KB),
-      // NOT the full video.
-      // 1. If we have estimated size from segment count, use it.
-      // 2. If we have a bandwidth and a duration, estimate from bandwidth.
-      // 3. Fallback to existingSize.
+      // For HLS / DASH manifests, a tiny HTTP contentLength is the
+      // playlist body itself — never treat it as the full media size.
       final itemBandwidth = mediaItem.bandwidth ?? item.bandwidth;
       final effectiveDuration = duration ?? mediaItem.duration;
       if (contentLength != null && contentLength > 10000) {
+        // Sampled/byte-range/bandwidth estimate produced by the HLS path.
         finalSize = contentLength;
-        estimated = false;
-      } else if (itemBandwidth != null) {
-        // Use actual duration if known, otherwise default to 1800s
-        final durationMs = effectiveDuration != null
-            ? effectiveDuration.inMilliseconds.toDouble()
-            : 1800.0 * 1000;
+        // Keep sizeIsEstimated as set by the estimator (exact byte-range
+        // sets estimated=false; samples set estimated=true).
+      } else if (itemBandwidth != null &&
+          effectiveDuration != null &&
+          effectiveDuration.inSeconds > 0) {
+        // Only use bandwidth×duration when we know the real duration.
+        // Never invent a 1800s default — that massively over-estimates.
+        final durationMs = effectiveDuration.inMilliseconds.toDouble();
         finalSize = ((itemBandwidth / 8) * (durationMs / 1000)).round();
-        estimated = effectiveDuration == null;
-      } else {
+        sizeIsEstimated = true;
+      } else if (existingSize != null && existingSize > 10000) {
         finalSize = existingSize;
+        sizeIsEstimated = mediaItem.isSizeEstimated;
+      } else {
+        // Unknown — leave null rather than a misleading playlist-body size.
+        finalSize = null;
+        sizeIsEstimated = true;
       }
     } else {
       finalSize = contentLength ?? existingSize;
+      sizeIsEstimated = estimated && contentLength == null;
     }
     final enriched = mediaItem.copyWith(
       contentLengthBytes: finalSize,
@@ -1207,7 +1178,7 @@ class MediaEnricher {
       isLive: isLive,
       frameRate: frameRate,
       isShortClip: isShortClip,
-      isSizeEstimated: estimated,
+      isSizeEstimated: sizeIsEstimated,
       headers: headers,
     );
     host.mutableDetectedMedia[index] = enriched;
@@ -1315,489 +1286,195 @@ class MediaEnricher {
     final ct = item.contentType?.toLowerCase() ?? '';
     return ct.contains('mpegurl');
   }
-}
 
-/// Result of parsing the first MP3 frame header in an MPEG audio stream.
-class _Mp3FrameInfo {
-  final int bitrateKbps;
-  final int sampleRate;
-  final int channels;
-  const _Mp3FrameInfo({
-    required this.bitrateKbps,
-    required this.sampleRate,
-    required this.channels,
-  });
-}
+  // ---------------------------------------------------------------------------
+  // Offloaded helpers — dispatch to the persistent worker-isolate pool.
+  // Falls back to main-thread execution when the pool is unavailable (e.g.
+  // in test environments where Isolate.spawn is limited).
+  // ---------------------------------------------------------------------------
 
-/// Result of the lightweight MP4 audio-atom scan. Returns whatever the
-/// probe could resolve: codec label (e.g. "aac"), sample rate, channel
-/// count, and a duration if both `mvhd` and a media timescale are present.
-class _Mp4AudioInfo {
-  final String? codec;
-  final int? sampleRate;
-  final int? channels;
-  final Duration? duration;
-  const _Mp4AudioInfo({
-    this.codec,
-    this.sampleRate,
-    this.channels,
-    this.duration,
-  });
-}
-
-/// Parses a 4-byte MPEG audio frame header to extract bitrate, sample
-/// rate, and channel count. Returns null when the header is reserved or
-/// otherwise invalid (e.g. the 4 bytes don't form a valid frame sync).
-_Mp3FrameInfo? _parseMp3FrameHeader(int header) {
-  // The first 11 bits must be all-1s except bit 21 (LSB of the second
-  // byte), which must be 0 — i.e. 0xFF 0xE_.
-  if ((header & 0xFFE00000) != 0xFFE00000) return null;
-
-  // version: 0 = v2.5, 1 = reserved, 2 = v2, 3 = v1
-  final versionBits = (header >> 19) & 0x03;
-  // layer: 1 = L3, 2 = L2, 3 = L1, 0 = reserved
-  final layerBits = (header >> 17) & 0x03;
-  if (versionBits == 1 || layerBits == 0) return null;
-
-  // Bitrate index is 4 bits at positions 16..13.
-  final bitrateIdx = (header >> 12) & 0x0F;
-  // Sample rate index is 2 bits at positions 11..10.
-  final sampleRateIdx = (header >> 10) & 0x03;
-  // Channel mode is 2 bits at positions 8..7. 3 = mono, others = stereo.
-  final channelMode = (header >> 6) & 0x03;
-  final channels = channelMode == 3 ? 1 : 2;
-
-  // Bitrate table indexed by (version, layer) and bitrate index.
-  // Each entry is kbps; 0 means "free" (we treat as invalid).
-  const bitrateTable = <List<List<int>>>[
-    // versionBits == 0 (v2.5) — same as v2
-    [
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // reserved (layer 0)
-      [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0], // L3
-      [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0], // L2
-      [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0], // L1
-    ],
-    // versionBits == 1 (reserved)
-    [
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    ],
-    // versionBits == 2 (v2)
-    [
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
-      [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
-      [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0],
-    ],
-    // versionBits == 3 (v1)
-    [
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
-      [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 0],
-      [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 0],
-    ],
-  ];
-  final bitrateKbps =
-      bitrateTable[versionBits][layerBits][bitrateIdx];
-
-  // Sample rate table indexed by versionBits and sampleRateIdx.
-  // v1: 44100, 48000, 32000, reserved
-  // v2: 22050, 24000, 16000, reserved
-  // v2.5: 11025, 12000, 8000, reserved
-  const sampleRateTable = <List<int>>[
-    [11025, 12000, 8000, 0], // v2.5
-    [0, 0, 0, 0], // reserved
-    [22050, 24000, 16000, 0], // v2
-    [44100, 48000, 32000, 0], // v1
-  ];
-  final sampleRate = sampleRateTable[versionBits][sampleRateIdx];
-
-  if (bitrateKbps <= 0 || sampleRate <= 0) return null;
-  return _Mp3FrameInfo(
-    bitrateKbps: bitrateKbps,
-    sampleRate: sampleRate,
-    channels: channels,
-  );
-}
-
-/// Returns true if [b] starting at [offset] contains the ASCII bytes of
-/// [ascii] (case-sensitive, length must match).
-bool _startsWithAscii(List<int> b, int offset, String ascii) {
-  if (offset < 0 || offset + ascii.length > b.length) return false;
-  for (var i = 0; i < ascii.length; i++) {
-    if (b[offset + i] != ascii.codeUnitAt(i)) return false;
-  }
-  return true;
-}
-
-/// Scans the leading bytes of an MP4/ISO BMFF stream for audio-specific
-/// atoms: `mvhd` (movie duration), `mdhd` (track timescale), and `mp4a`
-/// (channel count + sample rate). Mirrors the structure of the video
-/// probe but only fills in audio-relevant fields.
-_Mp4AudioInfo? _parseMp4AudioAtoms(List<int> b) {
-  int? movieTimescale;
-  int? movieDuration;
-  int? mdhdTimescale;
-  int? mp4aSampleRate;
-  int? mp4aChannels;
-  bool foundMp4a = false;
-
-  // Bounds check: 40 bytes of lookahead is more than enough for any
-  // fixed-size header we read (mvhd needs 36, mdhd 32, mp4a 32).
-  for (var i = 0; i < b.length - 40; i++) {
-    // mvhd
-    if (b[i] == 0x6D &&
-        b[i + 1] == 0x76 &&
-        b[i + 2] == 0x68 &&
-        b[i + 3] == 0x64) {
-      final ver = b[i + 4];
-      if (ver == 1) {
-        if (i + 36 <= b.length) {
-          movieTimescale =
-              (b[i + 24] << 24) |
-              (b[i + 25] << 16) |
-              (b[i + 26] << 8) |
-              b[i + 27];
-          var d = 0;
-          for (var j = 0; j < 8; j++) {
-            d = (d << 8) | b[i + 28 + j];
-          }
-          movieDuration = d;
-        }
-      } else {
-        if (i + 24 <= b.length) {
-          movieTimescale =
-              (b[i + 16] << 24) |
-              (b[i + 17] << 16) |
-              (b[i + 18] << 8) |
-              b[i + 19];
-          movieDuration =
-              (b[i + 20] << 24) |
-              (b[i + 21] << 16) |
-              (b[i + 22] << 8) |
-              b[i + 23];
-        }
-      }
-    }
-    // mdhd
-    if (b[i] == 0x6D &&
-        b[i + 1] == 0x64 &&
-        b[i + 2] == 0x68 &&
-        b[i + 3] == 0x64) {
-      final ver = b[i + 4];
-      final tsOff = ver == 1 ? i + 28 : i + 20;
-      if (tsOff + 4 <= b.length) {
-        mdhdTimescale =
-            (b[tsOff] << 24) |
-            (b[tsOff + 1] << 16) |
-            (b[tsOff + 2] << 8) |
-            b[tsOff + 3];
-      }
-    }
-    // mp4a — the audio sample entry inside stsd. The "Audio Sample Entry"
-    // (ISO 14496-12) layout after the 4-byte "mp4a" type is:
-    //   reserved(6) + data_ref_index(2) + reserved(8) + channel_count(2)
-    //   + sample_size(2) + compression_id(2) + packet_size(2) +
-    //   sample_rate(4) — stored as 16.16 fixed point.
-    // Since the "mp4a" magic lives at b[i..i+3], the rest of the box
-    // body (which we treat as starting right after the 4-byte type) is
-    // at offsets i+4 and beyond, even though the full box header also
-    // includes a 4-byte size before the type.
-    if (b[i] == 0x6D &&
-        b[i + 1] == 0x70 &&
-        b[i + 2] == 0x34 &&
-        b[i + 3] == 0x61) {
-      if (i + 32 <= b.length) {
-        // channel_count at i+20 (6 reserved + 2 dref + 8 reserved + 2 ch).
-        mp4aChannels = (b[i + 20] << 8) | b[i + 21];
-        // sample_rate at i+28, upper 16 bits are the integer Hz part.
-        mp4aSampleRate = (b[i + 28] << 8) | b[i + 29];
-        if (mp4aSampleRate > 0) {
-          foundMp4a = true;
-        }
-      }
+  /// Returns true when running inside `flutter test`.
+  bool _isTestEnvironment() {
+    try {
+      return Platform.environment.containsKey('FLUTTER_TEST');
+    } catch (_) {
+      return false;
     }
   }
 
-  Duration? dur;
-  if (movieDuration != null && movieTimescale != null && movieTimescale > 0) {
-    final seconds = movieDuration / movieTimescale;
-    if (seconds > 0 && seconds < 24 * 3600) {
-      dur = Duration(milliseconds: (seconds * 1000).round());
+  /// Parse image dimensions on a background worker. Returns `{width, height}`
+  /// or null.
+  Future<Map<String, int>?> _parseImageDimensionsInIsolate(
+      Uint8List bytes) async {
+    if (_isTestEnvironment()) {
+      return Future.value(parseImageDimensions(bytes));
     }
-  }
-
-  if (!foundMp4a &&
-      mdhdTimescale == null &&
-      movieDuration == null) {
-    return null;
-  }
-
-  return _Mp4AudioInfo(
-    codec: foundMp4a ? 'aac' : null,
-    sampleRate: mp4aSampleRate,
-    channels: mp4aChannels,
-    duration: dur,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Isolate-parsing helpers — each runs binary header/atom analysis off the UI
-// isolate so that media enrichment does not block the render thread.
-// ---------------------------------------------------------------------------
-
-/// Parse image dimensions (JPEG/PNG/GIF/WEBP) from raw bytes on a background
-/// isolate. Returns `{width, height}` or null.
-Future<Map<String, int>?> _parseImageDimensionsInIsolate(Uint8List bytes) async {
-  return Isolate.run<Map<String, int>?>(() {
-    int? w, h;
-    if (bytes.length > 6 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
-      for (var i = 0; i < bytes.length - 5; i++) {
-        if (bytes[i] == 0xFF && (bytes[i + 1] & 0xF0) == 0xC0) {
-          h = (bytes[i + 5] << 8) | bytes[i + 6];
-          w = (bytes[i + 7] << 8) | bytes[i + 8];
-          break;
-        }
-      }
-    } else if (bytes.length > 8 &&
-        bytes[0] == 0x89 && bytes[1] == 0x50 &&
-        bytes[2] == 0x4E && bytes[3] == 0x47) {
-      w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
-      h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
-    } else if (bytes.length > 6 &&
-        bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
-      w = bytes[6] | (bytes[7] << 8);
-      h = bytes[8] | (bytes[9] << 8);
-    } else if (bytes.length > 20 &&
-        bytes[0] == 0x52 && bytes[1] == 0x49 &&
-        bytes[2] == 0x46 && bytes[3] == 0x46) {
-      w = ((bytes[26] & 0x3F) << 8) | bytes[27];
-      h = (((bytes[26] >> 6) | (bytes[28] << 2)) << 8) | bytes[29];
-    }
-    if (w != null && h != null && w > 0 && h > 0) {
-      return {'width': w, 'height': h};
-    }
-    return null;
-  });
-}
-
-/// Parse audio binary headers (MP3/ID3v2, FLAC, OGG Vorbis, M4A/mp4a) on a
-/// background isolate. Returns a map with keys: codec, container, sampleRate,
-/// channels, durationMs — any may be null.
-Future<Map<String, dynamic>?> _parseAudioHeadersInIsolate(Uint8List b) async {
-  return Isolate.run<Map<String, dynamic>?>(() {
-    if (b.length < 4) return null;
-    String? audioCodec;
-    String? containerFormat;
-    int? sampleRate;
-    int? channels;
-    int? durationMs;
-
-    // -- MP3 / ID3v2 --
-    var scanFrom = 0;
-    if (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33) {
-      if (b.length >= 10) {
-        final tagSize = (b[6] << 21) | (b[7] << 14) | (b[8] << 7) | b[9];
-        scanFrom = 10 + tagSize;
-      }
-    }
-    if (scanFrom < b.length - 4 &&
-        b[scanFrom] == 0xFF && (b[scanFrom + 1] & 0xE0) == 0xE0) {
-      final mp3Header = (b[scanFrom] << 24) |
-          (b[scanFrom + 1] << 16) |
-          (b[scanFrom + 2] << 8) |
-          b[scanFrom + 3];
-      final mp3Parsed = _parseMp3FrameHeader(mp3Header);
-      if (mp3Parsed != null) {
-        audioCodec = 'mp3';
-        containerFormat ??= 'mp3';
-        sampleRate = mp3Parsed.sampleRate;
-        channels = mp3Parsed.channels;
-      }
-    } else if (b[0] == 0x66 && b[1] == 0x4C &&
-        b[2] == 0x61 && b[3] == 0x43) {
-      // -- FLAC --
-      if (b.length >= 42) {
-        final sr = (b[18] << 12) | (b[19] << 4) | (b[20] >> 4);
-        final ch = ((b[20] >> 1) & 0x07) + 1;
-        var totalSamples = (b[21] & 0x0F);
-        for (var k = 0; k < 4; k++) {
-          totalSamples = (totalSamples << 8) | b[22 + k];
-        }
-        audioCodec = 'flac';
-        containerFormat ??= 'flac';
-        sampleRate = sr > 0 ? sr : null;
-        channels = ch;
-        if (sr > 0 && totalSamples > 0) {
-          final seconds = totalSamples / sr;
-          if (seconds > 0 && seconds < 24 * 3600) {
-            durationMs = (seconds * 1000).round();
-          }
-        }
-      }
-    } else if (b[0] == 0x4F && b[1] == 0x67 &&
-        b[2] == 0x67 && b[3] == 0x53) {
-      // -- OGG Vorbis --
-      if (b.length >= 30) {
-        final segCount = b[26];
-        var payloadStart = 27 + segCount;
-        if (payloadStart + 1 < b.length && b[payloadStart] == 0x01) {
-          if (payloadStart + 30 <= b.length &&
-              _startsWithAscii(b, payloadStart + 1, 'vorbis')) {
-            channels = b[payloadStart + 11];
-            sampleRate = b[payloadStart + 12] |
-                (b[payloadStart + 13] << 8) |
-                (b[payloadStart + 14] << 16) |
-                (b[payloadStart + 15] << 24);
-            audioCodec = 'vorbis';
-            containerFormat ??= 'ogg';
-            sampleRate = sampleRate > 0 ? sampleRate : null;
-            channels = channels > 0 ? channels : null;
-          }
-        }
-      }
-    } else if (b.length > 8 &&
-        b[4] == 0x66 && b[5] == 0x74 &&
-        b[6] == 0x79 && b[7] == 0x70) {
-      // -- M4A / ISO BMFF audio --
-      final audioMp4 = _parseMp4AudioAtoms(b);
-      if (audioMp4 != null) {
-        audioCodec = audioMp4.codec ?? 'aac';
-        containerFormat ??= 'mp4';
-        sampleRate = audioMp4.sampleRate;
-        channels = audioMp4.channels;
-        if (audioMp4.duration != null) {
-          durationMs = audioMp4.duration!.inMilliseconds;
-        }
-      }
-    }
-
-    if (audioCodec == null && sampleRate == null && channels == null) {
+    try {
+      final result = await WorkerIsolatePool.instance.execute('parseImage', {
+        'bytes': bytes.toList(),
+      });
+      return result as Map<String, int>?;
+    } catch (_) {
       return null;
     }
-    return {
-      'codec': audioCodec,
-      'container': containerFormat,
-      'sampleRate': sampleRate,
-      'channels': channels,
-      'durationMs': durationMs,
-    };
-  });
-}
+  }
 
-/// Parse MP4 atoms (tkhd, mvhd, mdhd, stts) on a background isolate to
-/// extract video dimensions, framerate, duration, and codec hints.
-/// Returns a map with keys: width, height, videoCodec, audioCodec, frameRate,
-/// durationMs — any may be null.
-Future<Map<String, dynamic>?> _parseVideoMp4AtomsInIsolate(Uint8List b) async {
-  return Isolate.run<Map<String, dynamic>?>(() {
-    int? vw, vh;
-    Duration? movieDuration;
-    int? trackTimescale;
-    int? firstSampleDelta;
+  /// Parse audio binary headers on a background worker. Returns a map with
+  /// keys: codec, container, sampleRate, channels, durationMs — any may be null.
+  Future<Map<String, dynamic>?> _parseAudioHeadersInIsolate(
+      Uint8List b) async {
+    if (_isTestEnvironment()) {
+      return Future.value(parseAudioHeaders(b));
+    }
+    try {
+      final result = await WorkerIsolatePool.instance.execute('parseAudio', {
+        'bytes': b.toList(),
+      });
+      return result as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
 
-    for (var i = 0; i < b.length - 80; i++) {
-      // tkhd
-      if (b[i] == 0x74 && b[i + 1] == 0x6B &&
-          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
-        final ver = b[i + 4];
-        final wOff = ver == 1 ? i + 92 : i + 80;
-        final hOff = wOff + 4;
-        if (hOff + 4 <= b.length) {
-          final vwRaw = (b[wOff] << 24) | (b[wOff + 1] << 16) |
-              (b[wOff + 2] << 8) | b[wOff + 3];
-          final vhRaw = (b[hOff] << 24) | (b[hOff + 1] << 16) |
-              (b[hOff + 2] << 8) | b[hOff + 3];
-          vw = vwRaw >> 16;
-          vh = vhRaw >> 16;
-        }
+  /// Parse MP4 atoms on a background worker. Returns a map with keys: width,
+  /// height, videoCodec, audioCodec, frameRate, durationMs — any may be null.
+  Future<Map<String, dynamic>?> _parseVideoMp4AtomsInIsolate(
+      Uint8List b) async {
+    if (_isTestEnvironment()) {
+      return Future.value(parseVideoMp4Atoms(b));
+    }
+    try {
+      final result = await WorkerIsolatePool.instance.execute('parseMp4', {
+        'bytes': b.toList(),
+      });
+      return result as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Probe a segment URI for Content-Length (HEAD → Range-GET → WebView).
+  Future<int?> _probeSegmentContentLength(
+    Uri segmentUri,
+    Map<String, String> headers,
+  ) async {
+    try {
+      final headResult = await _probeInIsolate(
+        method: 'HEAD',
+        url: segmentUri.toString(),
+        headers: headers,
+        timeoutSeconds: 5,
+        onlySuccess: true,
+      );
+      if (headResult != null) {
+        final len = headResult['contentLength'] as int?;
+        if (len != null && len > 0) return len;
       }
-      // mvhd
-      if (b[i] == 0x6D && b[i + 1] == 0x76 &&
-          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
-        final ver = b[i + 4];
-        if (ver == 1) {
-          if (i + 36 <= b.length) {
-            final timescale = (b[i + 24] << 24) | (b[i + 25] << 16) |
-                (b[i + 26] << 8) | b[i + 27];
-            var durationRaw = 0;
-            for (var j = 0; j < 8; j++) {
-              durationRaw = (durationRaw << 8) | b[i + 28 + j];
-            }
-            if (timescale > 0 && durationRaw > 0) {
-              movieDuration = Duration(
-                milliseconds: ((durationRaw * 1000) / timescale).round(),
-              );
-            }
+
+      final rangeResult = await _probeInIsolate(
+        method: 'GET',
+        url: segmentUri.toString(),
+        headers: headers,
+        range: 'bytes=0-0',
+        timeoutSeconds: 5,
+        onlySuccess: true,
+      );
+      if (rangeResult != null) {
+        final cr = rangeResult['contentRange'] as String? ?? '';
+        final rm = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
+        if (rm != null) {
+          final total = int.tryParse(rm.group(1)!);
+          if (total != null && total > 0) return total;
+        }
+        final lh = rangeResult['contentLength'] as int?;
+        if (lh != null && lh > 1) return lh;
+      }
+    } catch (_) {}
+
+    if (host.fetchViaWebView != null) {
+      try {
+        final jsHeaders = await host.fetchViaWebView!(segmentUri.toString());
+        final statusCode = int.tryParse(jsHeaders?['statusCode'] ?? '');
+        if (statusCode != null && statusCode >= 200 && statusCode < 400) {
+          final lengthHeader = jsHeaders?['content-length'] ??
+              jsHeaders?['Content-Length'] ??
+              '';
+          if (lengthHeader.isNotEmpty) {
+            return int.tryParse(lengthHeader);
           }
-        } else {
-          if (i + 24 <= b.length) {
-            final timescale = (b[i + 16] << 24) | (b[i + 17] << 16) |
-                (b[i + 18] << 8) | b[i + 19];
-            final durationRaw = (b[i + 20] << 24) | (b[i + 21] << 16) |
-                (b[i + 22] << 8) | b[i + 23];
-            if (timescale > 0 && durationRaw > 0) {
-              movieDuration = Duration(
-                milliseconds: ((durationRaw * 1000) / timescale).round(),
-              );
-            }
-          }
         }
-      }
-      // mdhd
-      if (b[i] == 0x6D && b[i + 1] == 0x64 &&
-          b[i + 2] == 0x68 && b[i + 3] == 0x64) {
-        final ver = b[i + 4];
-        final tsOff = ver == 1 ? i + 28 : i + 16;
-        if (tsOff + 4 <= b.length) {
-          final ts = (b[tsOff] << 24) | (b[tsOff + 1] << 16) |
-              (b[tsOff + 2] << 8) | b[tsOff + 3];
-          if (ts > 0) trackTimescale = ts;
-        }
-      }
-      // stts
-      if (b[i] == 0x73 && b[i + 1] == 0x74 &&
-          b[i + 2] == 0x74 && b[i + 3] == 0x73) {
-        if (i + 20 <= b.length) {
-          final sampleDelta = (b[i + 16] << 24) | (b[i + 17] << 16) |
-              (b[i + 18] << 8) | b[i + 19];
-          if (sampleDelta > 0) firstSampleDelta = sampleDelta;
-        }
-      }
+      } catch (_) {}
     }
+    return null;
+  }
 
-    double? frameRate;
-    if (trackTimescale != null && firstSampleDelta != null) {
-      final rawFps = trackTimescale / firstSampleDelta;
-      final clamped = rawFps.clamp(1.0, 240.0);
-      frameRate = (clamped * 100).round() / 100.0;
+  /// Runs an HTTP probe (HEAD or GET with optional Range) via the persistent
+  /// worker pool so network I/O never blocks the UI thread. Returns a map
+  /// with `statusCode`, `contentType`, `contentLength`, `contentRange`,
+  /// `headers`, and `bodyBytes`, or null on failure.
+  Future<Map<String, dynamic>?> _probeInIsolate({
+    required String method,
+    required String url,
+    required Map<String, String> headers,
+    String? range,
+    int timeoutSeconds = 10,
+    bool onlySuccess = false,
+  }) async {
+    if (_isTestEnvironment()) {
+      return _runProbeDirect(method, url, headers,
+          range: range, timeoutSeconds: timeoutSeconds, onlySuccess: onlySuccess);
     }
+    try {
+      final result = await WorkerIsolatePool.instance.execute('probe', {
+        'method': method,
+        'url': url,
+        'headers': headers,
+        if (range != null) 'range': range,
+        'timeoutSeconds': timeoutSeconds,
+        'onlySuccess': onlySuccess,
+      });
+      return result as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
 
-    // Codec detection from string patterns in bytes
-    String? vCodec, aCodec;
-    final bodyStr = String.fromCharCodes(b);
-    if (bodyStr.contains('avcC')) {
-      vCodec = 'h264';
-    } else if (bodyStr.contains('hvcC')) {
-      vCodec = 'h265';
-    } else if (bodyStr.contains('vpcC')) {
-      vCodec = 'vp9';
+  /// Runs the probe directly on the calling thread (test mode). Uses
+  /// [host.client] which is the mock client in tests.
+  Future<Map<String, dynamic>?> _runProbeDirect(
+    String method,
+    String url,
+    Map<String, String> headers, {
+    String? range,
+    int timeoutSeconds = 10,
+    bool onlySuccess = false,
+  }) async {
+    final client = host.client;
+    try {
+      final uri = Uri.parse(url);
+      final request = http.Request(method, uri);
+      request.headers.addAll(headers);
+      if (range != null) request.headers['Range'] = range;
+      request.followRedirects = true;
+      final streamedResponse = await client
+          .send(request)
+          .timeout(Duration(seconds: timeoutSeconds));
+      final response = await http.Response.fromStream(streamedResponse);
+      if (onlySuccess &&
+          (response.statusCode < 200 || response.statusCode >= 400)) {
+        return null;
+      }
+      return {
+        'statusCode': response.statusCode,
+        'contentType': response.headers['content-type'] ?? '',
+        'contentLength':
+            int.tryParse(response.headers['content-length'] ?? ''),
+        'contentRange': response.headers['content-range'] ?? '',
+        'headers': Map<String, String>.from(response.headers),
+        'bodyBytes': response.bodyBytes,
+      };
+    } catch (_) {
+      return null;
     }
-    if (bodyStr.contains('mp4a')) {
-      aCodec = 'aac';
-    } else if (bodyStr.contains('Opus')) {
-      aCodec = 'opus';
-    }
-
-    return {
-      'width': vw,
-      'height': vh,
-      'videoCodec': vCodec,
-      'audioCodec': aCodec,
-      'frameRate': frameRate,
-      'durationMs': movieDuration?.inMilliseconds,
-    };
-  });
+  }
 }

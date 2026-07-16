@@ -4,7 +4,7 @@
   // To new flutter_inappwebview API: window.flutter_inappwebview.callHandler(name, data)
   if (!window.__auroraChannelShim) {
     window.__auroraChannelShim = true;
-    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','NavigationSwipeChannel'];
+    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','NavigationSwipeChannel','AuroraPlayChannel'];
     for (var __i = 0; __i < __auroraChannels.length; __i++) {
       (function(__name) {
         window[__name] = {
@@ -151,6 +151,23 @@
       c === 'application/dash+xml';
   }
 
+  // True when Content-Type is real media / playlist (not every response).
+  // Intentionally skips application/octet-stream to avoid bridge floods.
+  function isMediaContentType(ct) {
+    if (!ct) return false;
+    var c = String(ct).toLowerCase();
+    if (c.indexOf('video/') === 0 || c.indexOf('audio/') === 0) return true;
+    return isHlsContentType(c);
+  }
+
+  // URL looks like downloadable media by extension (or disguised playlist path).
+  var _mediaUrlRe = /\.(mp4|m3u8|webm|mkv|avi|flv|mov|ts|mp3|wav|aac|ogg|m4a|flac|mpd|f4m|smil)([?#]|$)/i;
+  function isMediaLikeUrl(url) {
+    if (!url) return false;
+    if (_mediaUrlRe.test(String(url))) return true;
+    return hasPlaylistPathHint(url);
+  }
+
   // Check if a URL path looks like a playlist path that might disguise an
   // HLS playlist under a non-.m3u8 extension (e.g. /hls/.../index.jpg).
   function hasPlaylistPathHint(url) {
@@ -232,6 +249,41 @@
     // Default: skip unknown binary-ish types
     return false;
   }
+
+  // Media-page heuristic: only scan response body text when the PAGE URL
+  // suggests it hosts video/media content. On normal websites (docs, search,
+  // social feeds) the response body scan is skipped entirely, avoiding the
+  // expensive response.clone().text() + regex pass for every fetch/XHR.
+  function _isMediaPage() {
+    var h = location.href.toLowerCase();
+    return h.indexOf('/watch') >= 0 ||
+      h.indexOf('/video') >= 0 ||
+      h.indexOf('/embed') >= 0 ||
+      h.indexOf('/play') >= 0 ||
+      h.indexOf('/live') >= 0 ||
+      h.indexOf('/vod') >= 0 ||
+      h.indexOf('/stream') >= 0 ||
+      h.indexOf('/tv/') >= 0 ||
+      h.indexOf('/episode') >= 0 ||
+      h.indexOf('/series') >= 0 ||
+      h.indexOf('/movie') >= 0 ||
+      h.indexOf('/clip') >= 0 ||
+      h.indexOf('/detail') >= 0 ||
+      // Known video/porn hosts (common media pages)
+      h.indexOf('youtube.com') >= 0 ||
+      h.indexOf('pornhub.com') >= 0 ||
+      h.indexOf('xvideos.com') >= 0 ||
+      h.indexOf('xhamster.com') >= 0 ||
+      h.indexOf('xnxx.com') >= 0 ||
+      h.indexOf('redtube.com') >= 0 ||
+      h.indexOf('youporn.com') >= 0 ||
+      h.indexOf('tube8.com') >= 0 ||
+      h.indexOf('spankbang.com') >= 0 ||
+      h.indexOf('eporner.com') >= 0 ||
+      h.indexOf('missav') >= 0 ||
+      h.indexOf('beeg') >= 0;
+  }
+  var _mediaPage = _isMediaPage();
 
   function scanTextForUrls(text) {
     if (!text) return;
@@ -423,17 +475,25 @@
   }, true);
 
   // --- Fetch hook ---
+  // Only bridge media-like URLs / content-types — posting every response
+  // (analytics, CSS, JSON APIs) flooded Dart mid page-load.
   var originalFetch = window.fetch;
   if (originalFetch) {
     window.fetch = function(input, init) {
       return originalFetch.apply(this, arguments).then(function(response) {
         if (response.url) {
-          postUrl(response.url);
           try {
             var ct = response.headers.get('content-type') || "";
             var cl = response.headers.get('content-length') || "";
-            if (ct) postMediaData(response.url, ct, cl);
-            if (shouldScanText(response.url, ct, cl)) {
+            var mediaCt = isMediaContentType(ct);
+            var mediaUrl = isMediaLikeUrl(response.url);
+            if (mediaCt || mediaUrl) {
+              postUrl(response.url);
+            }
+            if (mediaCt) postMediaData(response.url, ct, cl);
+            // Only scan response body text on known media pages — on typical
+            // websites (search, docs, social) the regex scan is pure overhead.
+            if (_mediaPage && shouldScanText(response.url, ct, cl)) {
               response.clone().text().then(function(text) {
                 scanTextForUrls(text);
               }).catch(function() {});
@@ -458,7 +518,8 @@
         return response;
       }).catch(function(err) {
         var url = (typeof input === "string") ? input : (input && input.url) || "";
-        if (url) postUrl(url); throw err;
+        if (url && isMediaLikeUrl(url)) postUrl(url);
+        throw err;
       });
     };
   }
@@ -476,24 +537,34 @@
     XMLHttpRequest.prototype.send = function() {
       var self = this;
       var url = self.__auroraUrl || "";
-      if (url) postUrl(url);
+      // Gate pre-response postUrl the same way as fetch (media-like only).
+      if (url && isMediaLikeUrl(url)) postUrl(url);
       self.addEventListener('loadend', function() {
         try {
+          var finalUrl = self.responseURL || url;
           var ct = self.getResponseHeader('content-type') || "";
           var cl = self.getResponseHeader('content-length') || "";
-          if (ct) postMediaData(self.responseURL || url, ct, cl);
-          if (shouldScanText(self.responseURL || url, ct, cl) && self.responseText) {
+          var mediaCt = isMediaContentType(ct);
+          var mediaUrl = isMediaLikeUrl(finalUrl);
+          // If we only learned media-ness from Content-Type, post now.
+          if (mediaCt || mediaUrl) {
+            postUrl(finalUrl);
+          }
+          if (mediaCt) postMediaData(finalUrl, ct, cl);
+          // Only scan response body text on known media pages.
+          if (_mediaPage && shouldScanText(finalUrl, ct, cl) && self.responseText) {
             scanTextForUrls(self.responseText);
           }
           // Capture .m3u8 response bodies for HlsPlaylistChannel
-          var _hlsXhrUrl = (self.responseURL || url).toLowerCase();
+          var _hlsXhrUrl = String(finalUrl).toLowerCase();
           if (_hlsXhrUrl.indexOf('.m3u8') >= 0 && self.responseText) {
             try {
-              HlsPlaylistChannel.postMessage(JSON.stringify({url: self.responseURL || url, body: self.responseText}));
+              HlsPlaylistChannel.postMessage(JSON.stringify({url: finalUrl, body: self.responseText}));
             } catch(_) {}
-          } else if (self.responseText && hasPlaylistPathHint(self.responseURL || url)) {
-            // Disguised playlist: body exists and path suggests HLS.
-            captureDisguisedPlaylist(self.responseURL || url, self.responseText);
+          } else if (self.responseText &&
+              (hasPlaylistPathHint(finalUrl) || isHlsContentType(ct))) {
+            // Disguised playlist: body exists and path/content-type suggests HLS.
+            captureDisguisedPlaylist(finalUrl, self.responseText);
           }
         } catch(_) {}
       }, { once: true });
@@ -546,6 +617,62 @@
   document.addEventListener('canplay', function(e) {
     if (e.target instanceof HTMLMediaElement) postMediaElementSrc(e.target);
   }, true);
+
+  // --- UC-style: replace site player with Aurora ---
+  // When window.__auroraReplaceSitePlayer is true, intercept play() so the
+  // site's own <video>/<audio> does not start; Dart opens AuroraVideoPlayer
+  // with cookies/headers from the capturing tab.
+  if (!window.__auroraReplacePlayerHooked) {
+    window.__auroraReplacePlayerHooked = true;
+    if (typeof window.__auroraReplaceSitePlayer === 'undefined') {
+      window.__auroraReplaceSitePlayer = true;
+    }
+    var _auroraOrigPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function() {
+      if (!window.__auroraReplaceSitePlayer) {
+        return _auroraOrigPlay.apply(this, arguments);
+      }
+      try {
+        var src = '';
+        try { src = this.currentSrc || this.src || ''; } catch (_) { src = ''; }
+        var isVideo = false;
+        try { isVideo = this instanceof HTMLVideoElement; } catch (_) { isVideo = true; }
+        var currentTime = 0;
+        try { currentTime = this.currentTime || 0; } catch (_) {}
+        try { this.pause(); } catch (_) {}
+        try { this.muted = true; } catch (_) {}
+        try {
+          if (this.removeAttribute) this.removeAttribute('autoplay');
+        } catch (_) {}
+        // Soft-hide the site player so it does not flash under Aurora.
+        try {
+          if (this.style && isVideo) {
+            this.dataset.auroraReplaced = '1';
+            this.style.opacity = '0.15';
+          }
+        } catch (_) {}
+        var needsSniffed = !src ||
+          src.indexOf('blob:') === 0 ||
+          src.indexOf('data:') === 0 ||
+          src.indexOf('mediasource:') === 0 ||
+          src.indexOf('mse:') === 0;
+        var payload = JSON.stringify({
+          url: src || '',
+          currentTime: currentTime,
+          isVideo: !!isVideo,
+          needsSniffed: !!needsSniffed
+        });
+        try {
+          if (window.AuroraPlayChannel && AuroraPlayChannel.postMessage) {
+            AuroraPlayChannel.postMessage(payload);
+          } else if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+            window.flutter_inappwebview.callHandler('AuroraPlayChannel', payload);
+          }
+        } catch (_) {}
+      } catch (_) {}
+      return Promise.resolve();
+    };
+  }
 
   // --- Media Error Detection ---
   // When a <video> or <audio> element fails to load its source (e.g. 404 from
@@ -673,19 +800,36 @@
       }
     } catch(_) {}
     setTimeout(function() { try { scanMedia(document); } catch(_) {} }, 500);
-    setTimeout(function() { try { scanMedia(document); } catch(_) {} }, 1500);
+    // 1500ms delayed scan removed — the MutationObserver and 500ms scan
+    // already catch dynamic content added after initial paint.
   }
 
-  // --- MutationObserver ---
+  // --- MutationObserver (debounced via requestAnimationFrame) ---
+  // Batching mutations on the next animation frame prevents expensive
+  // scanMedia + querySelectorAll calls from blocking the JS thread during
+  // bursts of DOM mutations (SPA rendering, ad insertion, lazy-loading).
   if (!window.__auroraObserverActive) {
     window.__auroraObserverActive = true;
+    var _moNodes = [];
+    var _moScheduled = false;
+    function _flushMutations() {
+      _moScheduled = false;
+      var nodes = _moNodes;
+      _moNodes = [];
+      for (var i = 0; i < nodes.length; i++) {
+        var node = nodes[i];
+        if (node && node.querySelectorAll) scanMedia(node);
+      }
+    }
     var observer = new MutationObserver(function(records) {
       for (var i = 0; i < records.length; i++) {
         var record = records[i];
         if (record.type === 'childList') {
           for (var j = 0; j < record.addedNodes.length; j++) {
             var node = record.addedNodes[j];
-            if (node && node.querySelectorAll) scanMedia(node);
+            if (node && node.querySelectorAll) {
+              _moNodes.push(node);
+            }
           }
         } else if (record.type === 'attributes') {
           var node = record.target;
@@ -697,6 +841,10 @@
             }
           }
         }
+      }
+      if (!_moScheduled && _moNodes.length > 0) {
+        _moScheduled = true;
+        requestAnimationFrame(_flushMutations);
       }
     });
     observer.observe(document.documentElement || document.body, {
@@ -902,16 +1050,22 @@
         var meta = {
           title: '',
           ogTitle: '',
+          twitterTitle: '',
+          h1Title: '',
           ogVideoWidth: '',
           ogVideoHeight: '',
           ldName: '',
+          codeLabel: '',
         };
 
         meta.title = document.title || '';
 
-        // OG meta tags (property="" or name="" forms)
+        // OG + Twitter meta tags (property="" or name="" forms).
+        // MissAV (and many hosts) truncate <title> (~55 chars) while
+        // og:title / twitter:title keep the full descriptive name.
         var metas = document.querySelectorAll(
-          'meta[property^="og:"], meta[name^="og:"]'
+          'meta[property^="og:"], meta[name^="og:"], ' +
+            'meta[name^="twitter:"], meta[property^="twitter:"]'
         );
         for (var i = 0; i < metas.length; i++) {
           var prop =
@@ -920,9 +1074,27 @@
             '';
           var content = metas[i].getAttribute('content') || '';
           if (prop === 'og:title') meta.ogTitle = content;
+          else if (prop === 'twitter:title') meta.twitterTitle = content;
           else if (prop === 'og:video:width') meta.ogVideoWidth = content;
           else if (prop === 'og:video:height') meta.ogVideoHeight = content;
         }
+
+        // Primary page heading — on MissAV this matches the full og:title
+        // and is more reliable than the truncated document.title.
+        try {
+          var h1 = document.querySelector('h1');
+          if (h1) {
+            var h1Text = (h1.textContent || '').replace(/\s+/g, ' ').trim();
+            if (h1Text.length >= 4) meta.h1Title = h1Text;
+          }
+        } catch (_) {}
+
+        // Optional product code line (e.g. "Code: LULU-172-UNCENSORED-LEAK")
+        try {
+          var bodyText = document.body ? document.body.innerText || '' : '';
+          var codeMatch = bodyText.match(/Code:\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40})/i);
+          if (codeMatch) meta.codeLabel = codeMatch[1].trim();
+        } catch (_) {}
 
         // JSON-LD structured data
         var ldScripts = document.querySelectorAll(
@@ -978,6 +1150,22 @@
           characterData: true,
         });
       }
+    } catch (_) {}
+
+    // Also observe meta tags (og:title, og:description, etc.) for SPAs that
+    // update them via JavaScript after the initial render. Without this,
+    // pageMeta.title stays as the stale placeholder title like "Pinayum Player"
+    // even though the real og:title was set client-side.
+    try {
+      var metaObserver = new MutationObserver(function () {
+        postMeta();
+      });
+      metaObserver.observe(document.head, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['content'],
+      });
     } catch (_) {}
   })();
 

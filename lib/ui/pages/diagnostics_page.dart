@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -392,7 +390,8 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.receipt_long_outlined,
-                            size: 48, color: scheme.onSurfaceVariant.withAlpha(128)),
+                            size: 48,
+                            color: scheme.onSurfaceVariant.withAlpha(128)),
                         const SizedBox(height: 12),
                         Text(
                           all.isEmpty

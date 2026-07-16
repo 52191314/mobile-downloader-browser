@@ -11,6 +11,7 @@ import '../logging/aurora_log.dart';
 import 'hls_decryptor.dart';
 import 'hls_models.dart';
 import 'hls_playlist_parser.dart';
+import 'hls_size_estimator.dart';
 import '../platform/network_binding_service.dart';
 import '../platform/ts_remux_service.dart';
 import 'headless_webview_fetcher.dart';
@@ -44,11 +45,21 @@ class HlsDownloader implements BaseDownloader {
   bool _needsRefresh = false;
   final Set<int> _staleSegmentIndexes = {};
   final Set<int> _countedSegmentIndexes = {};
-  /// True when [_probeSegmentSizes] determined the total size before
-  /// downloading segments.  Prevents per-segment accumulation from
-  /// overwriting the pre-calculated total (which would make progress
-  /// track downloaded bytes 1:1 and always show ~100%).
+  /// True when total size was determined before (or refined during)
+  /// segment download. Prevents naive per-segment accumulation from
+  /// making progress always show ~100%.
   bool _totalBytesLocked = false;
+  /// Exact byte-range sum — never refine downward except at completion.
+  bool _totalBytesExact = false;
+  /// Sampled / bandwidth estimate — progressively refined as segments finish.
+  bool _totalBytesEstimated = false;
+  final List<int> _completedSegSizes = [];
+  double _completedSegDurationSec = 0;
+  int _completedSegCount = 0;
+  int _initSegmentBytes = 0;
+  /// First locked estimate (sniffer or sample probe). Progressive refine is
+  /// clamped against this so concurrent partials cannot balloon the total.
+  int _initialSizeEstimate = 0;
   HlsPlaylist? _playlist;
   Uint8List? _encryptionKeyBytes;
   String _currentPlaylistUrl = '';
@@ -66,6 +77,12 @@ class HlsDownloader implements BaseDownloader {
   /// WebView (CORS).  Lazily initialized on first need.
   HeadlessWebViewFetcher? _headlessFetcher;
 
+  /// After repeated HTTP 403/401 on a WAF host, skip Dart HTTP entirely and
+  /// rely on WebView / headless only. Hammering 403s trips the circuit
+  /// breaker and can get the device IP banned by Cloudflare.
+  bool _skipHttpFallback = false;
+  int _httpForbiddenStreak = 0;
+
 
   Timer? _speedTimer;
   int _lastBytesTick = 0;
@@ -75,11 +92,16 @@ class HlsDownloader implements BaseDownloader {
   final StreamController<DownloadTask> _taskUpdateController =
       StreamController<DownloadTask>.broadcast();
 
+  /// When true, MPEG-TS merge output is remuxed to MP4 after completion.
+  /// fMP4 and audio-only playlists never remux regardless of this flag.
+  final bool remuxTsToMp4;
+
   HlsDownloader({
     required this.task,
     http.Client? client,
     this.maxConcurrentSegments = 4,
     this.maxSegmentProbeConcurrency = 10,
+    this.remuxTsToMp4 = true,
     SpeedLimiter? speedLimiter,
   }) : _ownsClient = client == null,
        client = client ?? http.Client(),
@@ -96,6 +118,8 @@ class HlsDownloader implements BaseDownloader {
 
     task.state = DownloadState.downloading;
     task.errorMessage = null;
+    _skipHttpFallback = false;
+    _httpForbiddenStreak = 0;
 
     // Detect resume: if tempDir has existing segment files, treat as retry
     // so we skip already-downloaded segments instead of wiping them.
@@ -153,11 +177,23 @@ class HlsDownloader implements BaseDownloader {
       task.downloadedBytes = 0;
     }
     if (task.totalBytes > 0) {
-      // Size already determined (previous run or sniffer estimate) — keep it.
+      // Size already determined (previous run or sniffer estimate) — keep it
+      // and refine as real segments complete unless we already know exact.
       _totalBytesLocked = true;
+      if (!_totalBytesExact) _totalBytesEstimated = true;
     } else {
       task.totalBytes = -1;
       _totalBytesLocked = false;
+      _totalBytesExact = false;
+      _totalBytesEstimated = false;
+    }
+    if (!_isRetry) {
+      _completedSegSizes.clear();
+      _completedSegDurationSec = 0;
+      _completedSegCount = 0;
+      _initSegmentBytes = 0;
+      _totalBytesExact = false;
+      _initialSizeEstimate = task.totalBytes > 0 ? task.totalBytes : 0;
     }
     _countedSegmentIndexes.clear();
     _taskUpdateController.add(task);
@@ -345,21 +381,24 @@ class HlsDownloader implements BaseDownloader {
 
       // Remux TS → MP4 for MPEG-TS streams (no transcoding, just container change).
       // fMP4 streams already produce .mp4; audio-only produces .m4a. Only MPEG-TS
-      // needs the remux step.
+      // needs the remux step — and only when the setting allows it.
       final mergedPath = task.savePath;
-      if (_playlist != null &&
+      if (remuxTsToMp4 &&
+          _playlist != null &&
           !_isAudioOnlyPlaylist(_playlist!) &&
           !playlist.hasFmp4 &&
           p.extension(mergedPath).toLowerCase() == '.ts') {
         final mp4Path = '${p.withoutExtension(mergedPath)}.mp4';
-        task.errorMessage = 'Converting .ts to .mp4 so it plays in any app.';
+        task.statusMessage = 'Converting .ts to .mp4 so it plays in any app.';
+        task.errorMessage = null;
         _taskUpdateController.add(task);
         final remux = await TsRemuxService.remuxTsToMp4(mergedPath, mp4Path);
         if (remux.success) {
           try {
-            File(mergedPath).delete();
+            await File(mergedPath).delete();
           } catch (_) {}
           task.savePath = mp4Path;
+          task.statusMessage = null;
           task.errorMessage = null;
         } else {
           AuroraLog.instance.error(
@@ -370,7 +409,10 @@ class HlsDownloader implements BaseDownloader {
             eventType: LogEventType.error,
             taskId: task.id,
           );
-          task.errorMessage = 'Couldn\'t convert to .mp4 — keeping original .ts. '
+          task.statusMessage = null;
+          task.errorMessage =
+              'Couldn\'t convert to .mp4 — keeping original .ts. '
+              'Open it in a player that supports MPEG-TS, or re-download. '
               '${remux.error ?? "The stream may use an unsupported codec."}';
         }
       }
@@ -398,134 +440,309 @@ class HlsDownloader implements BaseDownloader {
   }
 
   Future<void> _probeSegmentSizes(HlsPlaylist playlist) async {
-    // 0. Skip if total is already locked (previous run or sniffer estimate)
-    if (_totalBytesLocked && task.totalBytes > 0) {
-      return;
-    }
+    // Skip if we already have an exact size from a prior run.
+    if (_totalBytesExact && task.totalBytes > 0) return;
 
-    // 1. Skip if resuming
+    // On resume, keep prior estimate and refine as segments complete.
     if (task.downloadedBytes > 0) {
+      if (task.totalBytes > 0) {
+        _totalBytesEstimated = true;
+        _totalBytesLocked = true;
+      }
       return;
     }
 
-    // 2. Skip if live
     if (playlist.isLive) {
       task.totalBytes = -1;
+      _totalBytesLocked = false;
+      _totalBytesExact = false;
+      _totalBytesEstimated = false;
       _taskUpdateController.add(task);
       return;
     }
 
-    // 3. Byte-range fast path
+    // Exact byte-range sum (best case — no network).
     final brSize = playlist.totalByteRangeLength;
     if (brSize != null && brSize > 0) {
-      task.totalBytes = brSize;
+      int initBytes = 0;
+      if (playlist.initSegmentUri != null) {
+        initBytes = await _probeUriContentLength(playlist.initSegmentUri!) ?? 0;
+        _initSegmentBytes = initBytes;
+      }
+      task.totalBytes = brSize + initBytes;
+      _totalBytesExact = true;
+      _totalBytesEstimated = false;
       _totalBytesLocked = true;
+      AuroraLog.instance.info(
+        'HLS size exact from byte-ranges: ${task.totalBytes}B '
+        '(${playlist.segments.length} segs + init=$initBytes)',
+        category: LogCategory.hls,
+        eventType: LogEventType.network,
+        taskId: task.id,
+      );
       _taskUpdateController.add(task);
       return;
     }
 
-    // 4. HEAD probe phase
-    task.errorMessage = 'Estimating total size from sample segments.';
+    final segs = playlist.segments;
+    if (segs.isEmpty) {
+      task.totalBytes = -1;
+      _taskUpdateController.add(task);
+      return;
+    }
+
+    task.statusMessage = 'Estimating total size from sample segments.';
     _taskUpdateController.add(task);
 
-    // Collect all unique segment URIs + init segment URI
-    final uris = <Uri>[];
+    // Probe init segment once (not multiplied).
+    int initBytes = 0;
     if (playlist.initSegmentUri != null) {
-      uris.add(playlist.initSegmentUri!);
-    }
-    for (final segment in playlist.segments) {
-      uris.add(segment.uri);
+      initBytes = await _probeUriContentLength(playlist.initSegmentUri!) ?? 0;
+      _initSegmentBytes = initBytes;
     }
 
-    if (uris.isEmpty) {
-      task.totalBytes = -1;
-      task.errorMessage = null;
-      _taskUpdateController.add(task);
-      return;
-    }
+    // Strategic sample — never HEAD every segment (slow + rate-limit risk).
+    final indices = HlsSizeEstimator.selectSampleIndices(
+      segs.length,
+      maxSamples: math.min(8, segs.length),
+    );
 
-    // A. Send test HEAD request to first URI to see if HEAD is supported
-    bool headSupported = false;
-    try {
-      final testUri = uris.first;
-      final request = http.Request('HEAD', testUri);
-      if (task.headers != null) {
-        request.headers.addAll(task.headers!);
-      }
-      final response = await client.send(request).timeout(const Duration(seconds: 4));
-      await response.stream.listen((_) {}, onError: (_) {}).cancel();
-      if (response.statusCode == 200) {
-        final len = response.contentLength;
-        if (len != null && len > 0) {
-          headSupported = true;
+    final samples = <HlsSizeSample>[];
+    var next = 0;
+    final concurrency = math.min(4, indices.length);
+
+    Future<void> worker() async {
+      while (!_isPaused) {
+        final i = next++;
+        if (i >= indices.length) break;
+        final segIndex = indices[i];
+        final seg = segs[segIndex];
+        final size = await _probeUriContentLength(seg.uri);
+        if (size != null &&
+            size >= HlsSizeEstimator.minSegmentBytes &&
+            size <= HlsSizeEstimator.maxSegmentBytes) {
+          samples.add(HlsSizeSample(
+            index: segIndex,
+            bytes: size,
+            durationSeconds: seg.durationSeconds,
+          ));
         }
+      }
+    }
+
+    await Future.wait(List.generate(concurrency, (_) => worker()));
+
+    // Prefer playlist BANDWIDTH if the media playlist carried it via
+    // a prior master selection — stored on task via sniffer totalBytes
+    // fallback. Bandwidth from playlist variants isn't on media playlist;
+    // use sniffer estimate as bandwidthDuration fallback only if samples fail.
+    final estimate = HlsSizeEstimator.estimate(
+      playlist: playlist,
+      samples: samples,
+      initSegmentBytes: initBytes,
+    );
+
+    if (!_isPaused) {
+      if (estimate.totalBytes != null && estimate.totalBytes! > 0) {
+        final snifferBytes = task.totalBytes;
+        var chosen = estimate.totalBytes!;
+        // If sniffer and sample disagree by >2×, prefer the more conservative
+        // (lower) estimate — inflated Content-Lengths on sample HEADs are a
+        // common CDN quirk and caused multi‑GB queue totals vs ~1GB capture.
+        if (snifferBytes > 0 &&
+            estimate.isEstimated &&
+            (chosen > snifferBytes * 2 || snifferBytes > chosen * 2)) {
+          chosen = math.min(chosen, snifferBytes);
+          AuroraLog.instance.info(
+            'HLS size sample/sniffer disagree '
+            '(sample=$chosen sniffer=$snifferBytes) — using lower',
+            category: LogCategory.hls,
+            eventType: LogEventType.network,
+            taskId: task.id,
+          );
+          // recompute with min already assigned
+          chosen = math.min(estimate.totalBytes!, snifferBytes);
+        }
+        task.totalBytes = chosen;
+        _totalBytesExact =
+            estimate.source == HlsSizeEstimateSource.byteRangeExact;
+        _totalBytesEstimated = estimate.isEstimated;
+        _totalBytesLocked = true;
+        _initialSizeEstimate = chosen;
+        AuroraLog.instance.info(
+          'HLS size estimate: ${task.totalBytes}B via ${estimate.source.name} '
+          '(${estimate.detail}, samples=${samples.length}/${segs.length})',
+          category: LogCategory.hls,
+          eventType: LogEventType.network,
+          taskId: task.id,
+        );
+      } else if (task.totalBytes > 0) {
+        // Keep sniffer-provided estimate (bandwidth×duration or enricher sample).
+        _totalBytesEstimated = true;
+        _totalBytesLocked = true;
+        _initialSizeEstimate = task.totalBytes;
+        AuroraLog.instance.info(
+          'HLS size preserving sniffer estimate: ${task.totalBytes}B',
+          category: LogCategory.hls,
+          eventType: LogEventType.network,
+          taskId: task.id,
+        );
+      } else {
+        task.totalBytes = -1;
+        _totalBytesLocked = false;
+        _totalBytesEstimated = false;
+        _initialSizeEstimate = 0;
+        AuroraLog.instance.debug(
+          'HLS size unknown after sampling '
+          '(${samples.length} valid samples of ${indices.length} probes)',
+          category: LogCategory.hls,
+          eventType: LogEventType.network,
+          taskId: task.id,
+        );
+      }
+    }
+
+    task.statusMessage = null;
+    _taskUpdateController.add(task);
+  }
+
+  /// Probe a single URI for Content-Length via HEAD, then Range-GET.
+  Future<int?> _probeUriContentLength(Uri uri) async {
+    try {
+      final headReq = http.Request('HEAD', uri);
+      if (task.headers != null) headReq.headers.addAll(task.headers!);
+      final headResp =
+          await client.send(headReq).timeout(const Duration(seconds: 4));
+      await headResp.stream.listen((_) {}, onError: (_) {}).cancel();
+      if (headResp.statusCode >= 200 && headResp.statusCode < 400) {
+        final len = headResp.contentLength;
+        if (len != null && len > 0) return len;
+        final cl = headResp.headers['content-length'];
+        final parsed = cl != null ? int.tryParse(cl) : null;
+        if (parsed != null && parsed > 0) return parsed;
       }
     } catch (_) {}
 
-    if (!headSupported) {
-      AuroraLog.instance.debug('HEAD request not supported by server/CDN, falling back to indeterminate mode.', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
-      // Preserve the sniffer's estimated totalBytes if one was carried over
-      // from SniffedMedia.contentLengthBytes (e.g. segment-sampling estimate).
-      if (task.totalBytes > 0) {
-        _totalBytesLocked = true;
-      } else {
-        task.totalBytes = -1;
-      }
-      task.errorMessage = null;
-      _taskUpdateController.add(task);
-      return;
-
-    }
-
-    // B. Concurrency-limited probe worker pool
-    int totalSize = 0;
-    int index = 0;
-    final maxConcurrency = maxSegmentProbeConcurrency;
-
-    Future<void> worker() async {
-      while (true) {
-        if (_isPaused) break;
-        int currentIndex;
-        if (index >= uris.length) break;
-        currentIndex = index++;
-
-        final uri = uris[currentIndex];
-        try {
-          final request = http.Request('HEAD', uri);
-          if (task.headers != null) {
-            request.headers.addAll(task.headers!);
-          }
-          final response = await client.send(request).timeout(const Duration(seconds: 4));
-          await response.stream.listen((_) {}, onError: (_) {}).cancel();
-          if (response.statusCode == 200) {
-            final len = response.contentLength;
-            if (len != null && len > 0) {
-              totalSize += len;
-            }
-          }
-        } catch (_) {
-          // Ignore individual segment probe failures
+    try {
+      final getReq = http.Request('GET', uri);
+      if (task.headers != null) getReq.headers.addAll(task.headers!);
+      getReq.headers['Range'] = 'bytes=0-0';
+      getReq.followRedirects = true;
+      final getResp =
+          await client.send(getReq).timeout(const Duration(seconds: 5));
+      await getResp.stream.listen((_) {}, onError: (_) {}).cancel();
+      if (getResp.statusCode >= 200 && getResp.statusCode < 400) {
+        final cr = getResp.headers['content-range'] ?? '';
+        final m = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
+        if (m != null) {
+          final total = int.tryParse(m.group(1)!);
+          if (total != null && total > 0) return total;
         }
+        final len = getResp.contentLength;
+        if (len != null && len > 1) return len;
       }
+    } catch (_) {}
+
+    // Note: task.fetchViaWebView returns a response *body* (String), not
+    // headers — it cannot be used for Content-Length probes.
+    return null;
+  }
+
+  /// Progressive size refinement after each completed media segment.
+  ///
+  /// Uses only finished-segment sizes (never [task.downloadedBytes], which
+  /// includes in-flight concurrent partials and was inflating totals into
+  /// multi‑GB while the sniffer correctly showed ~1GB).
+  void _refineSizeAfterSegment({
+    required int bytes,
+    required int segmentIndex,
+    required bool isInit,
+  }) {
+    if (isInit) {
+      if (bytes > 0) _initSegmentBytes = bytes;
+      return;
+    }
+    if (bytes < HlsSizeEstimator.minSegmentBytes ||
+        bytes > HlsSizeEstimator.maxSegmentBytes) {
+      return;
     }
 
-    final workers = List.generate(
-      math.min(maxConcurrency, uris.length),
-      (_) => worker(),
+    final playlist = _playlist;
+    final dur = (playlist != null &&
+            segmentIndex >= 0 &&
+            segmentIndex < playlist.segments.length)
+        ? playlist.segments[segmentIndex].durationSeconds
+        : 0.0;
+
+    _completedSegSizes.add(bytes);
+    _completedSegDurationSec += dur > 0 ? dur : 0;
+    _completedSegCount++;
+
+    if (_totalBytesExact) return;
+
+    final totalSegs = playlist?.segments.length ?? 0;
+    if (totalSegs <= 0) return;
+
+    // Need a few real segments before overriding a sniffer/sample estimate.
+    if (_completedSegCount < 3 && _initialSizeEstimate > 0) return;
+
+    final refined = HlsSizeEstimator.refine(
+      completedSegmentCount: _completedSegCount,
+      totalSegmentCount: totalSegs,
+      completedDurationSeconds: _completedSegDurationSec,
+      totalDurationSeconds: playlist?.durationSeconds ?? 0,
+      initSegmentBytes: _initSegmentBytes,
+      completedSegmentSizes: _completedSegSizes,
+      // Floor only — never drive the formula from in-flight partials.
+      downloadedBytesFloor: 0,
     );
-    await Future.wait(workers);
 
-    if (!_isPaused) {
-      if (totalSize > 0) {
-        task.totalBytes = totalSize;
-        _totalBytesLocked = true;
-      } else {
-        task.totalBytes = -1;
+    if (refined.totalBytes == null || refined.totalBytes! <= 0) return;
+
+    var next = refined.totalBytes!;
+
+    // Clamp against the initial estimate until most segments are done.
+    // Prevents a few large early segments (or bad samples) from exploding
+    // the displayed total (e.g. 981MB → 2.8GB+ mid-download).
+    if (_initialSizeEstimate > 0) {
+      final progress = _completedSegCount / totalSegs;
+      if (progress < 0.85) {
+        final maxAllowed = (_initialSizeEstimate * 1.25).round();
+        final minAllowed = (_initialSizeEstimate * 0.55).round();
+        if (next > maxAllowed) next = maxAllowed;
+        if (next < minAllowed) next = minAllowed;
       }
     }
 
-    task.errorMessage = null;
-    _taskUpdateController.add(task);
+    // Only raise total to match downloaded when we slightly overshoot a
+    // low estimate — do not let total track downloaded 1:1 (that makes
+    // progress stick at ~100% and "climb" forever).
+    if (task.downloadedBytes > next) {
+      // Allow a small headroom so the bar doesn't sit at 100% early.
+      next = (task.downloadedBytes * 1.02).round();
+    }
+
+    // Mild smoothing toward the new value (no upward ratchet).
+    if (_totalBytesEstimated && task.totalBytes > 0) {
+      final blended = ((next * 0.6) + (task.totalBytes * 0.4)).round();
+      // Prefer not to jump more than 15% in a single refine step.
+      final maxStep = math.max(
+        (task.totalBytes * 1.15).round(),
+        task.totalBytes + 5 * 1024 * 1024,
+      );
+      final minStep = math.min(
+        (task.totalBytes * 0.85).round(),
+        task.totalBytes - 5 * 1024 * 1024,
+      );
+      task.totalBytes = blended.clamp(
+        math.min(minStep, next),
+        math.max(maxStep, next),
+      );
+    } else {
+      task.totalBytes = next;
+    }
+    _totalBytesEstimated = true;
+    _totalBytesLocked = true;
   }
 
   @override
@@ -542,7 +759,8 @@ class HlsDownloader implements BaseDownloader {
   /// re-runs start() with the original URL.
   Future<void> retryWithRefresh({bool forceReload = false}) async {
     if (task.onTokenExpired != null) {
-      task.errorMessage = 'Refreshing link from the page.';
+      task.statusMessage = 'Refreshing link from the page.';
+      task.errorMessage = null;
       _taskUpdateController.add(task);
       final newUrl = await task.onTokenExpired!(forceReload: forceReload);
       if (newUrl != null && newUrl != task.url) {
@@ -566,6 +784,7 @@ class HlsDownloader implements BaseDownloader {
     }
     task.state = DownloadState.idle;
     task.errorMessage = null;
+    task.statusMessage = null;
     // Reset progress — on retry, valid existing segments are counted
     // during the skip check in _downloadSegments.
     task.downloadedBytes = 0;
@@ -587,10 +806,18 @@ class HlsDownloader implements BaseDownloader {
     }
     if (task.totalBytes > 0) {
       _totalBytesLocked = true;
+      if (!_totalBytesExact) _totalBytesEstimated = true;
     } else {
       task.totalBytes = -1;
       _totalBytesLocked = false;
+      _totalBytesExact = false;
+      _totalBytesEstimated = false;
     }
+    _completedSegSizes.clear();
+    _completedSegDurationSec = 0;
+    _completedSegCount = 0;
+    _initSegmentBytes = 0;
+    _initialSizeEstimate = 0;
     _hostBlocked = false;
     _consecutiveSegmentFailures = 0;
     _needsRefresh = false;
@@ -598,6 +825,40 @@ class HlsDownloader implements BaseDownloader {
     _countedSegmentIndexes.clear();
     _taskUpdateController.add(task);
     await start();
+  }
+
+  /// Account for a finished segment's size toward totalBytes (accumulate
+  /// or progressively refine a sampled estimate).
+  void _accountSegmentBytes({
+    required int bytes,
+    required int fileIndex,
+    required int segmentIndex,
+    required bool isInit,
+  }) {
+    if (isInit) {
+      _refineSizeAfterSegment(
+        bytes: bytes,
+        segmentIndex: -1,
+        isInit: true,
+      );
+      return;
+    }
+    if (_countedSegmentIndexes.contains(fileIndex)) return;
+    _countedSegmentIndexes.add(fileIndex);
+
+    if (_totalBytesExact) return;
+
+    if (!_totalBytesLocked) {
+      // No pre-estimate yet: provisional total = sum of completed sizes
+      // extrapolated once we have a few samples (handled in refine).
+      if (task.totalBytes < 0) task.totalBytes = 0;
+    }
+
+    _refineSizeAfterSegment(
+      bytes: bytes,
+      segmentIndex: segmentIndex,
+      isInit: false,
+    );
   }
 
   Future<void> cancel() async {
@@ -860,10 +1121,27 @@ class HlsDownloader implements BaseDownloader {
     }
 
     var nextSegIndex = 0;
+    // When segments must go through the WebView bridge (WAF hosts like
+    // surrit.com), keep concurrency low. 4–8 parallel multi‑MB base64
+    // round-trips starve the bridge and produce "Speed 0 for 30s" stalls.
+    final webViewBound = task.fetchBinaryViaWebView != null;
+    final effectiveConcurrency = webViewBound
+        ? math.min(maxConcurrentSegments, 2)
+        : maxConcurrentSegments;
     final workerCount = math.max(
       1,
-      math.min(maxConcurrentSegments, segments.length),
+      math.min(effectiveConcurrency, segments.length),
     );
+    if (webViewBound) {
+      AuroraLog.instance.info(
+        'HLS WebView-bound download: concurrency capped at $workerCount '
+        '(configured maxConcurrentSegments=$maxConcurrentSegments)',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+        taskId: task.id,
+      );
+    }
 
     Future<void> worker() async {
       while (!_isPaused && !_hostBlocked) {
@@ -887,6 +1165,12 @@ class HlsDownloader implements BaseDownloader {
                 await _isSegmentValid(existing, ext, isInitSeg)) {
               files[fileIndex] = existing;
               task.downloadedBytes += size;
+              _accountSegmentBytes(
+                bytes: size,
+                fileIndex: fileIndex,
+                segmentIndex: segIndex,
+                isInit: false,
+              );
               AuroraLog.instance.debug(
                 'Seg $segIndex skipped ($size bytes)',
                 category: LogCategory.hls,
@@ -966,9 +1250,12 @@ class HlsDownloader implements BaseDownloader {
       }
     }
 
+    final staleConcurrency = task.fetchBinaryViaWebView != null
+        ? math.min(maxConcurrentSegments, 2)
+        : maxConcurrentSegments;
     final workerCount = math.max(
       1,
-      math.min(maxConcurrentSegments, sorted.length),
+      math.min(staleConcurrency, sorted.length),
     );
     final queue = List<int>.from(sorted);
     Future<void> worker() async {
@@ -991,7 +1278,7 @@ class HlsDownloader implements BaseDownloader {
     if (task.fetchBinaryViaWebView != null) {
       try {
         final data = await task.fetchBinaryViaWebView!(uri.toString())
-            .timeout(const Duration(seconds: 30));
+            .timeout(const Duration(seconds: 55));
         if (data != null && data.isNotEmpty) {
           final ext = isInit
               ? 'mp4'
@@ -1026,17 +1313,13 @@ class HlsDownloader implements BaseDownloader {
           // Rename .part to final only after successful write + decrypt.
           await partFile.rename(finalPath);
           final file = File(finalPath);
-          if (!_totalBytesLocked &&
-              !isInit &&
-              !_countedSegmentIndexes.contains(index)) {
-            _countedSegmentIndexes.add(index);
-            if (task.totalBytes < 0) task.totalBytes = 0;
-            task.totalBytes += data.length;
-          }
           task.downloadedBytes += data.length;
-          if (task.totalBytes > 0 && task.downloadedBytes > task.totalBytes) {
-            task.totalBytes = task.downloadedBytes;
-          }
+          _accountSegmentBytes(
+            bytes: data.length,
+            fileIndex: index,
+            segmentIndex: segmentIndex,
+            isInit: isInit,
+          );
           _taskUpdateController.add(task);
           _consecutiveSegmentFailures = 0; // Circuit breaker reset
           AuroraLog.instance.debug('WebView binary fetch segment $index OK (${data.length} bytes)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
@@ -1055,7 +1338,7 @@ class HlsDownloader implements BaseDownloader {
       try {
         _headlessFetcher ??= HeadlessWebViewFetcher();
         final data = await _headlessFetcher!.fetchBinary(uri.toString())
-            .timeout(const Duration(seconds: 30));
+            .timeout(const Duration(seconds: 55));
         if (data != null && data.isNotEmpty) {
           final ext = isInit
               ? 'mp4'
@@ -1076,17 +1359,13 @@ class HlsDownloader implements BaseDownloader {
           if (!_isPaused) {
             await partFile.writeAsBytes(data);
           }
-          if (!_totalBytesLocked &&
-              !isInit &&
-              !_countedSegmentIndexes.contains(index)) {
-            _countedSegmentIndexes.add(index);
-            if (task.totalBytes < 0) task.totalBytes = 0;
-            task.totalBytes += data.length;
-          }
           task.downloadedBytes += data.length;
-          if (task.totalBytes > 0 && task.downloadedBytes > task.totalBytes) {
-            task.totalBytes = task.downloadedBytes;
-          }
+          _accountSegmentBytes(
+            bytes: data.length,
+            fileIndex: index,
+            segmentIndex: segmentIndex,
+            isInit: isInit,
+          );
           _taskUpdateController.add(task);
           _consecutiveSegmentFailures = 0;
 
@@ -1129,6 +1408,68 @@ class HlsDownloader implements BaseDownloader {
       return file;
     }
 
+    // After WebView + headless both failed, HTTP almost always 403s on
+    // Cloudflare WAF hosts. Skip further HTTP attempts once we know that.
+    if (_skipHttpFallback) {
+      AuroraLog.instance.debug(
+        'HTTP fallback skipped for segment $index (WAF host; use WebView/headless only)',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
+      // One more headless attempt before stubbing — often recovers after
+      // the bridge is less congested.
+      if (task.fetchBinaryViaWebView != null || _headlessFetcher != null) {
+        try {
+          _headlessFetcher ??= HeadlessWebViewFetcher();
+          final retry = await _headlessFetcher!.fetchBinary(uri.toString())
+              .timeout(const Duration(seconds: 55));
+          if (retry != null && retry.isNotEmpty) {
+            final ext = isInit
+                ? 'mp4'
+                : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
+            final finalPath =
+                '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
+            final partPath = '$finalPath.part';
+            final partFile = File(partPath);
+            await partFile.parent.create(recursive: true);
+            await partFile.writeAsBytes(retry);
+            final keyBytes = _encryptionKeyBytes;
+            if (!isInit && keyBytes != null && segmentIndex >= 0) {
+              final iv = _buildAesIv(
+                _playlist?.encryptionKey,
+                segmentIndex,
+                _playlist?.mediaSequence ?? 0,
+              );
+              await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+            }
+            await partFile.rename(finalPath);
+            task.downloadedBytes += retry.length;
+            _accountSegmentBytes(
+              bytes: retry.length,
+              fileIndex: index,
+              segmentIndex: segmentIndex,
+              isInit: isInit,
+            );
+            _consecutiveSegmentFailures = 0;
+            _taskUpdateController.add(task);
+            AuroraLog.instance.debug(
+              'Headless retry after skip-HTTP OK for segment $index (${retry.length} bytes)',
+              category: LogCategory.hls,
+              screen: LogScreen.background,
+              eventType: LogEventType.network,
+            );
+            return File(finalPath);
+          }
+        } catch (_) {}
+      }
+      _needsRefresh = true;
+      _staleSegmentIndexes.add(index);
+      final file = File('${task.tempDir}/stub_$index');
+      await file.writeAsString('');
+      return file;
+    }
+
     const maxRetries = 5;
     var attempt = 0;
 
@@ -1160,12 +1501,34 @@ class HlsDownloader implements BaseDownloader {
           // connection is reset while draining.
           await response.stream.listen((_) {}, onError: (_) {}).cancel();
           if (response.statusCode == 403 || response.statusCode == 401) {
+            _httpForbiddenStreak++;
+            // After 2 HTTP 403s, stop wasting attempts on Dart HTTP for
+            // this host — WebView/headless are the only viable paths.
+            if (_httpForbiddenStreak >= 2 &&
+                (task.fetchBinaryViaWebView != null ||
+                    _headlessFetcher != null)) {
+              _skipHttpFallback = true;
+              AuroraLog.instance.info(
+                'Disabling HTTP segment fallback after $_httpForbiddenStreak '
+                '× 403/401 — relying on WebView/headless only',
+                category: LogCategory.hls,
+                screen: LogScreen.background,
+                eventType: LogEventType.network,
+                taskId: task.id,
+              );
+            }
+
             // Circuit breaker: track consecutive 403/401 failures.
             // After too many in a row, abort to avoid triggering a
             // Cloudflare IP block from hammering the CDN.
+            // When WebView paths exist, be more patient — 403 via HTTP
+            // does not mean WebView is dead.
+            final hasWebViewPath = task.fetchBinaryViaWebView != null;
+            final failLimit = hasWebViewPath
+                ? _maxConsecutiveFailures * 3
+                : _maxConsecutiveFailures;
             _consecutiveSegmentFailures++;
-            if (_consecutiveSegmentFailures >= _maxConsecutiveFailures &&
-                !_hostBlocked) {
+            if (_consecutiveSegmentFailures >= failLimit && !_hostBlocked) {
               _hostBlocked = true;
               task.state = DownloadState.failed;
               task.failureReason = DownloadFailure.hlsCircuitBreaker;
@@ -1206,17 +1569,6 @@ class HlsDownloader implements BaseDownloader {
           );
         }
 
-        final contentLength = response.contentLength;
-        if (!_totalBytesLocked &&
-            contentLength != null &&
-            contentLength > 0 &&
-            !isInit &&
-            !_countedSegmentIndexes.contains(index)) {
-          _countedSegmentIndexes.add(index);
-          if (task.totalBytes < 0) task.totalBytes = 0;
-          task.totalBytes += contentLength;
-        }
-
         final ext = isInit
             ? 'mp4'
             : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
@@ -1244,9 +1596,10 @@ class HlsDownloader implements BaseDownloader {
             sink.add(chunk);
             bytesDownloadedInThisAttempt += chunk.length;
             task.downloadedBytes += chunk.length;
-            if (task.totalBytes > 0 && task.downloadedBytes > task.totalBytes) {
-              task.totalBytes = task.downloadedBytes;
-            }
+            // Do NOT raise totalBytes to match downloadedBytes mid-stream.
+            // That made the queue total "climb" with every concurrent chunk
+            // (e.g. capture ~981MB → queue 2.8GB+). Progress may briefly
+            // exceed 100% until refine/completion corrects total.
           }
         } catch (e) {
           task.downloadedBytes -= bytesDownloadedInThisAttempt;
@@ -1290,6 +1643,18 @@ class HlsDownloader implements BaseDownloader {
         // Rename .part to final only after successful write + decrypt.
         await partFile.rename(finalPath);
         final file = File(finalPath);
+        // Account actual on-disk size (post-decrypt) for size estimate.
+        try {
+          final size = await file.length();
+          if (size > 0) {
+            _accountSegmentBytes(
+              bytes: size,
+              fileIndex: index,
+              segmentIndex: segmentIndex,
+              isInit: isInit,
+            );
+          }
+        } catch (_) {}
         return file;
       } catch (error) {
         if (attempt >= maxRetries || _isPaused) {

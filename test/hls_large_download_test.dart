@@ -127,12 +127,20 @@ void main() {
     );
 
     final dl = HlsDownloader(task: task, maxConcurrentSegments: 16);
+    int lastWrittenBytes = 0;
+    DownloadState? lastState;
     dl.onTaskUpdated.listen((t) {
-      File('D:\\progress.txt')
-          .writeAsStringSync(
-              '[PROGRESS] state=${t.state} '
-              '${t.downloadedBytes}/${t.totalBytes} bytes\n',
-              mode: FileMode.append);
+      if (t.state != lastState || (t.downloadedBytes - lastWrittenBytes).abs() >= 20 * 1024 * 1024) {
+        lastState = t.state;
+        lastWrittenBytes = t.downloadedBytes;
+        try {
+          File('D:\\progress.txt')
+              .writeAsStringSync(
+                  '[PROGRESS] state=${t.state} '
+                  '${t.downloadedBytes}/${t.totalBytes} bytes\n',
+                  mode: FileMode.append);
+        } catch (_) {}
+      }
     });
 
     File('D:\\progress.txt').writeAsStringSync(

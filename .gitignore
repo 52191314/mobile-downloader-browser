@@ -48,3 +48,17 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local runtime dumps / device exports (never publish)
+local_*.json
+local_*.bin
+test_output_read.bin
+.playwright-mcp/
+
+# Android Gradle intermediate (should not be in VCS)
+/android/build/
+
+# Load lab / scratch logs
+tools/archive/*.log
+tools/archive/*_live.txt
+tools/archive/*_results.log

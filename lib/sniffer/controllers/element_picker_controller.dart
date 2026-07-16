@@ -19,13 +19,17 @@ class ElementPickerController {
   Timer? _timeout;
   final ValueNotifier<bool> _isActiveNotifier = ValueNotifier<bool>(false);
 
+  final int? _maxRules;
+
   ElementPickerController({
     required BrowserTab Function() activeTabGetter,
     required ValueChanged<DownloadSettings>? onSettingsChanged,
     required void Function(String message) showSnack,
+    int? maxRules,
   })  : _activeTabGetter = activeTabGetter,
         _onSettingsChanged = onSettingsChanged,
-        _showSnack = showSnack;
+        _showSnack = showSnack,
+        _maxRules = maxRules;
 
   // ---------------------------------------------------------------------------
   // Reactive state
@@ -129,6 +133,13 @@ class ElementPickerController {
       } else if (selector != null) {
         // Cosmetic rule — hide by selector
         if (pageHost.isNotEmpty) {
+          if (_maxRules != null &&
+              settings.manualCosmeticRules.length >= _maxRules!) {
+            _showSnack(
+              'Cosmetic rule limit ($_maxRules) reached. Upgrade to Pro for unlimited rules.',
+            );
+            return null;
+          }
           updated = settings.copyWith(
             manualCosmeticRules: [
               ...settings.manualCosmeticRules,

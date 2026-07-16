@@ -49,6 +49,20 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 - Browser supports multiple tabs (`List<_BrowserTab>` in `_SnifferScreenState`)
 - Each tab gets its OWN `MediaSnifferEngine` — no shared engines between tabs
 
+## Worker Isolate Pool
+
+The app uses a **persistent 3-worker isolate pool** (`lib/sniffer/worker_isolate_pool.dart`) instead of one-shot `Isolate.run()` calls. This eliminates **50–100+ fresh isolate spawns per page load** (media probing, JSON decode, binary media parsing).
+
+- `WorkerIsolatePool.instance.execute(type, params)` — the single public API. Types: `probe`, `jsonDecode`, `jsonEncode`, `parseImage`, `parseAudio`, `parseMp4`.
+- Workers are lazily spawned on first `execute()` call, kept alive until `dispose()`.
+- Each worker owns a persistent `http.Client()` (connection-pool reuse across probes to the same CDN).
+- Round-robin dispatch across 3 workers. Crash detection + auto-respawn.
+- `WorkerIsolatePool.instance.dispose()` called in `AuroraHome.dispose()`.
+- Binary parsers extracted to `lib/sniffer/media_binary_parsers.dart` (pure functions usable by the worker).
+- In test mode (`_isTestEnvironment()`), `MediaEnricher` falls back to direct execution with `host.client` so mock HTTP clients work without isolates. Other callers (`sniffer_screen.dart`, `sniffed_media_cache.dart`, `download_queue.dart`) route through the pool.
+
+**Do NOT add new `Isolate.run()` or `Isolate.spawn()` calls** — use the worker pool instead. If you need a new request type, add it to the `_handleRequest()` switch in `worker_isolate_pool.dart`.
+
 ## Sniffer JS Guard
 
 Single JS script injected via `_installBrowserGuards()` in `browser_controller.dart`:
@@ -133,6 +147,15 @@ This applies regardless of whether the command was given directly or through the
 
 - All development, testing, builds, and commits in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`) must occur on the **`opencode/witty-river`** branch.
 - Never check out, switch to, or pull changes from other branches (such as `ui/redesign-2.0`) in this repository.
+
+## Freemium / Pro implementation tracker
+
+When working on Play Store freemium, Pro gates, or items listed in the strategy:
+
+1. Read and update **`docs/premium_implementation_tracker.md`** (source of truth for remaining work).
+2. Product intent lives in **`docs/premium_freemium_strategy.md`**.
+3. **Mandatory strikethrough rule:** After a tracker item is fully implemented and verified, **cross it out with Markdown strikethrough** (`~~like this~~`) on the item title/checkbox line, and add a short **Done:** note (date + key files). Do **not** delete completed items. Partial work: strike only finished sub-bullets.
+4. Do not re-gate free-forever items (sniffer, IDM import, native adblock engine baseline, UC-class player toggle, etc.).
 
 ## Interaction & Output Rules
 

@@ -7,6 +7,9 @@ import '../models/closed_tab_snapshot.dart';
 import '../models/tab_group.dart';
 import '../tab_groups/tab_group_palette.dart';
 
+/// Default `isProCallback` — always returns false.
+bool _defaultIsPro() => false;
+
 /// Manages the list of browser tabs, active tab state, and basic
 /// open/close/switch lifecycle.
 ///
@@ -20,6 +23,9 @@ class TabManager {
   final List<ClosedTabSnapshot> recentlyClosedTabs = [];
   static const int maxRecentlyClosed = 12;
   static const int maxTabs = 20;
+
+  /// Maximum tab groups for free users.
+  static const int maxFreeTabGroups = 1;
 
   /// Persistent tab groups, ordered by [TabGroup.sortOrder] ascending.
   /// Tabs reference groups by case-insensitive name through
@@ -41,7 +47,11 @@ class TabManager {
   /// Callback invoked after any state change that needs a [State.setState].
   VoidCallback? onRebuild;
 
-  TabManager();
+  /// Callback that returns whether the user has Pro entitlement.
+  /// Used to gate tab group count and auto-host for free users.
+  bool Function() isProCallback;
+
+  TabManager({this.isProCallback = _defaultIsPro});
 
   // ---------------------------------------------------------------------------
   // Computed accessors
@@ -74,12 +84,20 @@ class TabManager {
       final oldActive = tabs[previous];
       oldActive.videoPollTimer?.cancel();
       unawaited(oldActive.controller.freeze());
-      unawaited(oldActive.controller.suspendTab());
+      // Use pauseWebView (pauseTimers + android.pause) instead of suspendTab
+      // (android.pause only) so the old tab's JS timers (MutationObserver,
+      // setTimeout scanMedia) are also stopped — not just rendering.
+      // pauseTimers is process-global: it pauses ALL WebViews' JS timers.
+      // The subsequent resumeWebView on the new tab restarts them globally.
+      unawaited(oldActive.controller.pauseWebView());
     }
 
     final newActive = activeTab;
     unawaited(newActive.controller.thaw());
-    unawaited(newActive.controller.resumeTab());
+    // resumeWebView (resumeTimers + android.resume) restarts JS timers for
+    // ALL WebViews in the process.  The old tab's rendering stays paused
+    // (android.pause) even though its JS timers are re-enabled.
+    unawaited(newActive.controller.resumeWebView());
 
     onRebuild?.call();
     return previous;
@@ -224,11 +242,16 @@ class TabManager {
       tab.groupColorIndex = null;
       tab.autoGrouped = false;
     } else {
+      // If this is a new group, enforce free cap.
+      final existingGroup = groupByName(newName);
+      final isExistingGroup = existingGroup != null;
+      if (!isExistingGroup && !isProCallback()) {
+        // Free users limited to maxFreeTabGroups.
+        final currentGroupCount = tabGroups.length;
+        if (currentGroupCount >= maxFreeTabGroups) return;
+      }
       tab.groupName = newName;
       tab.groupColorIndex = colorIndex;
-      // Manual moves clear the auto-group flag so subsequent navigations
-      // to the same host don't silently re-add the tab if the user
-      // later removes it from the group.
       tab.autoGrouped = false;
       _ensureGroupExists(newName, colorIndex: colorIndex);
     }
@@ -310,6 +333,7 @@ class TabManager {
   /// [TabLifecycleController.openNewTab] uses it to auto-add tabs that
   /// share the same URL host.
   void setGroupAutoHost(String name, String? host) {
+    if (host != null && !isProCallback()) return; // Pro-gated feature
     final group = groupByName(name);
     if (group == null) return;
     final idx = tabGroups.indexOf(group);

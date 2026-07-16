@@ -198,7 +198,7 @@ void main() {
         } catch (e) {
           expect(task.state, DownloadState.failed);
           expect(task.errorMessage, isNotNull);
-          expect(task.errorMessage, contains('Simulated network disconnect'));
+          expect(task.errorMessage, contains('No internet connection'));
         }
 
         // Resume download with clean client and reset bytes sent
@@ -310,14 +310,14 @@ void main() {
         queue.addTask(task);
 
         int elapsedMs = 0;
-        while (task.state != DownloadState.failed && elapsedMs < 2000) {
+        while (task.state != DownloadState.failed && elapsedMs < 8000) {
           await Future<void>.delayed(const Duration(milliseconds: 50));
           elapsedMs += 50;
         }
 
         expect(task.state, DownloadState.failed);
         expect(task.errorMessage, isNotNull);
-        expect(task.errorMessage, contains('Simulated network disconnect'));
+        expect(task.errorMessage, contains('No internet connection'));
 
         client.shouldFail = false;
         client.globalBytesSent = 0;

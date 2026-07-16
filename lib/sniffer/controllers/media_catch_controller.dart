@@ -102,7 +102,10 @@ class MediaCatchController {
     final buf = StringBuffer();
     if (primaryMedia.contentLengthBytes != null &&
         primaryMedia.contentLengthBytes! > 0) {
-      buf.write(_formatBytes(primaryMedia.contentLengthBytes!));
+      final sizeLabel = _formatBytes(primaryMedia.contentLengthBytes!);
+      buf.write(
+        primaryMedia.isSizeEstimated ? '~$sizeLabel' : sizeLabel,
+      );
     }
     if (group.variantCount > 1) {
       if (buf.isNotEmpty) buf.write(' · ');

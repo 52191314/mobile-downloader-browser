@@ -16,7 +16,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import 'package:aurora_downloader/downloader/models.dart';
+import 'package:aurora_downloader/downloader/downloader.dart';
 import 'package:aurora_downloader/platform/public_downloads_service.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/sniffer_url_utils.dart';
@@ -369,9 +369,8 @@ Future<void> addContextTargetToQueue(
   required String Function(String? label, String targetUrl)
       downloadFilenameFor,
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
-  required bool Function(String url) urlExists,
-  required void Function(DownloadTask task, {bool force}) addTask,
-  required Future<bool> Function(BuildContext context, String filename)
+  required DownloadQueue downloadQueue,
+  required Future<DuplicateChoice> Function(BuildContext context, String filename)
       showDuplicatePrompt,
   required void Function(String message) showSnack,
   required Future<String?> Function(
@@ -430,14 +429,22 @@ Future<void> addContextTargetToQueue(
         tab.controller.getCookiesForDomain(url: url);
 
     bool force = false;
-    if (urlExists(targetUrl)) {
+    if (downloadQueue.urlExists(targetUrl)) {
       if (!isMounted) return;
       // ignore: use_build_context_synchronously
-      final skip = await showDuplicatePrompt(context, filename);
-      if (skip) return;
+      final choice = await showDuplicatePrompt(context, filename);
+      if (choice == DuplicateChoice.skip) return;
+      if (choice == DuplicateChoice.updateExisting) {
+        final existing = downloadQueue.getTaskByUrl(targetUrl);
+        if (existing != null) {
+          await downloadQueue.updateTaskFromDonor(existing.id, task);
+          showSnack('Done — Link updated. Download will retry.');
+          return;
+        }
+      }
       force = true;
     }
-    addTask(task, force: force);
+    downloadQueue.addTask(task, force: force);
     showSnack('Added "$filename" to queue.');
   } catch (e) {
     // ignore: avoid_print

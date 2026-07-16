@@ -61,11 +61,12 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
                 return null;
               },
             ),
-            if (_controller.text.length > 120) ...[
+            if (FilenameService.utf8ByteLength(_controller.text) >
+                FilenameService.defaultMaxFileNameBytes) ...[
               const SizedBox(height: 8),
-              const Text(
-                '⚠️ Filename exceeds 120 characters. It will be auto-truncated to fit on save, or you can cut it manually.',
-                style: TextStyle(
+              Text(
+                'Filename exceeds Android’s ${FilenameService.defaultMaxFileNameBytes}-byte limit. It will be auto-truncated on save, or you can shorten it manually.',
+                style: const TextStyle(
                   color: Colors.redAccent,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -86,7 +87,7 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
             if (_formKey.currentState?.validate() ?? false) {
               final finalName = _SnifferScreenState.truncateFilename(
                 _controller.text.trim(),
-                maxLength: 120,
+                maxLength: FilenameService.defaultMaxFileNameBytes,
               );
               Navigator.pop(context, finalName);
             }

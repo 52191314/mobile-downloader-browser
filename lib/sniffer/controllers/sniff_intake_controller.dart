@@ -280,9 +280,22 @@ class SniffIntakeController {
         tab.authHeaderCache[url] = auth;
       }
 
+      // Prefer structured page meta (og:title) over raw WebView title so
+      // downloads get descriptive names (e.g. MissAV full titles) instead of
+      // URL slugs when the tab title is empty or a WAF interstitial.
+      final metaTitle = tab.pageMeta.title.trim();
+      final structured = tab.pageMeta.structuredName?.trim() ?? '';
+      final tabTitle = tab.title?.trim() ?? '';
+      final pageTitle = metaTitle.isNotEmpty
+          ? metaTitle
+          : (structured.isNotEmpty
+              ? structured
+              : (tabTitle.isNotEmpty ? tabTitle : null));
+
       tab.snifferEngine.sniff(
         url,
         sourcePageUrl: pageUrl,
+        pageTitle: pageTitle,
         headers: liveHeaders,
         contentType: contentType,
         contentLength: contentLength,
@@ -355,6 +368,70 @@ class SniffIntakeController {
     final cookies = await getCookiesForUrl(url);
     cookieCache.set(key, cookies);
     return cookies;
+  }
+
+  /// Collects and merges cookies for media playback from the media host
+  /// and the page host (CDN cookies + session cookies). CDNs often need
+  /// both a valid Cookie jar and a page Referer; page-only cookies are
+  /// useless on a third-party host but merging is always safe.
+  Future<Map<String, String>> getPlaybackCookies({
+    required String mediaUrl,
+    String? pageUrl,
+  }) async {
+    final maps = <Map<String, String>>[];
+    maps.add(await getCookiesForUrl(mediaUrl));
+    final mediaUri = Uri.tryParse(mediaUrl);
+    if (mediaUri != null && mediaUri.host.isNotEmpty) {
+      final root = '${mediaUri.scheme}://${mediaUri.host}/';
+      if (root != mediaUrl) {
+        maps.add(await getCookiesForUrl(root));
+      }
+    }
+    final page = pageUrl?.trim();
+    if (page != null && page.isNotEmpty) {
+      maps.add(await getCookiesForUrl(page));
+      final pageUri = Uri.tryParse(page);
+      if (pageUri != null && pageUri.host.isNotEmpty) {
+        final root = '${pageUri.scheme}://${pageUri.host}/';
+        if (root != page) {
+          maps.add(await getCookiesForUrl(root));
+        }
+      }
+    }
+    return mergeCookieHeaderMaps(maps);
+  }
+
+  /// Merges multiple `Cookie` header maps into one by cookie name.
+  /// Later maps win on name collision (page cookies override only when
+  /// the media map lacked that name — callers pass media first, page last).
+  static Map<String, String> mergeCookieHeaderMaps(
+    List<Map<String, String>> maps,
+  ) {
+    final byName = <String, String>{};
+    for (final m in maps) {
+      String? raw;
+      for (final e in m.entries) {
+        if (e.key.toLowerCase() == 'cookie') {
+          raw = e.value;
+          break;
+        }
+      }
+      if (raw == null || raw.isEmpty) continue;
+      for (final part in raw.split(';')) {
+        final trimmed = part.trim();
+        if (trimmed.isEmpty) continue;
+        final eq = trimmed.indexOf('=');
+        if (eq <= 0) continue;
+        final name = trimmed.substring(0, eq).trim();
+        final value = trimmed.substring(eq + 1).trim();
+        if (name.isEmpty) continue;
+        byName[name] = value;
+      }
+    }
+    if (byName.isEmpty) return const {};
+    return {
+      'Cookie': byName.entries.map((e) => '${e.key}=${e.value}').join('; '),
+    };
   }
 
   /// Retrieve cookies for the given URL from the WebView cookie store.
@@ -433,6 +510,10 @@ class SniffIntakeController {
   /// captures.
   void clearCookieCache() {
     cookieCache.clear();
+  }
+
+  void clearCookieCacheForHost(String host) {
+    cookieCache.clearForHost(host);
   }
 }
 

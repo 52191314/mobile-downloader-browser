@@ -67,12 +67,19 @@ class DownloadForegroundService {
   /// On Android 6+ this opens a system dialog; on older devices it is a
   /// no-op.  Every Android manufacturer's doze / app-standby policy is
   /// different, so this gives the user a fighting chance regardless of OEM.
-  static Future<void> requestBatteryOptimizationExemption() async {
-    if (!Platform.isAndroid) return;
+  ///
+  /// Returns a map with an optional "oem" key (e.g. "xiaomi", "huawei",
+  /// "samsung") when the manufacturer has separate autostart / background-
+  /// activity settings that the user should also adjust.  Returns an empty
+  /// map on non-Android or when the manufacturer is not specially detected.
+  static Future<Map<String, dynamic>> requestBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return {};
     try {
-      await _channel.invokeMethod('requestBatteryOpt');
+      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+          'requestBatteryOpt');
+      return Map<String, dynamic>.from(result ?? {});
     } catch (e) {
-      // Best-effort.
+      return {};
     }
   }
 
@@ -86,6 +93,63 @@ class DownloadForegroundService {
       return result ?? false;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Opens the manufacturer-specific autostart / background-activity
+  /// settings page when the device is from a known OEM that has separate
+  /// toggles outside the standard AOSP battery optimisation whitelist.
+  static Future<void> openOemAutostartPage() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('openOemAutostartPage');
+    } catch (e) {
+      // Best-effort.
+    }
+  }
+
+  /// Returns a human-readable label for the OEM settings screen that the
+  /// user needs to visit, given the [oem] key returned by
+  /// [requestBatteryOptimizationExemption].  Returns null for unknown OEMs.
+  static String? oemLabel(String oem) {
+    switch (oem) {
+      case 'xiaomi':
+        return 'Auto-start in Security centre';
+      case 'huawei':
+        return 'Protected apps in Phone Manager';
+      case 'oppo':
+      case 'realme':
+        return 'Auto-start in Safe centre';
+      case 'vivo':
+        return 'Auto-start in iManager';
+      case 'oneplus':
+        return 'Background activity in Security';
+      case 'samsung':
+        return 'Battery in Device care';
+      default:
+        return null;
+    }
+  }
+
+  /// Returns a human-readable name for the OEM, given the [oem] key.
+  static String? oemName(String oem) {
+    switch (oem) {
+      case 'xiaomi':
+        return 'Xiaomi';
+      case 'huawei':
+        return 'Huawei';
+      case 'oppo':
+        return 'OPPO / Realme';
+      case 'realme':
+        return 'OPPO / Realme';
+      case 'vivo':
+        return 'Vivo';
+      case 'oneplus':
+        return 'OnePlus';
+      case 'samsung':
+        return 'Samsung';
+      default:
+        return null;
     }
   }
 }

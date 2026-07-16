@@ -13,3 +13,7 @@ export 'bencode_decoder.dart';
 export 'torrent_metadata.dart';
 export 'torrent_downloader.dart';
 export 'file_classifier.dart';
+export 'media_file_types.dart';
+export 'filename_service.dart';
+export 'url_filename_resolver.dart';
+export 'hls_size_estimator.dart';

@@ -398,14 +398,13 @@ void main() {
         );
       });
 
-      test('returns null with charset suffix (not stripped by extensionForMime)', () {
-        // extensionForMime itself does NOT strip ;charset — callers
-        // (_extensionForContentType in the resolver) do that before calling.
+      test('strips charset suffix before looking up extension', () {
+        // MediaFileTypes.extensionForMime strips MIME parameters.
         expect(
           PublicDownloadsService.extensionForMime(
             'text/html; charset=utf-8',
           ),
-          isNull,
+          '.html',
         );
       });
     });

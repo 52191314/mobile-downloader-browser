@@ -955,4 +955,26 @@ void main() {
       },
     );
   });
+
+  group('DownloadQueue.getTaskByUrl', () {
+    test('retrieves task by URL with query parameters normalization', () async {
+      final queue = DownloadQueue();
+      final task = DownloadTask(
+        id: 'test_task_id',
+        url: 'https://example.com/video.mp4?token=123&utm_source=unused',
+        savePath: 'dummy_save_path',
+        tempDir: 'dummy_temp_dir',
+      );
+      queue.addTask(task);
+
+      // Match exact
+      expect(queue.getTaskByUrl('https://example.com/video.mp4?token=123&utm_source=unused'), task);
+      
+      // Match with UTM parameter ignored
+      expect(queue.getTaskByUrl('https://example.com/video.mp4?token=123'), task);
+
+      // Return null for mismatch
+      expect(queue.getTaskByUrl('https://example.com/video.mp4?token=456'), isNull);
+    });
+  });
 }

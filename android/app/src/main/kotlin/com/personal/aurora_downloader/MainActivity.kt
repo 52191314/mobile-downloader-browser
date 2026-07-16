@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.ContentUris
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.MediaCodec
@@ -39,6 +40,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.ByteBuffer
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val channelName = "aurora_downloader/public_downloads"
@@ -165,7 +167,11 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "requestBatteryOpt" -> {
-                        requestBatteryOptimizationExemption()
+                        val oemInfo = requestBatteryOptimizationExemption()
+                        result.success(oemInfo)
+                    }
+                    "openOemAutostartPage" -> {
+                        openOemAutostartPage()
                         result.success(null)
                     }
                     "isIgnoringBatteryOptimizations" -> {
@@ -974,7 +980,10 @@ class MainActivity : FlutterActivity() {
     /// Open the system battery-optimisation exemption dialog so the user
     /// can whitelist Aurora.  This prevents Android's doze / app-standby
     /// from killing the process or throttling network during downloads.
-    private fun requestBatteryOptimizationExemption() {
+    /// Returns a map with an optional "oem" key when the manufacturer has
+    /// separate autostart / background-activity settings the user also
+    /// needs to adjust.
+    private fun requestBatteryOptimizationExemption(): Map<String, Any> {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
                 val intent = Intent(
@@ -984,6 +993,72 @@ class MainActivity : FlutterActivity() {
                 startActivity(intent)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to open battery opt exemption", e)
+            }
+        }
+        return detectOemBatteryHint()
+    }
+
+    private val _manufacturer: String by lazy {
+        Build.MANUFACTURER.lowercase(Locale.ROOT)
+    }
+
+    /// Detects known OEMs that have separate autostart / background-activity
+    /// permission screens outside of the standard AOSP battery optimisation
+    /// whitelist.  Returns a map with "oem" set to the manufacturer key, or
+    /// an empty map if none is detected.
+    private fun detectOemBatteryHint(): Map<String, Any> {
+        val result = mutableMapOf<String, Any>()
+        when {
+            _manufacturer.contains("xiaomi") -> result["oem"] = "xiaomi"
+            _manufacturer.contains("huawei") -> result["oem"] = "huawei"
+            _manufacturer.contains("oppo") || _manufacturer.contains("realme") -> result["oem"] = "oppo"
+            _manufacturer.contains("vivo") -> result["oem"] = "vivo"
+            _manufacturer.contains("oneplus") -> result["oem"] = "oneplus"
+            _manufacturer.contains("samsung") -> result["oem"] = "samsung"
+        }
+        return result
+    }
+
+    /// Opens the manufacturer-specific autostart / background-activity
+    /// settings page so the user can whitelist Aurora for background
+    /// operation — a separate requirement from the standard battery
+    /// optimisation exemption on many Chinese OEM ROMs.
+    private fun openOemAutostartPage() {
+        val intent: Intent? = when {
+            _manufacturer.contains("xiaomi") ->
+                Intent().setComponent(ComponentName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                ))
+            _manufacturer.contains("huawei") ->
+                Intent().setComponent(ComponentName(
+                    "com.huawei.systemmanager",
+                    "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"
+                ))
+            _manufacturer.contains("oppo") || _manufacturer.contains("realme") ->
+                Intent().setComponent(ComponentName(
+                    "com.coloros.safecenter",
+                    "com.coloros.safecenter.permission.startup.StartupAppListActivity"
+                ))
+            _manufacturer.contains("vivo") ->
+                Intent("vivo.intent.action.STARTUP_ENGINE")
+                    .setComponent(ComponentName("com.iqoo.secure", "com.iqoo.secure.MainActivity"))
+            _manufacturer.contains("oneplus") ->
+                Intent().setComponent(ComponentName(
+                    "com.oneplus.security",
+                    "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"
+                ))
+            _manufacturer.contains("samsung") ->
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:${applicationContext.packageName}"))
+            else -> null
+        }
+        if (intent != null) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to open OEM autostart page for $_manufacturer", e)
             }
         }
     }

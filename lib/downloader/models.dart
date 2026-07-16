@@ -1,4 +1,10 @@
-enum DownloadState { idle, downloading, paused, completed, failed, merging }
+enum DownloadState { scheduled, idle, downloading, paused, completed, failed, merging }
+
+enum DuplicateChoice {
+  downloadAgain,
+  updateExisting,
+  skip,
+}
 
 /// Classifies the reason a download failed.
 /// Used for programmatic error handling (different retry strategies,
@@ -168,7 +174,7 @@ class DownloadTask implements Comparable<DownloadTask> {
   final String tempDir;
   final String? expectedHash;
   final String? contentType;
-  final Map<String, String>? headers;
+  Map<String, String>? headers;
   DownloadPriority priority;
   DownloadState state;
   int totalBytes;
@@ -176,6 +182,9 @@ class DownloadTask implements Comparable<DownloadTask> {
   double speed; // In bytes/second
   String? actualHash;
   String? errorMessage;
+  /// Transient UI status (resuming, converting, token refresh, rate-limit
+  /// waits). Not persisted — cleared on terminal state transitions.
+  String? statusMessage;
   /// Structured failure reason — set alongside [errorMessage] when the
   /// download fails.  Enables programmatic error handling (e.g. different
   /// retry strategies per failure type) without string-matching.
@@ -187,6 +196,8 @@ class DownloadTask implements Comparable<DownloadTask> {
   String? lastModified;
   List<DownloadChunk> chunks;
   final DateTime createdAt;
+  /// When set, the download will start at this time (Pro scheduled/night queue).
+  DateTime? scheduledStartAt;
   Future<String?> Function({bool forceReload})? onTokenExpired;
   /// Optional callback that fetches a URL through the WebView's JavaScript
   /// `fetch()` API, bypassing Cloudflare WAF blocks that affect Dart's HTTP
@@ -231,6 +242,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.speed = 0.0,
     this.actualHash,
     this.errorMessage,
+    this.statusMessage,
     this.failureReason,
     this.publicUri,
     this.publicPathLabel,
@@ -239,6 +251,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.lastModified,
     this.chunks = const [],
     DateTime? createdAt,
+    this.scheduledStartAt,
     this.isBackupImport = false,
     this.exportUri,
     this.exportDirectoryUri,
@@ -264,6 +277,37 @@ class DownloadTask implements Comparable<DownloadTask> {
 
   double get progress => totalBytes > 0 ? downloadedBytes / totalBytes : 0.0;
 
+  /// True when this task is scheduled to start at a future time.
+  bool get isScheduled => scheduledStartAt != null && scheduledStartAt!.isAfter(DateTime.now());
+
+  /// Copies runtime browser bridges from [donor]. These closures cannot be
+  /// persisted to JSON and are lost after app restart / queue reload — they
+  /// must be re-attached from a live browser tab (or a freshly sniffed task).
+  void copyBrowserBridgesFrom(DownloadTask donor) {
+    if (donor.fetchViaWebView != null) {
+      fetchViaWebView = donor.fetchViaWebView;
+    }
+    if (donor.fetchBinaryViaWebView != null) {
+      fetchBinaryViaWebView = donor.fetchBinaryViaWebView;
+    }
+    if (donor.hlsPlaylistCache != null) {
+      hlsPlaylistCache = donor.hlsPlaylistCache;
+    }
+    if (donor.cookieProvider != null) {
+      cookieProvider = donor.cookieProvider;
+    }
+    if (donor.onTokenExpired != null) {
+      onTokenExpired = donor.onTokenExpired;
+    }
+  }
+
+  /// True when at least one WAF-bypass bridge is attached.
+  bool get hasBrowserBridges =>
+      fetchViaWebView != null ||
+      cookieProvider != null ||
+      onTokenExpired != null ||
+      fetchBinaryViaWebView != null;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'url': url,
@@ -288,6 +332,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     'lastModified': lastModified,
     'chunks': chunks.map((c) => c.toJson()).toList(),
     'createdAt': createdAt.toIso8601String(),
+    if (scheduledStartAt != null)
+      'scheduledStartAt': scheduledStartAt!.toIso8601String(),
     'isBackupImport': isBackupImport,
     'exportUri': exportUri,
     'exportDirectoryUri': exportDirectoryUri,
@@ -375,6 +421,9 @@ class DownloadTask implements Comparable<DownloadTask> {
       createdAt: json['createdAt'] != null
           ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
           : DateTime.now(),
+      scheduledStartAt: json['scheduledStartAt'] != null
+          ? DateTime.tryParse(json['scheduledStartAt'] as String)
+          : null,
       isBackupImport: json['isBackupImport'] as bool? ?? false,
       exportUri: json['exportUri'] as String?,
       exportDirectoryUri: json['exportDirectoryUri'] as String?,

@@ -254,6 +254,9 @@ class _QueuePageState extends State<QueuePage> {
     final queuedCount = filteredTasks
         .where((t) => widget.queue.queuedTasks.any((q) => q.id == t.id))
         .length;
+    final scheduledCount = filteredTasks
+        .where((t) => t.state == DownloadState.scheduled)
+        .length;
 
     final totalSpeed = filteredTasks
         .where((t) => t.state == DownloadState.downloading)
@@ -270,6 +273,7 @@ class _QueuePageState extends State<QueuePage> {
         context,
         activeCount: activeCount,
         queuedCount: queuedCount,
+        scheduledCount: scheduledCount,
         completedCount: filteredCompleted,
         failedCount: filteredFailed,
         totalSpeed: totalSpeed,
@@ -602,6 +606,7 @@ class _QueuePageState extends State<QueuePage> {
   static const _stateFilterOptions = <_StateFilterOption>{
     _StateFilterOption(null, 'All', Icons.all_inclusive),
     _StateFilterOption({DownloadState.downloading, DownloadState.idle, DownloadState.merging}, 'Active', Icons.bolt),
+    _StateFilterOption({DownloadState.scheduled}, 'Scheduled', Icons.schedule),
     _StateFilterOption({DownloadState.paused}, 'Paused', Icons.pause_circle_outline),
     _StateFilterOption({DownloadState.completed}, 'Done', Icons.done_all),
     _StateFilterOption({DownloadState.failed}, 'Failed', Icons.error_outline),
@@ -774,6 +779,7 @@ class _QueuePageState extends State<QueuePage> {
     final hasActive = filteredTasks
         .any((t) => t.state == DownloadState.downloading || t.state == DownloadState.idle);
     final hasPaused = filteredTasks.any((t) => t.state == DownloadState.paused);
+    final hasScheduled = filteredTasks.any((t) => t.state == DownloadState.scheduled);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -803,6 +809,14 @@ class _QueuePageState extends State<QueuePage> {
                 }
               }
             }),
+          if (hasScheduled && widget.onCancelTask != null)
+            _actionChip(Icons.event_busy_rounded, 'Cancel Scheduled', () {
+              for (final task in filteredTasks) {
+                if (task.state == DownloadState.scheduled) {
+                  widget.onCancelTask!(task)?.call();
+                }
+              }
+            }),
           if (widget.onCancelTask != null)
             _actionChip(Icons.cancel_outlined, 'Cancel Active', () async {
               final confirm = await showDialog<bool>(
@@ -820,7 +834,8 @@ class _QueuePageState extends State<QueuePage> {
               );
               if (confirm == true) {
                 for (final task in filteredTasks) {
-                  if (task.state != DownloadState.completed) {
+                  if (task.state != DownloadState.completed &&
+                      task.state != DownloadState.scheduled) {
                     widget.onCancelTask!(task)?.call();
                   }
                 }
@@ -853,6 +868,7 @@ class _QueuePageState extends State<QueuePage> {
     BuildContext context, {
     required int activeCount,
     required int queuedCount,
+    required int scheduledCount,
     required int completedCount,
     required int failedCount,
     required double totalSpeed,
@@ -877,6 +893,11 @@ class _QueuePageState extends State<QueuePage> {
               _statBadge(Icons.pending_actions, '$queuedCount', 'Queued',
                   ac.accentPurple),
               const SizedBox(width: 8),
+              if (scheduledCount > 0) ...[
+                _statBadge(Icons.schedule, '$scheduledCount', 'Scheduled',
+                    ac.accentPurple),
+                const SizedBox(width: 8),
+              ],
               _statBadge(Icons.done_all, '$completedCount', 'Done',
                   ac.statusSuccess),
               const SizedBox(width: 8),
@@ -960,6 +981,8 @@ class _QueuePageState extends State<QueuePage> {
       case DownloadState.downloading:
       case DownloadState.idle:
         return ac.accentFrost; // Teal, pulsing
+      case DownloadState.scheduled:
+        return ac.accentPurple; // Purple for scheduled
       case DownloadState.paused:
         return ac.accentAmber; // Amber
       case DownloadState.completed:
@@ -984,29 +1007,27 @@ class _QueuePageState extends State<QueuePage> {
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Done — Removed "${_taskDisplayName(task)}".'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {
-            final restored = DownloadTask.fromJson(taskJson);
-            // Reattach closure-typed callbacks that toJson/fromJson loses.
-            restored.fetchViaWebView = callbacks.fetchViaWebView;
-            restored.fetchBinaryViaWebView = callbacks.fetchBinaryViaWebView;
-            restored.hlsPlaylistCache = callbacks.hlsPlaylistCache;
-            restored.cookieProvider = callbacks.cookieProvider;
-            restored.onTokenExpired = callbacks.onTokenExpired;
-            // Non-completed tasks are set to paused so they don't auto-start.
-            if (restored.state != DownloadState.completed) {
-              restored.state = DownloadState.paused;
-              restored.downloadedBytes = 0;
-            }
-            widget.queue.addTask(restored, force: true);
-          },
-        ),
-        duration: const Duration(seconds: 5),
-      ),
+    final undoAction = () {
+      final restored = DownloadTask.fromJson(taskJson);
+      // Reattach closure-typed callbacks that toJson/fromJson loses.
+      restored.fetchViaWebView = callbacks.fetchViaWebView;
+      restored.fetchBinaryViaWebView = callbacks.fetchBinaryViaWebView;
+      restored.hlsPlaylistCache = callbacks.hlsPlaylistCache;
+      restored.cookieProvider = callbacks.cookieProvider;
+      restored.onTokenExpired = callbacks.onTokenExpired;
+      // Non-completed tasks are set to paused so they don't auto-start.
+      if (restored.state != DownloadState.completed) {
+        restored.state = DownloadState.paused;
+        restored.downloadedBytes = 0;
+      }
+      widget.queue.addTask(restored, force: true);
+    };
+
+    AuroraSnackbar.show(
+      context,
+      'Done — Removed "${_taskDisplayName(task)}".',
+      actionLabel: 'Undo',
+      onAction: undoAction,
     );
   }
 
@@ -1034,6 +1055,8 @@ class _QueuePageState extends State<QueuePage> {
     Widget? _rightSwipeBackground() {
       Widget icon;
       switch (task.state) {
+        case DownloadState.scheduled:
+          icon = Icon(Icons.cancel_outlined, color: ac.statusError);
         case DownloadState.idle:
         case DownloadState.downloading:
           icon = Icon(Icons.pause, color: ac.accentFrost);
@@ -1049,7 +1072,9 @@ class _QueuePageState extends State<QueuePage> {
       return Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        color: ac.accentFrost.withValues(alpha: 0.2),
+        color: task.state == DownloadState.scheduled
+            ? ac.statusError.withValues(alpha: 0.2)
+            : ac.accentFrost.withValues(alpha: 0.2),
         child: icon,
       );
     }
@@ -1069,6 +1094,8 @@ class _QueuePageState extends State<QueuePage> {
     VoidCallback? _onRightSwipe() {
       if (isMerging) return null;
       switch (task.state) {
+        case DownloadState.scheduled:
+          return () => widget.onCancelTask?.call(task)?.call();
         case DownloadState.idle:
         case DownloadState.downloading:
           return () => widget.onPauseTask?.call(task)?.call();
@@ -1105,6 +1132,7 @@ class _QueuePageState extends State<QueuePage> {
           ),
           child: IntrinsicHeight(
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Left edge status indicator
                 Container(
@@ -1116,66 +1144,122 @@ class _QueuePageState extends State<QueuePage> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Text block
+                // Text block — grows vertically for full failed-error text
                 Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildNameWidget(
-                        task,
-                        TextStyle(
-                          fontFamily: 'Inter',
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: ac.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // Micro progress bar
-                      // When totalBytes is unknown (null progress), shows an
-                      // indeterminate animated bar so the user can see the
-                      // download is actively receiving data.
-                      if (task.state == DownloadState.downloading ||
-                          task.state == DownloadState.idle)
-                        RepaintBoundary(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(1),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              minHeight: 2,
-                              backgroundColor:
-                                  ac.surfaceElevated,
-                              valueColor: AlwaysStoppedAnimation<Color>(color),
-                            ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      vertical: task.state == DownloadState.failed ? 10 : 0,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: task.state == DownloadState.failed
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildNameWidget(
+                          task,
+                          TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: ac.textPrimary,
                           ),
                         ),
-                      if (task.state == DownloadState.completed ||
-                          task.state == DownloadState.failed ||
-                          task.state == DownloadState.paused)
                         const SizedBox(height: 2),
-                      // Metadata line
-                      Text(
-                        _metadataLabel(task),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 8.5,
-                          fontFamily: 'JetBrainsMono',
-                          color: ac.textTertiary,
+                        // Micro progress bar
+                        // When totalBytes is unknown (null progress), shows an
+                        // indeterminate animated bar so the user can see the
+                        // download is actively receiving data.
+                        if (task.state == DownloadState.downloading ||
+                            task.state == DownloadState.idle)
+                          RepaintBoundary(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(1),
+                              child: LinearProgressIndicator(
+                                value: progress,
+                                minHeight: 2,
+                                backgroundColor: ac.surfaceElevated,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(color),
+                              ),
+                            ),
+                          ),
+                        if (task.state == DownloadState.completed ||
+                            task.state == DownloadState.failed ||
+                            task.state == DownloadState.paused)
+                          const SizedBox(height: 2),
+                        // Metadata line (no truncated error — full text below)
+                        Text(
+                          _metadataLabel(task),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 8.5,
+                            fontFamily: 'JetBrainsMono',
+                            color: ac.textTertiary,
+                          ),
                         ),
-                      ),
-                    ],
+                        // Transient status (converting, refreshing, resuming…)
+                        if (task.statusMessage != null &&
+                            task.statusMessage!.isNotEmpty &&
+                            task.state != DownloadState.completed &&
+                            task.state != DownloadState.failed)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              task.statusMessage!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontFamily: 'Inter',
+                                color: ac.accentFrost,
+                              ),
+                            ),
+                          ),
+                        // Failed-task error: full message, card expands
+                        if (task.state == DownloadState.failed &&
+                            task.errorMessage != null &&
+                            task.errorMessage!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6, right: 4),
+                            child: SelectableText(
+                              _displayErrorMessage(task.errorMessage!),
+                              style: TextStyle(
+                                fontSize: 11,
+                                height: 1.35,
+                                fontFamily: 'Inter',
+                                color: ac.statusError,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-                // Action buttons
-                _buildTaskActions(task, color),
+                // Action buttons — top-aligned so tall error cards stay tidy
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: task.state == DownloadState.failed ? 8 : 0,
+                    ),
+                    child: _buildTaskActions(task, color),
+                  ),
+                ),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// Strips internal markers (e.g. `[PARTIAL:0.42]`) for on-card display.
+  String _displayErrorMessage(String raw) {
+    return raw
+        .replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '')
+        .trim();
   }
 
   Widget _compactButton({
@@ -1204,7 +1288,14 @@ class _QueuePageState extends State<QueuePage> {
     // ── Primary action icon (visible outside popup) ──────────────
     Widget? primaryAction;
 
-    if (task.state == DownloadState.downloading ||
+    if (task.state == DownloadState.scheduled) {
+      primaryAction = _compactButton(
+        icon: Icons.cancel_outlined,
+        color: ac.statusError,
+        tooltip: 'Cancel scheduled',
+        onPressed: () => widget.onCancelTask?.call(task)?.call(),
+      );
+    } else if (task.state == DownloadState.downloading ||
         task.state == DownloadState.idle) {
       primaryAction = _compactButton(
         icon: Icons.pause_rounded,
@@ -1365,11 +1456,8 @@ class _QueuePageState extends State<QueuePage> {
                           context: context,
                           builder: (context) => DownloadPropertiesDialog(
                             task: task,
-                            onOpenDownload: widget.onOpenDownload,
                             onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
                             onTaskUpdated: (t) => widget.queue.emitTask(t),
-                            onShareDownload: widget.onShareDownload,
-                            onExport: widget.onExportDownload,
                           ),
                         ).then((_) {
                           if (mounted) setState(() {});
@@ -1390,7 +1478,12 @@ class _QueuePageState extends State<QueuePage> {
       children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 10),
-        Text(label, style: const TextStyle(fontSize: 13)),
+        Flexible(
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13)),
+        ),
       ],
     );
   }
@@ -1488,7 +1581,29 @@ class _QueuePageState extends State<QueuePage> {
 
   String _metadataLabel(DownloadTask task) {
     final parts = <String>[];
-    if (task.state == DownloadState.downloading ||
+    if (task.state == DownloadState.scheduled) {
+      if (task.scheduledStartAt != null) {
+        final diff = task.scheduledStartAt!.difference(DateTime.now());
+        if (diff.isNegative) {
+          parts.add('Starting…');
+        } else {
+          String pad(int n) => n.toString().padLeft(2, '0');
+          if (diff.inDays > 1) {
+            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)} '
+                '${task.scheduledStartAt!.month}/${task.scheduledStartAt!.day}');
+          } else {
+            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)}');
+          }
+          if (diff.inMinutes < 60) {
+            parts.add('${diff.inMinutes}m left');
+          } else if (diff.inHours < 24) {
+            parts.add('${diff.inHours}h ${diff.inMinutes % 60}m left');
+          }
+        }
+      } else {
+        parts.add('Scheduled');
+      }
+    } else if (task.state == DownloadState.downloading ||
         task.state == DownloadState.idle) {
       if (task.totalBytes > 0) {
         parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
@@ -1504,10 +1619,13 @@ class _QueuePageState extends State<QueuePage> {
       parts.add(formatBytes(task.totalBytes));
     } else if (task.state == DownloadState.completed && task.downloadedBytes > 0) {
       parts.add('${formatBytes(task.downloadedBytes)} downloaded');
-    } else if (task.state == DownloadState.failed && task.errorMessage != null) {
-      parts.add(task.errorMessage!.length > 40
-          ? '${task.errorMessage!.substring(0, 40)}…'
-          : task.errorMessage!);
+    } else if (task.state == DownloadState.failed) {
+      // Full error is shown on its own wrapping lines below — keep the
+      // mono metadata row short so the card layout stays scannable.
+      if (task.downloadedBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} saved');
+      }
+      parts.add('Failed');
     } else if (task.state == DownloadState.paused) {
       if (task.totalBytes > 0) {
         parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
@@ -1629,19 +1747,19 @@ class _QueuePageState extends State<QueuePage> {
   /// Called by [DownloadQueue.onResniffDuplicate] when a duplicate URL is
   /// detected while the queue is in manual-resniff mode.  Shows a dialog
   /// asking whether to update the existing download or create a new one.
-  void _handleResniffDuplicate(String existingTaskId, String newUrl, String? contentType) {
+  void _handleResniffDuplicate(String existingTaskId, DownloadTask newTask) {
     if (!mounted) return;
     widget.queue.resniffPendingTaskId = null; // exit resniff mode
-    _showResniffDuplicateDialog(existingTaskId, newUrl, contentType);
+    _showResniffDuplicateDialog(existingTaskId, newTask);
   }
 
-  void _showResniffDuplicateDialog(String existingTaskId, String newUrl, String? contentType) {
+  void _showResniffDuplicateDialog(String existingTaskId, DownloadTask newTask) {
     if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Link already queued'),
-        content: Text(
+        content: const Text(
           'This link is already in your download queue.\n\n'
           'The URL may have changed (token refresh). Update the existing '
           'download with the new link, or create a separate one.',
@@ -1654,22 +1772,24 @@ class _QueuePageState extends State<QueuePage> {
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              // Create new download alongside existing one
+              // Create new download alongside existing one — keep the
+              // freshly sniffed headers + browser bridges from [newTask].
               final existing = widget.queue.getTask(existingTaskId);
               if (existing != null) {
-                final newTask = DownloadTask(
+                final created = DownloadTask(
                   id: DateTime.now().microsecondsSinceEpoch.toString(),
-                  url: newUrl,
-                  headers: existing.headers,
+                  url: newTask.url,
+                  headers: newTask.headers ?? existing.headers,
                   savePath: existing.savePath.replaceAll(
                     _fileName(existing.savePath),
                     '${_fileName(existing.savePath).replaceAll(RegExp(r'\.[^.]+$'), '')}_${DateTime.now().millisecondsSinceEpoch}${RegExp(r'\.[^.]+$').firstMatch(existing.savePath)?.group(0) ?? ''}',
                   ),
                   tempDir: '${existing.tempDir}_${DateTime.now().millisecondsSinceEpoch}',
-                  contentType: contentType ?? existing.contentType,
-                  sourcePageUrl: existing.sourcePageUrl,
+                  contentType: newTask.contentType ?? existing.contentType,
+                  sourcePageUrl: newTask.sourcePageUrl ?? existing.sourcePageUrl,
                 );
-                widget.queue.addTask(newTask, force: true);
+                created.copyBrowserBridgesFrom(newTask);
+                widget.queue.addTask(created, force: true);
                 if (mounted) {
                   AuroraSnackbar.show(context, 'Done — New download created with refreshed link.');
                 }
@@ -1680,31 +1800,16 @@ class _QueuePageState extends State<QueuePage> {
           ElevatedButton(
             onPressed: () async {
               Navigator.of(ctx).pop();
-              // Update existing task with the freshly sniffed URL and make it
-              // retryable. A changed URL means the previously downloaded bytes
-              // no longer match, so progress is reset before resuming.
-              final existing = widget.queue.getTask(existingTaskId);
-              if (existing != null) {
-                final urlChanged = existing.url != newUrl;
-                existing.url = newUrl;
-                if (urlChanged) {
-                  existing.downloadedBytes = 0;
-                  existing.totalBytes = 0;
-                }
-                if (existing.state == DownloadState.failed ||
-                    existing.state == DownloadState.paused) {
-                  existing.state = DownloadState.idle;
-                }
-                existing.failureReason = null;
-                existing.errorMessage = null;
-                await widget.queue.resumeTaskAsync(existingTaskId);
-                if (mounted) {
-                  AuroraSnackbar.show(
-                    context,
-                    'Done — Link updated. Download will retry.',
-                  );
-                  setState(() {});
-                }
+              // Copy URL + headers + WebView bridges from the fresh sniff,
+              // wipe stale temp segments, and restart. (Old path only updated
+              // the URL, so post-restart "Update link" still 403'd.)
+              await widget.queue.updateTaskFromDonor(existingTaskId, newTask);
+              if (mounted) {
+                AuroraSnackbar.show(
+                  context,
+                  'Done — Link updated. Download will retry.',
+                );
+                setState(() {});
               }
             },
             child: const Text('Update existing'),

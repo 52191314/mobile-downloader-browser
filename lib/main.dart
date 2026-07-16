@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'downloader/download_rules.dart';
 import 'downloader/downloader.dart';
+import 'downloader/filename_service.dart';
 import 'downloader/url_filename_resolver.dart';
 import 'logging/aurora_log.dart';
 import 'logging/log_settings_store.dart';
@@ -16,6 +18,7 @@ import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
 import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
+import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
 import 'sync/sync.dart';
 import 'theme/aurora_glass_background.dart';
@@ -26,6 +29,9 @@ import 'ui/widgets/aurora_dock.dart';
 import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
 import 'backup/auto_backup_service.dart';
+import 'premium/pro_entitlement.dart';
+import 'premium/pro_features.dart';
+import 'sniffer/worker_isolate_pool.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
 /// same constant in sniffer_screen.dart so manually-pasted HLS requests look
@@ -43,6 +49,12 @@ final ValueNotifier<ThemeMode> appThemeModeNotifier =
 /// Set to `true` when [DarkModePreference.forced] is active (the setting
 /// is labelled "Dark (OLED black)" in the UI).
 final ValueNotifier<bool> appOledDarkNotifier = ValueNotifier(false);
+
+enum BatteryOptChoice {
+  openSettings,
+  later,
+  neverAskAgain,
+}
 
 void main() {
   // Global error handlers: catch any uncaught Dart/async errors so a single
@@ -181,15 +193,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final TextEditingController _customSearchController;
   late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
+  final ProEntitlement _proEntitlement = ProEntitlement();
   final PublicDownloadsService _publicDownloadsService =
       const PublicDownloadsService();
   final DownloadNotificationService _notificationService =
       DownloadNotificationService();
-  final AutoBackupService _autoBackupService = AutoBackupService();
+  late final AutoBackupService _autoBackupService = AutoBackupService(
+    isProCallback: () => _proEntitlement.isPro,
+  );
   StreamSubscription<DownloadTask>? _queueSubscription;
   StreamSubscription<DriveSyncState>? _driveSubscription;
   DownloadSettings _settings = DownloadSettings.defaults();
+  DownloadRuleEngine? _ruleEngine;
   double _speedLimitKbps = 0;
+  Future<void>? _loadSettingsFuture;
   int _currentTabIndex = 1; // Start on Browser tab; overridden in initState
 
   /// Tracks which top-level tabs have been visited.  Only visited tabs are
@@ -204,6 +221,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   Timer? _resniffModeTimer;
   final Map<String, DownloadState> _prevTaskStates = {};
   bool _isDisposed = false;
+
+  /// Queue → Browser external URL opens (View source / Scan / intents).
+  final BrowserOpenRequestBus _browserOpenRequestBus = BrowserOpenRequestBus();
 
   void _logError(String context, Object error, [StackTrace? stack]) {
     debugPrint('[AuroraHome] $context: $error');
@@ -265,7 +285,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     );
     _sniffedCountNotifier = ValueNotifier<int>(0);
     _startAdblockAutoRefresh();
-    unawaited(_loadSettings());
+    _proEntitlement.addListener(_onProEntitlementChanged);
+    _loadSettingsFuture = _loadSettings();
     unawaited(_initNotifications());
     _queueSubscription = _downloadQueue.onTaskUpdated.listen((task) {
       // QueuePage listens to task updates and throttles its own rebuilds.
@@ -299,11 +320,17 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       // Uses a static flag so the system dialog is shown only once per
       // process lifetime.
       if (task.state == DownloadState.downloading) {
-        _requestBatteryOptOnce();
+        unawaited(_requestBatteryOptOnce());
       }
     });
     _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
+    // Request battery-optimisation exemption on app start (once), so the
+    // user sees the prompt even if they browse without downloading yet.
+    // The 2-second delay lets the UI settle first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeRequestBatteryOptOnLaunch();
+    });
   }
 
   Future<void> _initNotifications() async {
@@ -330,15 +357,130 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     return SnifferWebViewControllerImpl();
   }
 
-  /// Called on the first download-start event to request battery
-  /// optimisation exemption.  On Android 6+ this shows a system dialog;
-  /// the user must tap "Allow" to whitelist Aurora so doze / app-standby
-  /// does not kill the process or throttle network during background
-  /// downloads.
-  static void _requestBatteryOptOnce() {
+  /// Called on the first battery-opt event (either app launch or first
+  /// download start) to request battery optimisation exemption.
+  /// On Android 6+ this shows a system dialog; the user must tap "Allow"
+  /// to whitelist Aurora so doze / app-standby does not kill the process
+  /// or throttle network during background downloads.
+  /// If the manufacturer has additional autostart/background-activity
+  /// settings (Xiaomi, Huawei, OPPO, Vivo, OnePlus, Samsung, etc.),
+  /// also shows an OEM guidance dialog pointing the user to the right
+  /// settings screen.
+  Future<void> _requestBatteryOptOnce() async {
+    try {
+      if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    } catch (_) {}
+    if (_loadSettingsFuture != null) {
+      await _loadSettingsFuture;
+    }
+    if (_settings.neverAskBatteryOpt) return;
     if (_batteryOptRequested) return;
     _batteryOptRequested = true;
-    unawaited(DownloadForegroundService.requestBatteryOptimizationExemption());
+
+    // Open the standard AOSP battery-opt exemption dialog and detect OEM.
+    final oemInfo =
+        await DownloadForegroundService.requestBatteryOptimizationExemption();
+    if (!mounted) return;
+
+    final oem = oemInfo['oem'] as String?;
+    if (oem != null) {
+      _showOemGuidanceDialog(oem);
+    }
+  }
+
+  Future<BatteryOptChoice?> _showBatteryOptRequestDialog() {
+    return showDialog<BatteryOptChoice>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Battery Optimization'),
+        content: const Text(
+          'Aurora Downloader requires background execution permission to ensure uninterrupted downloads.\n\n'
+          'Would you like to exclude Aurora from battery optimization?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(BatteryOptChoice.neverAskAgain),
+            child: const Text('Never ask again'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(BatteryOptChoice.later),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(BatteryOptChoice.openSettings),
+            child: const Text('Open settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Checks battery optimisation status shortly after app launch, and
+  /// triggers the exemption request (once) if the app is not yet whitelisted.
+  Future<void> _maybeRequestBatteryOptOnLaunch() async {
+    try {
+      if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    } catch (_) {}
+    if (_loadSettingsFuture != null) {
+      await _loadSettingsFuture;
+    }
+    if (_settings.neverAskBatteryOpt) return;
+    if (_batteryOptRequested) return;
+
+    // Brief pause so the initial UI is fully settled.
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    // Re-check after delay in case state changed
+    if (_settings.neverAskBatteryOpt) return;
+    if (_batteryOptRequested) return;
+
+    if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
+      return;
+    }
+
+    final choice = await _showBatteryOptRequestDialog();
+    if (!mounted) return;
+
+    if (choice == BatteryOptChoice.neverAskAgain) {
+      _updateSettings(_settings.copyWith(neverAskBatteryOpt: true));
+    } else if (choice == BatteryOptChoice.openSettings) {
+      await _requestBatteryOptOnce();
+    }
+  }
+
+  /// Shows a dialog explaining the OEM-specific autostart / background-
+  /// activity settings screen the user should also visit for full
+  /// background download reliability.
+  void _showOemGuidanceDialog(String oem) {
+    final label = DownloadForegroundService.oemLabel(oem);
+    final name = DownloadForegroundService.oemName(oem);
+    if (label == null || name == null) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Background downloads on $name'),
+        content: Text(
+          'Some $name devices also require enabling "$label" for Aurora '
+          'to keep downloading in the background.\n\n'
+          'Do you want to open the system settings?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(DownloadForegroundService.openOemAutostartPage());
+            },
+            child: const Text('Open settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Switches the active main tab (Queue=0, Browser=1, Settings=2).
@@ -384,6 +526,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     unawaited(_downloadQueue.dispose());
     unawaited(_driveSyncService.dispose());
     _autoBackupService.dispose();
+    WorkerIsolatePool.instance.dispose();
+    _browserOpenRequestBus.dispose();
+    _proEntitlement.removeListener(_onProEntitlementChanged);
+    _proEntitlement.dispose();
     super.dispose();
   }
 
@@ -522,6 +668,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             settings: _settings,
                             onSettingsChanged: _updateSettings,
                             libraryUpdateNotifier: _libraryUpdateNotifier,
+                            openRequestBus: _browserOpenRequestBus,
+                            isProCallback: () => _proEntitlement.isPro,
                             onOpenQueue: () => _selectTab(0),
                             onOpenSettings: () => _selectTab(2),
                             onSniffedCountChanged: (count) {
@@ -551,6 +699,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             downloadQueue: _downloadQueue,
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             autoBackupService: _autoBackupService,
+                            proEntitlement: _proEntitlement,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -623,10 +772,34 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       );
       if (_downloadQueue.urlExists(rawUrl)) {
         if (!mounted) return;
-        final skip = await _showDuplicatePrompt(context, 'Torrent');
-        if (skip) {
+        final choice = await _showDuplicatePrompt(context, 'Torrent');
+        if (choice == DuplicateChoice.skip) {
           _urlController.clear();
           return;
+        }
+        if (choice == DuplicateChoice.updateExisting) {
+          final existing = _downloadQueue.getTaskByUrl(rawUrl);
+          if (existing != null) {
+            final urlChanged = existing.url != rawUrl;
+            existing.url = rawUrl;
+            existing.headers = task.headers;
+            if (urlChanged) {
+              existing.downloadedBytes = 0;
+              existing.totalBytes = 0;
+            }
+            if (existing.state == DownloadState.failed ||
+                existing.state == DownloadState.paused ||
+                existing.state == DownloadState.completed) {
+              existing.state = DownloadState.idle;
+            }
+            existing.failureReason = null;
+            existing.errorMessage = null;
+            await _downloadQueue.resumeTaskAsync(existing.id);
+            _urlController.clear();
+            _showSnack('Done — Link updated. Torrent will retry.');
+            if (mounted) setState(() {});
+            return;
+          }
         }
       }
       _downloadQueue.addTask(task);
@@ -638,12 +811,18 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     // Probe the URL for a real filename, Content-Type, and size.
     final resolved = await resolveFilename(url: rawUrl, headers: headers);
-    final fileName = resolved.name;
+    final fileName = FilenameService.truncate(
+      FilenameService.sanitize(resolved.name),
+    );
+    final savePath = FilenameService.uniquePath(
+      '${baseDir.path}/$fileName',
+      reservedPaths: _downloadQueue.allTasks.map((t) => t.savePath),
+    );
     final task = DownloadTask(
       id: id,
       url: rawUrl,
       headers: headers,
-      savePath: '${baseDir.path}/$fileName',
+      savePath: savePath,
       tempDir: '${tempDir.path}/$id',
       contentType: resolved.contentType,
       totalBytes: resolved.contentLength ?? -1,
@@ -651,10 +830,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     bool force = false;
     if (_downloadQueue.urlExists(rawUrl)) {
       if (!mounted) return;
-      final skip = await _showDuplicatePrompt(context, fileName);
-      if (skip) {
+      final choice = await _showDuplicatePrompt(context, fileName);
+      if (choice == DuplicateChoice.skip) {
         _urlController.clear();
         return;
+      }
+      if (choice == DuplicateChoice.updateExisting) {
+        final existing = _downloadQueue.getTaskByUrl(rawUrl);
+        if (existing != null) {
+          await _downloadQueue.updateTaskFromDonor(existing.id, task);
+          _urlController.clear();
+          _showSnack('Done — Link updated. Download will retry.');
+          if (mounted) setState(() {});
+          return;
+        }
       }
       force = true;
     }
@@ -675,11 +864,50 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _openUrlInBrowserAfterTabReady(url);
   }
 
+  /// Switch to the Browser tab and navigate to [url].
+  ///
+  /// Uses [BrowserOpenRequestBus] so SnifferScreen handles the load on the
+  /// **active tab's live WebView** (same reliability as History open-all /
+  /// address bar). The old `openUrlInNewTab` controller callback was a no-op
+  /// in practice (logs showed the call from main with no page load).
   void _openUrlInBrowserAfterTabReady(String url) {
-    if (_currentTabIndex != 1 || !_visitedMainTabs.contains(1)) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+
+    final firstVisitToBrowser = !_visitedMainTabs.contains(1);
+    if (_currentTabIndex != 1 || firstVisitToBrowser) {
       _selectTab(1);
     }
-    _browserController.requestOpenUrl(url);
+
+    void publish() {
+      if (!mounted) return;
+      AuroraLog.instance.info(
+        'browserOpenRequestBus.request("$trimmed") '
+        '(firstVisit=$firstVisitToBrowser, browserMounted='
+        '${_visitedMainTabs.contains(1)})',
+        category: LogCategory.app,
+        screen: LogScreen.queue,
+        eventType: LogEventType.navigation,
+      );
+      // Primary path: ChangeNotifier bus → SnifferScreen listener.
+      _browserOpenRequestBus.request(trimmed);
+      // Fallback if bus listener was not yet attached (first frame after
+      // first Browser visit): keep controller pending queue as well.
+      if (firstVisitToBrowser) {
+        _browserController.openUrlInNewTab(trimmed);
+      }
+    }
+
+    // Wait one frame so SnifferScreen is in the tree on first visit and
+    // popup menus have dismissed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (firstVisitToBrowser) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => publish());
+      } else {
+        publish();
+      }
+    });
   }
 
   /// Auto-resniff: probe the download URL through the browser controller
@@ -690,15 +918,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     try {
       final sourcePage = task.sourcePageUrl;
       if (sourcePage != null && sourcePage.isNotEmpty) {
-        if (_currentTabIndex != 1 || !_visitedMainTabs.contains(1)) {
-          _selectTab(1);
-        }
-        final sourceUri = Uri.tryParse(sourcePage);
-        if (sourceUri != null && sourceUri.hasScheme) {
-          await _browserController.loadRequest(sourceUri, addToHistory: false);
-          // Let page JS kick off player/playlist requests before probing.
-          await Future<void>.delayed(const Duration(seconds: 2));
-        }
+        // Open the source page in a real browser tab (same path as
+        // "Scan in browser" / "View source page"). Loading via
+        // `_browserController.loadRequest` only hits the shared first-tab
+        // controller, which is often not the active WebView — so the
+        // Browser screen appeared without the source page.
+        _openUrlInBrowserAfterTabReady(sourcePage);
+        // Let the page JS kick off player/playlist requests before probing.
+        await Future<void>.delayed(const Duration(seconds: 3));
       }
 
       // Try the HLS playlist refresh path first (handles token expiry).
@@ -752,22 +979,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         ),
       );
       if (choice == 'update') {
-        final urlChanged =
-            _normalizeForCompare(task.url) != _normalizeForCompare(freshUrl);
-        task.url = freshUrl;
-        // A refreshed URL means the previously downloaded bytes no longer
-        // match — reset progress so the download restarts cleanly.
-        if (urlChanged) {
-          task.downloadedBytes = 0;
-          task.totalBytes = 0;
-        }
-        if (task.state == DownloadState.failed ||
-            task.state == DownloadState.paused) {
-          task.state = DownloadState.idle;
-        }
-        task.failureReason = null;
-        task.errorMessage = null;
-        await _downloadQueue.resumeTaskAsync(task.id);
+        // Build a donor with the fresh URL so updateTaskFromDonor can rebind
+        // bridges, refresh cookies, and wipe stale segments when the token
+        // changed. Plain URL swap left restored tasks without WebView context.
+        final donor = DownloadTask(
+          id: 'donor_${task.id}',
+          url: freshUrl,
+          headers: task.headers,
+          savePath: task.savePath,
+          tempDir: task.tempDir,
+          contentType: task.contentType,
+          sourcePageUrl: task.sourcePageUrl,
+        );
+        donor.copyBrowserBridgesFrom(task);
+        await _downloadQueue.updateTaskFromDonor(task.id, donor);
         if (mounted) {
           _showSnack('Link updated. Download will retry.');
         }
@@ -785,6 +1010,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           contentType: task.contentType,
           sourcePageUrl: task.sourcePageUrl,
         );
+        newTask.copyBrowserBridgesFrom(task);
         _downloadQueue.addTask(newTask, force: true);
         if (mounted) _showSnack('Done \u2014 new download created with refreshed link.');
         setState(() {});
@@ -928,6 +1154,16 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     });
     _applySettings(loaded);
 
+    // Load download rules.
+    try {
+      final rules = await const DownloadRulesStore().load();
+      if (mounted) {
+        setState(() => _ruleEngine = DownloadRuleEngine(rules));
+      }
+    } catch (e, s) {
+      _logError('Failed to load download rules', e, s);
+    }
+
     try {
       final docs = await getApplicationSupportDirectory();
       final path = docs.path;
@@ -943,6 +1179,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         }),
         _downloadQueue.loadFromFile('$path/download_queue.json'),
       ]);
+      // Free disk from abandoned failed-task segment trees older than 3 days.
+      unawaited(_downloadQueue.purgeStaleFailedTemps());
       if (mounted) setState(() {});
     } catch (e, s) {
       _logError('Failed to load download queue/logs', e, s);
@@ -961,14 +1199,30 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     );
   }
 
+  void _onProEntitlementChanged() {
+    // Re-apply current settings so caps (concurrent, chunks, proxy, etc.)
+    // reflect the new Pro status immediately.
+    if (mounted) _applySettings(_settings);
+  }
+
   void _applySettings(DownloadSettings settings) {
+    final isPro = _proEntitlement.isPro;
+
     unawaited(_autoBackupService.configure(settings));
+    _downloadQueue.wifiOnly = settings.wifiOnly;
     _downloadQueue.configure(
-      maxConcurrentDownloads: settings.maxConcurrentDownloads,
-      numChunksPerTask: settings.chunksPerTask,
+      maxConcurrentDownloads: settings.maxConcurrentDownloads.clamp(
+        1,
+        isPro ? ProFeatures.maxConcurrentPro : ProFeatures.maxConcurrentFree,
+      ),
+      numChunksPerTask: settings.chunksPerTask.clamp(
+        1,
+        isPro ? ProFeatures.chunksPerTaskPro : ProFeatures.chunksPerTaskFree,
+      ),
       completedDownloadPublisher: _publicDownloadsService,
       autoClassifyEnabled: settings.autoClassifyEnabled,
       remuxTsToMp4: settings.remuxTsToMp4,
+      autoClassifyMappings: settings.autoClassifyMappings,
       autoRetry: settings.autoRetry,
       retryLimit: settings.retryLimit,
       minSpeedThresholdBytesPerSec: settings.minSpeedThresholdKbps * 1024,
@@ -990,14 +1244,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         cosmeticRules: settings.manualCosmeticRules,
       ),
     );
-    // Apply proxy settings (recreates HTTP client if needed).
-    _downloadQueue.applyProxySettings(
-      settings.proxyType,
-      settings.proxyHost,
-      settings.proxyPort,
-      settings.proxyUsername,
-      settings.proxyPassword,
-    );
+    // Apply proxy settings (Pro only; free users get no proxy).
+    if (isPro) {
+      _downloadQueue.applyProxySettings(
+        settings.proxyType,
+        settings.proxyHost,
+        settings.proxyPort,
+        settings.proxyUsername,
+        settings.proxyPassword,
+      );
+    } else {
+      _downloadQueue.applyProxySettings(
+        ProxyType.none, '', 0, '', '',
+      );
+    }
     // Update the app theme mode and OLED-dark flag based on the user's
     // preference.  "Dark (OLED black)" → forced → OLED pure black.
     appThemeModeNotifier.value = _themeModeFromPreference(
@@ -1101,32 +1361,36 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     };
   }
 
-  Future<bool> _showDuplicatePrompt(
+  Future<DuplicateChoice> _showDuplicatePrompt(
     BuildContext context,
     String filename,
   ) async {
-    final result = await showDialog<bool>(
+    final result = await showDialog<DuplicateChoice>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Already in Queue'),
-          content: Text(
+          content: const Text(
             'This download link has already been added to your queue.\n\n'
-            'Download it again anyway?',
+            'The URL may have changed (token refresh). Update the existing download with the new link, or create a separate one.',
           ),
           actions: <Widget>[
             TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Download Again'),
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
+              child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Skip'),
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
+              child: const Text('Create New'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
+              child: const Text('Update Existing'),
             ),
           ],
         );
       },
     );
-    return result ?? true;
+    return result ?? DuplicateChoice.skip;
   }
 }

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
@@ -26,6 +28,31 @@ class WebViewFetchDelegate {
   InAppWebViewController? _controller;
   final String? Function() _getCurrentUrl;
   int _fetchCounter = 0;
+
+  /// Cap concurrent binary XHRs through one WebView. Flooding the bridge
+  /// with multi‑MB base64 payloads (4–8 workers × ~2 MB) causes mass
+  /// timeouts on surrit-style CDNs.
+  static const int _maxConcurrentBinaryFetches = 2;
+  static int _activeBinaryFetches = 0;
+  static final List<Completer<void>> _binaryFetchWaiters = [];
+
+  static Future<void> _acquireBinarySlot() async {
+    if (_activeBinaryFetches < _maxConcurrentBinaryFetches) {
+      _activeBinaryFetches++;
+      return;
+    }
+    final c = Completer<void>();
+    _binaryFetchWaiters.add(c);
+    await c.future;
+    _activeBinaryFetches++;
+  }
+
+  static void _releaseBinarySlot() {
+    _activeBinaryFetches = math.max(0, _activeBinaryFetches - 1);
+    if (_binaryFetchWaiters.isNotEmpty) {
+      _binaryFetchWaiters.removeAt(0).complete();
+    }
+  }
 
   /// Update the WebView controller. Called by
   /// [SnifferWebViewControllerImpl.onWebViewCreated] when the InAppWebView
@@ -366,14 +393,20 @@ class WebViewFetchDelegate {
     }
   }
 
-  /// Fetches binary data (e.g. .ts segments) through the WebView's
-  /// networking stack. Uses XHR with responseType='arraybuffer' and
-  /// returns the body as List<int>. Returns null on failure.
+  /// Fetches binary data (e.g. .ts / disguised .jpeg segments) through the
+  /// WebView's networking stack. Returns null on failure.
+  ///
+  /// Uses `responseType: 'blob'` + FileReader (same as headless path) instead
+  /// of a per-byte string loop — the old loop was O(n²) on multi‑MB segments
+  /// and routinely blew the previous 6s timeout on surrit.com.
+  /// Concurrent fetches are capped so the JS bridge is not flooded.
   Future<Uint8List?> fetchBinaryViaJavaScript(String url) async {
     if (_controller == null) return null;
+    await _acquireBinarySlot();
     try {
-      final safeUrl = url.replaceAll("'", "\\'");
-      final channelName = 'BinaryFetch_${DateTime.now().millisecondsSinceEpoch}_${_fetchCounter++}';
+      final safeUrl = url.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
+      final channelName =
+          'BinaryFetch_${DateTime.now().millisecondsSinceEpoch}_${_fetchCounter++}';
 
       final completer = Completer<Uint8List?>();
       _controller!.addJavaScriptHandler(
@@ -400,47 +433,97 @@ class WebViewFetchDelegate {
   try {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '$safeUrl', true);
-    xhr.responseType = 'arraybuffer';
+    xhr.responseType = 'blob';
+    xhr.timeout = 40000;
     xhr.onload = function() {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        var bytes = new Uint8Array(xhr.response);
-        var binary = '';
-        for (var i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
+      if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+        try {
+          var reader = new FileReader();
+          reader.onload = function() {
+            try {
+              var dataUrl = reader.result || '';
+              var comma = dataUrl.indexOf(',');
+              var b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+              window.flutter_inappwebview.callHandler('$channelName', 'OK:' + b64);
+            } catch (e) {
+              try {
+                window.flutter_inappwebview.callHandler('$channelName', 'ERROR:READER');
+              } catch (e2) {}
+            }
+          };
+          reader.onerror = function() {
+            try {
+              window.flutter_inappwebview.callHandler('$channelName', 'ERROR:READER');
+            } catch (e) {}
+          };
+          reader.readAsDataURL(xhr.response);
+        } catch (e) {
+          try {
+            window.flutter_inappwebview.callHandler('$channelName', 'ERROR:BLOB:' + (e.message || 'unknown'));
+          } catch (e2) {}
         }
-        var b64 = btoa(binary);
-        window.flutter_inappwebview.callHandler('$channelName', 'OK:' + b64);
       } else {
-        window.flutter_inappwebview.callHandler('$channelName', 'ERROR:STATUS:' + xhr.status);
+        try {
+          window.flutter_inappwebview.callHandler('$channelName', 'ERROR:STATUS:' + xhr.status);
+        } catch (e) {}
       }
     };
     xhr.onerror = function() {
-      window.flutter_inappwebview.callHandler('$channelName', 'ERROR:EXCEPTION:network error');
+      try {
+        window.flutter_inappwebview.callHandler('$channelName', 'ERROR:EXCEPTION:network error');
+      } catch (e) {}
+    };
+    xhr.ontimeout = function() {
+      try {
+        window.flutter_inappwebview.callHandler('$channelName', 'ERROR:TIMEOUT');
+      } catch (e) {}
     };
     xhr.send();
   } catch(e) {
-    window.flutter_inappwebview.callHandler('$channelName', 'ERROR:EXCEPTION:' + (e.message || 'unknown'));
+    try {
+      window.flutter_inappwebview.callHandler('$channelName', 'ERROR:EXCEPTION:' + (e.message || 'unknown'));
+    } catch (e2) {}
   }
 })();
 ''');
 
+      // 45s: multi‑MB segments + FileReader base64 over the platform channel.
       final result = await completer.future.timeout(
-        const Duration(seconds: 6),
+        const Duration(seconds: 45),
         onTimeout: () {
-          AuroraLog.instance.debug('fetchBinaryViaJavaScript timed out for $safeUrl', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+          AuroraLog.instance.debug(
+            'fetchBinaryViaJavaScript timed out for $safeUrl',
+            category: LogCategory.browser,
+            screen: LogScreen.browser,
+            eventType: LogEventType.network,
+          );
           return null;
         },
       );
 
-      try { _controller!.removeJavaScriptHandler(handlerName: channelName); } catch (_) {}
+      try {
+        _controller!.removeJavaScriptHandler(handlerName: channelName);
+      } catch (_) {}
 
       if (result != null) {
-        AuroraLog.instance.debug('fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+        AuroraLog.instance.debug(
+          'fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes',
+          category: LogCategory.browser,
+          screen: LogScreen.browser,
+          eventType: LogEventType.network,
+        );
       }
       return result;
     } catch (e) {
-      AuroraLog.instance.debug('fetchBinaryViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+      AuroraLog.instance.debug(
+        'fetchBinaryViaJavaScript threw: $e',
+        category: LogCategory.browser,
+        screen: LogScreen.browser,
+        eventType: LogEventType.network,
+      );
       return null;
+    } finally {
+      _releaseBinarySlot();
     }
   }
 

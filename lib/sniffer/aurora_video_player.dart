@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../theme/aurora_palette.dart';
-import 'models/sniffed_media.dart';
 
 /// A full-screen custom video player with UC Browser-style controls.
 ///
@@ -116,10 +115,28 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     }
 
     try {
-      final headers = widget.headers.isNotEmpty ? Map<String, String>.from(widget.headers) : <String, String>{};
+      // Dispose any previous controller before retry.
+      if (_controllerListener != null) {
+        _controller?.removeListener(_controllerListener!);
+      }
+      await _controller?.dispose();
+      _controller = null;
+
+      final headers = widget.headers.isNotEmpty
+          ? Map<String, String>.from(widget.headers)
+          : <String, String>{};
+
+      // Ensure Accept covers common media/HLS responses; some CDNs
+      // reject bare clients that omit it.
+      if (!headers.keys.any((k) => k.toLowerCase() == 'accept')) {
+        headers['Accept'] = '*/*';
+      }
+
+      final formatHint = _formatHintForUrl(widget.url);
       final controller = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: headers,
+        formatHint: formatHint,
       );
       _controller = controller;
       _controllerListener = _onControllerUpdate;
@@ -143,12 +160,32 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       _startAutoHideTimer();
     } catch (e) {
       if (mounted) {
+        final hasCookie = widget.headers.keys.any(
+          (k) => k.toLowerCase() == 'cookie',
+        );
         setState(() {
-          _error = 'Could not play this video. Check your connection and try again.';
+          _error = hasCookie
+              ? 'Could not play this video. The stream may be protected or expired — open the page again, then retry.'
+              : 'Could not play this video. Missing session cookies — open the page in the browser first, then try again.';
           _initialized = true;
         });
       }
     }
+  }
+
+  /// Android ExoPlayer format hint for HLS/DASH URLs so playback does not
+  /// depend on content-type sniffing alone.
+  static VideoFormat? _formatHintForUrl(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8') ||
+        lower.contains('mpegurl') ||
+        lower.contains('m3u8')) {
+      return VideoFormat.hls;
+    }
+    if (lower.contains('.mpd') || lower.contains('dash+xml')) {
+      return VideoFormat.dash;
+    }
+    return null;
   }
 
   void _onControllerUpdate() {

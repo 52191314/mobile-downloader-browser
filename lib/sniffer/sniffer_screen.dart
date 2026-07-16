@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
+import 'worker_isolate_pool.dart';
 
 import 'package:http/http.dart' as http;
 
@@ -12,7 +12,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 import '../downloader/downloader.dart';
-import '../downloader/url_filename_resolver.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
 import '../ui/notifications/aurora_snackbar.dart';
@@ -21,6 +20,7 @@ import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'browser_controller.dart';
 import 'browser_library.dart';
+import 'browser_open_request.dart';
 import 'controllers/address_bar_controller.dart';
 import 'controllers/element_picker_controller.dart';
 import 'controllers/library_controller.dart';
@@ -63,9 +63,6 @@ import 'widgets/draggable_tab_card.dart' show DraggableTabCard, TabListDropSlot;
 import 'widgets/group_drop_zone.dart' show GroupDropZone;
 import 'widgets/tab_grid_view.dart' show TabGridView;
 import 'tab_groups/tab_group_palette.dart' show TabGroupPalette;
-import 'aurora_video_player.dart';
-import 'widgets/floating_video_button.dart';
-
 part 'widgets/capture_widgets.dart';
 part 'widgets/add_queue_dialog.dart';
 part 'widgets/folder_selector.dart';
@@ -320,6 +317,13 @@ class SnifferScreen extends StatefulWidget {
   final SafeBrowsingService safeBrowsing;
   final ValueNotifier<int>? libraryUpdateNotifier;
 
+  /// Queue / intent external open requests (preferred over controller callback).
+  final BrowserOpenRequestBus? openRequestBus;
+
+  /// Callback for Pro entitlement check — used to gate tab group count
+  /// and auto-host features for free users.
+  final bool Function()? isProCallback;
+
   SnifferScreen({
     super.key,
     this.controller,
@@ -334,6 +338,8 @@ class SnifferScreen extends StatefulWidget {
     this.debugControllerFactory,
     SafeBrowsingService? safeBrowsing,
     this.libraryUpdateNotifier,
+    this.openRequestBus,
+    this.isProCallback,
   }) : settings = settings ?? DownloadSettings.defaults(),
        libraryStore = libraryStore ?? const BrowserLibraryStore(),
        safeBrowsing =
@@ -428,11 +434,21 @@ class _SnifferScreenState extends State<SnifferScreen>
   int _lastBarsToggleAtMs = 0;
   bool _barsVisible = true;
   bool _isContextMenuShowing = false;
+  final ValueNotifier<int> _progressNotifier = ValueNotifier<int>(0);
 
-  /// Latest sniffed video media for the floating video button.
-  /// Updated with priority: HLS > large MP4 > small MP4 > other.
-  /// `null` when no video has been detected on the current page.
+  /// Debounce timer for navigation callbacks ([onUrlChanged], [onPageStarted],
+  /// [onPageFinished]) so rapid back-to-back navigation events (e.g. redirect
+  /// chains) trigger only one `setState` instead of three per step.
+  Timer? _navSetStateDebounce;
+
+  /// Best sniffed video on the active page (HLS > large MP4 > other).
+  /// Used when site play is intercepted but `src` is blob/MSE — Aurora
+  /// falls back to this sniffed URL for the in-app player.
   SniffedMedia? _latestVideoMedia;
+
+  /// Debounce for auto-open player when site `play()` is intercepted.
+  bool _playerOpening = false;
+  DateTime? _lastAuroraPlayAt;
 
   /// Set of tab IDs whose WebViews have already been built (lazy creation).
   /// Only tabs in this set get a real [BrowserWidget] — others render an empty
@@ -466,7 +482,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// expensive native WebView that would be immediately disposed.  Mock
   /// (test) controllers always build immediately regardless of this flag.
   bool _tabsLoaded = false;
-  String? _pendingOpenUrlAfterTabsLoaded;
+  /// External open requests (Queue "View source page", "Scan in browser",
+  /// share intents, etc.) that arrived before tab restore finished.
+  /// List (not a single slot) so concurrent opens are not dropped.
+  final List<String> _pendingOpenUrlsAfterTabsLoaded = [];
   static const Duration _strictRedirectPromptCooldown = Duration(seconds: 8);
   final Set<String> _activeStrictRedirectPrompts = {};
   final Map<String, int> _recentStrictRedirectPrompts = {};
@@ -495,16 +514,24 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
     );
     _downloadQueue = widget.downloadQueue ?? DownloadQueue();
-    _tabManager = TabManager()
+    // Re-attach WebView bridges on every start/retry after process death.
+    // Closures cannot be JSON-persisted, so without this, restored HLS tasks
+    // lose cookie/fetch/token-refresh and fail with 403 after app restart.
+    _downloadQueue.browserContextAttacher = _attachBrowserContextToTask;
+    _tabManager = TabManager(
+      isProCallback: widget.isProCallback ?? (() => false),
+    )
       ..onRebuild = () {
         if (mounted) setState(() {});
       };
     _addressBarController = AddressBarController();
     _mediaCatchController = MediaCatchController();
+    final isPro = widget.isProCallback?.call() ?? false;
     _elementPickerController = ElementPickerController(
       activeTabGetter: () => _activeTab,
       onSettingsChanged: widget.onSettingsChanged,
       showSnack: _showSnack,
+      maxRules: isPro ? null : 10,
     );
     _libraryController = LibraryController(libraryStore: widget.libraryStore)
       ..onLibraryChanged = () {
@@ -538,20 +565,11 @@ class _SnifferScreenState extends State<SnifferScreen>
       debugControllerFactory: widget.debugControllerFactory,
       injectedSnifferEngine: widget.snifferEngine,
     );
-    widget.controller?.setOnOpenUrlRequest((url) {
-      if (!_tabsLoaded) {
-        _pendingOpenUrlAfterTabsLoaded = url;
-        return;
-      }
-      _tabLifecycleController.openNewTab(url: url);
-    });
-    widget.controller?.setOnOpenUrlInNewTab((url) {
-      if (!_tabsLoaded) {
-        _pendingOpenUrlAfterTabsLoaded = url;
-        return;
-      }
-      _tabLifecycleController.openNewTab(url: url);
-    });
+    widget.controller?.setOnOpenUrlRequest(_handleExternalOpenUrl);
+    widget.controller?.setOnOpenUrlInNewTab(_handleExternalOpenUrl);
+    widget.openRequestBus?.addListener(_onOpenRequestBus);
+    // Consume any request published before SnifferScreen mounted.
+    _onOpenRequestBus();
     widget.controller?.setOnSystemBackRequested(() async {
       if (!mounted) return false;
       final tab = _activeTab;
@@ -643,6 +661,16 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (oldWidget.settings.privateMode != widget.settings.privateMode) {
       _privateMode = widget.settings.privateMode;
     }
+    if (oldWidget.settings.replaceSitePlayer !=
+        widget.settings.replaceSitePlayer) {
+      for (final tab in _tabs) {
+        unawaited(
+          tab.controller.setReplaceSitePlayer(
+            widget.settings.replaceSitePlayer,
+          ),
+        );
+      }
+    }
   }
 
   void _updateAllTabAdblock() {
@@ -673,6 +701,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     await tab.controller.setInvisibleRedirectBlocking(
       widget.settings.invisibleRedirectBlockingEnabled,
     );
+    await tab.controller.setReplaceSitePlayer(
+      widget.settings.replaceSitePlayer,
+    );
     await _applyCosmeticRules(tab);
   }
 
@@ -696,7 +727,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     _tabActivationOrder.remove(activeId);
     _tabActivationOrder.insert(0, activeId);
     _evictStaleTabs();
-
+    _progressNotifier.value = _activeTab.progress;
     setState(() {});
   }
 
@@ -804,14 +835,118 @@ class _SnifferScreenState extends State<SnifferScreen>
   void markTabsLoaded() {
     if (!_tabsLoaded) {
       _tabsLoaded = true;
-      final pending = _pendingOpenUrlAfterTabsLoaded;
-      if (pending != null && pending.isNotEmpty) {
-        _pendingOpenUrlAfterTabsLoaded = null;
+      AuroraLog.instance.info(
+        'markTabsLoaded: flushing ${_pendingOpenUrlsAfterTabsLoaded.length} '
+        'pending external open(s)',
+        category: LogCategory.browser,
+        screen: LogScreen.browser,
+        eventType: LogEventType.navigation,
+      );
+      final pending = List<String>.from(_pendingOpenUrlsAfterTabsLoaded);
+      _pendingOpenUrlsAfterTabsLoaded.clear();
+      if (pending.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _tabLifecycleController.openNewTab(url: pending);
+          if (!mounted) return;
+          for (final url in pending) {
+            _navigateActiveTabToExternalUrl(url);
+          }
         });
       }
+      // Also drain the bus in case a request arrived while restoring tabs.
+      _onOpenRequestBus();
     }
+  }
+
+  int _lastHandledOpenSeq = 0;
+
+  void _onOpenRequestBus() {
+    final bus = widget.openRequestBus;
+    if (bus == null) return;
+    final url = bus.url;
+    final seq = bus.seq;
+    if (url == null || url.isEmpty) return;
+    if (seq == _lastHandledOpenSeq) return;
+    _lastHandledOpenSeq = seq;
+    AuroraLog.instance.info(
+      'openRequestBus consumed seq=$seq url="$url" tabsLoaded=$_tabsLoaded',
+      category: LogCategory.browser,
+      screen: LogScreen.browser,
+      eventType: LogEventType.navigation,
+    );
+    _handleExternalOpenUrl(url);
+  }
+
+  /// Handles Queue / intent "open this URL in the browser" requests.
+  /// Queues until tab restore finishes so we never open into a tab list
+  /// that loadTabsAndMedia is about to dispose and replace.
+  void _handleExternalOpenUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    AuroraLog.instance.info(
+      '_handleExternalOpenUrl("$trimmed") tabsLoaded=$_tabsLoaded '
+      'tabs=${_tabs.length} active=${_tabs.isEmpty ? -1 : _activeTabIndex}',
+      category: LogCategory.browser,
+      screen: LogScreen.browser,
+      eventType: LogEventType.navigation,
+    );
+    if (!_tabsLoaded || _tabs.isEmpty) {
+      _pendingOpenUrlsAfterTabsLoaded.add(trimmed);
+      return;
+    }
+    _navigateActiveTabToExternalUrl(trimmed);
+  }
+
+  /// Load [url] in the **current active browser tab** (not a brand-new tab).
+  ///
+  /// Creating a fresh tab + WebView from outside the Browser main-tab often
+  /// failed silently (controller callback / dispose races). The active tab
+  /// already has a live WebView after the user has browsed; navigating it is
+  /// the same reliable path as typing a URL in the address bar.
+  void _navigateActiveTabToExternalUrl(String url) {
+    if (!mounted || _tabs.isEmpty) {
+      _pendingOpenUrlsAfterTabsLoaded.add(url);
+      return;
+    }
+    final tab = _activeTab;
+    // Ensure this tab's WebView is in the live set before loadRequest.
+    _builtWebViewTabIds.add(tab.id);
+    tab.addressController.text = url;
+    tab.currentUrl = url;
+    _addressExpanded = false;
+    if (mounted) setState(() {});
+    AuroraLog.instance.info(
+      '_navigateActiveTabToExternalUrl tab=${tab.id} url="$url"',
+      category: LogCategory.browser,
+      screen: LogScreen.browser,
+      eventType: LogEventType.navigation,
+    );
+    // Post-frame so setState rebuild creates BrowserWidget if it was
+    // previously evicted, then loadUrl awaits _ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tabs.contains(tab)) return;
+      unawaited(() async {
+        try {
+          await tab.controller.resumeWebView();
+        } catch (_) {}
+        try {
+          await _loadUrlWithHostSettings(tab, Uri.parse(url));
+          AuroraLog.instance.info(
+            'external open loadRequest finished for "$url"',
+            category: LogCategory.browser,
+            screen: LogScreen.browser,
+            eventType: LogEventType.navigation,
+          );
+        } catch (e, s) {
+          AuroraLog.instance.error(
+            'external open loadRequest failed for "$url": $e',
+            category: LogCategory.browser,
+            screen: LogScreen.browser,
+            eventType: LogEventType.error,
+            stackTrace: s,
+          );
+        }
+      }());
+    });
   }
 
   @override
@@ -860,10 +995,18 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   void dispose() {
+    if (identical(
+      _downloadQueue.browserContextAttacher,
+      _attachBrowserContextToTask,
+    )) {
+      _downloadQueue.browserContextAttacher = null;
+    }
+    _progressNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     widget.libraryUpdateNotifier?.removeListener(_onLibraryUpdate);
     _tabManager.mediaRebuildTimer?.cancel();
     _tabManager.mediaSaveTimer?.cancel();
+    _navSetStateDebounce?.cancel();
     unawaited(_sessionRecovery.markClean());
     _addressFocusNode.dispose();
     _addressBarController.dispose();
@@ -886,6 +1029,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
     widget.controller?.setOnOpenUrlRequest(null);
     widget.controller?.setOnOpenUrlInNewTab(null);
+    widget.openRequestBus?.removeListener(_onOpenRequestBus);
     _tabManager.dispose();
     super.dispose();
   }
@@ -1620,6 +1764,16 @@ class _SnifferScreenState extends State<SnifferScreen>
     setState(() => _findVisible = false);
   }
 
+  /// Debounced [setState] for navigation callbacks. Cancels any pending
+  /// timer and schedules a rebuild 100ms after the last navigation event,
+  /// so rapid redirect chains fire only one rebuild instead of one per step.
+  void _debouncedNavSetState() {
+    _navSetStateDebounce?.cancel();
+    _navSetStateDebounce = Timer(const Duration(milliseconds: 100), () {
+      if (mounted) setState(() {});
+    });
+  }
+
   void _onScroll(double x, double y) {
     if (!mounted) return;
     if (_findVisible) {
@@ -1802,16 +1956,18 @@ class _SnifferScreenState extends State<SnifferScreen>
       tab.currentUrl = url;
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
       _updateTabNavState(tab);
-      if (mounted) setState(() {});
+      if (mounted && tab == _activeTab) _debouncedNavSetState();
     });
     tab.controller.setOnPageStarted((url) {
       if (!mounted) return;
       tab.isLoading = true;
       tab.progress = 0;
-      setState(() {});
+      if (tab == _activeTab) {
+        _progressNotifier.value = 0;
+      }
       _lastScrollY = 0.0;
       if (!_barsVisible) {
-        setState(() => _barsVisible = true);
+        _barsVisible = true;
       }
       _fetchedIframeSrcs.clear();
       AuroraLog.instance.info(
@@ -1821,7 +1977,10 @@ class _SnifferScreenState extends State<SnifferScreen>
         eventType: LogEventType.navigation,
       );
       tab.authHeaderCache.clear();
-      _sniffIntakeController.clearCookieCache();
+      final navHost = Uri.tryParse(url)?.host;
+      if (navHost != null) {
+        _sniffIntakeController.clearCookieCacheForHost(navHost);
+      }
       // Only clear the media cache when navigating to a genuinely different
       // page. The authority is the last *fully-loaded* main-frame URL
       // (`committedMainFrameUrl`, updated on onPageFinished), NOT the raw
@@ -1855,6 +2014,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
       _updateTabNavState(tab);
+      // Debounce setState — onPageStarted may fire for background tabs too.
+      if (tab == _activeTab) {
+        _debouncedNavSetState();
+      }
     });
     tab.controller.setOnPageFinished((url) {
       if (!mounted) return;
@@ -1864,7 +2027,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       // used by setOnPageStarted to decide cache clearing — invisible JS
       // navigations never reach here, so they keep the previous value.
       tab.committedMainFrameUrl = url;
-      setState(() {});
+      _debouncedNavSetState();
       AuroraLog.instance.info(
         'Page finished: $url',
         category: LogCategory.browser,
@@ -1879,12 +2042,16 @@ class _SnifferScreenState extends State<SnifferScreen>
       _startVideoPoll(tab);
       _applyZoomForPage(tab, url);
       unawaited(_applyDarkModeForPage(tab, url));
+      // Re-apply after guard/page scripts so the flag survives reinjection.
+      unawaited(
+        tab.controller.setReplaceSitePlayer(widget.settings.replaceSitePlayer),
+      );
     });
     tab.controller.setOnProgressChanged((progress) {
       if (!mounted) return;
       tab.progress = progress;
       if (tab == _activeTab) {
-        setState(() {});
+        _progressNotifier.value = progress;
       }
     });
     tab.controller.setOnScrollPositionChange((x, y) {
@@ -1905,10 +2072,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     // instantly without an async round-trip to the WebView.
     tab.controller.setOnNavStateChanged(() {
       if (!mounted) return;
+      final prevBack = tab.canGoBack;
+      final prevForward = tab.canGoForward;
       tab.canGoBack = tab.controller.historyIndex > 0;
       tab.canGoForward =
           tab.controller.historyIndex < tab.controller.historyUrls.length - 1;
-      if (mounted) setState(() {});
+      if (tab.canGoBack != prevBack || tab.canGoForward != prevForward) {
+        if (mounted) setState(() {});
+      }
     });
     tab.controller.setOnStrictRedirectDetected((event) {
       _handleNativeStrictRedirect(tab, event);
@@ -1971,6 +2142,13 @@ class _SnifferScreenState extends State<SnifferScreen>
       },
     );
     tab.controller.addJavaScriptChannel(
+      'AuroraPlayChannel',
+      onMessageReceived: (message) {
+        if (tab != _activeTab) return;
+        unawaited(_handleAuroraPlayRequest(message));
+      },
+    );
+    tab.controller.addJavaScriptChannel(
       'MediaMetaChannel',
       onMessageReceived: (message) {
         final capturedTab = tab;
@@ -2020,15 +2198,41 @@ class _SnifferScreenState extends State<SnifferScreen>
         _decodeJsInBackground(message).then((data) {
           if (data == null || !mounted) return;
           final ogTitle = data['ogTitle'] as String?;
+          final twitterTitle = data['twitterTitle'] as String?;
+          final h1Title = data['h1Title'] as String?;
           final ldName = data['ldName'] as String?;
+          final docTitle = data['title'] as String? ?? '';
+          // Prefer the longest usable source. Playwright study of MissAV:
+          // document.title is truncated (~55 chars); og:title / h1 / twitter
+          // hold the full descriptive name (~273 chars).
+          final resolvedTitle = FilenameService.pickBestTitle([
+                ogTitle,
+                twitterTitle,
+                h1Title,
+                ldName,
+                docTitle,
+              ]) ??
+              '';
           capturedTab.pageMeta = PageMeta(
-            title: (ogTitle != null && ogTitle.trim().isNotEmpty)
-                ? ogTitle.trim()
-                : (data['title'] as String? ?? ''),
+            title: resolvedTitle,
             videoWidth: int.tryParse((data['ogVideoWidth'] as String?) ?? ''),
             videoHeight: int.tryParse((data['ogVideoHeight'] as String?) ?? ''),
             structuredName: ldName,
           );
+          // Backfill (or upgrade truncated) pageTitle on already-sniffed
+          // media so downloads get the full title instead of URL slug /
+          // short document.title.
+          if (resolvedTitle.trim().isNotEmpty) {
+            final title = resolvedTitle.trim();
+            final media = capturedTab.snifferEngine.detectedMedia;
+            for (var i = 0; i < media.length; i++) {
+              final m = media[i];
+              final existing = m.pageTitle?.trim() ?? '';
+              if (existing.isEmpty || existing.length + 20 < title.length) {
+                media[i] = m.copyWith(pageTitle: title);
+              }
+            }
+          }
           if (mounted) setState(() {});
         });
       },
@@ -2129,22 +2333,23 @@ class _SnifferScreenState extends State<SnifferScreen>
       _sniffIntakeController.scheduleMediaSave(tab);
     });
 
-    // Listen for video detections to show the floating video button.
-    // Only the active tab's detections update the overlay.
-    // Priority: HLS (.m3u8) > large MP4/size known > any other video.
+    // Track best video candidate for auto-replace when site play uses
+    // blob/MSE (no direct URL). No floating button — toggle in Settings.
     tab.mediaSubscription?.cancel();
     tab.mediaSubscription = tab.snifferEngine.onMediaDetected.listen((media) {
       if (!mounted) return;
-      if (media.type != MediaType.video) return;
+      if (media.type != MediaType.video && media.type != MediaType.playlist) {
+        return;
+      }
       if (tab != _activeTab) return;
       if (_shouldReplaceVideo(media)) {
-        setState(() => _latestVideoMedia = media);
+        _latestVideoMedia = media;
       }
     });
   }
 
   /// Returns `true` if [incoming] should replace the current [_latestVideoMedia]
-  /// for the floating video button. Keeps the best candidate: HLS > large > other.
+  /// used for auto-replace playback. Keeps the best candidate: HLS > large > other.
   bool _shouldReplaceVideo(SniffedMedia incoming) {
     final current = _latestVideoMedia;
     if (current == null) return true;
@@ -3286,19 +3491,26 @@ class _SnifferScreenState extends State<SnifferScreen>
                                     ),
                             ],
                           ),
-                          if (tab.isLoading)
-                            Positioned(
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              child: RepaintBoundary(
-                                child: LinearProgressIndicator(
-                                  value: tab.progress / 100.0,
-                                  minHeight: 2,
-                                  backgroundColor: Colors.transparent,
-                                ),
-                              ),
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: ValueListenableBuilder<int>(
+                              valueListenable: _progressNotifier,
+                              builder: (context, progress, _) {
+                                if (!tab.isLoading || progress <= 0 || progress >= 100) {
+                                  return const SizedBox.shrink();
+                                }
+                                return RepaintBoundary(
+                                  child: LinearProgressIndicator(
+                                    value: progress / 100.0,
+                                    minHeight: 2,
+                                    backgroundColor: Colors.transparent,
+                                  ),
+                                );
+                              },
                             ),
+                          ),
                         ],
                       ),
                     ),
@@ -3327,13 +3539,11 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
     );
 
-    final webView = AnimatedPositioned(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      top: _barsVisible ? topHeight : 0,
-      bottom: _barsVisible ? bottomHeight : 0,
-      left: 0,
-      right: 0,
+    // WebView is Positioned.fill so its layout NEVER changes when toolbars
+    // hide/show — only the toolbars slide over it.  Previously AnimatedPositioned
+    // resized the WebView (top/bottom changed), triggering expensive layout passes
+    // on every scroll >5px → scroll jank.  Fix D.
+    final webView = Positioned.fill(
       child: Stack(
         children: [
           // Lazy IndexedStack — only builds the active tab's WebView to avoid
@@ -3361,6 +3571,17 @@ class _SnifferScreenState extends State<SnifferScreen>
                 _builtWebViewTabIds.clear();
               }
               final shouldBuild = _builtWebViewTabIds.contains(t.id);
+              // Seed first paint from address bar / committed URL so external
+              // opens (Queue source page) navigate even if loadRequest races.
+              final seedUrl = () {
+                final fromAddress = t.addressController.text.trim();
+                if (fromAddress.isNotEmpty) return fromAddress;
+                final fromCurrent = t.currentUrl?.trim();
+                if (fromCurrent != null && fromCurrent.isNotEmpty) {
+                  return fromCurrent;
+                }
+                return null;
+              }();
               return Positioned.fill(
                 child: Offstage(
                   offstage: !isActive,
@@ -3368,6 +3589,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                       ? BrowserWidget(
                           key: ValueKey(t.id),
                           controller: t.controller,
+                          initialUrl: seedUrl,
                           onSwipeForward: () {
                             // Forward navigation via right-edge swipe.
                             // No debounce needed — there is only one forward
@@ -3401,16 +3623,6 @@ class _SnifferScreenState extends State<SnifferScreen>
               topBar,
               bottomBar,
               if (_elementPickerActive) _buildPickerCancelButton(),
-              // Floating video button — appears when a video is detected.
-              if (_latestVideoMedia != null && _barsVisible)
-                Positioned(
-                  bottom: bottomHeight + 12,
-                  right: 12,
-                  child: FloatingVideoButton(
-                    onTap: () => _openVideoPlayer(_latestVideoMedia!),
-                    onDismiss: () => setState(() => _latestVideoMedia = null),
-                  ),
-                ),
             ],
           ),
         ),
@@ -3456,6 +3668,8 @@ class _SnifferScreenState extends State<SnifferScreen>
             onTab: _showTabsSheet,
             onBrowserTools: _showBrowserMenuSheet,
             onSettings: () => widget.onOpenSettings?.call(),
+            onHistory: _showHistorySheet,
+            onBookmarks: _showFavoritesSheet,
           ),
         ),
       ),
@@ -3742,15 +3956,50 @@ class _SnifferScreenState extends State<SnifferScreen>
         baseTemp: _baseTemp,
         downloadFilenameFor: _downloadFilenameFor,
         getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
-        urlExists: (url) => _downloadQueue.urlExists(url),
-        addTask: (task, {bool force = false}) =>
-            _downloadQueue.addTask(task, force: force),
+        downloadQueue: _downloadQueue,
         showDuplicatePrompt: _showDuplicatePrompt,
         showSnack: _showSnack,
         reloadForFreshUrl: (tab, sourcePageUrl, {bool forceReload = false}) =>
             _reloadForFreshUrl(tab, sourcePageUrl, forceReload: forceReload),
         isMounted: mounted,
       );
+
+  /// Wire live WebView bridges onto [task] (cookies, JS fetch, token refresh).
+  /// Called by [DownloadQueue.browserContextAttacher] before every start/retry
+  /// so queue rows restored from JSON after app restart regain WAF bypass.
+  void _attachBrowserContextToTask(DownloadTask task) {
+    if (_tabs.isEmpty) return;
+    final tab = _findTabForTask(task) ?? _activeTab;
+    final sourcePage = task.sourcePageUrl ?? tab.addressController.text;
+
+    task.fetchViaWebView = (fetchUrl, {Map<String, String>? headers}) =>
+        tab.controller.fetchViaJavaScript(fetchUrl, headers: headers);
+    task.fetchBinaryViaWebView =
+        (binaryUrl) => tab.controller.fetchBinaryViaJavaScript(binaryUrl);
+    task.hlsPlaylistCache = (cacheUrl) => tab.hlsPlaylistCache[cacheUrl];
+    task.cookieProvider =
+        (url) => tab.controller.getCookiesForDomain(url: url);
+    task.onTokenExpired = ({bool forceReload = false}) =>
+        _reloadForFreshUrl(tab, sourcePage, forceReload: forceReload);
+  }
+
+  /// Prefer a tab whose address matches the task's source page host.
+  BrowserTab? _findTabForTask(DownloadTask task) {
+    final src = task.sourcePageUrl ?? task.url;
+    final host = Uri.tryParse(src)?.host.toLowerCase();
+    if (host == null || host.isEmpty) return null;
+    for (final tab in _tabs) {
+      final tabHost =
+          Uri.tryParse(tab.addressController.text)?.host.toLowerCase();
+      if (tabHost != null &&
+          (tabHost == host ||
+              tabHost.endsWith('.$host') ||
+              host.endsWith('.$tabHost'))) {
+        return tab;
+      }
+    }
+    return null;
+  }
 
   Future<String?> _reloadForFreshUrl(
     BrowserTab tab,
@@ -3841,54 +4090,26 @@ class _SnifferScreenState extends State<SnifferScreen>
     return null;
   }
 
-  String _truncateFilename(String name, {int maxLength = 120}) {
-    return truncateFilename(name, maxLength: maxLength);
+  String _truncateFilename(
+    String name, {
+    int maxLength = FilenameService.defaultMaxFileNameBytes,
+  }) {
+    return FilenameService.truncate(name, maxBytes: maxLength);
   }
 
-  static String truncateFilename(String name, {int maxLength = 120}) {
-    if (name.length <= maxLength) return name;
-    final dotIndex = name.lastIndexOf('.');
-    if (dotIndex != -1 && dotIndex > name.length - 10) {
-      final ext = name.substring(dotIndex);
-      final baseLen = maxLength - ext.length;
-      if (baseLen > 0) {
-        return name.substring(0, baseLen).trim() + ext;
-      }
-    }
-    return name.substring(0, maxLength).trim();
+  static String truncateFilename(
+    String name, {
+    int maxLength = FilenameService.defaultMaxFileNameBytes,
+  }) {
+    return FilenameService.truncate(name, maxBytes: maxLength);
   }
 
   String _downloadFilenameFor(String? label, String targetUrl) {
-    // Extract quality label from URL pattern like "1080p.mp4" or "1080p"
-    final qualityMatch = RegExp(r'(\d+)p').firstMatch(targetUrl);
-    final qualityLabel = qualityMatch != null
-        ? ' (${qualityMatch.group(1)}p)'
-        : '';
-
-    final uri = Uri.tryParse(targetUrl);
-    final segments =
-        uri?.pathSegments
-            .where((segment) => segment.trim().isNotEmpty)
-            .toList(growable: false) ??
-        const <String>[];
-    var filename = label?.trim();
-    if (filename == null || filename.isEmpty) {
-      filename = segments.isNotEmpty ? segments.last : uri?.host ?? 'download';
-    }
-    // For HLS URLs, strip the extension — the downloader picks the final one
-    final lowFilename = filename.toLowerCase();
-    if (lowFilename.endsWith('.m3u8')) {
-      filename = filename.substring(0, filename.length - 5);
-    }
-    filename = filename
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .trim();
-    if (filename.isEmpty) filename = 'download';
-    if (!filename.contains('.') && segments.isEmpty) {
-      filename = '$filename.html';
-    }
-    return _truncateFilename('$filename$qualityLabel');
+    return FilenameService.downloadFilenameFor(
+      label: label,
+      targetUrl: targetUrl,
+      includeQualitySuffix: widget.settings.includeQualitySuffix,
+    );
   }
 
   Future<void> _toggleFavorite() async {
@@ -4682,9 +4903,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     onDelete: onDelete,
   );
 
-  /// Opens the floating video button player, showing a quality picker if the
-  /// detected video is an HLS master playlist with variants.
-  void _openVideoPlayer(SniffedMedia media) async {
+  /// Opens the Aurora player, showing a quality picker if the detected
+  /// video is an HLS master playlist with variants.
+  Future<void> _openVideoPlayer(SniffedMedia media) async {
     if (media.url.contains('.m3u8') || media.url.contains('mpegurl')) {
       // Check for enriched variants from the same master.
       final variants = _activeTab.snifferEngine.detectedMedia
@@ -4693,11 +4914,123 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (variants.isNotEmpty) {
         final selected = await _showHlsQualityPicker(context, variants);
         if (selected == null || !mounted) return;
-        _showMediaPreview(selected);
+        await _showMediaPreview(selected);
         return;
       }
     }
-    _showMediaPreview(media);
+    await _showMediaPreview(media);
+  }
+
+  /// Handles JS [AuroraPlayChannel] when replace-site-player is on.
+  Future<void> _handleAuroraPlayRequest(String message) async {
+    if (!mounted || !widget.settings.replaceSitePlayer) return;
+    if (_playerOpening) return;
+    final now = DateTime.now();
+    if (_lastAuroraPlayAt != null &&
+        now.difference(_lastAuroraPlayAt!) < const Duration(milliseconds: 1500)) {
+      return;
+    }
+
+    Map<String, dynamic>? data;
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is Map) {
+        data = Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      data = null;
+    }
+
+    final rawUrl = (data?['url'] as String?)?.trim() ?? '';
+    final needsSniffed = data?['needsSniffed'] == true ||
+        rawUrl.isEmpty ||
+        rawUrl.startsWith('blob:') ||
+        rawUrl.startsWith('data:');
+    final isVideo = data?['isVideo'] != false;
+
+    SniffedMedia? media;
+    if (!needsSniffed && rawUrl.isNotEmpty) {
+      final detected = _activeTab.snifferEngine.detectedMedia;
+      for (final m in detected) {
+        if (m.url == rawUrl ||
+            m.url.contains(rawUrl) ||
+            rawUrl.contains(m.url)) {
+          media = m;
+          break;
+        }
+      }
+      final segs = Uri.tryParse(rawUrl)?.pathSegments;
+      final fallbackName = (segs != null && segs.isNotEmpty)
+          ? segs.last
+          : 'Video';
+      media ??= SniffedMedia(
+        url: rawUrl,
+        name: fallbackName.isEmpty ? 'Video' : fallbackName,
+        type: isVideo ? MediaType.video : MediaType.audio,
+        sourcePageUrl: _activeTab.addressController.text,
+        sniffSource: SniffSource.javascript,
+      );
+      // Also register so capture tray shows it.
+      unawaited(
+        Future(() {
+          _sniffIntakeController.sniffBrowserUrl(
+            _activeTab,
+            rawUrl,
+            sourcePageUrl: _activeTab.addressController.text,
+          );
+        }),
+      );
+    } else {
+      media = _latestVideoMedia ?? _bestDetectedVideoForPlayback();
+    }
+
+    if (media == null) {
+      if (mounted) {
+        _showSnack(
+          'No playable stream found yet. Wait a moment or open the capture tray.',
+        );
+      }
+      return;
+    }
+
+    _playerOpening = true;
+    _lastAuroraPlayAt = now;
+    try {
+      await _openVideoPlayer(media);
+    } finally {
+      _playerOpening = false;
+    }
+  }
+
+  /// Picks the best sniffed video/playlist for auto-replace when the site
+  /// only exposes a blob/MSE element.
+  SniffedMedia? _bestDetectedVideoForPlayback() {
+    final items = _activeTab.snifferEngine.detectedMedia
+        .where(
+          (m) =>
+              m.type == MediaType.video ||
+              m.type == MediaType.playlist ||
+              m.type == MediaType.audio,
+        )
+        .toList();
+    if (items.isEmpty) return _latestVideoMedia;
+    items.sort((a, b) {
+      int score(SniffedMedia m) {
+        var s = 0;
+        final u = m.url.toLowerCase();
+        if (u.contains('.m3u8') || u.contains('mpegurl')) s += 100;
+        if (m.type == MediaType.video) s += 20;
+        if (m.type == MediaType.playlist) s += 40;
+        if ((m.contentLengthBytes ?? 0) > 0) {
+          s += ((m.contentLengthBytes! / (1024 * 1024)).clamp(0, 50)).toInt();
+        }
+        if (m.height != null && m.height! >= 720) s += 10;
+        return s;
+      }
+
+      return score(b).compareTo(score(a));
+    });
+    return items.first;
   }
 
   /// Shows a bottom sheet listing HLS variant qualities. Returns the selected
@@ -4792,6 +5125,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     activeTab: _activeTab,
     isMounted: mounted,
     getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+    getPlaybackCookies: ({required String mediaUrl, String? pageUrl}) =>
+        _sniffIntakeController.getPlaybackCookies(
+          mediaUrl: mediaUrl,
+          pageUrl: pageUrl,
+        ),
     buildSniffedDownloadHeaders:
         ({
           required BrowserTab tab,
@@ -5180,23 +5518,6 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   /// Directly enqueue a download from a captured URL without showing
   /// the "Add to Queue" dialog.
-  /// Extracts the file extension from a URL's path (e.g. `.conf` from
-  /// `https://example.com/wireguard/client.conf`). Returns empty string
-  /// if the path has no extension.
-  String _extensionFromUrlPath(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return '';
-    final path = uri.path;
-    // Strip trailing slashes, then find last segment.
-    final segments = path.endsWith('/')
-        ? path.substring(0, path.length - 1).split('/')
-        : path.split('/');
-    final last = segments.last;
-    final dot = last.lastIndexOf('.');
-    if (dot <= 0 || dot >= last.length - 1) return '';
-    return last.substring(dot);
-  }
-
   Future<void> _enqueueDirectDownload(
     BrowserTab tab,
     String url,
@@ -5209,7 +5530,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
     // Determine the filename, preferring the extension from the URL path
     // over the server-suggested one (many servers send a generic .bin).
-    final urlExt = _extensionFromUrlPath(url);
+    final urlExt = extensionFromUrlPath(url);
     String suggestedName;
     if (suggestedFilename != null) {
       if (urlExt.isNotEmpty) {
@@ -5305,12 +5626,27 @@ class _SnifferScreenState extends State<SnifferScreen>
     task.fetchBinaryViaWebView = (binaryUrl) =>
         tab.controller.fetchBinaryViaJavaScript(binaryUrl);
     task.cookieProvider = (url) => tab.controller.getCookiesForDomain(url: url);
+    task.onTokenExpired = ({bool forceReload = false}) => _reloadForFreshUrl(
+      tab,
+      media?.sourcePageUrl ?? currentUrl,
+      forceReload: forceReload,
+    );
 
     // Check for duplicates.
     bool force = false;
     if (_downloadQueue.urlExists(url)) {
-      final skip = await _showDuplicatePrompt(context, suggestedName);
-      if (skip ?? true) return;
+      final choice = await _showDuplicatePrompt(context, suggestedName);
+      if (choice == DuplicateChoice.skip) return;
+      if (choice == DuplicateChoice.updateExisting) {
+        final existing = _downloadQueue.getTaskByUrl(url);
+        if (existing != null) {
+          await _downloadQueue.updateTaskFromDonor(existing.id, task);
+          if (mounted) {
+            _showSnack('Done — Link updated. Download will retry.');
+          }
+          return;
+        }
+      }
       force = true;
     }
     _downloadQueue.addTask(task, force: force);
@@ -5363,6 +5699,25 @@ class _SnifferScreenState extends State<SnifferScreen>
     List<SniffedMedia> variants = const [],
   }) async {
     final tab = _activeTab;
+    // Refresh live page title so long descriptive names (MissAV etc.) are
+    // available even if PageMetaChannel raced behind the download tap.
+    try {
+      final live = await tab.controller.pageTitle();
+      if (live != null && live.trim().isNotEmpty) {
+        final cleaned = live.trim();
+        if (tab.pageMeta.title.trim().isEmpty) {
+          tab.pageMeta = PageMeta(
+            title: cleaned,
+            videoWidth: tab.pageMeta.videoWidth,
+            videoHeight: tab.pageMeta.videoHeight,
+            structuredName: tab.pageMeta.structuredName,
+          );
+        }
+        if (tab.title == null || tab.title!.trim().isEmpty) {
+          tab.title = cleaned;
+        }
+      }
+    } catch (_) {}
     final suggestedName = _buildSuggestedFilename(
       media.name,
       mediaUrl: media.url,
@@ -5403,123 +5758,49 @@ class _SnifferScreenState extends State<SnifferScreen>
     SniffedMedia? media,
   }) {
     final metaTitle = _activeTab.pageMeta.title.trim();
+    final structured = _activeTab.pageMeta.structuredName?.trim() ?? '';
     final tabTitle = _activeTab.title?.trim() ?? '';
-    final bestTitle = metaTitle.isNotEmpty ? metaTitle : tabTitle;
+    // pickBestTitle prefers the longest usable descriptive title (and
+    // titles that look like product codes such as LULU-172).
+    final bestTitle = FilenameService.pickBestTitle([
+      metaTitle,
+      structured,
+      tabTitle,
+      media?.pageTitle,
+    ]);
 
-    // Strip parenthetical metadata (e.g., bandwidth labels like "(0.6 Mbps)")
-    // before extracting the file extension — dots inside parenthetical values
-    // would hijack the extension and produce ".6 Mbps)" instead of ".m3u8".
-    final cleanName = mediaName
-        .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
-        .trim();
-    final rawExt = cleanName.contains('.')
-        ? '.${cleanName.split('.').last}'
-        : '';
-    final hasRealExt = rawExt.isNotEmpty &&
-        RegExp(r'^\.[a-zA-Z0-9]{2,5}$').hasMatch(rawExt);
-
-    // Compute the base BEFORE stripping playlist extensions, so the
-    // extension-stripping regex removes the real file extension — not
-    // bandwidth-label dots like ".6" in "0.6 Mbps".
-    final base = hasRealExt
-        ? cleanName.replaceAll(RegExp(r'\.[^.]+$'), '').trim()
-        : cleanName;
-
-    var ext = hasRealExt ? rawExt : '';
-    if (ext.toLowerCase() == '.m3u8') {
-      ext = ''; // Let the HLS downloader pick .ts/.mp4/.m4a
-    } else if (ext.toLowerCase() == '.mpd') {
-      ext = ''; // Let the DASH downloader pick the output extension
-    } else if (media != null && media.type == MediaType.playlist) {
-      ext = ''; // Disguised playlist (e.g. index.jpg with #EXTM3U body)
-    }
-
-    // Extract a meaningful video identifier from the source page URL when
-    // the page title is an error page (e.g., "fc2-ppv-4912494" from
-    // "https://missav.ws/en/fc2-ppv-4912494"). This produces a distinguishing
-    // filename instead of a generic fallback like "master_720p".
-    String sourceId = '';
-    final srcUrl = media?.sourcePageUrl;
-    if (srcUrl != null && srcUrl.isNotEmpty) {
-      final srcUri = Uri.tryParse(srcUrl);
-      if (srcUri != null) {
-        final segments = srcUri.pathSegments
-            .where((s) => s.isNotEmpty && s != 'en' && s != 'ja' && s != 'cn')
-            .toList();
-        if (segments.isNotEmpty) {
-          sourceId = segments.last;
-        }
+    // Prefer capture-analyzer quality when available (resolution / bandwidth).
+    String? explicitQuality;
+    if (media != null) {
+      final h = media.height;
+      final w = media.width;
+      if (h != null || w != null) {
+        explicitQuality = FilenameService.qualityLabelFrom(
+          height: h,
+          width: w,
+          bandwidth: media.bandwidth,
+        );
+        if (explicitQuality != null) explicitQuality = '${explicitQuality}p';
       }
     }
 
-    String qualityLabel = '';
-    if (mediaUrl != null) {
-      final qMatch = RegExp(r'(\d+)p').firstMatch(mediaUrl);
-      if (qMatch != null) qualityLabel = qMatch.group(1)!;
-    }
-
-    if (bestTitle.isNotEmpty) {
-      final sanitized = bestTitle
-          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-          .trim();
-      if (sanitized.isNotEmpty &&
-          !_isErrorPageTitle(sanitized) &&
-          (qualityLabel.isEmpty || sanitized.length >= 4)) {
-        if (widget.settings.includeQualitySuffix && qualityLabel.isNotEmpty) {
-          return _truncateFilename('$sanitized (${qualityLabel}p)$ext');
-        }
-        // If ext is empty and this is a known video host (dood.sh etc),
-        // default to .mp4 so the file doesn't save without an extension.
-        final finalExt = ext.isNotEmpty
-            ? ext
-            : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
-        return _truncateFilename('$sanitized$finalExt');
-      }
-    }
-
-    // Title was empty or an error page — try the media's own pageTitle
-    // field, which was captured at sniff time and is still available
-    // even if the user navigated away from the original page.
-    if (media?.pageTitle != null && media!.pageTitle!.trim().isNotEmpty) {
-      final mediaTitle = media.pageTitle!.trim();
-      if (!_isErrorPageTitle(mediaTitle) && mediaTitle.length >= 4) {
-        final sanitized = mediaTitle
-            .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-            .trim();
-        if (sanitized.isNotEmpty) {
-          final finalExt = ext.isNotEmpty
-              ? ext
-              : (mediaUrl != null && isVideoHostingUrl(mediaUrl)
-                  ? '.mp4'
-                  : '');
-          if (widget.settings.includeQualitySuffix && qualityLabel.isNotEmpty) {
-            return _truncateFilename('$sanitized (${qualityLabel}p)$finalExt');
-          }
-          return _truncateFilename('$sanitized$finalExt');
-        }
-      }
-    }
-
-    // Title was empty or an error page — use the source page identifier
-    // (e.g., "fc2-ppv-4912494") for a distinguishing filename.
-    if (sourceId.isNotEmpty) {
-      final finalExt = ext.isNotEmpty
-          ? ext
-          : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
-      if (qualityLabel.isNotEmpty) {
-        return _truncateFilename('${sourceId}_${qualityLabel}p$finalExt');
-      }
-      return _truncateFilename('$sourceId$finalExt');
-    }
-
-    final finalExt = ext.isNotEmpty
-        ? ext
-        : (mediaUrl != null && isVideoHostingUrl(mediaUrl) ? '.mp4' : '');
-    if (qualityLabel.isNotEmpty) {
-      final qBase = base.isNotEmpty ? base : 'video';
-      return _truncateFilename('${qBase}_${qualityLabel}p$finalExt');
-    }
-    return _truncateFilename(base.isNotEmpty ? '$base$finalExt' : 'download$finalExt');
+    return FilenameService.buildSuggestedFilename(
+      mediaName: mediaName,
+      mediaUrl: mediaUrl,
+      pageTitle: bestTitle,
+      mediaPageTitle: media?.pageTitle,
+      structuredName: structured.isNotEmpty ? structured : null,
+      sourcePageUrl: media?.sourcePageUrl ??
+          _activeTab.addressController.text,
+      width: media?.width,
+      height: media?.height,
+      bandwidth: media?.bandwidth,
+      explicitQuality: explicitQuality,
+      includeQualitySuffix: widget.settings.includeQualitySuffix,
+      defaultMp4ForVideoHosts:
+          mediaUrl != null && isVideoHostingUrl(mediaUrl),
+      isPlaylist: media?.type == MediaType.playlist,
+    );
   }
 
   List<SniffedMedia> _sortedMedia(List<SniffedMedia> media) {
@@ -5564,13 +5845,19 @@ class _SnifferScreenState extends State<SnifferScreen>
     final parts = <String>[];
     switch (widget.settings.sniffedMediaDisplayMode) {
       case SniffedMediaDisplayMode.size:
-        parts.add(_sizeLabel(item.contentLengthBytes, isEstimated: false));
+        parts.add(_sizeLabel(
+          item.contentLengthBytes,
+          isEstimated: item.isSizeEstimated,
+        ));
         break;
       case SniffedMediaDisplayMode.duration:
         parts.add(_durationLabel(item.duration));
         break;
       case SniffedMediaDisplayMode.both:
-        parts.add(_sizeLabel(item.contentLengthBytes, isEstimated: false));
+        parts.add(_sizeLabel(
+          item.contentLengthBytes,
+          isEstimated: item.isSizeEstimated,
+        ));
         parts.add(_durationLabel(item.duration));
         break;
     }
@@ -5621,7 +5908,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     };
   }
 
-  /// Decodes a JSON string off the UI isolate.
+  /// Decodes a JSON string off the UI isolate via the persistent worker pool.
   /// Returns a [Map] on success, null on parse failure.
   Future<Map?> _decodeJsInBackground(String message) async {
     try {
@@ -5630,41 +5917,22 @@ class _SnifferScreenState extends State<SnifferScreen>
         if (decoded is Map) return decoded;
         return <String, dynamic>{};
       }
-      return await Isolate.run<Map>(() {
-        final decoded = jsonDecode(message);
-        if (decoded is Map) return decoded;
-        return <String, dynamic>{};
-      });
+      final result = await WorkerIsolatePool.instance.execute(
+        'jsonDecode',
+        {'json': message},
+      );
+      if (result is Map) return result;
+      return <String, dynamic>{};
     } catch (_) {
       return null;
     }
   }
 
-  static final Set<String> _errorPageTitles = <String>{
-    'web page not available',
-    'this page could not be loaded',
-    'this site can\'t be reached',
-    'page not found',
-    'universal widget',
-    'this page has been blocked',
-    'access denied',
-    'site cannot be reached',
-    'the page has been blocked',
-  };
-
-  static final RegExp _errorPagePattern = RegExp(
-    r'^(err_|error\s|http\s?\d{3}\s|403\s|404\s|500\s|502\s|503\s)',
-    caseSensitive: false,
-  );
-
   /// Returns true when [title] is a known Android WebView error page title
   /// or a generic interstitial placeholder. Such titles should not be used
   /// as download filenames — fall back to the URL-derived name instead.
   static bool _isErrorPageTitle(String title) {
-    final low = title.trim().toLowerCase();
-    if (low.isEmpty) return false;
-    if (_errorPagePattern.hasMatch(low)) return true;
-    return _errorPageTitles.contains(low);
+    return FilenameService.isUnusableTitle(title);
   }
 
   String _cleanTitle(String? title, String? url) {
@@ -5971,33 +6239,37 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  Future<bool> _showDuplicatePrompt(
+  Future<DuplicateChoice> _showDuplicatePrompt(
     BuildContext context,
     String filename,
   ) async {
-    final result = await showDialog<bool>(
+    final result = await showDialog<DuplicateChoice>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Already in Queue'),
-          content: Text(
+          content: const Text(
             'This download link has already been added to your queue.\n\n'
-            'Download it again anyway?',
+            'The URL may have changed (token refresh). Update the existing download with the new link, or create a separate one.',
           ),
           actions: <Widget>[
             TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Download Again'),
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
+              child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Skip'),
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
+              child: const Text('Create New'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
+              child: const Text('Update Existing'),
             ),
           ],
         );
       },
     );
-    return result ?? true;
+    return result ?? DuplicateChoice.skip;
   }
 }
 

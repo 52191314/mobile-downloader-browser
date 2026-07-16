@@ -33,10 +33,7 @@ class DownloadTaskRow extends StatelessWidget {
   void _showPropertiesDialog(BuildContext context, DownloadTask task) {
     showDialog(
       context: context,
-      builder: (context) => DownloadPropertiesDialog(
-        task: task,
-        onOpenDownload: onOpenDownload,
-      ),
+      builder: (context) => DownloadPropertiesDialog(task: task),
     );
   }
 
@@ -226,7 +223,7 @@ class DownloadTaskRow extends StatelessWidget {
                 ),
               ),
             ],
-            // Error message for failed tasks
+            // Error message for failed tasks — full text, card grows
             if (task.state == DownloadState.failed &&
                 task.errorMessage != null &&
                 task.errorMessage!.isNotEmpty) ...[
@@ -242,9 +239,12 @@ class DownloadTaskRow extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: SelectableText(
-                      task.errorMessage!,
+                      task.errorMessage!
+                          .replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '')
+                          .trim(),
                       style: TextStyle(
                         fontSize: 12,
+                        height: 1.35,
                         color: ac.statusError,
                       ),
                     ),
@@ -284,19 +284,13 @@ class DownloadTaskRow extends StatelessWidget {
 
 class DownloadPropertiesDialog extends StatefulWidget {
   final DownloadTask task;
-  final Future<void> Function(DownloadTask task) onOpenDownload;
   final void Function(String url)? onOpenUrlInBrowser;
   final void Function(DownloadTask task)? onTaskUpdated;
-  final Future<void> Function(DownloadTask task)? onShareDownload;
-  final Future<void> Function(DownloadTask task)? onExport;
 
   const DownloadPropertiesDialog({
     required this.task,
-    required this.onOpenDownload,
     this.onOpenUrlInBrowser,
     this.onTaskUpdated,
-    this.onShareDownload,
-    this.onExport,
   });
 
   @override
@@ -374,7 +368,6 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
-    final isCompleted = widget.task.state == DownloadState.completed;
 
     return AlertDialog(
       title: const Text('File details'),
@@ -468,50 +461,6 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
                 ],
               ),
               const SizedBox(height: 16),
-            ],
-            if (isCompleted) ...[
-              const Divider(),
-              const SizedBox(height: 8),
-              Text('Actions', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
-                    icon: const Icon(Icons.open_in_new, size: 16),
-                    label: const Text('Open'),
-                    onPressed: widget.task.publicUri == null
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            widget.onOpenDownload(widget.task);
-                          },
-                  ),
-                  if (widget.onShareDownload != null)
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
-                      icon: const Icon(Icons.share, size: 16),
-                      label: const Text('Share'),
-                      onPressed: widget.task.publicUri == null
-                          ? null
-                          : () {
-                              Navigator.of(context).pop();
-                              widget.onShareDownload!(widget.task);
-                            },
-                    ),
-                  if (widget.onExport != null)
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(visualDensity: VisualDensity.compact),
-                      icon: const Icon(Icons.save_alt, size: 16),
-                      label: const Text('Export'),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        widget.onExport!(widget.task);
-                      },
-                    ),
-                ],
-              ),
             ],
           ],
         ),

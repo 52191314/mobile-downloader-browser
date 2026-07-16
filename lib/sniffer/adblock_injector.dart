@@ -95,21 +95,24 @@ class AdblockInjector {
           .catchError((_) {});
     }
 
-    // Scriptlet rules
+    // Scriptlet rules — batched into a single evaluateJavascript call
+    // instead of one per rule, so a page with 10+ scriptlets only pays
+    // one platform-channel round-trip instead of 10+.
     final scriptlets = _engine.getScriptletsForHost(host);
     if (scriptlets.isNotEmpty) {
+      final buffer = StringBuffer();
       for (final rule in scriptlets) {
         final escapedName = rule.name.replaceAll("'", "\\'");
         final argsStr = rule.args
             .map((a) => "'${a.replaceAll("'", "\\'")}'")
             .join(', ');
-        await controller
-            .evaluateJavascript(
-              source:
-                  "window.__auroraScriptlets?.invoke('$escapedName', [$argsStr]);",
-            )
-            .catchError((_) {});
+        buffer.writeln(
+          "window.__auroraScriptlets?.invoke('$escapedName', [$argsStr]);",
+        );
       }
+      await controller
+          .evaluateJavascript(source: buffer.toString())
+          .catchError((_) {});
     }
   }
 

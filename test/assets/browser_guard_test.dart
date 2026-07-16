@@ -12,27 +12,27 @@ void main() {
 
     test('blocked window.open does not emit LinkContextChannel payloads', () {
       final start = guard.indexOf('window.open = function(url, name, specs)');
-      final end = guard.indexOf('// --- invisible redirect blocking');
+      final end = guard.indexOf('// --- long press and context menu ---');
 
       expect(start, isNonNegative);
       expect(end, greaterThan(start));
       final windowOpenBlock = guard.substring(start, end);
 
-      expect(windowOpenBlock, contains('PopupBlockerChannel.postMessage'));
+      expect(windowOpenBlock, contains('AdBlockerChannel.postMessage'));
       expect(windowOpenBlock, isNot(contains('postLinkContext')));
     });
 
     test('text selection can use Aurora context sheet without native menu', () {
-      expect(guard, contains('function hasSelectedContextText()'));
+      expect(guard, contains('function hasTextSelection()'));
       expect(
         guard,
         contains(
-          '!shouldInterceptContext(event.target) && !hasSelectedContextText()',
+          'if (hasTextSelection()) return;',
         ),
       );
       expect(
         guard,
-        contains('if (!ctx.href && !ctx.src && !ctx.selectedText) return;'),
+        contains('TextSelectionChannel.postMessage(text)'),
       );
     });
   });

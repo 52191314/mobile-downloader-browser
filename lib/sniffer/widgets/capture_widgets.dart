@@ -586,7 +586,7 @@ class _SniffedMediaControls extends StatelessWidget {
 /// Two-slide browser dock shown in the Sniffer screen's bottom strip.
 ///
 /// Slide 1: Backward · Forward · Sniffer · Download · Tab
-/// Slide 2: Browser Tools · Settings
+/// Slide 2: Browser Tools · Sniffer · History · Bookmarks · Settings
 ///
 /// Swipe horizontally to move between slides. Icons are flat (no circle
 /// outline). A small pill indicator shows the active slide.
@@ -597,6 +597,8 @@ class _BrowserDock extends StatefulWidget {
   final VoidCallback onTab;
   final VoidCallback onBrowserTools;
   final VoidCallback onSettings;
+  final VoidCallback onHistory;
+  final VoidCallback onBookmarks;
 
   const _BrowserDock({
     required this.tab,
@@ -605,6 +607,8 @@ class _BrowserDock extends StatefulWidget {
     required this.onTab,
     required this.onBrowserTools,
     required this.onSettings,
+    required this.onHistory,
+    required this.onBookmarks,
   });
 
   @override
@@ -667,10 +671,22 @@ class _BrowserDockState extends State<_BrowserDock> {
         onTap: widget.onBrowserTools,
       ),
       _CompactNavButton(
+        key: const Key('mini_dock_history'),
+        icon: Icons.history_rounded,
+        enabled: true,
+        onTap: widget.onHistory,
+      ),
+      _CompactNavButton(
         key: const Key('slide2_sniffer_button'),
         icon: badgeCount > 0 ? Icons.radar : Icons.add,
         enabled: true,
         onTap: widget.onSniffer,
+      ),
+      _CompactNavButton(
+        key: const Key('mini_dock_bookmarks'),
+        icon: Icons.star_rounded,
+        enabled: true,
+        onTap: widget.onBookmarks,
       ),
       _CompactNavButton(
         key: const Key('mini_dock_settings'),

@@ -203,7 +203,7 @@ void showMediaInfoSheet(
                         Text(
                           formatSize(
                             item.contentLengthBytes!,
-                            isEstimated: false,
+                            isEstimated: item.isSizeEstimated,
                           ),
                           style: const TextStyle(
                             color: Colors.white,

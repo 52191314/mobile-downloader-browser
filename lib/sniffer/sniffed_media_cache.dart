@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
+import 'worker_isolate_pool.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -267,9 +267,10 @@ class SniffedMediaCache {
             },
           )
           .toList(growable: false);
-      final jsonString = await Isolate.run(
-        () => jsonEncode({'schemaVersion': 2, 'items': items}),
-      );
+      final jsonString = await WorkerIsolatePool.instance.execute(
+        'jsonEncode',
+        {'data': {'schemaVersion': 2, 'items': items}},
+      ) as String;
       await file.writeAsString(jsonString);
     } catch (e) {
       debugPrint('[SniffedMediaCache] Failed to save media cache: $e');
@@ -281,7 +282,10 @@ class SniffedMediaCache {
       final file = File(filePath);
       if (!await file.exists()) return false;
       final raw = await file.readAsString();
-      final decoded = await Isolate.run(() => jsonDecode(raw));
+      final decoded = await WorkerIsolatePool.instance.execute(
+        'jsonDecode',
+        {'json': raw},
+      );
       final items = _cacheItemsFromDecoded(decoded);
       if (items == null) return false;
       var added = 0;

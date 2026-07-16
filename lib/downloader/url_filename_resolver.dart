@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
-import '../platform/public_downloads_service.dart';
+import 'media_file_types.dart';
 
 /// Result of a URL filename resolution via HTTP probe.
 class ResolvedFilename {
@@ -46,17 +46,7 @@ String safeFileName(Uri uri) {
 ///   `extensionFromUrlPath('https://example.com/video.mp4?q=1')` → `.mp4`
 ///   `extensionFromUrlPath('https://example.com/path/')` → ``
 String extensionFromUrlPath(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null) return '';
-  final path = uri.path;
-  // Strip trailing slashes, then find last segment.
-  final segments = path.endsWith('/')
-      ? path.substring(0, path.length - 1).split('/')
-      : path.split('/');
-  final last = segments.last;
-  final dot = last.lastIndexOf('.');
-  if (dot <= 0 || dot >= last.length - 1) return '';
-  return last.substring(dot);
+  return MediaFileTypes.extensionFromUrlPath(url);
 }
 
 /// Parses a `Content-Disposition` header value and returns the suggested
@@ -313,6 +303,5 @@ String _buildFileName({
 /// or returns `null` if the MIME type is unknown.
 String? _extensionForContentType(String? contentType) {
   if (contentType == null || contentType.isEmpty) return null;
-  final clean = contentType.split(';').first.trim().toLowerCase();
-  return PublicDownloadsService.extensionForMime(clean);
+  return MediaFileTypes.extensionForMime(contentType);
 }

@@ -30,6 +30,13 @@ Future<void> showMediaPreview(
   required BrowserTab activeTab,
   required bool isMounted,
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
+  /// Optional multi-host cookie collector (media URL + page URL). When
+  /// provided, used instead of a single [getCookiesForUrl] call so CDN
+  /// playback receives both media-host and page-session cookies.
+  Future<Map<String, String>> Function({
+    required String mediaUrl,
+    String? pageUrl,
+  })? getPlaybackCookies,
   required Map<String, String> Function({
     required BrowserTab tab,
     required SniffedMedia media,
@@ -50,13 +57,51 @@ Future<void> showMediaPreview(
   Map<String, String> resolvedHeaders = {};
   try {
     final currentUrl = await activeTab.controller.currentUrl();
-    final cookieHeaders = await getCookiesForUrl(media.url);
+    final sourcePage = media.sourcePageUrl;
+    final pageUrl = (sourcePage != null && sourcePage.isNotEmpty)
+        ? sourcePage
+        : (currentUrl ?? activeTab.addressController.text);
+
+    // Prefer multi-host cookie merge (media CDN + page session) so
+    // ExoPlayer/VideoPlayer gets the same jar the WebView used.
+    Map<String, String> cookieHeaders;
+    if (getPlaybackCookies != null) {
+      cookieHeaders = await getPlaybackCookies!(
+        mediaUrl: media.url,
+        pageUrl: pageUrl,
+      );
+    } else {
+      cookieHeaders = await getCookiesForUrl(media.url);
+    }
+
     resolvedHeaders = buildSniffedDownloadHeaders(
       tab: activeTab,
       media: media,
       cookieHeaders: cookieHeaders,
       currentUrl: currentUrl,
     );
+
+    // Ensure page Referer/Origin for playback when builders left them empty.
+    // Do not overwrite host-specific fixes (e.g. surrit.com same-origin
+    // Referer from _normalizeHeadersForUrl).
+    final hasReferer = resolvedHeaders.keys.any(
+      (k) => k.toLowerCase() == 'referer',
+    );
+    final hasOrigin = resolvedHeaders.keys.any(
+      (k) => k.toLowerCase() == 'origin',
+    );
+    if (pageUrl.isNotEmpty && !hasReferer) {
+      resolvedHeaders['Referer'] = pageUrl;
+    }
+    if (pageUrl.isNotEmpty && !hasOrigin) {
+      final pageUri = Uri.tryParse(pageUrl);
+      if (pageUri != null &&
+          pageUri.host.isNotEmpty &&
+          pageUri.scheme.isNotEmpty) {
+        resolvedHeaders['Origin'] = '${pageUri.scheme}://${pageUri.host}';
+      }
+    }
+
     if (media.type == MediaType.video || media.type == MediaType.audio) {
       resolvedUrl = await refreshM3u8IfNeeded(media.url, resolvedHeaders);
     }

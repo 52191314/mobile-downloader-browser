@@ -447,6 +447,9 @@ class DownloadSettings {
   final bool privateMode;
   final bool wifiOnly;
   final bool readerMode;
+  /// When true, site `<video>`/`<audio>` play is intercepted and Aurora's
+  /// in-app player opens instead (UC Browser-style). Free core feature.
+  final bool replaceSitePlayer;
   final bool captureShowAllMedia;
   final int maxDetectedMedia;
   final Set<MediaType> disabledMediaTypes;
@@ -505,6 +508,7 @@ class DownloadSettings {
   final bool autoBackupSettings;
   final int lastBackupTimestamp;
   final AutoBackupInterval autoBackupInterval;
+  final bool neverAskBatteryOpt;
 
   const DownloadSettings({
     required this.maxConcurrentDownloads,
@@ -525,6 +529,7 @@ class DownloadSettings {
     this.privateMode = false,
     this.wifiOnly = false,
     this.readerMode = false,
+    this.replaceSitePlayer = true,
     this.captureShowAllMedia = false,
     this.maxDetectedMedia = 200,
     this.disabledMediaTypes = const {},
@@ -560,6 +565,7 @@ class DownloadSettings {
     this.autoBackupSettings = true,
     this.lastBackupTimestamp = 0,
     this.autoBackupInterval = AutoBackupInterval.daily,
+    this.neverAskBatteryOpt = false,
   });
 
   static const trustedAdblockSources = [
@@ -588,6 +594,7 @@ class DownloadSettings {
     remuxTsToMp4: true,
     includeQualitySuffix: true,
     showSnackbars: true,
+    neverAskBatteryOpt: false,
   );
 
   DownloadSettings copyWith({
@@ -609,6 +616,7 @@ class DownloadSettings {
     bool? privateMode,
     bool? wifiOnly,
     bool? readerMode,
+    bool? replaceSitePlayer,
     bool? captureShowAllMedia,
     int? maxDetectedMedia,
     Set<MediaType>? disabledMediaTypes,
@@ -644,6 +652,7 @@ class DownloadSettings {
     bool? autoBackupSettings,
     int? lastBackupTimestamp,
     AutoBackupInterval? autoBackupInterval,
+    bool? neverAskBatteryOpt,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -670,6 +679,7 @@ class DownloadSettings {
       autoBackupSettings: autoBackupSettings ?? this.autoBackupSettings,
       lastBackupTimestamp: lastBackupTimestamp ?? this.lastBackupTimestamp,
       autoBackupInterval: autoBackupInterval ?? this.autoBackupInterval,
+      neverAskBatteryOpt: neverAskBatteryOpt ?? this.neverAskBatteryOpt,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -691,6 +701,7 @@ class DownloadSettings {
       privateMode: privateMode ?? this.privateMode,
       wifiOnly: wifiOnly ?? this.wifiOnly,
       readerMode: readerMode ?? this.readerMode,
+      replaceSitePlayer: replaceSitePlayer ?? this.replaceSitePlayer,
       captureShowAllMedia: captureShowAllMedia ?? this.captureShowAllMedia,
       maxDetectedMedia: maxDetectedMedia ?? this.maxDetectedMedia,
       disabledMediaTypes: disabledMediaTypes ?? this.disabledMediaTypes,
@@ -738,6 +749,7 @@ class DownloadSettings {
     'privateMode': privateMode,
     'wifiOnly': wifiOnly,
     'readerMode': readerMode,
+    'replaceSitePlayer': replaceSitePlayer,
       'captureShowAllMedia': captureShowAllMedia,
       'maxDetectedMedia': maxDetectedMedia,
       'disabledMediaTypes': disabledMediaTypes.map((t) => t.name).toList(),
@@ -773,6 +785,7 @@ class DownloadSettings {
     'autoBackupSettings': autoBackupSettings,
     'lastBackupTimestamp': lastBackupTimestamp,
     'autoBackupInterval': autoBackupInterval.name,
+    'neverAskBatteryOpt': neverAskBatteryOpt,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -827,6 +840,7 @@ class DownloadSettings {
       privateMode: json['privateMode'] as bool? ?? false,
       wifiOnly: json['wifiOnly'] as bool? ?? false,
       readerMode: json['readerMode'] as bool? ?? false,
+      replaceSitePlayer: json['replaceSitePlayer'] as bool? ?? true,
       captureShowAllMedia: json['captureShowAllMedia'] as bool? ?? false,
       maxDetectedMedia:
           (json['maxDetectedMedia'] as num?)?.round() ?? 200,
@@ -903,6 +917,7 @@ class DownloadSettings {
           (json['lastBackupTimestamp'] as num?)?.round() ?? 0,
       autoBackupInterval:
           AutoBackupInterval.fromName(json['autoBackupInterval'] as String?),
+      neverAskBatteryOpt: json['neverAskBatteryOpt'] as bool? ?? false,
     );
   }
 
