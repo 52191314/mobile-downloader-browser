@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
+import '../compliance/restricted_media_policy.dart';
 import '../downloader/media_file_types.dart';
 import 'media_enricher.dart';
 import 'models/sniffed_media.dart';
@@ -212,6 +213,14 @@ class MediaSnifferEngine implements MediaEnricherHost {
     SniffSource sniffSource = SniffSource.javascript,
     int? contentLength,
   }) {
+    // Play: URL/CDN/page backstop (site hard-off is enforced before sniff()).
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: url,
+      sourcePageUrl: sourcePageUrl,
+      headers: headers,
+    )) {
+      return;
+    }
     // Soft cap buffer: allow some extra items so they can be enriched and sorted
     // before we evict them.
     final bufferCap = maxDetectedMedia + 20;
@@ -556,6 +565,9 @@ class MediaSnifferEngine implements MediaEnricherHost {
   Future<void> saveDetectedMedia(String filePath) => cache.save(filePath);
 
   Future<bool> loadDetectedMedia(String filePath) => cache.load(filePath);
+
+  /// Drop Play-restricted items already in the list (YouTube UI sounds, etc.).
+  int purgeRestrictedMedia() => cache.purgeRestrictedMedia();
 
   // ---------------------------------------------------------------------------
   // MediaEnricherHost implementation — gives the enricher access to engine

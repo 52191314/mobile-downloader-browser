@@ -7,6 +7,12 @@ void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadNotification] $context: $error');
 }
 
+/// System notifications for download progress / completion / failure, with
+/// action buttons that map onto [DownloadQueue] controls.
+///
+/// Actions use [AndroidNotificationAction.showsUserInterface] so they always
+/// land on the main isolate (where the queue lives). Tapping the notification
+/// body opens the Queue tab.
 class DownloadNotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -21,7 +27,25 @@ class DownloadNotificationService {
   static const String _doneChannelDescription =
       'Notifies you when a download finishes.';
 
+  /// Action IDs returned via [NotificationResponse.actionId].
+  static const String actionPause = 'pause';
+  static const String actionResume = 'resume';
+  static const String actionCancel = 'cancel';
+  static const String actionRetry = 'retry';
+  static const String actionOpen = 'open';
+
+  /// Host wires these to [DownloadQueue] / open-file handlers.
+  void Function(String taskId)? onPause;
+  void Function(String taskId)? onResume;
+  void Function(String taskId)? onCancel;
+  void Function(String taskId)? onRetry;
+  void Function(String taskId)? onOpen;
+
+  /// Fired when the user taps the notification body (not an action button).
+  void Function(String taskId)? onNotificationTap;
+
   StreamSubscription<DownloadTask>? _subscription;
+  StreamSubscription<String>? _removedSubscription;
 
   Future<void> initialize() async {
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -34,7 +58,10 @@ class DownloadNotificationService {
       android: androidSettings,
       iOS: iosSettings,
     );
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _onNotificationResponse,
+    );
     await _createChannels();
   }
 
@@ -67,15 +94,66 @@ class DownloadNotificationService {
     );
   }
 
-  void listenTo(Stream<DownloadTask> taskStream) {
+  void listenTo(
+    Stream<DownloadTask> taskStream, {
+    Stream<String>? taskRemovedStream,
+  }) {
     _subscription?.cancel();
     _subscription = taskStream.listen(_onTaskUpdated);
+    _removedSubscription?.cancel();
+    if (taskRemovedStream != null) {
+      _removedSubscription = taskRemovedStream.listen(cancelForTask);
+    }
   }
 
   void dispose() {
     _subscription?.cancel();
     _subscription = null;
+    _removedSubscription?.cancel();
+    _removedSubscription = null;
     _activeLiveNotificationIds.clear();
+  }
+
+  /// Dismiss the system notification for [taskId] (e.g. after cancel).
+  void cancelForTask(String taskId) {
+    try {
+      final id = _notificationIdFor(taskId);
+      unawaited(_plugin.cancel(id));
+      _activeLiveNotificationIds.remove(taskId);
+    } catch (e, s) {
+      _logError('Failed to cancel notification', e, s);
+    }
+  }
+
+  void _onNotificationResponse(NotificationResponse response) {
+    final taskId = response.payload;
+    if (taskId == null || taskId.isEmpty) return;
+
+    try {
+      if (response.notificationResponseType ==
+          NotificationResponseType.selectedNotification) {
+        onNotificationTap?.call(taskId);
+        return;
+      }
+
+      switch (response.actionId) {
+        case actionPause:
+          onPause?.call(taskId);
+        case actionResume:
+          onResume?.call(taskId);
+        case actionCancel:
+          onCancel?.call(taskId);
+        case actionRetry:
+          onRetry?.call(taskId);
+        case actionOpen:
+          onOpen?.call(taskId);
+        default:
+          // Unknown action — treat like a body tap.
+          onNotificationTap?.call(taskId);
+      }
+    } catch (e, s) {
+      _logError('Failed to handle notification action', e, s);
+    }
   }
 
   void _onTaskUpdated(DownloadTask task) {
@@ -83,15 +161,20 @@ class DownloadNotificationService {
       switch (task.state) {
         case DownloadState.downloading:
           _updateProgressNotification(task);
+        case DownloadState.paused:
+          _showPausedNotification(task);
         case DownloadState.completed:
           _showCompletedNotification(task);
         case DownloadState.failed:
           _showFailedNotification(task);
-        case DownloadState.paused:
+        case DownloadState.merging:
+          _updateMergingNotification(task);
         case DownloadState.idle:
         case DownloadState.scheduled:
-        case DownloadState.merging:
-          break;
+          // Drop progress-style live notifs when the task is no longer active.
+          if (_activeLiveNotificationIds.contains(task.id)) {
+            cancelForTask(task.id);
+          }
       }
     } catch (e, s) {
       _logError('Failed to process task update', e, s);
@@ -100,14 +183,7 @@ class DownloadNotificationService {
 
   void _updateProgressNotification(DownloadTask task) {
     final id = _notificationIdFor(task.id);
-    final progress = task.totalBytes > 0
-        ? (task.downloadedBytes / task.totalBytes * 100).round()
-        : (task.chunks.isNotEmpty
-            ? (task.chunks.where((c) => c.isCompleted).length /
-                    task.chunks.length *
-                    100)
-                .round()
-            : 0);
+    final progress = _progressPercent(task);
     final filename = _shortName(task.savePath);
 
     _plugin.show(
@@ -121,14 +197,110 @@ class DownloadNotificationService {
           onlyAlertOnce: true,
           showProgress: true,
           maxProgress: 100,
-          progress: progress.clamp(0, 100),
+          progress: progress,
           indeterminate: task.totalBytes <= 0 && task.chunks.isEmpty,
           ongoing: true,
           priority: Priority.low,
           showWhen: true,
           usesChronometer: true,
+          autoCancel: false,
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              actionPause,
+              'Pause',
+              showsUserInterface: true,
+              cancelNotification: false,
+            ),
+            AndroidNotificationAction(
+              actionCancel,
+              'Cancel',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
         ),
       ),
+      payload: task.id,
+    );
+    _activeLiveNotificationIds.add(task.id);
+  }
+
+  void _showPausedNotification(DownloadTask task) {
+    final id = _notificationIdFor(task.id);
+    final progress = _progressPercent(task);
+    final filename = _shortName(task.savePath);
+    final body = progress > 0 ? '$filename · $progress%' : filename;
+
+    _plugin.show(
+      id,
+      'Paused',
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          _channelName,
+          onlyAlertOnce: true,
+          showProgress: task.totalBytes > 0 || task.chunks.isNotEmpty,
+          maxProgress: 100,
+          progress: progress,
+          ongoing: false,
+          autoCancel: false,
+          priority: Priority.low,
+          showWhen: true,
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              actionResume,
+              'Resume',
+              showsUserInterface: true,
+              cancelNotification: false,
+            ),
+            AndroidNotificationAction(
+              actionCancel,
+              'Cancel',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
+        ),
+      ),
+      payload: task.id,
+    );
+    _activeLiveNotificationIds.add(task.id);
+  }
+
+  void _updateMergingNotification(DownloadTask task) {
+    final id = _notificationIdFor(task.id);
+    final filename = _shortName(task.savePath);
+
+    _plugin.show(
+      id,
+      'Finishing…',
+      filename,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          _channelName,
+          onlyAlertOnce: true,
+          showProgress: true,
+          maxProgress: 100,
+          progress: 0,
+          indeterminate: true,
+          ongoing: true,
+          autoCancel: false,
+          priority: Priority.low,
+          showWhen: true,
+          // Merging can't safely pause; Cancel still stops the task.
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              actionCancel,
+              'Cancel',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
+        ),
+      ),
+      payload: task.id,
     );
     _activeLiveNotificationIds.add(task.id);
   }
@@ -148,8 +320,17 @@ class DownloadNotificationService {
           priority: Priority.high,
           showWhen: true,
           autoCancel: true,
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              actionOpen,
+              'Open',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
         ),
       ),
+      payload: task.id,
     );
     _activeLiveNotificationIds.remove(task.id);
   }
@@ -167,12 +348,26 @@ class DownloadNotificationService {
           _doneChannelName,
           importance: Importance.defaultImportance,
           priority: Priority.high,
+          showWhen: true,
           autoCancel: true,
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              actionRetry,
+              'Retry',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
         ),
       ),
+      payload: task.id,
     );
     _activeLiveNotificationIds.remove(task.id);
   }
+
+  /// Same 0–100 as Queue: [DownloadTask.progressPercent]
+  /// (HLS = segments done / total; else bytes or HTTP chunks).
+  int _progressPercent(DownloadTask task) => task.progressPercent;
 
   int _notificationIdFor(String taskId) => taskId.hashCode.abs() % 100000 + 1;
 

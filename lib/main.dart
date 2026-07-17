@@ -31,6 +31,9 @@ import 'ui/pages/settings_page.dart';
 import 'backup/auto_backup_service.dart';
 import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
+import 'premium/play_billing_service.dart';
+import 'premium/pro_upsell_sheet.dart';
+import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
@@ -180,9 +183,12 @@ class AuroraHome extends StatefulWidget {
 }
 
 class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
-  /// Static flag so the battery-optimisation exemption dialog is shown
-  /// only once per process lifetime (on the first download start).
+  /// Soft/system battery-opt prompt already handled this process lifetime
+  /// (user allowed, dismissed, or tapped Later).
   static bool _batteryOptRequested = false;
+
+  /// Guards concurrent soft dialogs if launch + first download race.
+  static bool _batteryOptDialogShowing = false;
 
   late final DownloadQueue _downloadQueue;
   late final DriveSyncService _driveSyncService;
@@ -194,6 +200,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final ProEntitlement _proEntitlement = ProEntitlement();
+  late final PlayBillingService _playBilling =
+      PlayBillingService(_proEntitlement);
   final PublicDownloadsService _publicDownloadsService =
       PublicDownloadsService();
   final DownloadNotificationService _notificationService =
@@ -288,6 +296,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _proEntitlement.addListener(_onProEntitlementChanged);
     _loadSettingsFuture = _loadSettings();
     unawaited(_initNotifications());
+    proUpsellBilling = _playBilling;
+    unawaited(_playBilling.init());
+    _downloadQueue.onRestrictedMediaBlocked = (message) {
+      if (mounted) _showSnack(message);
+    };
     _queueSubscription = _downloadQueue.onTaskUpdated.listen((task) {
       // QueuePage listens to task updates and throttles its own rebuilds.
       // The shell only needs a rebuild for visible queue UI or when the queue
@@ -315,35 +328,60 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           );
         }
       }
-      // Request battery-optimisation exemption on first download start
-      // so Android does not kill the process during background downloads.
-      // Uses a static flag so the system dialog is shown only once per
-      // process lifetime.
+      // Soft battery-opt prompt on first download if launch path has not
+      // already handled it this session (Later / never / already exempt).
       if (task.state == DownloadState.downloading) {
-        unawaited(_requestBatteryOptOnce());
+        unawaited(_promptBatteryOptIfNeeded(delay: Duration.zero));
       }
     });
     _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
-    // Request battery-optimisation exemption on app start (once), so the
-    // user sees the prompt even if they browse without downloading yet.
-    // The 2-second delay lets the UI settle first.
+    // Soft battery-opt prompt on app start (once), after the UI settles.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _maybeRequestBatteryOptOnLaunch();
+      unawaited(_promptBatteryOptIfNeeded(delay: const Duration(seconds: 2)));
     });
   }
 
   Future<void> _initNotifications() async {
     try {
+      // Action buttons on progress / paused / done / failed notifications.
+      _notificationService.onPause = (taskId) {
+        unawaited(_downloadQueue.pauseTaskAsync(taskId));
+      };
+      _notificationService.onResume = (taskId) {
+        unawaited(_downloadQueue.resumeTaskAsync(taskId));
+      };
+      _notificationService.onCancel = (taskId) {
+        unawaited(_downloadQueue.cancelTaskAsync(taskId));
+      };
+      _notificationService.onRetry = (taskId) {
+        unawaited(
+          _downloadQueue.retryHlsTaskWithRefreshAsync(
+            taskId,
+            forceReload: true,
+          ),
+        );
+      };
+      _notificationService.onOpen = (taskId) {
+        final task = _downloadQueue.getTask(taskId);
+        if (task != null) unawaited(_openDownload(task));
+      };
+      _notificationService.onNotificationTap = (taskId) {
+        if (!mounted) return;
+        _selectTab(0);
+      };
+
       await _notificationService.initialize();
-      _notificationService.listenTo(_downloadQueue.onTaskUpdated);
+      _notificationService.listenTo(
+        _downloadQueue.onTaskUpdated,
+        taskRemovedStream: _downloadQueue.onTaskRemoved,
+      );
     } catch (e, s) {
       _logError('Failed to init notifications', e, s);
     }
-    // On Android 13+, request the POST_NOTIFICATIONS permission so the
-    // foreground service notification is visible, which makes Android
-    // less likely to kill the process during background downloads.
-    unawaited(DownloadForegroundService.requestNotificationPermission());
+    // On Android 13+, request POST_NOTIFICATIONS at most once (persisted),
+    // and only when not already granted.
+    unawaited(_requestNotificationPermissionIfNeeded());
     _driveSubscription = _driveSyncService.onStateChanged.listen((state) {
       if (mounted) {
         setState(() {
@@ -357,16 +395,37 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     return SnifferWebViewControllerImpl();
   }
 
-  /// Called on the first battery-opt event (either app launch or first
-  /// download start) to request battery optimisation exemption.
-  /// On Android 6+ this shows a system dialog; the user must tap "Allow"
-  /// to whitelist Aurora so doze / app-standby does not kill the process
-  /// or throttle network during background downloads.
-  /// If the manufacturer has additional autostart/background-activity
-  /// settings (Xiaomi, Huawei, OPPO, Vivo, OnePlus, Samsung, etc.),
-  /// also shows an OEM guidance dialog pointing the user to the right
-  /// settings screen.
-  Future<void> _requestBatteryOptOnce() async {
+  /// Requests [POST_NOTIFICATIONS] once per install unless already granted.
+  /// After the first system prompt we persist [notificationPermissionAsked]
+  /// so a deny is not re-prompted on every cold start (OS permanent-deny is
+  /// still respected if the user later enables notifications in Settings).
+  Future<void> _requestNotificationPermissionIfNeeded() async {
+    try {
+      if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    } catch (_) {}
+    if (_loadSettingsFuture != null) {
+      await _loadSettingsFuture;
+    }
+    if (await DownloadForegroundService.areNotificationsEnabled()) {
+      return;
+    }
+    if (_settings.notificationPermissionAsked) {
+      return;
+    }
+    await DownloadForegroundService.requestNotificationPermission();
+    if (!mounted) return;
+    _updateSettings(_settings.copyWith(notificationPermissionAsked: true));
+  }
+
+  /// Soft battery-opt prompt used by launch and first-download paths.
+  ///
+  /// - Skips when already exempt, user chose never-ask, or this process
+  ///   already handled the prompt (including **Later** session suppress).
+  /// - Always shows the soft dialog first; only "Open settings" opens the
+  ///   system exemption intent + optional OEM guidance.
+  Future<void> _promptBatteryOptIfNeeded({
+    Duration delay = Duration.zero,
+  }) async {
     try {
       if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     } catch (_) {}
@@ -374,10 +433,52 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       await _loadSettingsFuture;
     }
     if (_settings.neverAskBatteryOpt) return;
-    if (_batteryOptRequested) return;
+    if (_batteryOptRequested || _batteryOptDialogShowing) return;
+
+    if (delay > Duration.zero) {
+      await Future.delayed(delay);
+      if (!mounted) return;
+      if (_settings.neverAskBatteryOpt) return;
+      if (_batteryOptRequested || _batteryOptDialogShowing) return;
+    }
+
+    if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
+      _batteryOptRequested = true;
+      return;
+    }
+
+    _batteryOptDialogShowing = true;
+    try {
+      final choice = await _showBatteryOptRequestDialog();
+      if (!mounted) return;
+
+      if (choice == BatteryOptChoice.neverAskAgain) {
+        _batteryOptRequested = true;
+        _updateSettings(_settings.copyWith(neverAskBatteryOpt: true));
+      } else if (choice == BatteryOptChoice.openSettings) {
+        await _openBatteryOptSystemDialog();
+      } else {
+        // Later, or dialog dismissed — suppress for this process only.
+        // Next cold start may ask again (by design).
+        _batteryOptRequested = true;
+      }
+    } finally {
+      _batteryOptDialogShowing = false;
+    }
+  }
+
+  /// Opens the AOSP battery-opt exemption intent (and OEM guidance when
+  /// relevant). Marks the process as handled so we do not re-prompt.
+  Future<void> _openBatteryOptSystemDialog() async {
+    if (_settings.neverAskBatteryOpt) return;
+
+    if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
+      _batteryOptRequested = true;
+      return;
+    }
+
     _batteryOptRequested = true;
 
-    // Open the standard AOSP battery-opt exemption dialog and detect OEM.
     final oemInfo =
         await DownloadForegroundService.requestBatteryOptimizationExemption();
     if (!mounted) return;
@@ -415,40 +516,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     );
   }
 
-  /// Checks battery optimisation status shortly after app launch, and
-  /// triggers the exemption request (once) if the app is not yet whitelisted.
-  Future<void> _maybeRequestBatteryOptOnLaunch() async {
-    try {
-      if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-    } catch (_) {}
-    if (_loadSettingsFuture != null) {
-      await _loadSettingsFuture;
-    }
-    if (_settings.neverAskBatteryOpt) return;
-    if (_batteryOptRequested) return;
-
-    // Brief pause so the initial UI is fully settled.
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-
-    // Re-check after delay in case state changed
-    if (_settings.neverAskBatteryOpt) return;
-    if (_batteryOptRequested) return;
-
-    if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
-      return;
-    }
-
-    final choice = await _showBatteryOptRequestDialog();
-    if (!mounted) return;
-
-    if (choice == BatteryOptChoice.neverAskAgain) {
-      _updateSettings(_settings.copyWith(neverAskBatteryOpt: true));
-    } else if (choice == BatteryOptChoice.openSettings) {
-      await _requestBatteryOptOnce();
-    }
-  }
-
   /// Shows a dialog explaining the OEM-specific autostart / background-
   /// activity settings screen the user should also visit for full
   /// background download reliability.
@@ -484,21 +551,16 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   /// Switches the active main tab (Queue=0, Browser=1, Settings=2).
-  /// Automatically pauses browser WebViews when leaving the Browser tab
-  /// and resumes them when re-entering, so the Dart event loop is freed
-  /// for download HTTP stream processing.
+  ///
+  /// Browser pause/resume is driven by [SnifferScreen.isShellVisible]
+  /// (set from `_currentTabIndex == 1`), not by the shell
+  /// [_browserController] — that instance has no attached platform WebView.
   void _selectTab(int index) {
     final previous = _currentTabIndex;
     setState(() {
       _currentTabIndex = index;
       _visitedMainTabs.add(index);
     });
-    AuroraLog.instance.info(
-      'Tab switch: $previous → $index',
-      category: LogCategory.app,
-      screen: LogScreen.settings,
-      eventType: LogEventType.navigation,
-    );
     AuroraLog.instance.info(
       'Tab switch: $previous → $index',
       category: LogCategory.app,
@@ -529,6 +591,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     WorkerIsolatePool.instance.dispose();
     _browserOpenRequestBus.dispose();
     _proEntitlement.removeListener(_onProEntitlementChanged);
+    unawaited(_playBilling.dispose());
     _proEntitlement.dispose();
     super.dispose();
   }
@@ -671,6 +734,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             openRequestBus: _browserOpenRequestBus,
                             isProCallback: () => _proEntitlement.isPro,
+                            // Drive pause/resume when leaving/entering Browser
+                            // so platform views do not freeze under opacity 0.
+                            isShellVisible: _currentTabIndex == 1,
                             onOpenQueue: () => _selectTab(0),
                             onOpenSettings: () => _selectTab(2),
                             onSniffedCountChanged: (count) {
@@ -701,6 +767,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             autoBackupService: _autoBackupService,
                             proEntitlement: _proEntitlement,
+                            playBilling: _playBilling,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -754,6 +821,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null || !uri.hasScheme) {
       _showSnack('Enter a valid URL and try again.');
+      return;
+    }
+
+    if (RestrictedMediaPolicy.isBlocked(mediaUrl: rawUrl)) {
+      _showSnack(RestrictedMediaPolicy.userMessageRestricted);
       return;
     }
 

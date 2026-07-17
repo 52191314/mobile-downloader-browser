@@ -4,7 +4,7 @@
   // To new flutter_inappwebview API: window.flutter_inappwebview.callHandler(name, data)
   if (!window.__auroraChannelShim) {
     window.__auroraChannelShim = true;
-    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','NavigationSwipeChannel','AuroraPlayChannel','InvisibleRedirectChannel'];
+    var __auroraChannels = ['MediaSnifferChannel','MediaSniffer','MediaSnifferDataChannel','LinkContextChannel','AdBlockerChannel','IframeSrcChannel','PopupBlockerChannel','ElementPickerChannel','MediaMetaChannel','PageMetaChannel','TextSelectionChannel','HlsPlaylistChannel','NavigationSwipeChannel','AuroraPlayChannel','InvisibleRedirectChannel','VideoFloatChannel'];
     for (var __i = 0; __i < __auroraChannels.length; __i++) {
       (function(__name) {
         window[__name] = {
@@ -354,9 +354,21 @@
   // redirect. When replace-site-player intercepts play(), we arm a short
   // suppress window so the ad navigation cannot steal the tab while Aurora
   // opens its player.
+  //
+  // Escape paths we harden here (in addition to Dart shouldOverride):
+  // - target=_blank / _new (often loads in-tab when multi-window is off)
+  // - synthetic a.click() / form.submit() stamped with a recent gesture
+  // - window.location = non-string (URL objects)
+  // - same-origin hops during play-ad suppress (ad intermediate pages)
+  // - meta-refresh injected after first paint
+  // - window.open with empty URL then later navigation (still cancelled)
   var _auroraLastUserGestureAt = 0;
-  function markAuroraUserGesture() {
+  var _auroraLastPointerTarget = null;
+  function markAuroraUserGesture(e) {
     _auroraLastUserGestureAt = Date.now();
+    try { _auroraLastPointerTarget = e && e.target ? e.target : null; } catch(_) {
+      _auroraLastPointerTarget = null;
+    }
   }
   try {
     ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function(evt) {
@@ -380,46 +392,74 @@
     var dur = typeof ms === 'number' ? ms : 3000;
     window.__auroraSuppressAdNavUntil = Date.now() + dur;
   }
-
-  // --- popup blocking & window.open ---
-  // When enabled, ALL window.open calls are cancelled and reported to Dart
-  // (dialog). During play-ad suppress, same — even if gesture is active.
-  var originalWindowOpen = window.open;
-  window.open = function(url, name, specs) {
-    if (window.__auroraPopupBlockingEnabled === false && !isPlayAdNavSuppressed()) {
-      if (originalWindowOpen) {
-        return originalWindowOpen.apply(this, arguments);
+  function popupBlockingOn() {
+    return window.__auroraPopupBlockingEnabled !== false || isPlayAdNavSuppressed();
+  }
+  function invisibleRedirectBlockingOn() {
+    return window.__auroraInvisibleRedirectBlockingEnabled !== false ||
+      isPlayAdNavSuppressed();
+  }
+  // Dart sets this before intentional loads (address bar / "Current tab").
+  // Shape: true | '*' | {url, until} | string url
+  // Wildcard stays active until `until` so HTTP redirect chains pass.
+  function consumeAllowNextCrossOriginNav(url) {
+    try {
+      var g = window.__auroraAllowNextCrossOriginNav;
+      if (!g) return false;
+      if (typeof g === 'object' && g.until && Date.now() > g.until) {
+        window.__auroraAllowNextCrossOriginNav = null;
+        return false;
       }
-      return null;
-    }
-    if (url) {
+      var target = resolveAuroraUrl(url);
+      if (g === true || g === '*') return true;
+      var allowed = typeof g === 'string' ? g : (g && g.url);
+      if (!allowed) return false;
+      if (allowed === '*') return true;
+      if (target === allowed ||
+          (target && allowed && target.indexOf(allowed) === 0)) {
+        return true;
+      }
+      // Same host as allowed URL (path hop after user confirm).
       try {
-        PopupBlockerChannel.postMessage(JSON.stringify({
-          url: resolveAuroraUrl(url),
-          userInitiated: hasAuroraUserGesture(),
-          sourcePageUrl: location.href,
-          reason: isPlayAdNavSuppressed() ? 'play-ad-suppress' : 'popup'
-        }));
-      } catch (_) {}
-    }
-    return null;
-  };
-
-  // --- invisible redirect blocking (location.href / replace / assign / meta) ---
-  var _invisibleRedirectGate = false;
-  function shouldInterceptRedirect(url) {
-    if (_invisibleRedirectGate) { _invisibleRedirectGate = false; return false; }
-    if (!url) return false;
-    // Always intercept during play-ad suppress (even if setting is off momentarily).
-    var force = isPlayAdNavSuppressed();
-    if (!force && window.__auroraInvisibleRedirectBlockingEnabled === false) return false;
+        var a = new URL(allowed, document.baseURI);
+        var t = new URL(target, document.baseURI);
+        if (a.host && a.host === t.host) return true;
+      } catch(_) {}
+    } catch(_) {}
+    return false;
+  }
+  function isHashOnlyNav(url) {
     try {
       var resolved = new URL(String(url), document.baseURI);
-      if (resolved.host === location.host && resolved.protocol === location.protocol) {
-        return false; // same-origin always allowed
+      var cur = new URL(location.href);
+      return resolved.origin === cur.origin &&
+        resolved.pathname === cur.pathname &&
+        resolved.search === cur.search;
+    } catch(_) { return false; }
+  }
+  function shouldInterceptRedirect(url) {
+    if (url == null || url === '') return false;
+    if (consumeAllowNextCrossOriginNav(url)) return false;
+    if (isHashOnlyNav(url)) return false;
+    // Always intercept during play-ad suppress (even if setting is off).
+    var force = isPlayAdNavSuppressed();
+    if (!force && window.__auroraInvisibleRedirectBlockingEnabled === false) {
+      return false;
+    }
+    try {
+      var resolved = new URL(String(url), document.baseURI);
+      // During play suppress, block same-origin hops too (ad intermediate
+      // pages / token bounce) — hash-only already allowed above.
+      if (force) return true;
+      if (resolved.host === location.host &&
+          resolved.protocol === location.protocol) {
+        return false;
       }
       return true;
-    } catch(_) { return false; }
+    } catch(_) {
+      // Fail closed: unparseable absolute-looking targets still get blocked.
+      return String(url).length > 0;
+    }
   }
   function postInvisibleRedirect(url, method) {
     try {
@@ -433,13 +473,60 @@
       }));
     } catch(_) {}
   }
+  function postPopupBlocked(url, reason) {
+    try {
+      PopupBlockerChannel.postMessage(JSON.stringify({
+        url: resolveAuroraUrl(url),
+        userInitiated: hasAuroraUserGesture(),
+        sourcePageUrl: location.href,
+        reason: String(reason || 'popup')
+      }));
+    } catch(_) {}
+  }
+  function stopEventHard(ev) {
+    try { ev.preventDefault(); } catch(_) {}
+    try { ev.stopPropagation(); } catch(_) {}
+    try { ev.stopImmediatePropagation(); } catch(_) {}
+  }
+  function isRealPointerOn(el) {
+    try {
+      if (!hasAuroraUserGesture() || !_auroraLastPointerTarget || !el) return false;
+      return el === _auroraLastPointerTarget ||
+        (el.contains && el.contains(_auroraLastPointerTarget));
+    } catch(_) { return false; }
+  }
+
+  // --- popup blocking & window.open ---
+  // When enabled, ALL window.open calls are cancelled and reported to Dart.
+  // During play-ad suppress, same — even if gesture is active.
+  var originalWindowOpen = window.open;
+  window.open = function(url, name, specs) {
+    if (!popupBlockingOn()) {
+      if (originalWindowOpen) {
+        return originalWindowOpen.apply(this, arguments);
+      }
+      return null;
+    }
+    // Empty / about:blank opens are still cancelled so ads cannot create a
+    // window handle then assign location later.
+    if (url) {
+      postPopupBlocked(url, isPlayAdNavSuppressed() ? 'play-ad-suppress' : 'popup');
+    } else {
+      postPopupBlocked('about:blank', isPlayAdNavSuppressed() ? 'play-ad-suppress' : 'popup-blank');
+    }
+    return null;
+  };
+
+  // --- location.href / window.location / replace / assign ---
   try {
-    var _hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+    var _hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href') ||
+      Object.getOwnPropertyDescriptor(location, 'href');
     if (_hrefDesc && _hrefDesc.set) {
       Object.defineProperty(Location.prototype, 'href', {
         get: function() { return _hrefDesc.get.call(this); },
         set: function(v) {
-          if (shouldInterceptRedirect(v)) { postInvisibleRedirect(v, 'href'); return; }
+          var s = v == null ? '' : String(v);
+          if (shouldInterceptRedirect(s)) { postInvisibleRedirect(s, 'href'); return; }
           return _hrefDesc.set.call(this, v);
         },
         configurable: true,
@@ -453,11 +540,30 @@
       Object.defineProperty(Window.prototype, 'location', {
         get: function() { return _winLocDesc.get.call(this); },
         set: function(v) {
-          if (typeof v === 'string' && shouldInterceptRedirect(v)) {
-            postInvisibleRedirect(v, 'window.location');
+          var s = v == null ? '' : String(v);
+          if (shouldInterceptRedirect(s)) {
+            postInvisibleRedirect(s, 'window.location');
             return;
           }
           return _winLocDesc.set.call(this, v);
+        },
+        configurable: true
+      });
+    }
+  } catch(_) {}
+  // document.location is often an accessor on Document.prototype.
+  try {
+    var _docLocDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'location');
+    if (_docLocDesc && _docLocDesc.set) {
+      Object.defineProperty(Document.prototype, 'location', {
+        get: function() { return _docLocDesc.get.call(this); },
+        set: function(v) {
+          var s = v == null ? '' : String(v);
+          if (shouldInterceptRedirect(s)) {
+            postInvisibleRedirect(s, 'document.location');
+            return;
+          }
+          return _docLocDesc.set.call(this, v);
         },
         configurable: true
       });
@@ -477,18 +583,42 @@
       return _origAssign.call(this, url);
     };
   } catch(_) {}
+  // Programmatic form.submit() bypasses the submit event in some engines.
+  try {
+    var _origFormSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+      try {
+        var action = this.getAttribute('action') || this.action || '';
+        if (action && shouldInterceptRedirect(action)) {
+          postInvisibleRedirect(action, 'form-submit');
+          return;
+        }
+      } catch(_) {}
+      return _origFormSubmit.call(this);
+    };
+  } catch(_) {}
+
   function scanMetaRefresh() {
-    if (window.__auroraInvisibleRedirectBlockingEnabled === false &&
-        !isPlayAdNavSuppressed()) return;
+    if (!invisibleRedirectBlockingOn()) return;
     try {
-      var metas = document.querySelectorAll('meta[http-equiv="refresh"]');
+      var metas = document.querySelectorAll(
+        'meta[http-equiv="refresh" i], meta[http-equiv="Refresh"]'
+      );
+      // Fallback without case-insensitive attr selector for older WebViews.
+      if (!metas || metas.length === 0) {
+        metas = document.querySelectorAll('meta[http-equiv]');
+      }
       for (var mi = 0; mi < metas.length; mi++) {
+        var he = (metas[mi].getAttribute('http-equiv') || '');
+        if (he.toLowerCase() !== 'refresh') continue;
         var content = metas[mi].getAttribute('content') || '';
-        var match = content.match(/url\s*=\s*['"]?\s*([^\s'"&]+)/i);
+        var match = content.match(/url\s*=\s*['"]?\s*([^'";\s]+)/i);
         if (match) {
-          var murl = String(match[1]);
+          var murl = String(match[1]).replace(/&amp;/gi, '&');
           if (shouldInterceptRedirect(murl)) {
-            metas[mi].remove();
+            try { metas[mi].remove(); } catch(_) {
+              try { metas[mi].parentNode && metas[mi].parentNode.removeChild(metas[mi]); } catch(__) {}
+            }
             postInvisibleRedirect(murl, 'meta-refresh');
           }
         }
@@ -498,16 +628,113 @@
   try {
     var _metaRefreshObserver = new MutationObserver(function() { scanMetaRefresh(); });
     var _startMetaObs = function() {
-      if (document.body) {
-        _metaRefreshObserver.observe(document.documentElement || document.body, {
+      try { scanMetaRefresh(); } catch(_) {}
+      var root = document.documentElement || document.body;
+      if (root) {
+        _metaRefreshObserver.observe(root, {
           childList: true, subtree: true, attributes: true,
           attributeFilter: ['http-equiv', 'content']
         });
       } else {
-        setTimeout(_startMetaObs, 200);
+        setTimeout(_startMetaObs, 50);
       }
     };
     _startMetaObs();
+    try {
+      document.addEventListener('DOMContentLoaded', scanMetaRefresh, true);
+    } catch(_) {}
+    // Late-injected meta refresh (ads after player load).
+    try { setTimeout(scanMetaRefresh, 500); } catch(_) {}
+    try { setTimeout(scanMetaRefresh, 2000); } catch(_) {}
+  } catch(_) {}
+
+  // Capture-phase click / submit shields (main frame + iframes when injected).
+  try {
+    document.addEventListener('click', function(ev) {
+      try {
+        if (ev.defaultPrevented) return;
+        var t = ev.target;
+        var a = t && t.closest ? t.closest('a[href], area[href]') : null;
+        if (!a) return;
+        var hrefAttr = a.getAttribute('href');
+        if (hrefAttr == null) return;
+        var href = String(hrefAttr).trim();
+        if (!href || href.charAt(0) === '#' ||
+            /^\s*javascript:/i.test(href) ||
+            /^\s*mailto:/i.test(href) ||
+            /^\s*tel:/i.test(href)) {
+          return;
+        }
+        var target = (a.getAttribute('target') || '').toLowerCase();
+        var isBlank = target === '_blank' || target === '_new';
+
+        // New-window style links → popup blocker (WebView often loads in-tab).
+        if (isBlank && popupBlockingOn()) {
+          stopEventHard(ev);
+          postPopupBlocked(
+            href,
+            isPlayAdNavSuppressed() ? 'play-ad-suppress' : 'target-blank'
+          );
+          return;
+        }
+
+        if (!shouldInterceptRedirect(href)) return;
+
+        // Play-ad window: always cancel navigations that would leave the page.
+        if (isPlayAdNavSuppressed()) {
+          stopEventHard(ev);
+          postInvisibleRedirect(href, 'play-click-link');
+          return;
+        }
+
+        // Programmatic .click() / scripted activation without pointer on link.
+        if (!isRealPointerOn(a)) {
+          stopEventHard(ev);
+          postInvisibleRedirect(href, 'synthetic-click');
+          return;
+        }
+
+        // target=_top / _parent cross-origin: treat as redirect (not user tab).
+        if ((target === '_top' || target === '_parent') &&
+            invisibleRedirectBlockingOn()) {
+          stopEventHard(ev);
+          postInvisibleRedirect(href, 'target-' + target.replace('_', ''));
+          return;
+        }
+      } catch(_) {}
+    }, true);
+
+    document.addEventListener('submit', function(ev) {
+      try {
+        if (!invisibleRedirectBlockingOn()) return;
+        var form = ev.target;
+        if (!form) return;
+        var action = '';
+        try {
+          action = form.getAttribute('action') || form.action || '';
+        } catch(_) { action = ''; }
+        if (!action) return;
+        if (shouldInterceptRedirect(action)) {
+          stopEventHard(ev);
+          postInvisibleRedirect(action, 'form-submit');
+        }
+      } catch(_) {}
+    }, true);
+
+    // Auxclick (middle-click) new-tab style open.
+    document.addEventListener('auxclick', function(ev) {
+      try {
+        if (!popupBlockingOn()) return;
+        if (ev.button !== 1) return;
+        var t = ev.target;
+        var a = t && t.closest ? t.closest('a[href]') : null;
+        if (!a) return;
+        var href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#') return;
+        stopEventHard(ev);
+        postPopupBlocked(href, 'auxclick');
+      } catch(_) {}
+    }, true);
   } catch(_) {}
 
   // --- long press and context menu ---
@@ -740,18 +967,19 @@
     if (e.target instanceof HTMLMediaElement) postMediaElementSrc(e.target);
   }, true);
 
-  // --- UC-style: replace site player with Aurora ---
-  // When window.__auroraReplaceSitePlayer is true, intercept play() so the
-  // site's own <video>/<audio> does not start; Dart opens AuroraVideoPlayer
-  // with cookies/headers from the capturing tab.
+  // --- IDM-style floating control + optional auto-replace ---
+  // Default: site player works; Dart shows a floating play icon over the
+  // largest visible <video>. When window.__auroraReplaceSitePlayer is true
+  // (Settings → Auto-open Aurora on site play), intercept play() instead.
   if (!window.__auroraReplacePlayerHooked) {
     window.__auroraReplacePlayerHooked = true;
     if (typeof window.__auroraReplaceSitePlayer === 'undefined') {
-      window.__auroraReplaceSitePlayer = true;
+      window.__auroraReplaceSitePlayer = false;
     }
     var _auroraOrigPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function() {
       if (!window.__auroraReplaceSitePlayer) {
+        try { scheduleVideoFloatReport(); } catch (_) {}
         return _auroraOrigPlay.apply(this, arguments);
       }
       try {
@@ -820,6 +1048,101 @@
         } catch (_) {}
       }, true);
     } catch(_) {}
+  }
+
+  // --- Video float rect (IDM-style floating button positioning) ---
+  // Reports the largest visible <video> bounding box so Flutter can park a
+  // play control on the video. Throttled via rAF; skipped when auto-replace
+  // is on (no floating control needed).
+  var _videoFloatRaf = 0;
+  var _lastVideoFloatKey = '';
+  function postVideoFloat(payload) {
+    try {
+      var s = JSON.stringify(payload);
+      if (window.VideoFloatChannel && VideoFloatChannel.postMessage) {
+        VideoFloatChannel.postMessage(s);
+      } else if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+        window.flutter_inappwebview.callHandler('VideoFloatChannel', s);
+      }
+    } catch (_) {}
+  }
+  function reportVideoFloat() {
+    _videoFloatRaf = 0;
+    if (window.__auroraReplaceSitePlayer) {
+      if (_lastVideoFloatKey !== 'off') {
+        _lastVideoFloatKey = 'off';
+        postVideoFloat({ hasVideo: false });
+      }
+      return;
+    }
+    try {
+      var vids = document.querySelectorAll('video');
+      var best = null;
+      var bestArea = 0;
+      var vw = window.innerWidth || 0;
+      var vh = window.innerHeight || 0;
+      for (var i = 0; i < vids.length; i++) {
+        var v = vids[i];
+        if (!v || v.dataset && v.dataset.auroraReplaced === '1') continue;
+        var r = v.getBoundingClientRect();
+        if (!r || r.width < 80 || r.height < 45) continue;
+        // Must intersect viewport a bit.
+        var ix = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+        var iy = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+        if (ix < 40 || iy < 30) continue;
+        var area = r.width * r.height;
+        if (area > bestArea) {
+          bestArea = area;
+          best = r;
+        }
+      }
+      if (!best) {
+        if (_lastVideoFloatKey !== 'none') {
+          _lastVideoFloatKey = 'none';
+          postVideoFloat({ hasVideo: false });
+        }
+        return;
+      }
+      var key = [
+        Math.round(best.left),
+        Math.round(best.top),
+        Math.round(best.width),
+        Math.round(best.height)
+      ].join(',');
+      if (key === _lastVideoFloatKey) return;
+      _lastVideoFloatKey = key;
+      postVideoFloat({
+        hasVideo: true,
+        left: best.left,
+        top: best.top,
+        width: best.width,
+        height: best.height
+      });
+    } catch (_) {}
+  }
+  function scheduleVideoFloatReport() {
+    if (_videoFloatRaf) return;
+    try {
+      _videoFloatRaf = requestAnimationFrame(reportVideoFloat);
+    } catch (_) {
+      reportVideoFloat();
+    }
+  }
+  if (!window.__auroraVideoFloatHooked) {
+    window.__auroraVideoFloatHooked = true;
+    try {
+      window.addEventListener('scroll', scheduleVideoFloatReport, { passive: true, capture: true });
+      window.addEventListener('resize', scheduleVideoFloatReport, { passive: true });
+      document.addEventListener('loadedmetadata', function(e) {
+        if (e.target instanceof HTMLMediaElement) scheduleVideoFloatReport();
+      }, true);
+      document.addEventListener('play', function(e) {
+        if (e.target instanceof HTMLMediaElement) scheduleVideoFloatReport();
+      }, true);
+      // Periodic light poll — covers SPA layout shifts without MutationObserver storms.
+      setInterval(scheduleVideoFloatReport, 1500);
+      scheduleVideoFloatReport();
+    } catch (_) {}
   }
 
   // --- Media Error Detection ---

@@ -166,6 +166,9 @@ class MainActivity : FlutterActivity() {
                         requestNotificationPermission()
                         result.success(null)
                     }
+                    "areNotificationsEnabled" -> {
+                        result.success(areNotificationsEnabled())
+                    }
                     "requestBatteryOpt" -> {
                         val oemInfo = requestBatteryOptimizationExemption()
                         result.success(oemInfo)
@@ -1102,6 +1105,7 @@ class MainActivity : FlutterActivity() {
     /// Request the POST_NOTIFICATIONS runtime permission on Android 13+.
     /// Without this the foreground service notification is hidden,
     /// making the process more vulnerable to being killed by the OS.
+    /// No-ops when already granted.
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -1113,6 +1117,21 @@ class MainActivity : FlutterActivity() {
                     NOTIFICATION_PERMISSION_REQUEST_CODE,
                 )
             }
+        }
+    }
+
+    /// True when the app can post notifications (permission granted on 13+,
+    /// or NotificationManager reports enabled on older APIs).
+    private fun areNotificationsEnabled(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE)
+                    as? android.app.NotificationManager
+            nm?.areNotificationsEnabled() ?: true
         }
     }
 
@@ -1162,42 +1181,99 @@ class MainActivity : FlutterActivity() {
     /// settings page so the user can whitelist Aurora for background
     /// operation — a separate requirement from the standard battery
     /// optimisation exemption on many Chinese OEM ROMs.
+    /// Tries known component aliases in order, then app-details fallback.
     private fun openOemAutostartPage() {
-        val intent: Intent? = when {
-            _manufacturer.contains("xiaomi") ->
-                Intent().setComponent(ComponentName(
-                    "com.miui.securitycenter",
-                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
-                ))
-            _manufacturer.contains("huawei") ->
-                Intent().setComponent(ComponentName(
-                    "com.huawei.systemmanager",
-                    "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"
-                ))
-            _manufacturer.contains("oppo") || _manufacturer.contains("realme") ->
-                Intent().setComponent(ComponentName(
-                    "com.coloros.safecenter",
-                    "com.coloros.safecenter.permission.startup.StartupAppListActivity"
-                ))
-            _manufacturer.contains("vivo") ->
-                Intent("vivo.intent.action.STARTUP_ENGINE")
-                    .setComponent(ComponentName("com.iqoo.secure", "com.iqoo.secure.MainActivity"))
-            _manufacturer.contains("oneplus") ->
-                Intent().setComponent(ComponentName(
-                    "com.oneplus.security",
-                    "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"
-                ))
-            _manufacturer.contains("samsung") ->
+        val candidates: List<Intent> = when {
+            _manufacturer.contains("xiaomi") || _manufacturer.contains("redmi") -> listOf(
+                Intent().setComponent(
+                    ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.powercenter.PowerSettings",
+                    ),
+                ),
+            )
+            _manufacturer.contains("huawei") || _manufacturer.contains("honor") -> listOf(
+                Intent().setComponent(
+                    ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+                    ),
+                ),
+            )
+            _manufacturer.contains("oppo") || _manufacturer.contains("realme") -> listOf(
+                Intent().setComponent(
+                    ComponentName(
+                        "com.coloros.safecenter",
+                        "com.coloros.safecenter.permission.startup.StartupAppListActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.oplus.safecenter",
+                        "com.oplus.safecenter.permission.startup.StartupAppListActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.coloros.safecenter",
+                        "com.coloros.safecenter.startupapp.StartupAppListActivity",
+                    ),
+                ),
+            )
+            _manufacturer.contains("vivo") -> listOf(
+                Intent("vivo.intent.action.STARTUP_ENGINE").setComponent(
+                    ComponentName("com.iqoo.secure", "com.iqoo.secure.MainActivity"),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.vivo.permissionmanager",
+                        "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
+                    ),
+                ),
+            )
+            _manufacturer.contains("oneplus") -> listOf(
+                Intent().setComponent(
+                    ComponentName(
+                        "com.oneplus.security",
+                        "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity",
+                    ),
+                ),
+                Intent().setComponent(
+                    ComponentName(
+                        "com.oplus.safecenter",
+                        "com.oplus.safecenter.permission.startup.StartupAppListActivity",
+                    ),
+                ),
+            )
+            _manufacturer.contains("samsung") -> listOf(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                    .setData(Uri.parse("package:${applicationContext.packageName}"))
-            else -> null
+                    .setData(Uri.parse("package:${applicationContext.packageName}")),
+            )
+            else -> emptyList()
         }
-        if (intent != null) {
+
+        val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.parse("package:${applicationContext.packageName}"))
+
+        for (intent in candidates + fallback) {
             try {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
+                return
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to open OEM autostart page for $_manufacturer", e)
+                Log.w(TAG, "OEM autostart candidate failed for $_manufacturer: ${e.message}")
             }
         }
     }

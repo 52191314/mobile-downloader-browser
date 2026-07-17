@@ -58,8 +58,12 @@ class HlsDownloader implements BaseDownloader {
   int _completedSegCount = 0;
   int _initSegmentBytes = 0;
   /// First locked estimate (sniffer or sample probe). Progressive refine is
-  /// clamped against this so concurrent partials cannot balloon the total.
+  /// lightly guided by this — never used as a hard ceiling once real
+  /// downloaded bytes exceed it (that caused "100% · 5 GB / 377 MB").
   int _initialSizeEstimate = 0;
+  /// When true, [task.downloadedBytes] was already seeded from on-disk
+  /// segment files at resume — skip paths must not `+=` those sizes again.
+  bool _resumeDiskBytesSeeded = false;
   HlsPlaylist? _playlist;
   Uint8List? _encryptionKeyBytes;
   String _currentPlaylistUrl = '';
@@ -128,30 +132,35 @@ class HlsDownloader implements BaseDownloader {
 
     // Detect resume: if tempDir has existing segment files, treat as retry
     // so we skip already-downloaded segments instead of wiping them.
+    _resumeDiskBytesSeeded = false;
     if (!_isRetry) {
       final tempDir = Directory(task.tempDir);
       if (await tempDir.exists()) {
         final files = await tempDir.list().toList();
-        final segmentFiles =
-            files.where((e) => e.path.contains('segment_')).toList();
+        // Only finished segments (not `.part` partials).
+        final segmentFiles = files.where((e) {
+          if (e is! File) return false;
+          final name = p.basename(e.path).toLowerCase();
+          if (!name.startsWith('segment_')) return false;
+          if (name.endsWith('.part')) return false;
+          return name.endsWith('.ts') || name.endsWith('.m4s');
+        }).toList();
         if (segmentFiles.isNotEmpty) {
           _isRetry = true;
-          // Immediately compute downloadedBytes from existing segment file
-          // sizes so the UI shows correct progress before the segment-skip
-          // logic in _downloadSegments() runs (which recomputes from valid
-          // segments only).
-          int totalBytes = 0;
+          // Seed downloadedBytes once from disk. Skip-logic must NOT add
+          // those sizes again (that caused multi-GB "100%" with a small
+          // estimated total still showing).
+          int diskBytes = 0;
           for (final entity in segmentFiles) {
-            if (entity is File) {
-              try {
-                totalBytes += await entity.length();
-              } catch (_) {}
-            }
+            try {
+              diskBytes += await (entity as File).length();
+            } catch (_) {}
           }
-          task.downloadedBytes = totalBytes;
+          task.downloadedBytes = diskBytes;
+          _resumeDiskBytesSeeded = true;
           AuroraLog.instance.info(
             'Resume detected: ${segmentFiles.length} segment files '
-            '(${(totalBytes / 1048576).toStringAsFixed(1)} MB) in ${task.tempDir}',
+            '(${(diskBytes / 1048576).toStringAsFixed(1)} MB) in ${task.tempDir}',
             category: LogCategory.hls,
             eventType: LogEventType.stateChange,
             taskId: task.id,
@@ -175,11 +184,12 @@ class HlsDownloader implements BaseDownloader {
       }
     }
 
-    // On retry, preserve already-downloaded bytes so we don't
-    // re-download successfully fetched segments from scratch.
-    // On a fresh start, reset to zero.
+    // On retry, keep seeded/restored downloadedBytes. Fresh start → zero.
     if (!_isRetry) {
       task.downloadedBytes = 0;
+      task.completedParts = 0;
+      task.totalParts = 0;
+      _resumeDiskBytesSeeded = false;
     }
     if (task.totalBytes > 0) {
       // Size already determined (previous run or sniffer estimate) — keep it
@@ -655,9 +665,9 @@ class HlsDownloader implements BaseDownloader {
 
   /// Progressive size refinement after each completed media segment.
   ///
-  /// Uses only finished-segment sizes (never [task.downloadedBytes], which
-  /// includes in-flight concurrent partials and was inflating totals into
-  /// multi‑GB while the sniffer correctly showed ~1GB).
+  /// Uses finished-segment sizes for the formula. When the sniffer/sample
+  /// estimate is far too low, **segment-fraction extrapolation** raises
+  /// [task.totalBytes] so the queue never sits at "100% · 5 GB / 377 MB".
   void _refineSizeAfterSegment({
     required int bytes,
     required int segmentIndex,
@@ -669,6 +679,8 @@ class HlsDownloader implements BaseDownloader {
     }
     if (bytes < HlsSizeEstimator.minSegmentBytes ||
         bytes > HlsSizeEstimator.maxSegmentBytes) {
+      // Still fix a stuck total when actual download already overshot it.
+      _ensureTotalCoversDownloaded();
       return;
     }
 
@@ -683,13 +695,22 @@ class HlsDownloader implements BaseDownloader {
     _completedSegDurationSec += dur > 0 ? dur : 0;
     _completedSegCount++;
 
-    if (_totalBytesExact) return;
+    if (_totalBytesExact) {
+      _ensureTotalCoversDownloaded();
+      return;
+    }
 
     final totalSegs = playlist?.segments.length ?? 0;
-    if (totalSegs <= 0) return;
+    if (totalSegs <= 0) {
+      _ensureTotalCoversDownloaded();
+      return;
+    }
 
     // Need a few real segments before overriding a sniffer/sample estimate.
-    if (_completedSegCount < 3 && _initialSizeEstimate > 0) return;
+    if (_completedSegCount < 3 && _initialSizeEstimate > 0) {
+      _ensureTotalCoversDownloaded(totalSegs: totalSegs);
+      return;
+    }
 
     final refined = HlsSizeEstimator.refine(
       completedSegmentCount: _completedSegCount,
@@ -698,54 +719,97 @@ class HlsDownloader implements BaseDownloader {
       totalDurationSeconds: playlist?.durationSeconds ?? 0,
       initSegmentBytes: _initSegmentBytes,
       completedSegmentSizes: _completedSegSizes,
-      // Floor only — never drive the formula from in-flight partials.
       downloadedBytesFloor: 0,
     );
 
-    if (refined.totalBytes == null || refined.totalBytes! <= 0) return;
+    var next = refined.totalBytes ?? 0;
 
-    var next = refined.totalBytes!;
-
-    // Clamp against the initial estimate until most segments are done.
-    // Prevents a few large early segments (or bad samples) from exploding
-    // the displayed total (e.g. 981MB → 2.8GB+ mid-download).
-    if (_initialSizeEstimate > 0) {
-      final progress = _completedSegCount / totalSegs;
-      if (progress < 0.85) {
-        final maxAllowed = (_initialSizeEstimate * 1.25).round();
-        final minAllowed = (_initialSizeEstimate * 0.55).round();
-        if (next > maxAllowed) next = maxAllowed;
-        if (next < minAllowed) next = minAllowed;
-      }
+    // Soft guide from the initial estimate only when we have little real
+    // data — never keep a low ceiling once downloaded bytes exceed it.
+    final segFrac = _completedSegCount / totalSegs;
+    if (_initialSizeEstimate > 0 &&
+        segFrac < 0.15 &&
+        next > 0 &&
+        task.downloadedBytes < _initialSizeEstimate) {
+      final maxAllowed = (_initialSizeEstimate * 2.0).round();
+      final minAllowed = (_initialSizeEstimate * 0.4).round();
+      if (next > maxAllowed) next = maxAllowed;
+      if (next < minAllowed) next = minAllowed;
     }
 
-    // Only raise total to match downloaded when we slightly overshoot a
-    // low estimate — do not let total track downloaded 1:1 (that makes
-    // progress stick at ~100% and "climb" forever).
+    // Prefer extrapolating from real download + segment fraction when the
+    // estimate is clearly wrong (the Queue "100% / tiny total" bug).
+    if (task.downloadedBytes > 0 && segFrac > 0.02) {
+      final fromProgress = (task.downloadedBytes / segFrac).round();
+      if (fromProgress > next) next = fromProgress;
+    }
+
     if (task.downloadedBytes > next) {
-      // Allow a small headroom so the bar doesn't sit at 100% early.
-      next = (task.downloadedBytes * 1.02).round();
+      // Headroom so the bar does not pin at 100% mid-download.
+      next = (task.downloadedBytes * 1.08).round();
     }
 
-    // Mild smoothing toward the new value (no upward ratchet).
+    if (next <= 0) {
+      _ensureTotalCoversDownloaded(totalSegs: totalSegs);
+      return;
+    }
+
+    // Smooth, but allow large upward corrections when estimate was way low.
     if (_totalBytesEstimated && task.totalBytes > 0) {
-      final blended = ((next * 0.6) + (task.totalBytes * 0.4)).round();
-      // Prefer not to jump more than 15% in a single refine step.
-      final maxStep = math.max(
-        (task.totalBytes * 1.15).round(),
-        task.totalBytes + 5 * 1024 * 1024,
-      );
-      final minStep = math.min(
-        (task.totalBytes * 0.85).round(),
-        task.totalBytes - 5 * 1024 * 1024,
-      );
-      task.totalBytes = blended.clamp(
-        math.min(minStep, next),
-        math.max(maxStep, next),
-      );
+      final hugeUnderestimate = task.downloadedBytes > task.totalBytes * 1.1 ||
+          next > task.totalBytes * 1.5;
+      if (hugeUnderestimate) {
+        // Jump quickly toward the better estimate (still slightly smooth).
+        task.totalBytes = ((next * 0.75) + (task.totalBytes * 0.25)).round();
+      } else {
+        final blended = ((next * 0.55) + (task.totalBytes * 0.45)).round();
+        final maxStep = math.max(
+          (task.totalBytes * 1.2).round(),
+          task.totalBytes + 8 * 1024 * 1024,
+        );
+        final minStep = math.min(
+          (task.totalBytes * 0.8).round(),
+          task.totalBytes - 8 * 1024 * 1024,
+        );
+        task.totalBytes = blended.clamp(
+          math.min(minStep, next),
+          math.max(maxStep, next),
+        );
+      }
     } else {
       task.totalBytes = next;
     }
+    // Never show total smaller than bytes already on disk.
+    if (task.totalBytes < task.downloadedBytes) {
+      task.totalBytes = (task.downloadedBytes * 1.05).round();
+    }
+    _totalBytesEstimated = true;
+    _totalBytesLocked = true;
+  }
+
+  /// If [task.downloadedBytes] already exceeds [task.totalBytes], raise the
+  /// total (optionally via segment-fraction extrapolation).
+  void _ensureTotalCoversDownloaded({int? totalSegs}) {
+    if (_totalBytesExact) {
+      if (task.totalBytes > 0 &&
+          task.downloadedBytes > task.totalBytes) {
+        task.totalBytes = task.downloadedBytes;
+      }
+      return;
+    }
+    if (task.downloadedBytes <= 0) return;
+    if (task.totalBytes > 0 && task.downloadedBytes <= task.totalBytes) {
+      return;
+    }
+
+    final segs = totalSegs ?? _playlist?.segments.length ?? 0;
+    var next = (task.downloadedBytes * 1.08).round();
+    if (segs > 0 && _completedSegCount > 0) {
+      final frac = (_completedSegCount / segs).clamp(0.02, 0.99);
+      final extrapolated = (task.downloadedBytes / frac).round();
+      if (extrapolated > next) next = extrapolated;
+    }
+    task.totalBytes = next;
     _totalBytesEstimated = true;
     _totalBytesLocked = true;
   }
@@ -851,7 +915,17 @@ class HlsDownloader implements BaseDownloader {
     if (_countedSegmentIndexes.contains(fileIndex)) return;
     _countedSegmentIndexes.add(fileIndex);
 
-    if (_totalBytesExact) return;
+    // Segment progress is the source of truth for % (Queue + notifications).
+    final totalSegs = _playlist?.segments.length ?? task.totalParts;
+    if (totalSegs > 0) {
+      task.totalParts = totalSegs;
+      task.completedParts = _countedSegmentIndexes.length.clamp(0, totalSegs);
+    }
+
+    if (_totalBytesExact) {
+      _ensureTotalCoversDownloaded(totalSegs: totalSegs > 0 ? totalSegs : null);
+      return;
+    }
 
     if (!_totalBytesLocked) {
       // No pre-estimate yet: provisional total = sum of completed sizes
@@ -1234,11 +1308,18 @@ class HlsDownloader implements BaseDownloader {
     final totalCount = segments.length + (hasInit ? 1 : 0);
     final files = List<File?>.filled(totalCount, null);
 
+    // Queue + notifications use parts (segments done / total), not byte
+    // estimates — keep these in sync for the whole segment pass.
+    task.totalParts = segments.length;
+    task.completedParts = 0;
+
     // Reset downloadedBytes so the segment-skip logic below recomputes
     // from valid segments only (the initial value from the resume
     // detection was a quick sum without validity checking).
     if (_isRetry) {
       task.downloadedBytes = 0;
+      // Force skip path to re-add sizes once (valid segments only).
+      _resumeDiskBytesSeeded = false;
     }
 
     // Circuit breaker: if host was already blocked, don't attempt any segments.
@@ -1296,7 +1377,11 @@ class HlsDownloader implements BaseDownloader {
             if (size > 0 &&
                 await _isSegmentValid(existing, ext, isInitSeg)) {
               files[fileIndex] = existing;
-              task.downloadedBytes += size;
+              // Resume already seeded downloadedBytes from disk — do not
+              // double-count here. Fresh runs without seed still +=.
+              if (!_resumeDiskBytesSeeded) {
+                task.downloadedBytes += size;
+              }
               _accountSegmentBytes(
                 bytes: size,
                 fileIndex: fileIndex,

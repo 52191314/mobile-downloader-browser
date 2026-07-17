@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'pro_entitlement_store.dart';
+
 /// Pro entitlement service — the single source of truth for whether the
 /// current user has Aurora Pro unlocked.
 ///
@@ -15,40 +17,60 @@ import 'package:flutter/foundation.dart';
 ///
 /// In **release** builds, debug override is a no-op.
 ///
-/// Future: `refresh()` will talk to Play Billing (P0.4).
+/// Play channel: [refresh] / [PlayBillingService] grants Pro after purchase
+/// or restore. Last-known grant is cached offline via [ProEntitlementStore].
 class ProEntitlement extends ChangeNotifier {
   bool _isPro = false;
   bool _debugOverride = false;
+  String _source = 'none';
 
   /// Whether the user has Pro unlocked.
   bool get isPro => _isPro || _debugOverride;
 
+  /// Where Pro came from: `none`, `play`, `cache`, `debug`.
+  String get source => _debugOverride ? 'debug' : _source;
+
   /// Force Pro on/off in debug/profile builds (no-op in release).
   void setDebugPro(bool value) {
-    // Only allow debug toggle in non-release builds.
     if (kReleaseMode) return;
     if (_debugOverride == value) return;
     _debugOverride = value;
     notifyListeners();
   }
 
-  /// Refresh entitlement from Play Billing / cached receipt.
-  /// Placeholder until P0.4 is implemented.
-  Future<void> refresh() async {
-    // TODO(P0.4): query Play Billing purchase status.
+  /// Load last-known entitlement from disk (offline cache).
+  Future<void> loadCachedEntitlement() async {
+    final data = await ProEntitlementStore.read();
+    if (data == null) return;
+    final cached = data['isPro'] == true;
+    if (cached && !_isPro) {
+      _isPro = true;
+      _source = (data['source'] as String?) ?? 'cache';
+      notifyListeners();
+    }
   }
 
-  /// Persist a server-verified Pro entitlement (called by P0.4 purchase flow).
-  void grantPro() {
-    if (_isPro) return;
+  /// Refresh entitlement from Play Billing / cached receipt.
+  /// Prefer calling [PlayBillingService.init] / [restorePurchases].
+  Future<void> refresh() async {
+    await loadCachedEntitlement();
+  }
+
+  /// Persist a verified Pro entitlement (called by Play purchase flow).
+  Future<void> grantPro({String source = 'play'}) async {
+    final changed = !_isPro || _source != source;
     _isPro = true;
-    notifyListeners();
+    _source = source;
+    await ProEntitlementStore.write(isPro: true, source: source);
+    if (changed) notifyListeners();
   }
 
   /// Revoke Pro (e.g., refund detected).
-  void revokePro() {
+  Future<void> revokePro() async {
     if (!_isPro && !_debugOverride) return;
     _isPro = false;
+    _source = 'none';
+    await ProEntitlementStore.write(isPro: false, source: 'none');
     notifyListeners();
   }
 }

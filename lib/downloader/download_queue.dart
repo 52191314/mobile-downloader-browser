@@ -21,6 +21,7 @@ import '../sniffer/sniffer_url_utils.dart';
 import 'file_classifier.dart';
 import 'filename_service.dart';
 import 'media_file_types.dart';
+import '../compliance/restricted_media_policy.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
@@ -88,6 +89,16 @@ class DownloadQueue {
   bool _isSaving = false;
   Future<void>? _pendingSaveFuture;
 
+  /// When true, [_schedule] is a no-op. Used during queue file restore and
+  /// for a short post-launch hold so Secure Folder cold start is not
+  /// saturated by multi-connection HLS resume + headless WebViews while the
+  /// browser UI is still mounting.
+  bool _startupHold = false;
+  Timer? _startupHoldTimer;
+
+  /// How long to keep downloads paused after queue restore.
+  static const Duration startupHoldDuration = Duration(seconds: 5);
+
   /// Debounce timer for persisting the queue to disk.  Without this the
   /// queue is written on every 500ms progress tick (from every active
   /// download), which saturates flash I/O and causes the UI progress bar
@@ -141,6 +152,10 @@ class DownloadQueue {
   /// which cannot be persisted to JSON. Set by [SnifferScreen] while
   /// mounted. Called before every task start / retry / link update.
   void Function(DownloadTask task)? browserContextAttacher;
+
+  /// Fired when [addTask] rejects a URL under [RestrictedMediaPolicy]
+  /// (e.g. YouTube). UI should show [message] to the user.
+  void Function(String message)? onRestrictedMediaBlocked;
 
   DownloadQueue({
     this.maxConcurrentDownloads = 3,
@@ -303,6 +318,15 @@ class DownloadQueue {
   /// move it to [DownloadState.idle] when the time arrives.
   void scheduleTask(DownloadTask task, DateTime startAt) {
     if (_isDisposed) return;
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: task.url,
+      sourcePageUrl: task.sourcePageUrl,
+      headers: task.headers,
+    )) {
+      _warn(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
+      return;
+    }
     task.scheduledStartAt = startAt;
     task.state = DownloadState.scheduled;
     _tasks[task.id] = task;
@@ -315,6 +339,17 @@ class DownloadQueue {
 
   void addTask(DownloadTask task, {bool force = false}) {
     if (_isDisposed) return;
+    // Play compliance: never enqueue restricted platform media (Wave 1+).
+    // (See lib/compliance/restricted_media_policy.dart.)
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: task.url,
+      sourcePageUrl: task.sourcePageUrl,
+      headers: task.headers,
+    )) {
+      _warn(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
+      return;
+    }
     _autoRetryAttempts.remove(task.id);
     if (!force) {
       // Duplicate prevention: skip if a task with the same URL is already
@@ -702,7 +737,12 @@ class DownloadQueue {
     if (pending != null) {
       await pending;
     }
-    _schedule();
+    // Explicit resume always wins over the cold-start hold.
+    if (!isAutoRetry) {
+      releaseStartupHold();
+    } else {
+      _schedule();
+    }
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
     }
@@ -1140,14 +1180,43 @@ class DownloadQueue {
       await _preserveCorruptQueueFile(file, e.toString());
     } finally {
       _isLoading = false;
+      // Tasks are already in _executionQueue as idle. Hold multi-connection
+      // resume for a few seconds so browser/WebView cold start can finish.
+      // Without this, Secure Folder freezes ~10–15s under HLS+GPU load.
+      holdSchedulingForStartup();
     }
 
     // Recover any tasks from previous corrupt backups
     await _recoverCorruptQueueFiles(path);
   }
 
+  /// Blocks automatic task starts for [duration] (default 5s), then runs
+  /// [_schedule]. Call after cold-start queue restore so the UI can paint.
+  void holdSchedulingForStartup([Duration? duration]) {
+    _startupHold = true;
+    _startupHoldTimer?.cancel();
+    _startupHoldTimer = Timer(duration ?? startupHoldDuration, () {
+      _startupHold = false;
+      _startupHoldTimer = null;
+      if (!_isDisposed) _schedule();
+    });
+  }
+
+  /// Ends the startup hold early (e.g. user manually starts a download).
+  void releaseStartupHold() {
+    _startupHoldTimer?.cancel();
+    _startupHoldTimer = null;
+    if (_startupHold) {
+      _startupHold = false;
+      _schedule();
+    }
+  }
+
   void _schedule() {
     if (_isDisposed) return;
+    // Do not start downloads while restoring the queue or during the
+    // post-launch hold — that contention freezes Secure Folder cold start.
+    if (_isLoading || _startupHold) return;
     // 1. Sort execution queue: priority descending, then createdAt ascending
     _executionQueue.sort((aId, bId) {
       final a = _tasks[aId]!;
@@ -1340,6 +1409,33 @@ class DownloadQueue {
       if (t.state == DownloadState.scheduled) return false;
       return true;
     });
+  }
+
+  /// True if a task with the same base filename AND same source page already
+  /// exists in the queue.  Catches the case where two quality variants of the
+  /// same video are sniffed from one page under different URLs.
+  bool samePageFilenameExists(String filename, String? sourcePageUrl) {
+    if (sourcePageUrl == null || sourcePageUrl.isEmpty) return false;
+    final base = _stripUniqueSuffix(filename);
+    final normalizedSource = _normalizeUrl(sourcePageUrl);
+    return _tasks.values.any((t) {
+      if (t.state == DownloadState.scheduled) return false;
+      if (_normalizeUrl(t.sourcePageUrl ?? '') != normalizedSource) return false;
+      final existingBase = _stripUniqueSuffix(
+        p.basename(t.savePath),
+      );
+      return existingBase.toLowerCase() == base.toLowerCase();
+    });
+  }
+
+  /// Strips ` (1)`, ` (2)`, … suffixes appended by [FilenameService.uniquePath].
+  static String _stripUniqueSuffix(String filename) {
+    final ext = p.extension(filename);
+    final base = p.basenameWithoutExtension(filename);
+    // Match "filename (N)" pattern where N is one or more digits.
+    final match = RegExp(r'^(.*) \((\d+)\)$').firstMatch(base);
+    final stripped = match != null ? match.group(1)! : base;
+    return '$stripped$ext';
   }
 
   // ---------------------------------------------------------------------------
@@ -1743,6 +1839,8 @@ class DownloadQueue {
 
     _saveDebounceTimer?.cancel();
     _scheduleTimer?.cancel();
+    _startupHoldTimer?.cancel();
+    _startupHold = false;
     if (!_taskUpdateController.isClosed) {
       await _taskUpdateController.close();
     }
@@ -1865,9 +1963,8 @@ class DownloadQueue {
       final task = _tasks[firstId];
       if (task != null) {
         fileName = task.savePath.split(RegExp(r'[/\\]')).last;
-        if (task.totalBytes > 0) {
-          percent = (task.downloadedBytes * 100 ~/ task.totalBytes).round();
-        }
+        // Same source as Queue + system notifications (segments for HLS).
+        percent = task.progressPercent;
       }
     }
     unawaited(DownloadForegroundService.update(

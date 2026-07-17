@@ -42,6 +42,14 @@ class BrowserTab {
   bool canGoForward = false;
   bool isLoading = false;
   int progress = 0;
+  /// One-shot Play-compliance snackbar when the user lands on a restricted page.
+  bool complianceNoticeShown = false;
+
+  /// Play channel: when false, all media sniffing is hard-off for this tab
+  /// (restricted site). URL-level [RestrictedMediaPolicy.isBlocked] remains a
+  /// backstop for paste/queue/CDN. Default true (sniffing allowed).
+  bool sniffingEnabled = true;
+
   PageMeta pageMeta = const PageMeta();
 
   /// Per-tab cache of HLS playlist response bodies captured by
@@ -60,6 +68,18 @@ class BrowserTab {
   /// and disposed when the tab is closed. Uses same-origin XHR from the
   /// CDN domain to bypass CORS and Cloudflare WAF.
   HeadlessWebViewFetcher? headlessFetcher;
+
+  /// True after deferred cold-start work has run for this tab (adblock
+  /// configure, sniffed-media cache load, initial URL navigation).
+  /// Background tabs restored at launch leave this false until first
+  /// activation so Secure Folder / large tab lists do not freeze startup.
+  bool startupReady = false;
+
+  /// When false, [BrowserWidget] must not seed [initialUrl] from the
+  /// address bar — lets cold start mount a blank WebView first, then
+  /// navigate after the UI frame and download-hold settle.
+  bool canSeedWebViewUrl = true;
+
   BrowserTab({
     required this.id,
     required this.controller,

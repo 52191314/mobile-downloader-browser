@@ -58,6 +58,17 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   // --- Seeking ---
   bool _isSeeking = false;
   Duration _seekPosition = Duration.zero;
+  /// 0..1 along the visible track (for preview popup alignment).
+  double _seekFraction = 0.0;
+
+  /// Secondary muted player used only for YouTube-style scrub thumbnails.
+  VideoPlayerController? _previewController;
+  bool _previewReady = false;
+  bool _previewInitStarted = false;
+  Timer? _previewSeekDebounce;
+  /// Throttle main-player UI rebuilds so the bar moves smoothly without
+  /// setState every vsync.
+  DateTime _lastProgressUiAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // --- Speed ---
   double _currentSpeed = 1.0;
@@ -204,19 +215,99 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         setState(() => _isBufferingSlow = false);
       }
     }
+
+    // Keep the progress bar live (~10 fps). Previously only the 1s clock
+    // timer rebuilt UI, so the bar jumped and felt "stuck in the middle".
+    if (_isSeeking) return;
+    final now = DateTime.now();
+    if (now.difference(_lastProgressUiAt).inMilliseconds < 100) return;
+    _lastProgressUiAt = now;
+    setState(() {});
   }
 
   @override
   void dispose() {
     _autoHideTimer?.cancel();
     _clockTimer?.cancel();
+    _previewSeekDebounce?.cancel();
     if (_controllerListener != null) {
       _controller?.removeListener(_controllerListener!);
     }
     _playPauseIconTimer?.cancel();
     _bufferingTimer?.cancel();
     _controller?.dispose();
+    _previewController?.dispose();
     super.dispose();
+  }
+
+  /// Lazy-init a second muted controller for scrub preview frames.
+  Future<void> _ensurePreviewController() async {
+    if (_previewReady || _previewInitStarted) return;
+    _previewInitStarted = true;
+    final uri = Uri.tryParse(widget.url);
+    if (uri == null || !uri.hasScheme) {
+      _previewInitStarted = false;
+      return;
+    }
+    try {
+      final headers = widget.headers.isNotEmpty
+          ? Map<String, String>.from(widget.headers)
+          : <String, String>{};
+      if (!headers.keys.any((k) => k.toLowerCase() == 'accept')) {
+        headers['Accept'] = '*/*';
+      }
+      final c = VideoPlayerController.networkUrl(
+        uri,
+        httpHeaders: headers,
+        formatHint: _formatHintForUrl(widget.url),
+      );
+      await c.initialize();
+      await c.setVolume(0);
+      await c.pause();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      setState(() {
+        _previewController = c;
+        _previewReady = true;
+      });
+    } catch (_) {
+      _previewInitStarted = false;
+      _previewReady = false;
+    }
+  }
+
+  void _schedulePreviewSeek(Duration pos) {
+    unawaited(_ensurePreviewController());
+    _previewSeekDebounce?.cancel();
+    _previewSeekDebounce = Timer(const Duration(milliseconds: 140), () async {
+      final c = _previewController;
+      if (c == null || !c.value.isInitialized) return;
+      try {
+        await c.seekTo(pos);
+        await c.pause();
+        if (mounted && _isSeeking) setState(() {});
+      } catch (_) {}
+    });
+  }
+
+  /// Map a local X (within the progress GestureDetector) to a media position.
+  /// [trackWidth] is the full detector width; bar is inset by [hPad] each side.
+  (Duration pos, double fraction) _positionFromLocalX({
+    required double localX,
+    required double trackWidth,
+    required Duration duration,
+    double hPad = 12,
+  }) {
+    final barWidth = (trackWidth - hPad * 2).clamp(1.0, double.infinity);
+    final x = (localX - hPad).clamp(0.0, barWidth);
+    final fraction = (x / barWidth).clamp(0.0, 1.0);
+    final ms = duration.inMilliseconds;
+    final pos = ms > 0
+        ? Duration(milliseconds: (fraction * ms).round())
+        : Duration.zero;
+    return (pos, fraction);
   }
 
   // ---- Timer helpers ----
@@ -754,7 +845,6 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     final duration = (c != null && c.value.isInitialized)
         ? c.value.duration
         : Duration.zero;
-    final isPlaying = c?.value.isPlaying ?? false;
 
     final displayPosition = _isSeeking ? _seekPosition : position;
 
@@ -862,113 +952,263 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     );
   }
 
-  Widget _buildProgressBar(double bufferedFraction, double progress, Duration duration) {
+  Widget _buildProgressBar(
+    double bufferedFraction,
+    double progress,
+    Duration duration,
+  ) {
     final ac = context.ac;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (details) {
-        if (_locked) return;
-        _onSeek(details.localPosition.dx);
-      },
-      onHorizontalDragStart: (_) {
-        if (_locked) return;
-        setState(() => _isSeeking = true);
-      },
-      onHorizontalDragUpdate: (details) {
-        if (_locked) return;
-        final w = context.size?.width ?? MediaQuery.of(context).size.width;
-        final fraction = (details.localPosition.dx / w).clamp(0.0, 1.0);
-        setState(() {
-          _seekPosition = Duration(
-            milliseconds: (fraction * duration.inMilliseconds).toInt(),
+    const hPad = 12.0;
+    const previewW = 132.0;
+    const previewH = 74.0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final trackWidth = constraints.maxWidth;
+        final barWidth = (trackWidth - hPad * 2).clamp(1.0, double.infinity);
+        final displayProgress = _isSeeking ? _seekFraction : progress;
+        final thumbCenterX = hPad + displayProgress * barWidth;
+
+        void applyLocalX(double localX, {required bool commit}) {
+          if (_locked || duration.inMilliseconds <= 0) return;
+          final (pos, fraction) = _positionFromLocalX(
+            localX: localX,
+            trackWidth: trackWidth,
+            duration: duration,
+            hPad: hPad,
           );
-        });
-      },
-      onHorizontalDragEnd: (details) {
-        if (_locked) return;
-        if (_controller != null) {
-          _controller!.seekTo(_seekPosition);
+          setState(() {
+            _isSeeking = !commit;
+            _seekPosition = pos;
+            _seekFraction = fraction;
+          });
+          if (commit) {
+            unawaited(_controller?.seekTo(pos));
+            if (_controller != null && !_controller!.value.isPlaying) {
+              unawaited(_controller!.play());
+            }
+            _resetAutoHideTimer();
+          } else {
+            _schedulePreviewSeek(pos);
+          }
         }
-        setState(() => _isSeeking = false);
-        if (!_controller!.value.isPlaying) {
-          _controller!.play();
-        }
-        _resetAutoHideTimer();
-      },
-      child: SizedBox(
-        height: 32,
-        child: Center(
-          child: Container(
-            height: 4,
-            margin: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.white12,
-              borderRadius: BorderRadius.circular(2),
-            ),
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) {
+            if (_locked) return;
+            applyLocalX(details.localPosition.dx, commit: true);
+            setState(() => _isSeeking = false);
+          },
+          onHorizontalDragStart: (details) {
+            if (_locked) return;
+            applyLocalX(details.localPosition.dx, commit: false);
+            unawaited(_ensurePreviewController());
+          },
+          onHorizontalDragUpdate: (details) {
+            if (_locked) return;
+            applyLocalX(details.localPosition.dx, commit: false);
+          },
+          onHorizontalDragEnd: (_) {
+            if (_locked) return;
+            unawaited(_controller?.seekTo(_seekPosition));
+            if (_controller != null && !_controller!.value.isPlaying) {
+              unawaited(_controller!.play());
+            }
+            setState(() => _isSeeking = false);
+            _resetAutoHideTimer();
+          },
+          onHorizontalDragCancel: () {
+            if (mounted) setState(() => _isSeeking = false);
+          },
+          child: SizedBox(
+            height: _isSeeking ? 110 : 40,
             child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.bottomCenter,
               children: [
-                // Buffered track
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: bufferedFraction,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+                // YouTube-style scrub thumbnail + time above the thumb.
+                if (_isSeeking)
+                  Positioned(
+                    left: (thumbCenterX - previewW / 2).clamp(
+                      4.0,
+                      trackWidth - previewW - 4,
+                    ),
+                    bottom: 36,
+                    child: _buildSeekPreviewCard(
+                      width: previewW,
+                      height: previewH,
+                      timeLabel: _formatDuration(_seekPosition),
                     ),
                   ),
-                ),
-                // Played track
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: progress,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: ac.accentFrost,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                // Thumb
+
+                // Track row
                 Positioned(
-                  left: (progress * (MediaQuery.of(context).size.width - 24)).clamp(-6.0, MediaQuery.of(context).size.width - 18),
-                  top: -4,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: ac.accentFrost,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: ac.accentFrost.withValues(alpha: 0.4),
-                          blurRadius: 6,
-                          spreadRadius: 1,
+                  left: 0,
+                  right: 0,
+                  bottom: 10,
+                  height: 20,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: hPad),
+                    child: Center(
+                      child: SizedBox(
+                        height: 4,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            // Background
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white12,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            // Buffered
+                            FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: bufferedFraction.clamp(0.0, 1.0),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white24,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                            // Played
+                            FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: displayProgress.clamp(0.0, 1.0),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: ac.accentFrost,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                            // Thumb — position from bar width only (not full screen).
+                            Positioned(
+                              left: (displayProgress * barWidth - 7).clamp(
+                                -2.0,
+                                barWidth - 5,
+                              ),
+                              top: -5,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: ac.accentFrost,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: ac.accentFrost.withValues(
+                                        alpha: 0.45,
+                                      ),
+                                      blurRadius: 6,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  void _onSeek(double dx) {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-    final w = context.size?.width ?? MediaQuery.of(context).size.width;
-    final fraction = (dx / w).clamp(0.0, 1.0);
-    final pos = Duration(
-      milliseconds: (fraction * _controller!.value.duration.inMilliseconds).toInt(),
+  /// Floating scrub preview (thumbnail frame + timestamp).
+  Widget _buildSeekPreviewCard({
+    required double width,
+    required double height,
+    required String timeLabel,
+  }) {
+    final ac = context.ac;
+    final preview = _previewController;
+    final showVideo =
+        _previewReady && preview != null && preview.value.isInitialized;
+
+    return Material(
+      elevation: 8,
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: width,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ac.accentFrost.withValues(alpha: 0.7)),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: showVideo
+                    ? FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: preview.value.size.width > 0
+                              ? preview.value.size.width
+                              : 16,
+                          height: preview.value.size.height > 0
+                              ? preview.value.size.height
+                              : 9,
+                          child: VideoPlayer(preview),
+                        ),
+                      )
+                    : ColoredBox(
+                        color: Colors.black,
+                        child: Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: ac.accentFrost,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                timeLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-    _controller!.seekTo(pos);
-    if (!_controller!.value.isPlaying) {
-      _controller!.play();
-    }
-    _resetAutoHideTimer();
   }
 
   Widget _miniButton({required VoidCallback onTap, required Widget child}) {

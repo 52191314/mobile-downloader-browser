@@ -52,13 +52,28 @@ class DownloadForegroundService {
 
   /// Requests the POST_NOTIFICATIONS runtime permission on Android 13+.
   /// Shows the system permission dialog. Safe to call on older API levels
-  /// (no-op on the native side).
+  /// (no-op on the native side). Prefer [areNotificationsEnabled] first so
+  /// we do not re-prompt when already granted.
   static Future<void> requestNotificationPermission() async {
     if (!Platform.isAndroid) return;
     try {
       await _channel.invokeMethod('requestNotificationPermission');
     } catch (e) {
       // Best-effort.
+    }
+  }
+
+  /// Whether notification permission is already granted (API 33+) or
+  /// notifications are enabled for the app (older APIs via NotificationManager).
+  /// Always true on non-Android.
+  static Future<bool> areNotificationsEnabled() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? result =
+          await _channel.invokeMethod<bool>('areNotificationsEnabled');
+      return result ?? false;
+    } catch (e) {
+      return false;
     }
   }
 

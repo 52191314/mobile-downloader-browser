@@ -1,14 +1,64 @@
+# =============================================================================
+# Android module .gitignore
+# =============================================================================
+
+# Gradle
+.gradle/
+build/
 gradle-wrapper.jar
-/.gradle
-/captures/
+# Wrapper scripts are generated/local in this repo layout (not tracked).
 /gradlew
 /gradlew.bat
-/local.properties
-GeneratedPluginRegistrant.java
-.cxx/
 
-# Remember to never publicly share your keystore.
-# See https://flutter.dev/to/reference-keystore
+# Local SDK path (machine-specific)
+local.properties
+
+# Captures / NDK
+/captures/
+.cxx/
+*.externalNativeBuild
+*.cxx
+
+# Flutter / plugin generated
+GeneratedPluginRegistrant.java
+
+# IDE
+*.iml
+.idea/
+.navigation/
+
+# Signing — NEVER commit (see docs/play_signing.md)
+# Flutter docs: https://docs.flutter.dev/deployment/android#sign-the-app
 key.properties
 **/*.keystore
 **/*.jks
+*.jks
+*.keystore
+upload-keystore.jks
+*-upload-key.*
+
+# Play / Google services (if added later)
+google-services.json
+**/google-services.json
+play-service-account*.json
+api-*.json
+
+# Build outputs / crash dumps
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+outputs/
+intermediates/
+*.mapping
+mapping.txt
+seeds.txt
+unused.txt
+
+# Kotlin
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db

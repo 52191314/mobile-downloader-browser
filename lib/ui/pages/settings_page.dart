@@ -22,6 +22,8 @@ import '../../settings/download_settings.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../premium/play_billing_service.dart';
+import '../../premium/build_channel.dart';
 import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
@@ -46,6 +48,7 @@ class SettingsPage extends StatefulWidget {
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
   final ProEntitlement proEntitlement;
+  final PlayBillingService? playBilling;
 
   const SettingsPage({
     super.key,
@@ -61,6 +64,7 @@ class SettingsPage extends StatefulWidget {
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
     required this.proEntitlement,
+    this.playBilling,
   });
 
   @override
@@ -98,21 +102,11 @@ class _SettingsPageState extends State<SettingsPage> {
   late DownloadSettings _settings;
   late double _speedLimitKbps;
 
-  StreamSubscription<DriveSyncState>? _driveSubscription;
-
   @override
   void initState() {
     super.initState();
     _settings = widget.settings;
     _speedLimitKbps = widget.speedLimitKbps;
-    _subscribeDriveSync();
-  }
-
-  void _subscribeDriveSync() {
-    _driveSubscription?.cancel();
-    _driveSubscription = widget.driveSyncService.onStateChanged.listen((_) {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
@@ -126,12 +120,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
-    _driveSubscription?.cancel();
     super.dispose();
   }
-
-  bool get _driveConnected =>
-      widget.driveSyncService.state.status == DriveConnectionStatus.connected;
 
   @override
   Widget build(BuildContext context) {
@@ -155,8 +145,6 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildProfileHeader() {
-    final state = widget.driveSyncService.state;
-    final connected = _driveConnected;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -172,15 +160,11 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: connected
-                    ? context.ac.statusSuccess.withValues(alpha: 0.22)
-                    : context.ac.surfaceElevated,
+                backgroundColor: context.ac.surfaceElevated,
                 radius: 24,
                 child: Icon(
-                  connected ? Icons.cloud_done_rounded : Icons.cloud_outlined,
-                  color: connected
-                      ? context.ac.statusSuccess
-                      : context.ac.textSecondary,
+                  Icons.cloud_outlined,
+                  color: context.ac.textSecondary,
                   size: 24,
                 ),
               ),
@@ -200,16 +184,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      connected
-                          ? 'Drive · ${state.account ?? 'Connected'}'
-                          : 'Google Drive not linked',
+                      'Google Drive sync — upcoming',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        color: connected
-                            ? context.ac.accentFrost
-                            : context.ac.textSecondary,
+                        color: context.ac.textSecondary,
                       ),
                     ),
                   ],
@@ -312,10 +292,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.cloud_outlined,
                 title: 'Google Drive',
-                subtitle: _driveConnected
-                    ? 'Linked · manage sync'
-                    : 'Link account for backup sync',
-                badge: isPro ? null : 'Pro',
+                subtitle: 'Upcoming — cloud sync & backup',
                 onTap: () => _openPage(_buildDrivePage()),
               ),
               _NavItem(
@@ -1086,11 +1063,11 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 8),
             Panel(
               child: SwitchListTile(
-                title: const Text('Replace site player with Aurora'),
+                title: const Text('Auto-open Aurora on site play'),
                 subtitle: Text(
                   localReplacePlayer
-                      ? 'When a page plays video or audio, Aurora opens its own player with the page session (cookies). Turn off to use the site\'s player.'
-                      : 'Site players run normally. Turn on to auto-open Aurora\'s player (like UC Browser) with cookies and headers.',
+                      ? 'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.'
+                      : 'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.',
                   style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                 ),
                 value: localReplacePlayer,
@@ -1132,12 +1109,58 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildDrivePage() {
-    return _DriveSyncPageContent(
-      driveSyncService: widget.driveSyncService,
-      folderController: widget.folderController,
-      initialState: widget.driveSyncService.state,
-      initialConnected: _driveConnected,
-      proEntitlement: widget.proEntitlement,
+    return Scaffold(
+      appBar: AppBar(title: const Text('Google Drive Sync')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PanelHeader(icon: Icons.cloud_outlined, title: 'Google Drive Sync'),
+          const SizedBox(height: 8),
+          Panel(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Icon(Icons.construction_rounded,
+                      size: 48, color: context.ac.accentFrost),
+                  const SizedBox(height: 16),
+                  Text(
+                    'This feature is under consideration.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: context.ac.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Google Drive sync for cloud backup and cross-device '
+                    'downloads is planned but currently unavailable. '
+                    'The required cloud service configuration is not yet provisioned.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.ac.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Use local backup in the meantime — '
+                    'tap "Backup" on the previous screen.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.ac.textTertiary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1802,17 +1825,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
 
-              // Buy button (visible only when NOT Pro)
+              // Buy / restore (Play channel only for real purchases)
               if (!isPro) ...[
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: () {
-                      // TODO(P0.4): launch Play Billing purchase flow.
-                    },
+                    onPressed: () => _onGetProPressed(context),
                     icon: const Icon(Icons.shopping_cart_outlined, size: 18),
-                    label: const Text('Get Aurora Pro'),
+                    label: Text(
+                      BuildChannel.isPlay
+                          ? (widget.playBilling?.localizedPrice != null
+                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedPrice}'
+                              : 'Get Aurora Pro')
+                          : 'Get Aurora Pro on Google Play',
+                    ),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       textStyle: const TextStyle(
@@ -1822,10 +1849,29 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
+                if (BuildChannel.isPlay) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => _onRestoreProPressed(context),
+                      child: Text(
+                        'Restore purchase',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.ac.accentFrost,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Center(
                   child: Text(
-                    'One-time purchase — no subscription.',
+                    BuildChannel.isPlay
+                        ? 'One-time purchase via Google Play — no subscription.'
+                        : 'Pro unlock is sold only in the Google Play edition. '
+                            'This build has no external checkout.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
                       color: context.ac.textTertiary,
@@ -1838,6 +1884,41 @@ class _SettingsPageState extends State<SettingsPage> {
         },
       ),
     );
+  }
+
+  Future<void> _onGetProPressed(BuildContext context) async {
+    final billing = widget.playBilling;
+    if (!BuildChannel.isPlay || billing == null) {
+      if (!context.mounted) return;
+      AuroraSnackbar.show(
+        context,
+        'Aurora Pro is available as a one-time unlock in the Google Play edition of this app.',
+      );
+      return;
+    }
+    final ok = await billing.buyPro();
+    if (!context.mounted) return;
+    if (!ok) {
+      AuroraSnackbar.show(
+        context,
+        billing.lastError ?? 'Could not start purchase.',
+      );
+    }
+  }
+
+  Future<void> _onRestoreProPressed(BuildContext context) async {
+    final billing = widget.playBilling;
+    if (!BuildChannel.isPlay || billing == null) return;
+    await billing.restorePurchases();
+    if (!context.mounted) return;
+    if (widget.proEntitlement.isPro) {
+      AuroraSnackbar.show(context, 'Aurora Pro restored.');
+    } else {
+      AuroraSnackbar.show(
+        context,
+        billing.lastError ?? 'No previous Pro purchase found for this account.',
+      );
+    }
   }
 
   List<Widget> _buildFeatureRows(bool isPro) {
@@ -3569,7 +3650,7 @@ class _RulesPageState extends State<_RulesPage> {
                       controller: hostController,
                       decoration: const InputDecoration(
                         labelText: 'Host pattern (glob)',
-                        hintText: 'e.g. *.youtube.com',
+                        hintText: 'e.g. *.example.com',
                         isDense: true,
                       ),
                     ),
@@ -3634,7 +3715,7 @@ class _RulesPageState extends State<_RulesPage> {
                       controller: destController,
                       decoration: const InputDecoration(
                         labelText: 'Destination folder (optional)',
-                        hintText: 'e.g. YouTube',
+                        hintText: 'e.g. Direct video site',
                         isDense: true,
                       ),
                     ),
@@ -3950,7 +4031,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                 children: [
                   TextField(
                     decoration: const InputDecoration(
-                        labelText: 'Name', hintText: 'e.g. YouTube'),
+                        labelText: 'Name', hintText: 'e.g. News site'),
                     controller: TextEditingController(text: name),
                     onChanged: (v) => name = v.trim(),
                   ),
@@ -3958,7 +4039,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                   TextField(
                     decoration: const InputDecoration(
                         labelText: 'Host pattern',
-                        hintText: 'e.g. *.youtube.com'),
+                        hintText: 'e.g. *.example.com'),
                     controller: TextEditingController(text: hostPattern),
                     onChanged: (v) => hostPattern = v.trim(),
                   ),

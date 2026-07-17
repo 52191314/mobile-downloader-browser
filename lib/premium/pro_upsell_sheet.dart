@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../theme/aurora_palette.dart';
 import '../theme/aurora_tokens.dart';
+import 'build_channel.dart';
+import 'play_billing_service.dart';
 import 'pro_features.dart';
+
+/// Optional billing handle so the upsell sheet can start a purchase on Play.
+/// Set once from app shell after [PlayBillingService] is created.
+PlayBillingService? proUpsellBilling;
 
 /// Shows the Pro upsell bottom sheet for a blocked feature.
 ///
@@ -13,11 +19,6 @@ import 'pro_features.dart';
 ///   return;
 /// }
 /// ```
-///
-/// The sheet lists:
-/// 1. The blocked feature name
-/// 2. A short benefits list
-/// 3. A "Not now" dismiss (and later a Get Pro button via P0.4)
 Future<void> showProUpsell(BuildContext context, ProFeature feature) {
   final featureName = ProFeatures.displayName(feature);
 
@@ -37,7 +38,6 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Drag handle
               Container(
                 width: 40,
                 height: 4,
@@ -47,16 +47,12 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Pro icon
               Icon(
                 Icons.auto_awesome,
                 size: 40,
                 color: palette.accentFrost,
               ),
               const SizedBox(height: 12),
-
-              // Title
               Text(
                 'Aurora Pro',
                 style: TextStyle(
@@ -66,8 +62,6 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
                 ),
               ),
               const SizedBox(height: 4),
-
-              // Subtitle — what's blocked
               Text(
                 '"$featureName" is a Pro feature.',
                 style: TextStyle(
@@ -77,21 +71,26 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
-
-              // Benefits list
               _buildBenefitsList(palette),
               const SizedBox(height: 24),
-
-              // CTA button (placeholder until P0.4)
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
                     Navigator.of(ctx).pop();
-                    // TODO(P0.4): launch Play Billing purchase flow.
+                    final billing = proUpsellBilling;
+                    if (!BuildChannel.isPlay || billing == null) {
+                      // No external checkout on non-Play builds.
+                      return;
+                    }
+                    await billing.buyPro();
                   },
                   icon: const Icon(Icons.shopping_cart_outlined, size: 18),
-                  label: const Text('Get Aurora Pro'),
+                  label: Text(
+                    BuildChannel.isPlay
+                        ? 'Get Aurora Pro'
+                        : 'Available on Google Play',
+                  ),
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     textStyle: const TextStyle(
@@ -102,8 +101,6 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
                 ),
               ),
               const SizedBox(height: 8),
-
-              // Dismiss
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
                 child: Text(
@@ -122,7 +119,6 @@ Future<void> showProUpsell(BuildContext context, ProFeature feature) {
   );
 }
 
-/// Renders the Pro benefits summary (3-column grid of icons + labels).
 Widget _buildBenefitsList(AColors palette) {
   final benefits = [
     (Icons.filter_alt_outlined, 'All filter lists\n+ tracker pack'),
@@ -140,9 +136,7 @@ Widget _buildBenefitsList(AColors palette) {
           padding: const EdgeInsets.only(bottom: 12),
           child: Row(
             children: [
-              for (int i = row;
-                  i < row + 3 && i < benefits.length;
-                  i++)
+              for (int i = row; i < row + 3 && i < benefits.length; i++)
                 Expanded(
                   child: Column(
                     children: [
@@ -164,9 +158,11 @@ Widget _buildBenefitsList(AColors palette) {
                     ],
                   ),
                 ),
-              // Fill remaining columns with empty space for balanced layout
               for (int fill = row + (3 - (row % 3));
-                  fill < row + 3 && fill < benefits.length + (3 - (benefits.length % 3)) % 3;
+                  fill < row + 3 &&
+                      fill <
+                          benefits.length +
+                              (3 - (benefits.length % 3)) % 3;
                   fill++)
                 const Expanded(child: SizedBox.shrink()),
             ],

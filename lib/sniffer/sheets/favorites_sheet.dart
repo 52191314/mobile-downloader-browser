@@ -16,7 +16,8 @@ void showFavoritesSheet(
   required Future<void> Function(String url) onLoadUrl,
   required VoidCallback onFavoriteToggled,
   required Future<void> Function() onNewFolderCreated,
-  required Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite,
+  required Future<BrowserLibrary?> Function(BrowserFavorite favorite)
+      onEditFavorite,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -48,7 +49,8 @@ class FavoritesSheetContent extends StatefulWidget {
   final Future<void> Function(String url) onLoadUrl;
   final VoidCallback onFavoriteToggled;
   final Future<void> Function() onNewFolderCreated;
-  final Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite;
+  final Future<BrowserLibrary?> Function(BrowserFavorite favorite)
+      onEditFavorite;
 
   const FavoritesSheetContent({
     super.key,
@@ -73,45 +75,97 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
   TabController? _tabController;
   late List<BookmarkFolder> _folders;
 
+  /// Controllers waiting for a safe post-frame dispose (after TabBar has
+  /// detached). Prevents `_dependents.isEmpty` crashes when recreating
+  /// the controller after "New folder".
+  final List<TabController> _pendingDispose = [];
+
   @override
   void initState() {
     super.initState();
     _currentLibrary = widget.library;
-    _updateFoldersAndController();
+    _folders = _buildFolders(_currentLibrary);
+    _tabController = TabController(length: _folders.length, vsync: this);
   }
 
   @override
   void didUpdateWidget(covariant FavoritesSheetContent oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Do not call setState here — parent rebuilds already schedule a frame.
     if (widget.library != oldWidget.library) {
-      setState(() {
-        _currentLibrary = widget.library;
-        _updateFoldersAndController();
-      });
-    }
-  }
-
-  void _updateFoldersAndController() {
-    _folders = [widget.unsortedFolder, ..._currentLibrary.folders];
-    final oldController = _tabController;
-    _tabController = TabController(
-      length: _folders.length,
-      vsync: this,
-      initialIndex: oldController != null
-          ? oldController.index.clamp(0, _folders.length - 1)
-          : 0,
-    );
-    if (oldController != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        oldController.dispose();
-      });
+      _applyLibrary(widget.library);
     }
   }
 
   @override
   void dispose() {
+    for (final c in _pendingDispose) {
+      c.dispose();
+    }
+    _pendingDispose.clear();
     _tabController?.dispose();
+    _tabController = null;
     super.dispose();
+  }
+
+  List<BookmarkFolder> _buildFolders(BrowserLibrary library) {
+    return [widget.unsortedFolder, ...library.folders];
+  }
+
+  /// Updates library + folder list. Recreates [TabController] only when the
+  /// tab count changes (creating/deleting a folder). Favorite edits alone
+  /// keep the same controller — recreating every time caused the red-screen
+  /// `_dependents.isEmpty` assert.
+  void _applyLibrary(
+    BrowserLibrary library, {
+    String? preferFolderId,
+  }) {
+    final nextFolders = _buildFolders(library);
+    final old = _tabController;
+
+    _currentLibrary = library;
+    _folders = nextFolders;
+
+    // Keep the same controller when tab count is unchanged (rename / move /
+    // tag edits). Recreating on every library save disposed a TabController
+    // that TabBar still depended on → red screen `_dependents.isEmpty`.
+    if (old != null && old.length == nextFolders.length) {
+      if (preferFolderId != null) {
+        final idx = nextFolders.indexWhere((f) => f.id == preferFolderId);
+        if (idx >= 0 && idx != old.index) {
+          old.animateTo(idx);
+        }
+      }
+      return;
+    }
+
+    var initialIndex = (old?.index ?? 0).clamp(0, nextFolders.length - 1);
+    if (preferFolderId != null) {
+      final preferred =
+          nextFolders.indexWhere((f) => f.id == preferFolderId);
+      if (preferred >= 0) initialIndex = preferred;
+    }
+
+    final next = TabController(
+      length: nextFolders.length,
+      vsync: this,
+      initialIndex: initialIndex,
+    );
+    _tabController = next;
+
+    if (old != null) {
+      // Detach first (next build uses [next]), then dispose old safely.
+      _pendingDispose.add(old);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          // State already disposed — dispose() drained the list.
+          return;
+        }
+        if (_pendingDispose.remove(old)) {
+          old.dispose();
+        }
+      });
+    }
   }
 
   Future<void> _createNewFolder() async {
@@ -126,6 +180,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
           decoration: const InputDecoration(
             hintText: 'Folder name',
           ),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v.trim()),
         ),
         actions: [
           TextButton(
@@ -141,7 +196,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
       ),
     );
     nameController.dispose();
-    if (name == null || name.isEmpty) return;
+    if (name == null || name.isEmpty || !mounted) return;
 
     final folder = BookmarkFolder(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -152,16 +207,33 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
       folders: [..._currentLibrary.folders, folder],
     );
     await widget.onSaveLibrary(updatedLibrary);
+    if (!mounted) return;
 
     setState(() {
-      _currentLibrary = updatedLibrary;
-      _updateFoldersAndController();
+      _applyLibrary(updatedLibrary, preferFolderId: folder.id);
+    });
+    widget.onFavoriteToggled();
+  }
+
+  Future<void> _onLibrarySaved(
+    BrowserLibrary updatedLib, {
+    String? preferFolderId,
+  }) async {
+    await widget.onSaveLibrary(updatedLib);
+    if (!mounted) return;
+    setState(() {
+      _applyLibrary(updatedLib, preferFolderId: preferFolderId);
     });
     widget.onFavoriteToggled();
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _tabController;
+    if (controller == null) {
+      return const SizedBox.shrink();
+    }
+
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -189,7 +261,10 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
             ),
           ),
           TabBar(
-            controller: _tabController,
+            // Key forces a clean TabBar when length changes so it never
+            // keeps a disposed controller identity across rebuilds.
+            key: ValueKey('fav_tabs_${controller.length}_${controller.hashCode}'),
+            controller: controller,
             isScrollable: true,
             tabs: [
               for (final folder in _folders) Tab(text: folder.name),
@@ -198,7 +273,10 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.55,
             child: TabBarView(
-              controller: _tabController,
+              key: ValueKey(
+                'fav_views_${controller.length}_${controller.hashCode}',
+              ),
+              controller: controller,
               children: [
                 for (final folder in _folders)
                   KeyedSubtree(
@@ -213,19 +291,16 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
                       library: _currentLibrary,
                       unsortedFolder: widget.unsortedFolder,
                       isCurrentPageFavorited: widget.isCurrentPageFavorited,
-                      onSaveLibrary: (updatedLib) async {
-                        await widget.onSaveLibrary(updatedLib);
-                        setState(() {
-                          _currentLibrary = updatedLib;
-                          _updateFoldersAndController();
-                        });
-                        widget.onFavoriteToggled();
-                      },
+                      onSaveLibrary: (updatedLib) =>
+                          _onLibrarySaved(updatedLib),
                       onLoadUrl: widget.onLoadUrl,
                       onFavoriteToggled: widget.onFavoriteToggled,
                       onNewFolderCreated: () async {
+                        // Library already saved by caller; just refresh tabs
+                        // if parent pushed a different library later.
+                        if (!mounted) return;
                         setState(() {
-                          _updateFoldersAndController();
+                          _applyLibrary(_currentLibrary);
                         });
                         widget.onFavoriteToggled();
                       },
@@ -253,7 +328,8 @@ Widget buildFavoritesFolderList(
   required Future<void> Function(String url) onLoadUrl,
   required VoidCallback onFavoriteToggled,
   required Future<void> Function() onNewFolderCreated,
-  required Future<BrowserLibrary?> Function(BrowserFavorite favorite) onEditFavorite,
+  required Future<BrowserLibrary?> Function(BrowserFavorite favorite)
+      onEditFavorite,
 }) {
   final isUnsorted = folder.id == '__unsorted__';
 
@@ -375,7 +451,7 @@ Widget buildFavoritesFolderList(
                   await onSaveLibrary(updatedLib);
                 }
               }
-              onNewFolderCreated();
+              await onNewFolderCreated();
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'edit', child: Text('Edit tags')),
@@ -408,7 +484,8 @@ Widget buildFavoritesFolderList(
               label:
                   const Text('Rename folder', style: TextStyle(fontSize: 12)),
               onPressed: () async {
-                final nameController = TextEditingController(text: folder.name);
+                final nameController =
+                    TextEditingController(text: folder.name);
                 final newName = await showDialog<String>(
                   context: sheetContext,
                   builder: (dialogCtx) => AlertDialog(
@@ -434,7 +511,11 @@ Widget buildFavoritesFolderList(
                   ),
                 );
                 nameController.dispose();
-                if (newName == null || newName.isEmpty || newName == folder.name) return;
+                if (newName == null ||
+                    newName.isEmpty ||
+                    newName == folder.name) {
+                  return;
+                }
 
                 final updatedFolders = library.folders.map((f) {
                   return f.id == folder.id
@@ -446,9 +527,8 @@ Widget buildFavoritesFolderList(
                       : f;
                 }).toList();
 
-                 await onSaveLibrary(library.copyWith(folders: updatedFolders));
-                 onNewFolderCreated();
-               },
+                await onSaveLibrary(library.copyWith(folders: updatedFolders));
+              },
             ),
             const SizedBox(width: 8),
             TextButton.icon(
@@ -471,7 +551,8 @@ Widget buildFavoritesFolderList(
                       ),
                       TextButton(
                         onPressed: () => Navigator.of(dialogCtx).pop(true),
-                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        style:
+                            TextButton.styleFrom(foregroundColor: Colors.red),
                         child: const Text('Delete'),
                       ),
                     ],
@@ -488,14 +569,13 @@ Widget buildFavoritesFolderList(
                   return fav;
                 }).toList();
 
-                 await onSaveLibrary(
-                   library.copyWith(
-                     folders: updatedFolders,
-                     favorites: updatedFavorites,
-                   ),
-                 );
-                 onNewFolderCreated();
-               },
+                await onSaveLibrary(
+                  library.copyWith(
+                    folders: updatedFolders,
+                    favorites: updatedFavorites,
+                  ),
+                );
+              },
             ),
           ],
         ),

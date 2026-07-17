@@ -71,6 +71,9 @@ class BrowserGuardInstaller {
         userScript: UserScript(
           source: script,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          // All frames: ad iframes use window.open / top navigations that
+          // never hit the main-frame-only guard.
+          forMainFrameOnly: false,
           groupName: 'aurora_guard',
         ),
       );
@@ -79,9 +82,10 @@ class BrowserGuardInstaller {
   }
 
   Future<void> _installBrowserGuards({bool force = false}) async {
-    if (_userScriptAdded) return;
     if (_controller == null) return;
-    if (!force && _guardInstalled) return;
+    // Document-start user script covers first paint; force re-inject still
+    // re-wraps hooks if page JS tore them down after load (SPA / anti-adblock).
+    if (!force && (_guardInstalled || _userScriptAdded)) return;
     if (force) {
       _guardInstalled = false;
       // Reset only the version counter so hooks are re-wrapped.

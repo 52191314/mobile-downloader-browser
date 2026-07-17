@@ -112,6 +112,10 @@ abstract class TabLifecycleHost {
   /// from disk. The host uses this to decide whether the lazy
   /// `BrowserWidget` stack should render real WebViews.
   void markTabsLoaded();
+
+  /// Runs deferred cold-start work for [tab] once (adblock, media cache,
+  /// initial URL). Safe to call repeatedly; no-ops when already ready.
+  Future<void> ensureTabStartupReady(BrowserTab tab);
 }
 
 /// Owns the browser-tab lifecycle: loading saved tabs, opening new
@@ -203,6 +207,9 @@ class TabLifecycleController {
             _tabs.remove(tab);
           }
           int activeIdx = 0;
+          // Defer adblock / media-cache / URL load for every restored tab,
+          // then only wake the active one. Large Secure Folder tab lists
+          // previously froze cold start for 10–15s doing this N times.
           for (var i = 0; i < decoded.length; i++) {
             final entry = decoded[i];
             if (entry is Map) {
@@ -226,14 +233,30 @@ class TabLifecycleController {
                 restoredGroupName: groupName,
                 restoredColorIndex: groupColorIndex,
                 restoredAutoGrouped: autoGrouped,
+                deferStartupWork: true,
+                persist: false,
               );
               if (isActive) activeIdx = _tabs.length - 1;
             }
           }
           loadGroups();
           if (_tabs.isEmpty) openNewTab();
-          host.switchToActiveTab(activeIdx.clamp(0, _tabs.length - 1));
-          host.markTabsLoaded();
+          final idx = activeIdx.clamp(0, _tabs.length - 1);
+          host.switchToActiveTab(idx);
+          // Mount WebViews only after the first frame so chrome paints first.
+          // Navigation for the active tab is delayed further inside
+          // ensureTabStartupReady (blank WebView → then load URL).
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!host.isMounted) return;
+            host.markTabsLoaded();
+            // Give the blank WebView / GPU a moment before heavy page load.
+            Future<void>.delayed(const Duration(milliseconds: 700), () {
+              if (!host.isMounted || idx >= _tabs.length) return;
+              unawaited(host.ensureTabStartupReady(_tabs[idx]));
+            });
+          });
+          // Single persist after bulk restore (openNewTab skipped N writes).
+          unawaited(saveTabs());
           return;
         }
       } catch (_) {}
@@ -247,6 +270,7 @@ class TabLifecycleController {
         ),
       );
     }
+    unawaited(host.ensureTabStartupReady(_activeTab));
     host.markTabsLoaded();
   }
 
@@ -355,6 +379,13 @@ class TabLifecycleController {
     /// When true, build the WebView even if the tab is opened in the
     /// background so its page can start loading immediately.
     bool buildImmediately = false,
+
+    /// Skip adblock configure, media-cache load, and URL navigation until
+    /// [TabLifecycleHost.ensureTabStartupReady] (used for bulk tab restore).
+    bool deferStartupWork = false,
+
+    /// When false, skip [saveTabs] (bulk restore writes once at the end).
+    bool persist = true,
   }) {
     final useInjectedController = _tabs.isEmpty && injectedController != null;
     final controller = useInjectedController
@@ -381,17 +412,10 @@ class TabLifecycleController {
     if (restoredGroupName != null) tab.groupName = restoredGroupName;
     if (restoredColorIndex != null) tab.groupColorIndex = restoredColorIndex;
     tab.autoGrouped = restoredAutoGrouped;
-    // Fetch and cache the browser's user agent
-    unawaited(() async {
-      try {
-        final ua = await controller.evaluateJavaScript('navigator.userAgent');
-        if (ua is String && ua.isNotEmpty) {
-          tab.userAgent = ua.startsWith('"') && ua.endsWith('"')
-              ? ua.substring(1, ua.length - 1)
-              : ua;
-        }
-      } catch (_) {}
-    }());
+    // Restored shells must not auto-navigate the first WebView paint.
+    if (deferStartupWork) {
+      tab.canSeedWebViewUrl = false;
+    }
     tab.mediaSubscription = tab.snifferEngine.onMediaChanged.listen((_) {
       host.sniffIntakeController.scheduleMediaSave(tab);
     });
@@ -413,20 +437,40 @@ class TabLifecycleController {
     // playlist body fetching. Created lazily and reuses a per-tab headless
     // WebView navigated to the CDN origin (same-origin XHR bypasses both CORS
     // and Cloudflare WAF). Disposed automatically via [BrowserTab.dispose].
-    tab.headlessFetcher = HeadlessWebViewFetcher();
-    tab.snifferEngine.fetchPlaylistBodyViaHeadlessWebView = (url) =>
-        tab.headlessFetcher!.fetchText(url);
+    // Only allocate for tabs that will actually load soon — deferred tabs
+    // create it on first ensureTabStartupReady to cut Secure Folder cold start.
+    if (!deferStartupWork) {
+      tab.headlessFetcher = HeadlessWebViewFetcher();
+      tab.snifferEngine.fetchPlaylistBodyViaHeadlessWebView = (url) =>
+          tab.headlessFetcher!.fetchText(url);
+    }
     tab.snifferEngine.hlsPlaylistCache =
         (url) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, url);
     host.setupTabCallbacks(tab);
-    unawaited(host.configureTabAdblock(tab));
-    if (baseDir != null) {
-      unawaited(
-        tab.snifferEngine.loadDetectedMedia(
-          '$baseDir/sniffed_media_cache_${tab.id}.json',
-        ),
-      );
+
+    if (!deferStartupWork) {
+      unawaited(host.configureTabAdblock(tab));
+      if (baseDir != null) {
+        unawaited(
+          tab.snifferEngine.loadDetectedMedia(
+            '$baseDir/sniffed_media_cache_${tab.id}.json',
+          ),
+        );
+      }
+      tab.startupReady = true;
+      // Fetch UA only when the WebView may exist soon (not for deferred tabs).
+      unawaited(() async {
+        try {
+          final ua = await controller.evaluateJavaScript('navigator.userAgent');
+          if (ua is String && ua.isNotEmpty) {
+            tab.userAgent = ua.startsWith('"') && ua.endsWith('"')
+                ? ua.substring(1, ua.length - 1)
+                : ua;
+          }
+        } catch (_) {}
+      }());
     }
+
     // Apply the global User-Agent profile when it is not the default mobile UA.
     final uaProfile = settings.userAgentProfile;
     if (host.isDesktopMode) {
@@ -461,12 +505,15 @@ class TabLifecycleController {
     // Only refresh page info for blank/restored tabs.  When a URL is being
     // loaded, refreshPageInfo's currentUrl() races with loadRequest below and
     // can overwrite tab.currentUrl with "about:blank" before the WebView loads.
-    if (url == null) {
+    if (url == null && !deferStartupWork) {
       unawaited(host.refreshPageInfo(tab, recordHistory: false));
     }
     if (switchToTab) {
       final newIndex = insertAtIndex ?? _tabs.length - 1;
       host.switchToActiveTab(newIndex);
+      if (deferStartupWork) {
+        unawaited(host.ensureTabStartupReady(tab));
+      }
     } else if (host.isMounted) {
       host.markNeedsBuild();
     }
@@ -475,7 +522,9 @@ class TabLifecycleController {
     // _ready.future and onWebViewCreated.
     // BrowserWidget also seeds initialUrlRequest from address/currentUrl as a
     // backup when the platform view is first created (Queue external opens).
-    if (url != null && url.trim().isNotEmpty) {
+    // Restored background tabs skip this — ensureTabStartupReady loads on
+    // first activation only.
+    if (!deferStartupWork && url != null && url.trim().isNotEmpty) {
       final loadUrl = url.trim();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (host.isMounted && _tabs.contains(tab)) {
@@ -492,19 +541,30 @@ class TabLifecycleController {
     if (restoredGroupName == null) {
       _applyAutoGroupFor(tab);
     }
-    unawaited(saveTabs());
+    if (persist) {
+      unawaited(saveTabs());
+    }
   }
 
   void startVideoPoll(BrowserTab tab) {
     // Only run the video poll on the active tab.
     if (tab != _activeTab) return;
     tab.videoPollTimer?.cancel();
+    // Play: no video/audio src polling on restricted sites (hard-off).
+    if (!tab.sniffingEnabled) return;
     int emptyPollCount = 0;
     // Poll interval tuned to 5s (was 3s).
     tab.videoPollTimer = Timer.periodic(const Duration(seconds: 5), (
       timer,
     ) async {
       if (!host.isMounted || !_tabs.contains(tab)) {
+        timer.cancel();
+        if (identical(tab.videoPollTimer, timer)) {
+          tab.videoPollTimer = null;
+        }
+        return;
+      }
+      if (!tab.sniffingEnabled) {
         timer.cancel();
         if (identical(tab.videoPollTimer, timer)) {
           tab.videoPollTimer = null;

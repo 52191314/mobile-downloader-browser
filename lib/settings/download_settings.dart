@@ -577,6 +577,10 @@ class DownloadSettings {
   final AutoBackupInterval autoBackupInterval;
   final bool neverAskBatteryOpt;
 
+  /// True after we have shown the POST_NOTIFICATIONS system prompt once.
+  /// Prevents re-requesting on every launch when the user already denied.
+  final bool notificationPermissionAsked;
+
   const DownloadSettings({
     required this.maxConcurrentDownloads,
     required this.chunksPerTask,
@@ -596,7 +600,10 @@ class DownloadSettings {
     this.privateMode = false,
     this.wifiOnly = false,
     this.readerMode = false,
-    this.replaceSitePlayer = true,
+    // Default off: site players work normally; an IDM-style floating
+    // button opens Aurora when the user wants it. Auto-replace on play
+    // remains available as an optional Settings toggle.
+    this.replaceSitePlayer = false,
     this.captureShowAllMedia = false,
     this.maxDetectedMedia = 200,
     this.disabledMediaTypes = const {},
@@ -633,6 +640,7 @@ class DownloadSettings {
     this.lastBackupTimestamp = 0,
     this.autoBackupInterval = AutoBackupInterval.daily,
     this.neverAskBatteryOpt = false,
+    this.notificationPermissionAsked = false,
   });
 
   static const trustedAdblockSources = [
@@ -720,6 +728,7 @@ class DownloadSettings {
     int? lastBackupTimestamp,
     AutoBackupInterval? autoBackupInterval,
     bool? neverAskBatteryOpt,
+    bool? notificationPermissionAsked,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -747,6 +756,8 @@ class DownloadSettings {
       lastBackupTimestamp: lastBackupTimestamp ?? this.lastBackupTimestamp,
       autoBackupInterval: autoBackupInterval ?? this.autoBackupInterval,
       neverAskBatteryOpt: neverAskBatteryOpt ?? this.neverAskBatteryOpt,
+      notificationPermissionAsked:
+          notificationPermissionAsked ?? this.notificationPermissionAsked,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -855,6 +866,7 @@ class DownloadSettings {
     'lastBackupTimestamp': lastBackupTimestamp,
     'autoBackupInterval': autoBackupInterval.name,
     'neverAskBatteryOpt': neverAskBatteryOpt,
+    'notificationPermissionAsked': notificationPermissionAsked,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -910,7 +922,7 @@ class DownloadSettings {
       privateMode: json['privateMode'] as bool? ?? false,
       wifiOnly: json['wifiOnly'] as bool? ?? false,
       readerMode: json['readerMode'] as bool? ?? false,
-      replaceSitePlayer: json['replaceSitePlayer'] as bool? ?? true,
+      replaceSitePlayer: json['replaceSitePlayer'] as bool? ?? false,
       captureShowAllMedia: json['captureShowAllMedia'] as bool? ?? false,
       maxDetectedMedia:
           (json['maxDetectedMedia'] as num?)?.round() ?? 200,
@@ -988,6 +1000,8 @@ class DownloadSettings {
       autoBackupInterval:
           AutoBackupInterval.fromName(json['autoBackupInterval'] as String?),
       neverAskBatteryOpt: json['neverAskBatteryOpt'] as bool? ?? false,
+      notificationPermissionAsked:
+          json['notificationPermissionAsked'] as bool? ?? false,
     );
   }
 
