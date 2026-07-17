@@ -75,20 +75,17 @@ void main() {
       );
     });
 
-    test('torrent maps to mediaOther (no mediaTorrent in PR1)', () {
+    test('torrent maps to mediaTorrent (not amber / not mediaOther)', () {
       final item = media(
         url: 'magnet:?xt=urn:btih:abc',
         type: MediaType.torrent,
       );
-      expect(
-        mediaAccentFor(ac, item, isHls: false),
-        ac.mediaOther,
-      );
-      // Must not use amber accent or any non-mediaOther stand-in.
-      expect(
-        mediaAccentFor(ac, item, isHls: false),
-        isNot(ac.accentAmber),
-      );
+      final accent = mediaAccentFor(ac, item, isHls: false);
+      expect(accent, ac.mediaTorrent);
+      // Distinct from Best/action accents and the generic other token.
+      expect(accent, isNot(ac.accentAmber));
+      expect(accent, isNot(ac.mediaOther));
+      expect(accent, isNot(ac.accentFrost));
     });
 
     test('video/audio/image map to their media tokens', () {

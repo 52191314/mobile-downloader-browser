@@ -247,45 +247,50 @@ void showSniffedMediaSheet(
                               ),
                               // Options shell — show-all only (sort/display = PR5).
                               SliverToBoxAdapter(
-                                child: SwitchListTile(
-                                  key: const Key('capture_show_all_switch'),
-                                  dense: true,
-                                  activeTrackColor: context.ac.accentFrost,
-                                  secondary: Icon(
-                                    Icons.tune,
-                                    size: 20,
-                                    color: context.ac.textSecondary,
-                                  ),
-                                  title: Text(
-                                    'Show all captured media',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: context.ac.textPrimary,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    mediaCatchController.captureShowAllMedia
-                                        ? 'Show every detected URL, including non-media assets'
-                                        : 'Show only URLs that look like playable media',
-                                    style: TextStyle(
-                                      fontSize: 11,
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                                  child: SwitchListTile.adaptive(
+                                    key: const Key('capture_show_all_switch'),
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    activeTrackColor: context.ac.accentFrost,
+                                    secondary: Icon(
+                                      Icons.tune,
+                                      size: 20,
                                       color: context.ac.textSecondary,
                                     ),
-                                  ),
-                                  value:
-                                      mediaCatchController.captureShowAllMedia,
-                                  onChanged: (value) {
-                                    setSheetState(() {
-                                      mediaCatchController.captureShowAllMedia =
-                                          value;
-                                      mediaCatchController.clearSelection();
-                                    });
-                                    onSettingsChanged?.call(
-                                      settings.copyWith(
-                                        captureShowAllMedia: value,
+                                    title: Text(
+                                      'Show all captured media',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: context.ac.textPrimary,
                                       ),
-                                    );
-                                  },
+                                    ),
+                                    subtitle: Text(
+                                      mediaCatchController.captureShowAllMedia
+                                          ? 'Show every detected URL, including non-media assets'
+                                          : 'Show only URLs that look like playable media',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: context.ac.textSecondary,
+                                      ),
+                                    ),
+                                    value: mediaCatchController
+                                        .captureShowAllMedia,
+                                    onChanged: (value) {
+                                      setSheetState(() {
+                                        mediaCatchController
+                                            .captureShowAllMedia = value;
+                                        mediaCatchController.clearSelection();
+                                      });
+                                      onSettingsChanged?.call(
+                                        settings.copyWith(
+                                          captureShowAllMedia: value,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
                               const SliverToBoxAdapter(

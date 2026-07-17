@@ -84,12 +84,17 @@ class _FilterChip extends StatelessWidget {
     final isLight = context.isLight;
     final unselectedFill = isLight ? ac.surfaceElevated : ac.glassSurface;
 
+    // Design: selected All fill @ 0.16; type chips @ 0.14.
+    final selectedAlpha = value == MediaFilter.all ? 0.16 : 0.14;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.14) : unselectedFill,
+          color: selected
+              ? accent.withValues(alpha: selectedAlpha)
+              : unselectedFill,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? accent : ac.glassBorder,

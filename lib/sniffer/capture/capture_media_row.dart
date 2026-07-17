@@ -106,9 +106,10 @@ class CaptureMediaRow extends StatelessWidget {
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final narrow = MediaQuery.sizeOf(context).width < 360;
+                        child: Builder(
+                          builder: (context) {
+                            final narrow =
+                                MediaQuery.sizeOf(context).width < 360;
                             // Prefer wider action targets when room allows.
                             final actionSize =
                                 MediaQuery.sizeOf(context).width >= 400
@@ -155,59 +156,80 @@ class CaptureMediaRow extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Row(
+                                  // LayoutBuilder measures *title column* width
+                                  // (after checkbox/well, before actions) so
+                                  // Quality drop uses title remaining space.
+                                  child: LayoutBuilder(
+                                    builder: (context, titleConstraints) {
+                                      // Design: Flexible title min ~80dp; drop
+                                      // Quality first when both pills would
+                                      // starve the title; keep Best.
+                                      const titleMin = 80.0;
+                                      const bestReserve = 48.0;
+                                      const qualityReserve = 52.0;
+                                      const gaps = 8.0;
+                                      final showQualityWithBest =
+                                          titleConstraints.maxWidth >=
+                                              titleMin +
+                                                  bestReserve +
+                                                  qualityReserve +
+                                                  gaps;
+
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Flexible(
-                                            child: Text(
-                                              item.name.isNotEmpty
-                                                  ? item.name
-                                                  : 'Unknown media',
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  item.name.isNotEmpty
+                                                      ? item.name
+                                                      : 'Unknown media',
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color: ac.textPrimary,
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (showQuality &&
+                                                  recommended) ...[
+                                                if (showQualityWithBest) ...[
+                                                  const SizedBox(width: 4),
+                                                  _QualityPill(label: qLabel),
+                                                ],
+                                                const SizedBox(width: 4),
+                                                const _BestPill(),
+                                              ] else if (showQuality) ...[
+                                                const SizedBox(width: 4),
+                                                _QualityPill(label: qLabel),
+                                              ] else if (recommended) ...[
+                                                const SizedBox(width: 4),
+                                                const _BestPill(),
+                                              ],
+                                            ],
+                                          ),
+                                          if (subtitle.isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              subtitle,
                                               maxLines: 2,
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
-                                                color: ac.textPrimary,
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600,
+                                                color: ac.textSecondary,
+                                                fontSize: 11,
                                               ),
                                             ),
-                                          ),
-                                          // Max two pills: Quality (drop first)
-                                          // then Best (always keep when recommended).
-                                          if (showQuality && recommended) ...[
-                                            const SizedBox(width: 4),
-                                            // Drop quality when both present
-                                            // and title is tight — keep Best.
-                                            if (constraints.maxWidth >= 220)
-                                              _QualityPill(label: qLabel),
-                                            const SizedBox(width: 4),
-                                            const _BestPill(),
-                                          ] else if (showQuality) ...[
-                                            const SizedBox(width: 4),
-                                            _QualityPill(label: qLabel),
-                                          ] else if (recommended) ...[
-                                            const SizedBox(width: 4),
-                                            const _BestPill(),
                                           ],
                                         ],
-                                      ),
-                                      if (subtitle.isNotEmpty) ...[
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          subtitle,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: ac.textSecondary,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
+                                      );
+                                    },
                                   ),
                                 ),
                                 if (narrow)
@@ -411,7 +433,6 @@ class _OverflowActions extends StatelessWidget {
           onPressed: onDownload,
         ),
         PopupMenuButton<String>(
-          key: Key('info_item_$index'),
           tooltip: 'More actions',
           icon: Icon(Icons.more_vert, color: ac.textSecondary, size: 20),
           padding: EdgeInsets.zero,
@@ -439,19 +460,28 @@ class _OverflowActions extends StatelessWidget {
             ),
           ],
         ),
-        // Keep preview key discoverable for tests even when collapsed.
-        if (canPreview)
-          Offstage(
-            child: SizedBox(
-              width: 0,
-              height: 0,
-              child: IconButton(
-                key: Key('preview_item_$index'),
-                icon: const Icon(Icons.play_circle_outline),
-                onPressed: onPreview,
-              ),
+        // Preserve action keys for finders even when UI collapses into menu.
+        Offstage(
+          child: SizedBox(
+            width: 0,
+            height: 0,
+            child: Row(
+              children: [
+                if (canPreview)
+                  IconButton(
+                    key: Key('preview_item_$index'),
+                    icon: const Icon(Icons.play_circle_outline),
+                    onPressed: onPreview,
+                  ),
+                IconButton(
+                  key: Key('info_item_$index'),
+                  icon: const Icon(Icons.info_outline),
+                  onPressed: onInfo,
+                ),
+              ],
             ),
           ),
+        ),
       ],
     );
   }

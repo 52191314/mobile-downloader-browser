@@ -24,7 +24,9 @@ class CaptureBatchBar extends StatelessWidget {
     final ac = context.ac;
     final isLight = context.isLight;
     final allSelected = totalCount > 0 && selectedCount == totalCount;
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    // Modal already uses SafeArea; do not re-apply viewPadding.bottom
+    // (layout contract: fromLTRB(12, 8, 12, 12) only).
+    final narrow = MediaQuery.sizeOf(context).width < 360;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -43,25 +45,36 @@ class CaptureBatchBar extends StatelessWidget {
             : null,
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Row(
           children: [
-            TextButton.icon(
-              key: const Key('capture_select_all_button'),
-              icon: Icon(
-                allSelected ? Icons.check_box : Icons.select_all,
-                color: ac.accentFrost,
+            if (narrow)
+              IconButton(
+                key: const Key('capture_select_all_button'),
+                tooltip: allSelected ? 'Clear selection' : 'Select all',
+                icon: Icon(
+                  allSelected ? Icons.check_box : Icons.select_all,
+                  color: ac.accentFrost,
+                ),
+                onPressed: onToggleSelectAll,
+              )
+            else
+              TextButton.icon(
+                key: const Key('capture_select_all_button'),
+                icon: Icon(
+                  allSelected ? Icons.check_box : Icons.select_all,
+                  color: ac.accentFrost,
+                ),
+                label: Text(
+                  allSelected ? 'Clear' : 'Select all',
+                  style: TextStyle(color: ac.accentFrost),
+                ),
+                onPressed: onToggleSelectAll,
               ),
-              label: Text(
-                allSelected ? 'Clear' : 'Select all',
-                style: TextStyle(color: ac.accentFrost),
-              ),
-              onPressed: onToggleSelectAll,
-            ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             Expanded(
               child: Text(
-                '$selectedCount selected',
+                narrow ? '$selectedCount' : '$selectedCount selected',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -93,7 +106,7 @@ class CaptureBatchBar extends StatelessWidget {
                   color: context.auroraColorScheme.onPrimary,
                 ),
                 label: Text(
-                  'Download $selectedCount',
+                  narrow ? '$selectedCount' : 'Download $selectedCount',
                   style: TextStyle(
                     color: context.auroraColorScheme.onPrimary,
                     fontWeight: FontWeight.bold,
@@ -102,6 +115,8 @@ class CaptureBatchBar extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
+                  visualDensity:
+                      narrow ? VisualDensity.compact : VisualDensity.standard,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
