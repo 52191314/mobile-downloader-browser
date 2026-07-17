@@ -2,7 +2,7 @@
 
 **Source of truth for build order:** this file.  
 **Product intent / freemium split:** [`premium_freemium_strategy.md`](./premium_freemium_strategy.md).  
-**Last updated:** 2026-07-16 (P0.1–P0.3, P0.6, P1.1–P1.2, P1.5–P1.6, P1.9 implemented).
+**Last updated:** 2026-07-17 (P0.4 Play Billing + P0.5 channel define + YouTube Play compliance).
 
 ---
 
@@ -117,16 +117,11 @@ Without this, every gate is ad-hoc. Build once, use everywhere.
 - ~~✓ **P0.3 Upsell UI**~~  
   - **Done:** 2026-07-16 — `lib/premium/pro_upsell_sheet.dart` (showProUpsell bottom sheet with feature name + benefits grid).
 
-- ○ **P0.4 Play Billing (one-time unlock)**  
-  - Package: `in_app_purchase` (or Play Billing native).  
-  - Product id: e.g. `aurora_pro_unlock`.  
-  - Only in Play product flavor; GitHub APK has no billing client.  
-  - Accept: purchase, restore, offline last-known entitlement cache.
+- ~~✓ **P0.4 Play Billing (one-time unlock)**~~  
+  - **Done:** 2026-07-17 — `in_app_purchase`, `lib/premium/play_billing_service.dart`, product id `aurora_pro_unlock`, purchase + restore + offline cache (`pro_entitlement.json`). Play channel only; Settings + upsell wired. **Console:** create/activate product before real purchases work.
 
-- ○ **P0.5 Build flavors**  
-  - `free` / `play` (or `foss` / `store`): dart-define `AURORA_BUILD_CHANNEL=github|play`.  
-  - Play channel: billing + OAuth client ids from CI secrets.  
-  - Accept: one repo, two APKs; no secrets in git.
+- ~~✓ **P0.5 Build channel define**~~  
+  - **Done:** 2026-07-17 — `lib/premium/build_channel.dart` via `--dart-define=AURORA_BUILD_CHANNEL=github|play` (default `github`). Full Android productFlavors optional later; OAuth secrets still out of git.
 
 - ~~✓ **P0.6 Settings → Aurora Pro page**~~  
   - **Done:** 2026-07-16 — `settings_page.dart` card grid + `_buildProPage()` sub-page (status header, feature comparison list, debug toggle, buy button placeholder).

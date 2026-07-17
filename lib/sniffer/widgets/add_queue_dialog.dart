@@ -375,6 +375,23 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                   setState(() => isSubmitting = true);
 
                   try {
+                    final mediaUrl = selectedMedia.url;
+                    if (RestrictedMediaPolicy.isBlocked(
+                      mediaUrl: mediaUrl,
+                      sourcePageUrl: widget.currentUrl ??
+                          widget.tab.currentUrl ??
+                          selectedMedia.sourcePageUrl,
+                    )) {
+                      if (mounted) {
+                        setState(() => isSubmitting = false);
+                        AuroraSnackbar.show(
+                          context,
+                          RestrictedMediaPolicy.userMessageYouTube,
+                        );
+                      }
+                      return;
+                    }
+
                     final baseDir = widget.baseDir ?? Directory.systemTemp.path;
                     final baseTemp =
                         widget.baseTemp ?? Directory.systemTemp.path;
@@ -391,7 +408,6 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     // Use the sniffer/quality-picker URL as-is. No pre-flight
                     // playlist refresh — that only delayed the queue and often
                     // 403'd on Cloudflare while the selected URL was already fine.
-                    final mediaUrl = selectedMedia.url;
 
                     final taskId = DateTime.now().millisecondsSinceEpoch
                         .toString();

@@ -21,6 +21,7 @@ import '../sniffer/sniffer_url_utils.dart';
 import 'file_classifier.dart';
 import 'filename_service.dart';
 import 'media_file_types.dart';
+import '../compliance/restricted_media_policy.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
@@ -141,6 +142,10 @@ class DownloadQueue {
   /// which cannot be persisted to JSON. Set by [SnifferScreen] while
   /// mounted. Called before every task start / retry / link update.
   void Function(DownloadTask task)? browserContextAttacher;
+
+  /// Fired when [addTask] rejects a URL under [RestrictedMediaPolicy]
+  /// (e.g. YouTube). UI should show [message] to the user.
+  void Function(String message)? onRestrictedMediaBlocked;
 
   DownloadQueue({
     this.maxConcurrentDownloads = 3,
@@ -303,6 +308,15 @@ class DownloadQueue {
   /// move it to [DownloadState.idle] when the time arrives.
   void scheduleTask(DownloadTask task, DateTime startAt) {
     if (_isDisposed) return;
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: task.url,
+      sourcePageUrl: task.sourcePageUrl,
+      headers: task.headers,
+    )) {
+      _warn(RestrictedMediaPolicy.userMessageYouTube);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageYouTube);
+      return;
+    }
     task.scheduledStartAt = startAt;
     task.state = DownloadState.scheduled;
     _tasks[task.id] = task;
@@ -315,6 +329,17 @@ class DownloadQueue {
 
   void addTask(DownloadTask task, {bool force = false}) {
     if (_isDisposed) return;
+    // Play compliance: never enqueue YouTube / YouTube-CDN media.
+    // (See lib/compliance/restricted_media_policy.dart.)
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: task.url,
+      sourcePageUrl: task.sourcePageUrl,
+      headers: task.headers,
+    )) {
+      _warn(RestrictedMediaPolicy.userMessageYouTube);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageYouTube);
+      return;
+    }
     _autoRetryAttempts.remove(task.id);
     if (!force) {
       // Duplicate prevention: skip if a task with the same URL is already

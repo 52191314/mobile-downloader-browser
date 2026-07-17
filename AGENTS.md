@@ -10,6 +10,25 @@ Before searching broadly, read:
 
 When changing Aurora structure, major features, important classes, or important methods, update `../docs/code-maps/projects/aurora_downloader.md` in the same session. When appropriate (such as introducing user-facing features, changing project setup, or updating build/install instructions), also update the repository's main `README.md` in the same session.
 
+## Build channels & dart-defines (not “flavors” unless Gradle says so)
+
+**Read:** [`docs/build_channels_and_defines.md`](./docs/build_channels_and_defines.md) — canonical list of compile-time flags.
+
+- `AURORA_BUILD_CHANNEL` is a **`--dart-define` build channel**, **not** an Android Gradle product flavor and **not** “flair”.
+- Default (unset) = **`github`**: full sniffer (YouTube allowed), no Play Billing purchase path.
+- **`play`**: Play Store edition — YouTube media blocked, Play Billing for Pro.
+- Also documented there: `AURORA_GOOGLE_SERVER_CLIENT_ID`, product id `aurora_pro_unlock`, channel matrix.
+
+```bash
+# Default / GitHub channel
+flutter build apk --debug --target-platform android-arm64
+
+# Play channel
+flutter build apk --debug --target-platform android-arm64 --dart-define=AURORA_BUILD_CHANNEL=play
+```
+
+When adding a new define or channel value, update `docs/build_channels_and_defines.md` in the same session.
+
 ## Build (incremental — fast)
 
 To keep development iteration fast, **always build and install in debug mode** for testing changes. Debug builds compile almost instantly and skip Proguard/R8 code shrinking:
@@ -19,6 +38,8 @@ flutter build apk --debug --target-platform android-arm64
 ```
 
 Only use release builds (`--release` and `app-release.apk`) if explicitly requested.
+
+For Play-store–shaped testing, add `--dart-define=AURORA_BUILD_CHANNEL=play` (see build-channels doc above).
 
 **First build takes ~10 min** (compiles everything including Kotlin + native libs).
 **Subsequent builds take ~1-2 min** (Gradle recompiles only changed files).

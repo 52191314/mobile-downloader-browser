@@ -11,7 +11,7 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 | **License** | [GPL-3.0](LICENSE) |
 | **Repo** | [github.com/52191314/Aurora-Downloader](https://github.com/52191314/Aurora-Downloader) |
 
-> **Open source + freemium:** Source is public under GPL-3.0. Core downloading and sniffing stay free. Optional **Aurora Pro** gates power features (extra filter lists, higher concurrency, Drive sync, proxy, etc.). Play Billing is planned; debug builds can force Pro for development.
+> **Open source + freemium:** Source is public under GPL-3.0. Core downloading and sniffing stay free. Optional **Aurora Pro** (one-time Play Billing unlock on the Play edition) gates power features (extra filter lists, higher concurrency, Drive sync, proxy, etc.). Build with `--dart-define=AURORA_BUILD_CHANNEL=play` for the Store APK; default `github` has no billing client path. Debug builds can force Pro for development.
 
 ---
 
@@ -172,7 +172,8 @@ Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premiu
 | Scheduled auto-backup | manual only | intervals |
 | Sniffer, player, core download, IDM import | **yes** | yes |
 
-- Play Billing one-time unlock: **planned** (not required for source builds).
+- Play Billing one-time unlock: **implemented** on `AURORA_BUILD_CHANNEL=play` (product id `aurora_pro_unlock`; activate in Play Console).
+- YouTube media capture/download: **blocked only on the Play channel** (`AURORA_BUILD_CHANNEL=play`). GitHub/sideload builds keep full sniffer capability.
 - Debug builds: **Settings → Aurora Pro → Debug: Force Pro** (not persisted; resets on restart).
 
 ### Developer / internals
@@ -181,6 +182,7 @@ Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premiu
 - Optional debug log server
 - Session logs under `docs/sessions/`
 - Code map: `docs/code-maps/projects/aurora_downloader.md`
+- Play listing copy: `docs/play_store_listing.md` · compliance: `docs/play_store_compliance.md` · Console runbook: `docs/play_store_console_runbook.md`
 - Unit/widget tests under `test/`
 - Agent notes: `AGENTS.md`
 

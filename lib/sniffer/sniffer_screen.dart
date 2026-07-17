@@ -11,6 +11,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
+import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
@@ -2040,6 +2041,17 @@ class _SnifferScreenState extends State<SnifferScreen>
         screen: LogScreen.browser,
         eventType: LogEventType.navigation,
       );
+      // Play channel only — GitHub builds keep YouTube capture enabled.
+      if (RestrictedMediaPolicy.enforcementEnabled &&
+          RestrictedMediaPolicy.isYouTubePage(url) &&
+          tab == _activeTab &&
+          !tab.youtubeComplianceNoticeShown) {
+        tab.youtubeComplianceNoticeShown = true;
+        AuroraSnackbar.show(
+          context,
+          RestrictedMediaPolicy.pageNoticeYouTube,
+        );
+      }
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
       _updateTabNavState(tab);
       unawaited(_refreshPageInfo(tab, recordHistory: true));

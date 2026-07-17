@@ -50,12 +50,12 @@ class DownloadRule {
     return [
       DownloadRule(
         id: now.microsecondsSinceEpoch.toString(),
-        name: 'YouTube videos',
+        name: 'Direct video files',
         enabled: false,
-        hostPattern: '*.youtube.com',
+        hostPattern: '*.example.com',
         typeFilter: const {'video', 'hls'},
         renameTemplate: '{title}_{quality}.{ext}',
-        destinationFolder: 'YouTube',
+        destinationFolder: 'Videos',
         createdAt: now,
       ),
       DownloadRule(

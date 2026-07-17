@@ -31,6 +31,9 @@ import 'ui/pages/settings_page.dart';
 import 'backup/auto_backup_service.dart';
 import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
+import 'premium/play_billing_service.dart';
+import 'premium/pro_upsell_sheet.dart';
+import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
@@ -194,6 +197,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final ProEntitlement _proEntitlement = ProEntitlement();
+  late final PlayBillingService _playBilling =
+      PlayBillingService(_proEntitlement);
   final PublicDownloadsService _publicDownloadsService =
       PublicDownloadsService();
   final DownloadNotificationService _notificationService =
@@ -288,6 +293,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _proEntitlement.addListener(_onProEntitlementChanged);
     _loadSettingsFuture = _loadSettings();
     unawaited(_initNotifications());
+    proUpsellBilling = _playBilling;
+    unawaited(_playBilling.init());
+    _downloadQueue.onRestrictedMediaBlocked = (message) {
+      if (mounted) _showSnack(message);
+    };
     _queueSubscription = _downloadQueue.onTaskUpdated.listen((task) {
       // QueuePage listens to task updates and throttles its own rebuilds.
       // The shell only needs a rebuild for visible queue UI or when the queue
@@ -529,6 +539,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     WorkerIsolatePool.instance.dispose();
     _browserOpenRequestBus.dispose();
     _proEntitlement.removeListener(_onProEntitlementChanged);
+    unawaited(_playBilling.dispose());
     _proEntitlement.dispose();
     super.dispose();
   }
@@ -701,6 +712,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             autoBackupService: _autoBackupService,
                             proEntitlement: _proEntitlement,
+                            playBilling: _playBilling,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -754,6 +766,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null || !uri.hasScheme) {
       _showSnack('Enter a valid URL and try again.');
+      return;
+    }
+
+    if (RestrictedMediaPolicy.isBlocked(mediaUrl: rawUrl)) {
+      _showSnack(RestrictedMediaPolicy.userMessageYouTube);
       return;
     }
 

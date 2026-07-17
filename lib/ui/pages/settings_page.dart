@@ -22,6 +22,8 @@ import '../../settings/download_settings.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../premium/play_billing_service.dart';
+import '../../premium/build_channel.dart';
 import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
@@ -46,6 +48,7 @@ class SettingsPage extends StatefulWidget {
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
   final ProEntitlement proEntitlement;
+  final PlayBillingService? playBilling;
 
   const SettingsPage({
     super.key,
@@ -61,6 +64,7 @@ class SettingsPage extends StatefulWidget {
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
     required this.proEntitlement,
+    this.playBilling,
   });
 
   @override
@@ -155,8 +159,6 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildProfileHeader() {
-    final state = widget.driveSyncService.state;
-    final connected = _driveConnected;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -172,15 +174,11 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: connected
-                    ? context.ac.statusSuccess.withValues(alpha: 0.22)
-                    : context.ac.surfaceElevated,
+                backgroundColor: context.ac.surfaceElevated,
                 radius: 24,
                 child: Icon(
-                  connected ? Icons.cloud_done_rounded : Icons.cloud_outlined,
-                  color: connected
-                      ? context.ac.statusSuccess
-                      : context.ac.textSecondary,
+                  Icons.cloud_outlined,
+                  color: context.ac.textSecondary,
                   size: 24,
                 ),
               ),
@@ -200,16 +198,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      connected
-                          ? 'Drive · ${state.account ?? 'Connected'}'
-                          : 'Google Drive not linked',
+                      'Google Drive sync — upcoming',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        color: connected
-                            ? context.ac.accentFrost
-                            : context.ac.textSecondary,
+                        color: context.ac.textSecondary,
                       ),
                     ),
                   ],
@@ -1802,17 +1796,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
 
-              // Buy button (visible only when NOT Pro)
+              // Buy / restore (Play channel only for real purchases)
               if (!isPro) ...[
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: () {
-                      // TODO(P0.4): launch Play Billing purchase flow.
-                    },
+                    onPressed: () => _onGetProPressed(context),
                     icon: const Icon(Icons.shopping_cart_outlined, size: 18),
-                    label: const Text('Get Aurora Pro'),
+                    label: Text(
+                      BuildChannel.isPlay
+                          ? (widget.playBilling?.localizedPrice != null
+                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedPrice}'
+                              : 'Get Aurora Pro')
+                          : 'Get Aurora Pro on Google Play',
+                    ),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       textStyle: const TextStyle(
@@ -1822,10 +1820,29 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
+                if (BuildChannel.isPlay) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => _onRestoreProPressed(context),
+                      child: Text(
+                        'Restore purchase',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.ac.accentFrost,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Center(
                   child: Text(
-                    'One-time purchase — no subscription.',
+                    BuildChannel.isPlay
+                        ? 'One-time purchase via Google Play — no subscription.'
+                        : 'Pro unlock is sold only in the Google Play edition. '
+                            'This build has no external checkout.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
                       color: context.ac.textTertiary,
@@ -1838,6 +1855,41 @@ class _SettingsPageState extends State<SettingsPage> {
         },
       ),
     );
+  }
+
+  Future<void> _onGetProPressed(BuildContext context) async {
+    final billing = widget.playBilling;
+    if (!BuildChannel.isPlay || billing == null) {
+      if (!context.mounted) return;
+      AuroraSnackbar.show(
+        context,
+        'Aurora Pro is available as a one-time unlock in the Google Play edition of this app.',
+      );
+      return;
+    }
+    final ok = await billing.buyPro();
+    if (!context.mounted) return;
+    if (!ok) {
+      AuroraSnackbar.show(
+        context,
+        billing.lastError ?? 'Could not start purchase.',
+      );
+    }
+  }
+
+  Future<void> _onRestoreProPressed(BuildContext context) async {
+    final billing = widget.playBilling;
+    if (!BuildChannel.isPlay || billing == null) return;
+    await billing.restorePurchases();
+    if (!context.mounted) return;
+    if (widget.proEntitlement.isPro) {
+      AuroraSnackbar.show(context, 'Aurora Pro restored.');
+    } else {
+      AuroraSnackbar.show(
+        context,
+        billing.lastError ?? 'No previous Pro purchase found for this account.',
+      );
+    }
   }
 
   List<Widget> _buildFeatureRows(bool isPro) {
@@ -3569,7 +3621,7 @@ class _RulesPageState extends State<_RulesPage> {
                       controller: hostController,
                       decoration: const InputDecoration(
                         labelText: 'Host pattern (glob)',
-                        hintText: 'e.g. *.youtube.com',
+                        hintText: 'e.g. *.example.com',
                         isDense: true,
                       ),
                     ),
@@ -3634,7 +3686,7 @@ class _RulesPageState extends State<_RulesPage> {
                       controller: destController,
                       decoration: const InputDecoration(
                         labelText: 'Destination folder (optional)',
-                        hintText: 'e.g. YouTube',
+                        hintText: 'e.g. Direct video site',
                         isDense: true,
                       ),
                     ),
@@ -3950,7 +4002,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                 children: [
                   TextField(
                     decoration: const InputDecoration(
-                        labelText: 'Name', hintText: 'e.g. YouTube'),
+                        labelText: 'Name', hintText: 'e.g. News site'),
                     controller: TextEditingController(text: name),
                     onChanged: (v) => name = v.trim(),
                   ),
@@ -3958,7 +4010,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                   TextField(
                     decoration: const InputDecoration(
                         labelText: 'Host pattern',
-                        hintText: 'e.g. *.youtube.com'),
+                        hintText: 'e.g. *.example.com'),
                     controller: TextEditingController(text: hostPattern),
                     onChanged: (v) => hostPattern = v.trim(),
                   ),

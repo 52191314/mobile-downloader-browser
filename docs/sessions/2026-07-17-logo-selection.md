@@ -27,3 +27,10 @@
 
 - **Agent:** Grok
 - **Task:** Selected faceted crystal ice-arrow (`images/5.jpg`). Saved to `assets/brand/aurora_logo_ice_arrow_faceted.jpg`. Launcher wiring not done yet.
+
+### 2026-07-17 — User command
+
+> *Yes*
+
+- **Agent:** Grok
+- **Task:** Wired ice-arrow faceted logo as Android launcher + Play Store icon. Generated density mipmaps + adaptive foreground; bg `#222F3F`; script `tools/install_launcher_icon.py`; debug APK built and installed.

@@ -51,6 +51,14 @@
 - **Agent:** Gemini 3.5 Flash (High)
 - **Task:** Advise the user on how to merge Post-Gate-Production into main via Pull Request or Git commands, keeping active branch constraints in mind.
 
+### 2026-07-17 10:39 — User command
+
+> *If changes are not commit, flutter build doesn't build the changes?*
+
+- **Agent:** Gemini 3.5 Flash (High)
+- **Task:** Clarify that flutter build uses the filesystem (saved files) and does not require git commits to compile changes.
+
+
 
 
 

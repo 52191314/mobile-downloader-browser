@@ -11,6 +11,7 @@ import '../cookie_header_cache.dart';
 import '../models/browser_tab.dart';
 import '../models/sniffed_media.dart';
 import '../sniffer_url_utils.dart';
+import '../../compliance/restricted_media_policy.dart';
 import 'tab_manager.dart';
 
 /// Owns the URL intake pipeline that feeds sniffed media into the
@@ -157,6 +158,14 @@ class SniffIntakeController {
   }) {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
+    // Play compliance: never sniff YouTube pages or YouTube CDN media.
+    final pageUrl = sourcePageUrl ?? tab.currentUrl;
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: trimmed,
+      sourcePageUrl: pageUrl,
+    )) {
+      return;
+    }
     // Fast-path: skip CSS/JS/fonts/analytics/etc. before any async work.
     // If contentType is provided, it may be a media response — let it through.
     if (contentType == null && !_looksLikeMediaUrl(trimmed)) return;
@@ -254,6 +263,12 @@ class SniffIntakeController {
             tab.addressController.text,
           ]) ??
           '';
+      if (RestrictedMediaPolicy.isBlocked(
+        mediaUrl: url,
+        sourcePageUrl: pageUrl.isEmpty ? null : pageUrl,
+      )) {
+        return;
+      }
       final liveHeaders = <String, String>{
         'User-Agent': downloadUserAgent(url, tab),
         ...baseRequestHeaders(),
@@ -264,6 +279,14 @@ class SniffIntakeController {
 
       liveHeaders.addAll(tab.controller.currentHeaders);
       liveHeaders.addAll(await getCachedCookiesForUrl(url));
+
+      if (RestrictedMediaPolicy.isBlocked(
+        mediaUrl: url,
+        sourcePageUrl: pageUrl.isEmpty ? null : pageUrl,
+        headers: liveHeaders,
+      )) {
+        return;
+      }
 
       normalizeHeadersForUrl(
         liveHeaders,

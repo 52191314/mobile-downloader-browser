@@ -42,6 +42,8 @@ class BrowserTab {
   bool canGoForward = false;
   bool isLoading = false;
   int progress = 0;
+  /// One-shot Play-compliance snackbar when the user lands on YouTube.
+  bool youtubeComplianceNoticeShown = false;
   PageMeta pageMeta = const PageMeta();
 
   /// Per-tab cache of HLS playlist response bodies captured by
