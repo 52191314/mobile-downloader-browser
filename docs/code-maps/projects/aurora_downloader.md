@@ -42,8 +42,14 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 - `lib/sniffer/sniffer_screen.dart` — main browser/sniffer UI, tab management,
   dock; hosts Capture sheet via `showSniffedMediaSheet` + `_showAddQueueDialog`
   (`Future<bool>` for batch cancel-stop).
+- `lib/sniffer/widgets/capture_widgets.dart` — `part of` sniffer_screen; **live
+  dock only**: `_BrowserDock` / `_CompactNavButton` / `_DockDot` (`mini_dock_*`
+  keys). Dead Capture dual-path tiles removed in PR4 hygiene.
 - `lib/sniffer/sheets/sniffed_media_sheet.dart` — Capture sheet orchestrator
   (displayedGroups pipeline, sticky batch bar, stream rebuilds).
+- `lib/sniffer/sheets/media_info_sheet.dart` — Capture → Details journey;
+  dual-theme tokens via `context.ac` + type chip `mediaAccentFor` (token/
+  contrast only; no structural redesign).
 - `lib/sniffer/capture/` — Capture UI library (dual-theme chrome):
   `media_accent.dart` / `media_filter.dart`,
   `capture_sheet_header.dart`, `capture_filter_bar.dart`,
