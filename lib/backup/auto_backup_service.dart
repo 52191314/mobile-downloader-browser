@@ -11,16 +11,16 @@ import '../settings/download_settings.dart';
 import 'auto_backup_models.dart';
 import 'auto_backup_state.dart';
 
-/// Root folder (relative to the device Downloads collection) where auto
-/// backups are written. Matches the app's existing external-storage layout.
-const String autoBackupRootRelative = 'Download/Aurora Downloader/Auto Backup';
+/// Default auto-backup root when settings have not been applied yet.
+const String autoBackupRootRelativeDefault =
+    'Download/Aurora Downloader/Auto Backup';
 
 /// Owns the auto-backup schedule and the one-shot backup/restore operations.
 ///
 /// Backups are written through the existing native `publishFile` channel so
-/// they land in `Downloads/Aurora Downloader/Auto Backup/<timestamp>/` with no
-/// new storage permissions. Scheduling is in-app (a [Timer] plus a launch
-/// catch-up check) — appropriate for a downloader that is normally running.
+/// they land under the configured download destination
+/// (`…/Auto Backup/<timestamp>/`) with no new storage permissions. Scheduling
+/// is in-app (a [Timer] plus a launch catch-up check).
 class AutoBackupService {
   AutoBackupService({
     AutoBackupStateStore? stateStore,
@@ -34,6 +34,16 @@ class AutoBackupService {
   DownloadSettings? _settings;
   Timer? _timer;
   bool _inProgress = false;
+
+  /// MediaStore-relative root for auto backups, derived from
+  /// [DownloadSettings.downloadDestination].
+  String get autoBackupRootRelative {
+    final dest = DownloadSettings.normalizeDownloadDestination(
+      _settings?.downloadDestination,
+    );
+    final media = DownloadSettings.mediaStoreRelativeFromDisplay(dest);
+    return '$media/Auto Backup';
+  }
 
   /// Last successful backup time, or `null` if never.
   DateTime? get lastBackupTime =>

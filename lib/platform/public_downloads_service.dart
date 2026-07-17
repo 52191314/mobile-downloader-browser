@@ -16,7 +16,22 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
   static const String defaultRelativePath = 'Download/Aurora Downloader';
   static const String defaultPathLabel = 'Downloads/Aurora Downloader';
 
-  const PublicDownloadsService();
+  /// MediaStore RELATIVE_PATH root under the Downloads collection
+  /// (e.g. `Download/Aurora Downloader`). Updated from Settings.
+  String rootRelativePath;
+
+  PublicDownloadsService({
+    this.rootRelativePath = defaultRelativePath,
+  });
+
+  /// Display label for the current root (`Downloads/...`).
+  String get pathLabel {
+    final r = rootRelativePath.replaceAll('\\', '/');
+    if (r.startsWith('Download/')) {
+      return 'Downloads/${r.substring('Download/'.length)}';
+    }
+    return defaultPathLabel;
+  }
 
   @override
   Future<PublishedDownload?> publishCompletedFile(DownloadTask task) async {
@@ -66,13 +81,14 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
       }
     }
 
-    String relativePath = defaultRelativePath;
+    final root = rootRelativePath.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    String relativePath = root;
     if (completedIndex != -1) {
       final subPath = normalized.substring(completedIndex + prefixLen);
       final parts = subPath.split('/');
       if (parts.length > 1) {
         final subFolder = parts.sublist(0, parts.length - 1).join('/');
-        relativePath = '$defaultRelativePath/$subFolder';
+        relativePath = '$root/$subFolder';
       }
     }
 
@@ -85,7 +101,7 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
         });
 
     final uri = result?['uri'] as String?;
-    final label = result?['pathLabel'] as String? ?? defaultPathLabel;
+    final label = result?['pathLabel'] as String? ?? pathLabel;
     if (uri == null || uri.isEmpty) return null;
     return PublishedDownload(uri: uri, pathLabel: label);
   }

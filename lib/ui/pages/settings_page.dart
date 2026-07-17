@@ -28,6 +28,7 @@ import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
+import '../widgets/dock_order_store.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
@@ -138,13 +139,11 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: [
             _buildProfileHeader(),
             const SizedBox(height: 20),
-            _buildSectionTitle('Downloads'),
-            const SizedBox(height: 8),
-            _buildCardGrid(),
+            _buildSettingsHub(),
           ],
         ),
       ),
@@ -158,200 +157,326 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildProfileHeader() {
     final state = widget.driveSyncService.state;
     final connected = _driveConnected;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.ac.glassSurface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openPage(_buildDrivePage()),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.ac.glassBorder),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor:
-                connected ? context.ac.statusSuccess : context.ac.textTertiary,
-            radius: 24,
-            child: Icon(
-              connected ? Icons.cloud_done : Icons.cloud_outlined,
-              color: context.ac.surfaceField,
-              size: 24,
-            ),
+        child: Ink(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: context.ac.glassSurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: context.ac.glassBorder),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Aurora Downloader',
-                    style: TextStyle(
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: connected
+                    ? context.ac.statusSuccess.withValues(alpha: 0.22)
+                    : context.ac.surfaceElevated,
+                radius: 24,
+                child: Icon(
+                  connected ? Icons.cloud_done_rounded : Icons.cloud_outlined,
+                  color: connected
+                      ? context.ac.statusSuccess
+                      : context.ac.textSecondary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Aurora Downloader',
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: context.ac.textPrimary)),
-                const SizedBox(height: 2),
-                Text(
-                  connected
-                    ? 'Google Drive: ${state.account ?? "Connected"}'
-                    : 'Google Drive not linked',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          connected ? context.ac.accentFrost : context.ac.textSecondary),
+                        letterSpacing: -0.3,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      connected
+                          ? 'Drive · ${state.account ?? 'Connected'}'
+                          : 'Google Drive not linked',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: connected
+                            ? context.ac.accentFrost
+                            : context.ac.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.ac.textTertiary,
+              ),
+            ],
           ),
-          TextButton.icon(
-            icon: Icon(connected ? Icons.sync : Icons.link, size: 16),
-            label: Text(connected ? 'Sync' : 'Link'),
-            onPressed: () {
-              if (connected) {
-                widget.driveSyncService.disconnect();
-              } else if (!widget.proEntitlement.isPro) {
-                showProUpsell(context, ProFeature.driveSync);
-              } else {
-                widget.driveSyncService.connect();
-              }
-            },
-          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hub: grouped navigation rows (replaces uneven 2-col card grid)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSettingsHub() {
+    return ListenableBuilder(
+      listenable: widget.proEntitlement,
+      builder: (context, _) {
+        final isPro = widget.proEntitlement.isPro;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSectionTitle('Downloads'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.download_rounded,
+                title: 'Defaults',
+                subtitle: 'Save location, concurrency, retries',
+                onTap: () => _openPage(_buildDefaultsPage()),
+              ),
+              _NavItem(
+                icon: Icons.wifi_rounded,
+                title: 'Network',
+                subtitle: 'Proxy and browser identity',
+                onTap: () => _openPage(_buildNetworkPage()),
+              ),
+              _NavItem(
+                icon: Icons.rule_rounded,
+                title: 'Rules',
+                subtitle: 'Auto-rename and organize',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildRulesPage()),
+              ),
+              _NavItem(
+                icon: Icons.schedule_rounded,
+                title: 'Schedule',
+                subtitle: 'Download later / night mode',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildSchedulePage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Browser'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.shield_rounded,
+                title: 'Adblock',
+                subtitle: 'Ads, popups, filter lists',
+                onTap: () => _openPage(_buildAdblockPage()),
+              ),
+              _NavItem(
+                icon: Icons.search_rounded,
+                title: 'Search',
+                subtitle: _settings.searchEngine.name,
+                onTap: () => _openPage(_buildSearchPage()),
+              ),
+              _NavItem(
+                icon: Icons.tune_rounded,
+                title: 'Sniffer',
+                subtitle: 'Media types and site player',
+                onTap: () => _openPage(_buildSnifferPage()),
+              ),
+              _NavItem(
+                icon: Icons.people_outline_rounded,
+                title: 'Profiles',
+                subtitle: 'Per-site browser settings',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildProfilesPage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Appearance'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.palette_outlined,
+                title: 'Theme',
+                subtitle: 'Dark mode and display',
+                onTap: () => _openPage(_buildAppearancePage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Data & account'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.cloud_outlined,
+                title: 'Google Drive',
+                subtitle: _driveConnected
+                    ? 'Linked · manage sync'
+                    : 'Link account for backup sync',
+                badge: isPro ? null : 'Pro',
+                onTap: () => _openPage(_buildDrivePage()),
+              ),
+              _NavItem(
+                icon: Icons.backup_rounded,
+                title: 'Backup',
+                subtitle: 'Save and restore app data',
+                onTap: () => _openPage(_buildBackupPage()),
+              ),
+              _NavItem(
+                icon: isPro
+                    ? Icons.auto_awesome
+                    : Icons.auto_awesome_outlined,
+                title: 'Aurora Pro',
+                subtitle: isPro
+                    ? 'Premium features unlocked'
+                    : 'Unlock premium features',
+                onTap: () => _openPage(_buildProPage()),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('About'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.info_outline_rounded,
+                title: 'About',
+                subtitle: 'v1.1.9 · diagnostics · battery',
+                onTap: () => _openPage(_buildAboutPage()),
+              ),
+            ]),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: context.ac.textTertiary,
+          letterSpacing: 0.9,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavGroup(List<_NavItem> items) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.ac.surfaceCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.ac.borderHairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 56,
+                color: context.ac.borderHairline,
+              ),
+            _buildNavRow(items[i]),
+          ],
         ],
       ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Section title
-  // ---------------------------------------------------------------------------
-
-  Widget _buildSectionTitle(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 4),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: context.ac.textSecondary,
-              letterSpacing: 0.5)),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Dashboard card grid
-  // ---------------------------------------------------------------------------
-
-  Widget _buildCardGrid() {
-    return Column(
-      children: [
-        Row(children: [
-          Expanded(child: _buildCard(Icons.download_rounded, 'Defaults',
-              'Where files save, how many at once, and how Aurora handles drops', () => _openPage(_buildDefaultsPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.shield_rounded, 'Adblock',
-              'Block ads, popups, and unwanted redirects',
-              () => _openPage(_buildAdblockPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(Icons.search_rounded, 'Search',
-              'Powered by ${_settings.searchEngine.name}',
-              () => _openPage(_buildSearchPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.tune_rounded, 'Sniffer',
-              'Media types and Aurora player for site videos', () => _openPage(_buildSnifferPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(Icons.palette_outlined, 'Appearance',
-              'Pick theme, dark mode, and in-app alerts', () => _openPage(_buildAppearancePage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(Icons.wifi_rounded, 'Network',
-              'Set proxy server and browser identity', () => _openPage(_buildNetworkPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                Icons.rule_rounded,
-                'Rules',
-                isPro
-                    ? 'Auto-rename and organize downloads'
-                    : 'Pro feature',
-                () => _openPage(_buildRulesPage()),
-              );
-            },
-          )),
-          const SizedBox(width: 12),
-          const Expanded(child: SizedBox.shrink()),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildCard(
-              Icons.people_outline, 'Profiles', 'Per-site browser and download settings', () => _openPage(_buildProfilesPage()))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(
-              Icons.backup_rounded, 'Backup', 'Save and restore your data', () => _openPage(_buildBackupPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                Icons.schedule,
-                'Schedule',
-                isPro ? 'Download later / night mode' : 'Pro feature',
-                () => _openPage(_buildSchedulePage()),
-              );
-            },
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _buildCard(
-              Icons.info_outline, 'About', 'v1.1.9', () => _openPage(_buildAboutPage()))),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: ListenableBuilder(
-            listenable: widget.proEntitlement,
-            builder: (context, _) {
-              final isPro = widget.proEntitlement.isPro;
-              return _buildCard(
-                isPro ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-                'Aurora Pro',
-                isPro ? 'Pro features unlocked' : 'Unlock premium features',
-                () => _openPage(_buildProPage()),
-              );
-            },
-          )),
-          const Expanded(child: SizedBox.shrink()),
-        ]),
-      ],
-    );
-  }
-
-  Widget _buildCard(
-      IconData icon, String title, String subtitle, VoidCallback onTap) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
+  Widget _buildNavRow(_NavItem item) {
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: item.onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(icon, color: context.ac.accentFrost, size: 28),
-            const SizedBox(height: 10),
-            Text(title,
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: context.ac.textPrimary)),
-            const SizedBox(height: 2),
-            Text(subtitle,
-                style:
-                    TextStyle(fontSize: 11, color: context.ac.textTertiary)),
-          ]),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: context.ac.accentFrost.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  item.icon,
+                  size: 20,
+                  color: context.ac.accentFrost,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.title,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.2,
+                              color: context.ac.textPrimary,
+                            ),
+                          ),
+                        ),
+                        if (item.badge != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: context.ac.accentPurple
+                                  .withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              item.badge!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                                color: context.ac.accentPurple,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.ac.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.ac.textTertiary,
+                size: 22,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -398,13 +523,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.download_rounded, title: 'Download Defaults'),
             const SizedBox(height: 8),
             Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _label('Destination'),
-              Text(
-                local.downloadDestination.isNotEmpty
-                    ? local.downloadDestination
-                    : 'App support directory',
-                style:
-                    TextStyle(fontSize: 13, color: context.ac.textSecondary, fontFamily: 'JetBrainsMono'),
+              _label('Destination (under Downloads)'),
+              const SizedBox(height: 6),
+              _DownloadDestinationEditor(
+                value: local.downloadDestination,
+                autoClassifyEnabled: local.autoClassifyEnabled,
+                onChanged: (dest) {
+                  setLocal(
+                    () => local = local.copyWith(downloadDestination: dest),
+                  );
+                  _update(local);
+                },
               ),
               const SizedBox(height: 16),
               _label('Max concurrent downloads'),
@@ -1050,7 +1179,9 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 16),
               SwitchListTile(
                 title: const Text('In-app snackbar alerts'),
-                subtitle: const Text('Show slide-up alerts for queue events. Use this when you want to glance at progress without leaving the browser.'),
+                subtitle: const Text(
+                  'Show slide-up alerts for queue events. Use this when you want to glance at progress without leaving the browser.',
+                ),
                 value: _settings.showSnackbars,
                 onChanged: (v) {
                   setLocal(() {});
@@ -1059,6 +1190,30 @@ class _SettingsPageState extends State<SettingsPage> {
                 contentPadding: EdgeInsets.zero,
               ),
             ])),
+            const SizedBox(height: 20),
+            PanelHeader(
+              icon: Icons.view_carousel_outlined,
+              title: 'Bottom dock',
+            ),
+            const SizedBox(height: 8),
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Drag to reorder icons on each dock slide. '
+                    'Add or remove actions (up to $kMaxDockItemsPerSlide per slide). '
+                    'Swipe the browser dock left/right to switch slides.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.ac.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const _DockReorderEditor(),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1291,18 +1446,24 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Row(
                   children: [
                     Expanded(
+                      flex: 3,
                       child: Text(entry.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               fontSize: 13,
                               color: context.ac.textPrimary)),
                     ),
-                    const SizedBox(width: 8),
-                    Text(': ${entry.value}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: context.ac.textSecondary)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 2,
+                      child: Text(': ${entry.value}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: context.ac.textSecondary)),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.close, size: 16),
                       padding: EdgeInsets.zero,
@@ -1846,6 +2007,23 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
+/// One row in the Settings hub navigation list.
+class _NavItem {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final VoidCallback onTap;
+
+  const _NavItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.badge,
+  });
+}
+
 /// Detail page for Drive Sync settings with live state subscription.
 class _DriveSyncPageContent extends StatefulWidget {
   final DriveSyncService driveSyncService;
@@ -2032,9 +2210,25 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _loadLocalBackups() async {
     try {
-      final files = await PublicDownloadsService.listBackupFiles(
+      final root = DownloadSettings.mediaStoreRelativeFromDisplay(
+        widget.settings.downloadDestination,
+      );
+      // Primary + legacy roots so old backups remain restorable.
+      final primary = await PublicDownloadsService.listBackupFiles(
+        relativePath: '$root/Backup',
+      );
+      final legacyDefault = await PublicDownloadsService.listBackupFiles(
+        relativePath: 'Download/Aurora Downloader/Backup',
+      );
+      final legacyOldName = await PublicDownloadsService.listBackupFiles(
         relativePath: 'Download/Aurora Downloads/Backups',
       );
+      final seen = <String>{};
+      final files = <Map<String, dynamic>>[];
+      for (final item in [...primary, ...legacyDefault, ...legacyOldName]) {
+        final key = (item['uri'] ?? item['displayName'] ?? item).toString();
+        if (seen.add(key)) files.add(item);
+      }
       if (mounted) {
         setState(() {
           _localBackups = files;
@@ -2067,12 +2261,16 @@ class _BackupPageState extends State<BackupPage> {
         settingsJson: settingsJson,
       );
 
-      // Publish the file directly to public Download/Aurora Downloads/Backups/
-      await const MethodChannel('aurora_downloader/public_downloads').invokeMapMethod<String, Object?>('publishFile', {
+      final root = DownloadSettings.mediaStoreRelativeFromDisplay(
+        widget.settings.downloadDestination,
+      );
+      // Public folder: Downloads/<your folder>/Backup/
+      await const MethodChannel('aurora_downloader/public_downloads')
+          .invokeMapMethod<String, Object?>('publishFile', {
         'sourcePath': file.path,
         'displayName': p.basename(file.path),
         'mimeType': 'application/json',
-        'relativePath': 'Download/Aurora Downloads/Backups',
+        'relativePath': '$root/Backup',
       });
 
       // Delete the private temporary file
@@ -4261,5 +4459,422 @@ class _SchedulePageContentState extends State<_SchedulePageContent> {
           '(${diff.inMinutes}m remaining)';
     }
     return '${pad(dt.hour)}:${pad(dt.minute)} (less than a minute)';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bottom dock reorder editor (Settings → Appearance)
+// ---------------------------------------------------------------------------
+
+/// Drag-to-reorder UI for the two browser dock slides.
+class _DockReorderEditor extends StatefulWidget {
+  const _DockReorderEditor();
+
+  @override
+  State<_DockReorderEditor> createState() => _DockReorderEditorState();
+}
+
+class _DockReorderEditorState extends State<_DockReorderEditor> {
+  late List<String> _slide1;
+  late List<String> _slide2;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await dockOrderStore.load();
+    if (!mounted) return;
+    setState(() {
+      _slide1 = List<String>.from(dockOrderStore.slide1Order);
+      _slide2 = List<String>.from(dockOrderStore.slide2Order);
+      _ready = true;
+    });
+  }
+
+  Future<void> _persist() async {
+    await dockOrderStore.update(slide1: _slide1, slide2: _slide2);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _reset() async {
+    await dockOrderStore.reset();
+    if (!mounted) return;
+    setState(() {
+      _slide1 = List<String>.from(kDefaultSlide1Order);
+      _slide2 = List<String>.from(kDefaultSlide2Order);
+    });
+  }
+
+  List<DockItem> get _available {
+    final used = {..._slide1, ..._slide2};
+    return kAllDockItems.where((i) => !used.contains(i.id)).toList();
+  }
+
+  Future<void> _addTo(int slide) async {
+    final pool = _available;
+    if (pool.isEmpty) {
+      AuroraSnackbar.show(context, 'Every dock action is already assigned.');
+      return;
+    }
+    final target = slide == 1 ? _slide1 : _slide2;
+    if (target.length >= kMaxDockItemsPerSlide) {
+      AuroraSnackbar.show(
+        context,
+        'This slide is full (max $kMaxDockItemsPerSlide). Remove one first.',
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                'Add to slide $slide',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: ctx.ac.textPrimary,
+                ),
+              ),
+            ),
+            for (final item in pool)
+              ListTile(
+                leading: Icon(item.icon, color: ctx.ac.accentFrost),
+                title: Text(item.label),
+                onTap: () => Navigator.pop(ctx, item.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (slide == 1) {
+        _slide1 = [..._slide1, picked];
+      } else {
+        _slide2 = [..._slide2, picked];
+      }
+    });
+    await _persist();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSlideSection(
+          title: 'Slide 1 (default)',
+          slideIndex: 1,
+          ids: _slide1,
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (newIndex > oldIndex) newIndex -= 1;
+              final item = _slide1.removeAt(oldIndex);
+              _slide1.insert(newIndex, item);
+            });
+            unawaited(_persist());
+          },
+          onRemove: (id) {
+            setState(() => _slide1 = _slide1.where((x) => x != id).toList());
+            unawaited(_persist());
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildSlideSection(
+          title: 'Slide 2 (swipe left)',
+          slideIndex: 2,
+          ids: _slide2,
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (newIndex > oldIndex) newIndex -= 1;
+              final item = _slide2.removeAt(oldIndex);
+              _slide2.insert(newIndex, item);
+            });
+            unawaited(_persist());
+          },
+          onRemove: (id) {
+            setState(() => _slide2 = _slide2.where((x) => x != id).toList());
+            unawaited(_persist());
+          },
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _reset,
+            icon: const Icon(Icons.restart_alt, size: 18),
+            label: const Text('Reset dock to default'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSlideSection({
+    required String title,
+    required int slideIndex,
+    required List<String> ids,
+    required void Function(int oldIndex, int newIndex) onReorder,
+    required void Function(String id) onRemove,
+  }) {
+    final ac = context.ac;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: ac.textPrimary,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => unawaited(_addTo(slideIndex)),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add'),
+            ),
+          ],
+        ),
+        if (ids.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No icons on this slide. Tap Add.',
+              style: TextStyle(fontSize: 13, color: ac.textSecondary),
+            ),
+          )
+        else
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: ids.length,
+            onReorder: onReorder,
+            itemBuilder: (context, index) {
+              final id = ids[index];
+              final item = DockOrderStore.byId(id);
+              if (item == null) {
+                return SizedBox(key: ValueKey('missing_$id'));
+              }
+              return ListTile(
+                key: ValueKey('$slideIndex-$id'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(Icons.drag_handle, color: ac.textSecondary),
+                ),
+                title: Row(
+                  children: [
+                    Icon(item.icon, size: 20, color: ac.accentFrost),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(item.label)),
+                  ],
+                ),
+                trailing: IconButton(
+                  tooltip: 'Remove',
+                  icon: Icon(Icons.close, size: 18, color: ac.textSecondary),
+                  onPressed: ids.length <= 1
+                      ? null
+                      : () => onRemove(id),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Download destination editor (Settings → Download Defaults)
+// ---------------------------------------------------------------------------
+
+/// Edits the folder under public Downloads. Android MediaStore only allows
+/// publishing into the Downloads collection without a one-off SAF picker.
+class _DownloadDestinationEditor extends StatefulWidget {
+  final String value;
+  final bool autoClassifyEnabled;
+  final ValueChanged<String> onChanged;
+
+  const _DownloadDestinationEditor({
+    required this.value,
+    required this.autoClassifyEnabled,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DownloadDestinationEditor> createState() =>
+      _DownloadDestinationEditorState();
+}
+
+class _DownloadDestinationEditorState
+    extends State<_DownloadDestinationEditor> {
+  late final TextEditingController _controller;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    final normalized =
+        DownloadSettings.normalizeDownloadDestination(widget.value);
+    final folder = normalized.startsWith('Downloads/')
+        ? normalized.substring('Downloads/'.length)
+        : normalized;
+    _controller = TextEditingController(text: folder);
+    _focus = FocusNode();
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _commit();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _DownloadDestinationEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value && !_focus.hasFocus) {
+      final normalized =
+          DownloadSettings.normalizeDownloadDestination(widget.value);
+      final folder = normalized.startsWith('Downloads/')
+          ? normalized.substring('Downloads/'.length)
+          : normalized;
+      if (_controller.text != folder) {
+        _controller.text = folder;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final dest = DownloadSettings.normalizeDownloadDestination(
+      'Downloads/${_controller.text.trim()}',
+    );
+    final folder = dest.startsWith('Downloads/')
+        ? dest.substring('Downloads/'.length)
+        : dest;
+    if (_controller.text != folder) {
+      _controller.text = folder;
+    }
+    if (dest !=
+        DownloadSettings.normalizeDownloadDestination(widget.value)) {
+      widget.onChanged(dest);
+    }
+  }
+
+  void _reset() {
+    _controller.text = 'Aurora Downloader';
+    widget.onChanged(DownloadSettings.defaultDownloadDestination);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saved = DownloadSettings.normalizeDownloadDestination(widget.value);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _controller,
+          focusNode: _focus,
+          decoration: InputDecoration(
+            prefixText: 'Downloads/',
+            prefixStyle: TextStyle(
+              color: context.ac.textSecondary,
+              fontFamily: 'JetBrainsMono',
+              fontSize: 13,
+            ),
+            hintText: 'Aurora Downloader',
+            isDense: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          style: TextStyle(
+            fontSize: 13,
+            color: context.ac.textPrimary,
+            fontFamily: 'JetBrainsMono',
+          ),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _commit(),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: context.ac.accentAmber.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: context.ac.accentAmber.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline,
+                  size: 18, color: context.ac.accentAmber),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Android limits where apps can write. Aurora publishes into the '
+                  'shared Downloads collection only (and subfolders you name here). '
+                  'You cannot choose DCIM, arbitrary SD-card roots, or other apps\' '
+                  'folders without using a one-time system folder picker for a single file. '
+                  'With auto-classify on, files also go into Videos / Audio / Images / … '
+                  'under this folder.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: context.ac.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            TextButton(
+              onPressed: _reset,
+              child: const Text('Reset to default'),
+            ),
+            const Spacer(),
+          ],
+        ),
+        Text(
+          'Publishes to: $saved'
+          '${widget.autoClassifyEnabled ? '/Videos|Audio|…' : ''}',
+          style: TextStyle(
+            fontSize: 12,
+            color: context.ac.textSecondary,
+            fontFamily: 'JetBrainsMono',
+          ),
+        ),
+      ],
+    );
   }
 }

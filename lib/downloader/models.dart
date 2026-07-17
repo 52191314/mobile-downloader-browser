@@ -199,10 +199,10 @@ class DownloadTask implements Comparable<DownloadTask> {
   /// When set, the download will start at this time (Pro scheduled/night queue).
   DateTime? scheduledStartAt;
   Future<String?> Function({bool forceReload})? onTokenExpired;
-  /// Optional callback that fetches a URL through the WebView's JavaScript
-  /// `fetch()` API, bypassing Cloudflare WAF blocks that affect Dart's HTTP
-  /// client.  Set when the task is created from a browser tab context
-  /// (sniffed media or in-app-pasted URL).
+  /// Optional callback that fetches a playlist/text URL through the WebView
+  /// (sniffer-grade `fetchPlaylistBodyViaJavaScript`), bypassing Cloudflare
+  /// WAF blocks that affect Dart's HTTP client.  Set when the task is created
+  /// from a browser tab context (sniffed media or in-app-pasted URL).
   Future<String?> Function(String url, {Map<String, String>? headers})? fetchViaWebView;
   /// Optional lookup for HLS playlist response bodies captured by
   /// browser_guard.js during page load. Returns the cached playlist text

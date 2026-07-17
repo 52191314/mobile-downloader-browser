@@ -78,10 +78,15 @@ class HlsDownloader implements BaseDownloader {
   HeadlessWebViewFetcher? _headlessFetcher;
 
   /// After repeated HTTP 403/401 on a WAF host, skip Dart HTTP entirely and
-  /// rely on WebView / headless only. Hammering 403s trips the circuit
+  /// rely on native / WebView / headless. Hammering 403s trips the circuit
   /// breaker and can get the device IP banned by Cloudflare.
   bool _skipHttpFallback = false;
   int _httpForbiddenStreak = 0;
+
+  /// After repeated native HttpURLConnection 403s, skip native segment path
+  /// and fall back to WebView/headless (slower but CF-clearance capable).
+  bool _skipNativeSegment = false;
+  int _nativeForbiddenStreak = 0;
 
 
   Timer? _speedTimer;
@@ -923,94 +928,222 @@ class HlsDownloader implements BaseDownloader {
     return h;
   }
 
+  /// True when [body] looks like a real HLS playlist (not a CF/HTML block page).
+  static bool _isUsablePlaylistBody(String? body) {
+    if (body == null || body.isEmpty) return false;
+    final trimmed = body.trimLeft();
+    if (trimmed.startsWith('#EXTM3U')) return true;
+    final head = trimmed.length > 64 ? trimmed.substring(0, 64) : trimmed;
+    return head.contains('#EXTM3U');
+  }
+
   Future<HlsPlaylist> _fetchPlaylist(Uri uri) async {
+    final urlStr = uri.toString();
+    final details = <String>[];
+
     // 0th attempt: cached HLS playlist body from browser_guard.js capture.
     // When the browser page loaded, browser_guard.js intercepted the fetch/XHR
     // for this .m3u8 URL and cached the response body.  Using it here avoids
     // any network request — no Cloudflare WAF, no cookie mismatch, no 403.
+    // Lookup is exact or host+path (sibling query / quality cache reuse).
     if (task.hlsPlaylistCache != null) {
-      final urlStr = uri.toString();
       final cached = task.hlsPlaylistCache!(urlStr);
-      if (cached != null && cached.isNotEmpty) {
-        AuroraLog.instance.debug('Using cached HLS playlist body for $uri (${cached.length} chars)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+      if (_isUsablePlaylistBody(cached)) {
+        AuroraLog.instance.debug(
+          'Using cached HLS playlist body for $uri (${cached!.length} chars)',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
         return HlsPlaylistParser.parse(cached, uri);
       }
-      AuroraLog.instance.debug('Cache MISS for $urlStr (hlsPlaylistCache is set but returned null)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+      AuroraLog.instance.debug(
+        'Cache MISS for $urlStr (hlsPlaylistCache is set but returned null/unusable)',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
+      details.add('Cache:miss');
     } else {
-      AuroraLog.instance.debug('hlsPlaylistCache is null (task not created from browser tab)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+      AuroraLog.instance.debug(
+        'hlsPlaylistCache is null (task not created from browser tab)',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
+      details.add('Cache:null');
     }
 
     var headers = _requestHeaders(uri);
-    AuroraLog.instance.debug('_fetchPlaylist uri=$uri headers_count=${headers.length}', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+    AuroraLog.instance.debug(
+      '_fetchPlaylist uri=$uri headers_count=${headers.length}',
+      category: LogCategory.hls,
+      screen: LogScreen.background,
+      eventType: LogEventType.network,
+    );
 
-    // 1st attempt: WebView JS fetch() when available — this is the ONLY
-    // path that sees Cloudflare clearance cookies because it runs inside
-    // the WebView's browser context and uses the raw UA that earned the
-    // cf_clearance token.  Skip the Dart HTTP client entirely when we
-    // have a WebView bridge so we don't waste retries on a path known
-    // to fail for Cloudflare-protected hosts.
+    // 1st attempt: WebView JS body fetch (same path as sniffer
+    // fetchPlaylistBodyViaJavaScript). Runs in the browser context so it
+    // sees Cloudflare clearance cookies + real Chrome TLS fingerprint.
+    // Opening the .m3u8 in the address bar can show a CF block page while
+    // this path still succeeds from the source-page tab.
     if (task.fetchViaWebView != null) {
       try {
-        final jsBody = await task.fetchViaWebView!(uri.toString(), headers: headers)
-            .timeout(const Duration(seconds: 15));
-        if (jsBody != null && jsBody.isNotEmpty) {
-          AuroraLog.instance.debug('WebView JS fetch succeeded for $uri (${jsBody.length} chars)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+        final jsBody = await task
+            .fetchViaWebView!(urlStr, headers: headers)
+            .timeout(const Duration(seconds: 20));
+        if (_isUsablePlaylistBody(jsBody)) {
+          AuroraLog.instance.debug(
+            'WebView JS fetch succeeded for $uri (${jsBody!.length} chars)',
+            category: LogCategory.hls,
+            screen: LogScreen.background,
+            eventType: LogEventType.network,
+          );
           return HlsPlaylistParser.parse(jsBody, uri);
         }
-        AuroraLog.instance.debug('WebView JS fetch returned null/empty', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+        details.add('WebView:null/empty');
+        AuroraLog.instance.debug(
+          'WebView JS fetch returned null/empty/non-playlist',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
       } catch (e) {
-        AuroraLog.instance.debug('WebView JS fetch threw: $e', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+        details.add('WebView:throw');
+        AuroraLog.instance.debug(
+          'WebView JS fetch threw: $e',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
         _logError('WebView JS fetch threw', e);
       }
     } else {
-      AuroraLog.instance.debug('fetchViaWebView is null (no WebView context)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+      details.add('WebView:unset');
+      AuroraLog.instance.debug(
+        'fetchViaWebView is null (no WebView context)',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
     }
 
-    // 2nd attempt: Dart HTTP client.
-    AuroraLog.instance.debug('Trying Dart HTTP client for $uri', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
-    // Inject Cloudflare cookies for the Dart HTTP fallback.
+    // 2nd attempt: headless WebView on the CDN origin (same-origin XHR).
+    // Segments already use this path; playlists previously fell through to
+    // Dart HTTP which Cloudflare TLS-fingerprint blocks (403).
+    if (!_isPaused) {
+      try {
+        _headlessFetcher ??= HeadlessWebViewFetcher();
+        final headlessBody = await _headlessFetcher!
+            .fetchText(urlStr)
+            .timeout(const Duration(seconds: 45));
+        if (_isUsablePlaylistBody(headlessBody)) {
+          AuroraLog.instance.debug(
+            'Headless WebView playlist fetch succeeded for $uri '
+            '(${headlessBody!.length} chars)',
+            category: LogCategory.hls,
+            screen: LogScreen.background,
+            eventType: LogEventType.network,
+          );
+          return HlsPlaylistParser.parse(headlessBody, uri);
+        }
+        details.add('Headless:null/empty');
+        AuroraLog.instance.debug(
+          'Headless WebView playlist fetch returned null/empty for $uri',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
+      } catch (e) {
+        details.add('Headless:throw');
+        AuroraLog.instance.debug(
+          'Headless WebView playlist fetch threw: $e',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
+        _logError('Headless playlist fetch threw', e);
+      }
+    }
+
+    // 3rd attempt: Dart HTTP client (works for non-WAF hosts; usually 403
+    // on Cloudflare CDNs like surrit.com even with cookies).
+    AuroraLog.instance.debug(
+      'Trying Dart HTTP client for $uri',
+      category: LogCategory.hls,
+      screen: LogScreen.background,
+      eventType: LogEventType.network,
+    );
     if (task.cookieProvider != null) {
       try {
-        final cookieHeaders = await task.cookieProvider!(uri.toString());
+        final cookieHeaders = await task.cookieProvider!(urlStr);
         if (cookieHeaders.isNotEmpty) {
           headers = {...headers, ...cookieHeaders};
         }
       } catch (_) {}
     }
-    final response = await client
-        .get(uri, headers: headers)
-        .timeout(const Duration(seconds: 15));
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return HlsPlaylistParser.parse(response.body, uri);
+    try {
+      final response = await client
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          _isUsablePlaylistBody(response.body)) {
+        return HlsPlaylistParser.parse(response.body, uri);
+      }
+      details.add('Dart:${response.statusCode}');
+      AuroraLog.instance.debug(
+        'Dart client returned ${response.statusCode}',
+        category: LogCategory.hls,
+        screen: LogScreen.background,
+        eventType: LogEventType.network,
+      );
+    } catch (e) {
+      details.add('Dart:throw');
+      _logError('Dart playlist fetch threw', e);
     }
-    AuroraLog.instance.debug('Dart client returned ${response.statusCode}', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
-    var lastErrorDetail = 'Dart:${response.statusCode}';
 
-    // 3rd attempt: Android native HttpURLConnection.
+    // 4th attempt: Android native HttpURLConnection.
     try {
       final nativeResult = await NetworkBindingService.fetchUrl(
-        uri.toString(),
+        urlStr,
         headers: headers,
       );
       if (nativeResult != null) {
         final sc = nativeResult['statusCode'] as int? ?? 0;
         final body = nativeResult['body'] as String? ?? '';
-        lastErrorDetail += ' Native:$sc';
-        if (sc >= 200 && sc < 300 && body.isNotEmpty) {
-          AuroraLog.instance.debug('Native HTTP fallback succeeded for $uri (status $sc)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+        details.add('Native:$sc');
+        if (sc >= 200 && sc < 300 && _isUsablePlaylistBody(body)) {
+          AuroraLog.instance.debug(
+            'Native HTTP fallback succeeded for $uri (status $sc)',
+            category: LogCategory.hls,
+            screen: LogScreen.background,
+            eventType: LogEventType.network,
+          );
           return HlsPlaylistParser.parse(body, uri);
         }
       } else {
-        lastErrorDetail += ' Native:null';
+        details.add('Native:null');
       }
     } catch (e) {
-      lastErrorDetail += ' Native:throw($e)';
+      details.add('Native:throw');
       _logError('Native HTTP fallback threw', e);
     }
 
-    AuroraLog.instance.debug('All fetch attempts failed for $uri. Detail: $lastErrorDetail', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
+    final detailStr = details.join(' ');
+    AuroraLog.instance.debug(
+      'All fetch attempts failed for $uri. Detail: $detailStr',
+      category: LogCategory.hls,
+      screen: LogScreen.background,
+      eventType: LogEventType.network,
+    );
+    // Prefer reporting a real status from the chain (not a hardcoded 403).
+    final statusMatch = RegExp(r'(?:Dart|Native):(\d{3})').firstMatch(detailStr);
+    final statusHint = statusMatch?.group(1) ?? 'failed';
     throw HttpException(
-      'HLS playlist request failed (403). Fallback results: $lastErrorDetail',
+      'HLS playlist request failed ($statusHint). Fallback results: $detailStr. '
+      'If the page still plays in the browser, re-open the source page and retry '
+      '(WebView/headless path must be used for Cloudflare CDNs).',
       uri: uri,
     );
   }
@@ -1121,27 +1254,26 @@ class HlsDownloader implements BaseDownloader {
     }
 
     var nextSegIndex = 0;
-    // When segments must go through the WebView bridge (WAF hosts like
-    // surrit.com), keep concurrency low. 4–8 parallel multi‑MB base64
-    // round-trips starve the bridge and produce "Speed 0 for 30s" stalls.
-    final webViewBound = task.fetchBinaryViaWebView != null;
-    final effectiveConcurrency = webViewBound
+    // Prefer high concurrency for the native stream path (1DM-style).
+    // Only cap hard when native is disabled and every segment must go
+    // through the WebView base64 bridge (that path starves at 4–8×).
+    final webViewOnly = _skipNativeSegment && task.fetchBinaryViaWebView != null;
+    final effectiveConcurrency = webViewOnly
         ? math.min(maxConcurrentSegments, 2)
         : maxConcurrentSegments;
     final workerCount = math.max(
       1,
       math.min(effectiveConcurrency, segments.length),
     );
-    if (webViewBound) {
-      AuroraLog.instance.info(
-        'HLS WebView-bound download: concurrency capped at $workerCount '
-        '(configured maxConcurrentSegments=$maxConcurrentSegments)',
-        category: LogCategory.hls,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-        taskId: task.id,
-      );
-    }
+    AuroraLog.instance.info(
+      'HLS segment workers=$workerCount '
+      '(maxConcurrent=$maxConcurrentSegments nativeSkip=$_skipNativeSegment '
+      'webViewOnly=$webViewOnly)',
+      category: LogCategory.hls,
+      screen: LogScreen.background,
+      eventType: LogEventType.network,
+      taskId: task.id,
+    );
 
     Future<void> worker() async {
       while (!_isPaused && !_hostBlocked) {
@@ -1274,18 +1406,123 @@ class HlsDownloader implements BaseDownloader {
     bool isInit = false,
     int segmentIndex = -1,
   }) async {
-    // 0th attempt: WebView binary fetch (bypasses Cloudflare WAF).
+    final ext = isInit
+        ? 'mp4'
+        : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
+    final finalPath =
+        '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
+    final partPath = '$finalPath.part';
+
+    // 0th attempt: Android native stream-to-file (CookieManager + media
+    // headers). This is the 1DM-class path — multi‑MB/s without WebView
+    // base64. Was implemented natively but never wired into HLS until now.
+    if (!_skipNativeSegment && !_isPaused && !_hostBlocked) {
+      try {
+        final headers = Map<String, String>.from(_requestHeaders(uri));
+        String? cookieHeader;
+        if (task.cookieProvider != null) {
+          try {
+            final cookies = await task.cookieProvider!(uri.toString());
+            cookieHeader = cookies['Cookie'] ?? cookies['cookie'];
+            if (cookieHeader == null && cookies.isNotEmpty) {
+              // Flatten map of name→value if provider returns that shape.
+              cookieHeader = cookies.entries
+                  .where((e) => e.key.toLowerCase() != 'cookie')
+                  .map((e) => '${e.key}=${e.value}')
+                  .join('; ');
+              if (cookieHeader.isEmpty) cookieHeader = null;
+            }
+          } catch (_) {}
+        }
+        final partFile = File(partPath);
+        await partFile.parent.create(recursive: true);
+        final native = await NetworkBindingService.streamSegmentToFile(
+          uri.toString(),
+          partPath,
+          headers: headers,
+          cookieHeader: cookieHeader,
+        ).timeout(const Duration(seconds: 130));
+        final status = native?['statusCode'] as int? ?? 0;
+        final written = (native?['bytesWritten'] as num?)?.toInt() ?? 0;
+        if (status >= 200 && status < 300 && written > 0 && await partFile.exists()) {
+          final limiter = _speedLimiter;
+          if (limiter != null && limiter.isActive) {
+            while (!limiter.tryConsume(written)) {
+              await limiter.onCapacityAvailable;
+              if (_isPaused) break;
+            }
+          }
+          final keyBytes = _encryptionKeyBytes;
+          if (!isInit && keyBytes != null && segmentIndex >= 0) {
+            final iv = _buildAesIv(
+              _playlist?.encryptionKey,
+              segmentIndex,
+              _playlist?.mediaSequence ?? 0,
+            );
+            await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+          }
+          await partFile.rename(finalPath);
+          task.downloadedBytes += written;
+          _accountSegmentBytes(
+            bytes: written,
+            fileIndex: index,
+            segmentIndex: segmentIndex,
+            isInit: isInit,
+          );
+          _taskUpdateController.add(task);
+          _consecutiveSegmentFailures = 0;
+          _nativeForbiddenStreak = 0;
+          AuroraLog.instance.debug(
+            'Native stream segment $index OK ($written bytes, status $status)',
+            category: LogCategory.hls,
+            screen: LogScreen.background,
+            eventType: LogEventType.network,
+          );
+          return File(finalPath);
+        }
+        if (status == 403 || status == 401) {
+          _nativeForbiddenStreak++;
+          if (_nativeForbiddenStreak >= 3) {
+            _skipNativeSegment = true;
+            AuroraLog.instance.info(
+              'Native segment stream disabled after $_nativeForbiddenStreak '
+              '× 403/401 — falling back to WebView/headless',
+              category: LogCategory.hls,
+              screen: LogScreen.background,
+              eventType: LogEventType.network,
+              taskId: task.id,
+            );
+          }
+        }
+        try {
+          if (await partFile.exists()) await partFile.delete();
+        } catch (_) {}
+        AuroraLog.instance.debug(
+          'Native stream segment $index failed status=$status written=$written',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
+      } catch (e) {
+        AuroraLog.instance.debug(
+          'Native stream segment $index threw: $e',
+          category: LogCategory.hls,
+          screen: LogScreen.background,
+          eventType: LogEventType.network,
+        );
+        try {
+          final f = File(partPath);
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+    }
+
+    // 1st attempt: WebView binary fetch (bypasses Cloudflare WAF).
     if (task.fetchBinaryViaWebView != null) {
       try {
         final data = await task.fetchBinaryViaWebView!(uri.toString())
             .timeout(const Duration(seconds: 55));
         if (data != null && data.isNotEmpty) {
-          final ext = isInit
-              ? 'mp4'
-              : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
-          final finalPath =
-              '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
-          final partPath = '$finalPath.part';
           final partFile = File(partPath);
           await partFile.parent.create(recursive: true);
           // Speed limiter gate (WebView fallback path).
@@ -1330,7 +1567,7 @@ class HlsDownloader implements BaseDownloader {
       }
     }
 
-    // 1st fallback: headless WebView (before Dart HTTP). The headless
+    // 2nd fallback: headless WebView (before Dart HTTP). The headless
     // WebView creates its own Chromium TLS session on the CDN's domain,
     // which bypasses Cloudflare TLS fingerprint detection that blocks
     // Dart's TLS stack even when valid cookies are sent.
@@ -1340,12 +1577,6 @@ class HlsDownloader implements BaseDownloader {
         final data = await _headlessFetcher!.fetchBinary(uri.toString())
             .timeout(const Duration(seconds: 55));
         if (data != null && data.isNotEmpty) {
-          final ext = isInit
-              ? 'mp4'
-              : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
-          final finalPath =
-              '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
-          final partPath = '$finalPath.part';
           final partFile = File(partPath);
           await partFile.parent.create(recursive: true);
           // Speed limiter gate (headless WebView path).
@@ -1425,12 +1656,6 @@ class HlsDownloader implements BaseDownloader {
           final retry = await _headlessFetcher!.fetchBinary(uri.toString())
               .timeout(const Duration(seconds: 55));
           if (retry != null && retry.isNotEmpty) {
-            final ext = isInit
-                ? 'mp4'
-                : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
-            final finalPath =
-                '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
-            final partPath = '$finalPath.part';
             final partFile = File(partPath);
             await partFile.parent.create(recursive: true);
             await partFile.writeAsBytes(retry);
@@ -1569,12 +1794,6 @@ class HlsDownloader implements BaseDownloader {
           );
         }
 
-        final ext = isInit
-            ? 'mp4'
-            : (uri.path.toLowerCase().endsWith('.m4s') ? 'm4s' : 'ts');
-        final finalPath =
-            '${task.tempDir}/segment_${index.toString().padLeft(6, '0')}.$ext';
-        final partPath = '$finalPath.part';
         final partFile = File(partPath);
         await partFile.parent.create(recursive: true);
         final sink = partFile.openWrite();

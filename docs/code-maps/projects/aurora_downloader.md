@@ -1,6 +1,6 @@
 # Aurora Downloader — Code Map
 
-> Maintained per AGENTS.md. Last updated: 2026-07-16.
+> Maintained per AGENTS.md. Last updated: 2026-07-17.
 
 ## Overview
 Aurora Downloader is a Flutter (Android) media downloader with an integrated
@@ -40,7 +40,26 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 
 ## Key Files
 - `lib/sniffer/sniffer_screen.dart` — main browser/sniffer UI, tab management,
-  dock, sniffed-media sheet.
+  dock; hosts Capture sheet via `showSniffedMediaSheet` + `_showAddQueueDialog`
+  (`Future<bool>` for batch cancel-stop).
+- `lib/sniffer/widgets/capture_widgets.dart` — `part of` sniffer_screen; **live
+  dock only**: `_BrowserDock` / `_CompactNavButton` / `_DockDot` (`mini_dock_*`
+  keys). Dead Capture dual-path tiles removed in PR4 hygiene.
+- `lib/sniffer/sheets/sniffed_media_sheet.dart` — Capture sheet orchestrator
+  (displayedGroups pipeline, sticky batch bar, stream rebuilds).
+- `lib/sniffer/sheets/media_info_sheet.dart` — Capture → Details journey;
+  dual-theme tokens via `context.ac` + type chip `mediaAccentFor` (token/
+  contrast only; no structural redesign).
+- `lib/sniffer/capture/` — Capture UI library (dual-theme chrome):
+  `media_accent.dart` / `media_filter.dart`,
+  `capture_sheet_header.dart`, `capture_filter_bar.dart`,
+  `capture_options_row.dart` (show-all + sort + display mode; KD25–26),
+  `capture_group_sort.dart` (post-filter `sortCaptureGroups` by
+  `SniffedMediaSort` on primary media — overrides analyzer confidence order),
+  `capture_stats_row.dart`, `capture_media_row.dart` (subtitle honors
+  `SniffedMediaDisplayMode`), `capture_batch_bar.dart`, `capture_empty_state.dart`.
+- `lib/sniffer/controllers/media_catch_controller.dart` — group-index selection
+  into the **displayed** list (`recommendedGroupIndices` / `selectedFrom`).
 - `lib/sniffer/browser_controller.dart` — `SnifferWebViewControllerImpl`
   (freeze/thaw, resource timer, dispose lifecycle).
 - `lib/sniffer/browser_guard_installer.dart` — injects guard JS, 20s refresh timer.
@@ -50,6 +69,9 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
   video poll, media save scheduling.
 - `lib/sniffer/controllers/tab_manager.dart` — `switchToActiveTab` freeze/thaw.
 - `lib/downloader/hls_downloader.dart` — HLS variant pipeline.
+  Playlist fetch order (2026-07-16): cache → WebView body → headless → Dart → native.
+- `lib/sniffer/hls_playlist_cache_lookup.dart` — exact + host/path playlist cache
+  lookup; rejects CF/HTML block pages.
 - `lib/log_server.dart` — debug-only HTTP server exposing `DownloadLogger` (release tree-shaken).
 - `lib/downloader/download_splitter.dart` — parallel segmented download.
 - `lib/downloader/torrent_downloader.dart` — torrent (native libtorrent_flutter + synthetic Dart fallback).
@@ -88,6 +110,21 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 - Debug-only Log Server added (2026-07-14): `lib/log_server.dart`, started via
   `startLogServerIfDebug()` in `main.dart` after logger init; no-op in release.
 - Consolidated Backup (2026-07-15): backup data files merged into a single consolidated `aurora_backup.json` to avoid multi-file copy issues, with backward-compatible fallback for restoring older backups.
+- Surrit/Cloudflare playlist gap (2026-07-16): sniffer already fetched real
+  `#EXTM3U` via `fetchPlaylistBodyViaJavaScript` while downloader used weaker
+  `fetchViaJavaScript`, no headless playlist fallback, exact-only cache →
+  Dart:403. Fixed: download bridges use playlist-body path; headless before
+  Dart; fuzzy cache; tests in `test/sniffer/hls_playlist_cache_lookup_test.dart`.
+- TS→MP4 remux HW audio silence (2026-07-16): MX Player HW mute / HW+ OK.
+  Native remux now time-interleaves A/V and synthesizes AAC `csd-0` when
+  missing (`MainActivity.remuxTsToMp4`). Existing files need re-download or
+  re-remux to pick up the fix.
+- HLS stall at ~142KB / speed 0 (2026-07-16): segments never used native
+  `streamSegmentToFile` (1DM-class CookieManager + media headers); only
+  WebView base64 / headless (timeouts + disposed controller). Wired as
+  primary path in `HlsDownloader._downloadSegment` via
+  `NetworkBindingService.streamSegmentToFile`; full concurrency retained
+  while native works.
 - WebView performance optimizations (2026-07-15): disabled `transparentBackground` and `useOnLoadResource` bridge callback, added `rendererPriorityPolicy` set to `RENDERER_PRIORITY_IMPORTANT` and `waivedWhenNotVisible: true`, and migrated media sniffer detection from `onLoadResource` into `shouldInterceptRequestCallback` to reduce bridge chatter.
 - WebView performance optimizations Phase 3 & 4 (2026-07-15): Added selective cookie cache clearing per host, optimized progress indicator with a ValueNotifier to eliminate full page rebuilds during load, implemented auto-cancellation of the periodic video poll timer after 3 consecutive empty cycles, and simplified browser guard re-injection logic.
 - Three-way duplicate download choices (2026-07-16): Added `DuplicateChoice` (downloadAgain, updateExisting, skip) to prompt the user when a duplicate URL is detected, allowing them to update the existing download task (resetting progress if URL changed, and resuming) or create a separate one.

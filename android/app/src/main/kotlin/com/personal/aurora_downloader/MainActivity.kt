@@ -410,64 +410,84 @@ class MainActivity : FlutterActivity() {
         val cookieHeader = call.argument<String>("cookie") ?: ""
         val rangeHeader = call.argument<String>("range") ?: ""
 
-        val mergedCookies = buildString {
+        // Background thread: multi‑MB segments must not block the platform channel.
+        Thread {
             try {
-                val webCookies = CookieManager.getInstance().getCookie(url)
-                if (!webCookies.isNullOrBlank()) append(webCookies)
-            } catch (_: Exception) {}
-            if (isNotEmpty() && cookieHeader.isNotBlank()) append("; ")
-            if (cookieHeader.isNotBlank()) append(cookieHeader)
-        }
+                val mergedCookies = buildString {
+                    try {
+                        val webCookies = CookieManager.getInstance().getCookie(url)
+                        if (!webCookies.isNullOrBlank()) append(webCookies)
+                    } catch (_: Exception) {}
+                    if (isNotEmpty() && cookieHeader.isNotBlank()) append("; ")
+                    if (cookieHeader.isNotBlank()) append(cookieHeader)
+                }
 
-        try {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", userAgent)
-            if (referer.isNotBlank()) connection.setRequestProperty("Referer", referer)
-            if (origin.isNotBlank()) connection.setRequestProperty("Origin", origin)
-            if (mergedCookies.isNotBlank()) connection.setRequestProperty("Cookie", mergedCookies)
-            // Media-player fingerprint (NOT XHR):
-            connection.setRequestProperty("Accept", "video/MP2T, video/mp4, application/vnd.apple.mpegurl, */*")
-            connection.setRequestProperty("Sec-Fetch-Dest", "video")
-            connection.setRequestProperty("Sec-Fetch-Mode", "no-cors")
-            connection.setRequestProperty("Sec-Fetch-Site", "cross-site")
-            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
-            connection.setRequestProperty("Accept-Encoding", "gzip, deflate, br")
-            if (rangeHeader.isNotBlank()) connection.setRequestProperty("Range", rangeHeader)
-            connection.connectTimeout = 30000
-            connection.readTimeout = 30000
-            connection.instanceFollowRedirects = true
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("User-Agent", userAgent)
+                if (referer.isNotBlank()) connection.setRequestProperty("Referer", referer)
+                if (origin.isNotBlank()) connection.setRequestProperty("Origin", origin)
+                if (mergedCookies.isNotBlank()) connection.setRequestProperty("Cookie", mergedCookies)
+                // Media-player fingerprint (NOT XHR) — same class of request 1DM uses.
+                connection.setRequestProperty("Accept", "video/MP2T, video/mp4, application/octet-stream, */*")
+                connection.setRequestProperty("Sec-Fetch-Dest", "video")
+                connection.setRequestProperty("Sec-Fetch-Mode", "no-cors")
+                connection.setRequestProperty("Sec-Fetch-Site", "cross-site")
+                connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+                // identity: avoid brotli/gzip wrapping binary TS segments.
+                connection.setRequestProperty("Accept-Encoding", "identity")
+                if (rangeHeader.isNotBlank()) connection.setRequestProperty("Range", rangeHeader)
+                connection.connectTimeout = 30000
+                connection.readTimeout = 120000
+                connection.instanceFollowRedirects = true
 
-            val statusCode = connection.responseCode
-            val inputStream = if (statusCode in 200..399) {
-                connection.inputStream
-            } else {
-                connection.errorStream
-            }
+                val statusCode = connection.responseCode
+                val inputStream = if (statusCode in 200..399) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream
+                }
 
-            var bytesWritten = 0L
-            if (inputStream != null) {
+                var bytesWritten = 0L
                 val outFile = File(filePath)
-                outFile.parentFile?.mkdirs()
-                val buffer = ByteArray(65536) // 64 KB buffer
-                FileOutputStream(outFile).use { outputStream ->
-                    var read: Int
-                    while (inputStream.read(buffer).also { read = it } != -1) {
-                        outputStream.write(buffer, 0, read)
-                        bytesWritten += read
+                if (statusCode in 200..399 && inputStream != null) {
+                    outFile.parentFile?.mkdirs()
+                    val buffer = ByteArray(65536)
+                    FileOutputStream(outFile).use { outputStream ->
+                        var read: Int
+                        while (inputStream.read(buffer).also { read = it } != -1) {
+                            outputStream.write(buffer, 0, read)
+                            bytesWritten += read
+                        }
                     }
+                    inputStream.close()
+                } else {
+                    // Don't leave a partial/error body as a "segment".
+                    try { if (outFile.exists()) outFile.delete() } catch (_: Exception) {}
+                    try { inputStream?.close() } catch (_: Exception) {}
+                }
+                connection.disconnect()
+
+                Log.d(
+                    NETWORK_TAG,
+                    "streamSegmentToFile status=$statusCode bytes=$bytesWritten cookies=${mergedCookies.isNotBlank()}",
+                )
+                runOnUiThread {
+                    result.success(
+                        mapOf(
+                            "statusCode" to statusCode,
+                            "bytesWritten" to bytesWritten,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(NETWORK_TAG, "streamSegmentToFile failed: ${e.message}")
+                try { File(filePath).delete() } catch (_: Exception) {}
+                runOnUiThread {
+                    result.error("stream_failed", e.message, null)
                 }
             }
-            connection.disconnect()
-
-            result.success(mapOf(
-                "statusCode" to statusCode,
-                "bytesWritten" to bytesWritten
-            ))
-        } catch (e: Exception) {
-            Log.w(NETWORK_TAG, "streamSegmentToFile failed: ${e.message}")
-            result.error("stream_failed", e.message, null)
-        }
+        }.start()
     }
 
     /**
@@ -897,6 +917,13 @@ class MainActivity : FlutterActivity() {
      * [MediaExtractor] + [MediaMuxer] APIs. No transcoding — just a
      * container change, so the operation is fast and lossless.
      *
+     * Important for MX Player / HW decode:
+     * - Samples must be **time-interleaved** across tracks (not all video then
+     *   all audio). Sequential-track writes produce files that often play
+     *   video-only in pure HW mode while HW+/SW still has sound.
+     * - AAC tracks need `csd-0` (AudioSpecificConfig). MPEG-TS ADTS streams
+     *   sometimes omit it; HW decoders then open silent audio tracks.
+     *
      * Runs on a background thread because MediaMuxer.start() / writeSampleData()
      * can take noticeable time on large files.
      *
@@ -912,50 +939,162 @@ class MainActivity : FlutterActivity() {
             return
         }
         Thread {
+            var extractor: MediaExtractor? = null
+            var muxer: MediaMuxer? = null
             try {
-                val extractor = MediaExtractor()
+                extractor = MediaExtractor()
                 extractor.setDataSource(sourcePath)
-                val muxer = MediaMuxer(destPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                val trackInfo = mutableMapOf<Int, MediaFormat>()
+
+                // extractor track index → muxer track index (only A/V)
+                val trackMap = LinkedHashMap<Int, Int>()
+                muxer = MediaMuxer(destPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
                 for (i in 0 until extractor.trackCount) {
-                    trackInfo[i] = extractor.getTrackFormat(i)
-                    muxer.addTrack(trackInfo[i]!!)
+                    val format = ensureAacCsd0(extractor.getTrackFormat(i))
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    // Skip metadata / timed-text / unknown — HW players choke on junk tracks.
+                    if (!mime.startsWith("video/") && !mime.startsWith("audio/")) {
+                        Log.i("AuroraRemux", "skipping non A/V track $i mime=$mime")
+                        continue
+                    }
+                    val muxerIndex = muxer.addTrack(format)
+                    trackMap[i] = muxerIndex
+                    Log.i(
+                        "AuroraRemux",
+                        "track $i → muxer $muxerIndex mime=$mime " +
+                            "hasCsd0=${format.containsKey("csd-0")} " +
+                            "sampleRate=${format.getIntegerOrNull(MediaFormat.KEY_SAMPLE_RATE)} " +
+                            "channels=${format.getIntegerOrNull(MediaFormat.KEY_CHANNEL_COUNT)}",
+                    )
                 }
-                if (trackInfo.isEmpty()) {
+
+                if (trackMap.isEmpty()) {
                     extractor.release()
                     muxer.release()
                     File(destPath).delete()
-                    runOnUiThread { result.success(mapOf("success" to false, "error" to "no tracks found in source")) }
+                    runOnUiThread {
+                        result.success(
+                            mapOf("success" to false, "error" to "no video/audio tracks found in source"),
+                        )
+                    }
                     return@Thread
                 }
-                muxer.start()
-                val buffer = ByteBuffer.allocate(1024 * 1024)
-                for (i in 0 until extractor.trackCount) {
-                    extractor.selectTrack(i)
-                    extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                    val info = MediaCodec.BufferInfo()
-                    while (true) {
-                        val size = extractor.readSampleData(buffer, 0)
-                        if (size < 0) break
-                        info.offset = 0
-                        info.size = size
-                        info.presentationTimeUs = extractor.sampleTime
-                        info.flags = extractor.sampleFlags
-                        muxer.writeSampleData(i, buffer, info)
-                        extractor.advance()
-                    }
-                    extractor.unselectTrack(i)
+
+                // Select all A/V tracks so MediaExtractor returns samples
+                // interleaved by presentation time (required by MediaMuxer).
+                for (extractorIndex in trackMap.keys) {
+                    extractor.selectTrack(extractorIndex)
                 }
+                extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+
+                muxer.start()
+                val buffer = ByteBuffer.allocateDirect(2 * 1024 * 1024)
+                val info = MediaCodec.BufferInfo()
+                var sampleCount = 0
+                while (true) {
+                    val extractorTrack = extractor.sampleTrackIndex
+                    if (extractorTrack < 0) break
+                    val muxerTrack = trackMap[extractorTrack]
+                    if (muxerTrack == null) {
+                        // Selected only A/V tracks, so this should be rare.
+                        extractor.advance()
+                        continue
+                    }
+                    buffer.clear()
+                    val size = extractor.readSampleData(buffer, 0)
+                    if (size < 0) break
+                    info.offset = 0
+                    info.size = size
+                    info.presentationTimeUs = extractor.sampleTime.coerceAtLeast(0L)
+                    info.flags = extractor.sampleFlags
+                    // MediaMuxer requires buffer position/limit to describe the sample.
+                    buffer.position(0)
+                    buffer.limit(size)
+                    muxer.writeSampleData(muxerTrack, buffer, info)
+                    sampleCount++
+                    extractor.advance()
+                }
+
                 muxer.stop()
                 muxer.release()
+                muxer = null
                 extractor.release()
+                extractor = null
+                Log.i("AuroraRemux", "remux OK samples=$sampleCount tracks=${trackMap.size} → $destPath")
                 runOnUiThread { result.success(mapOf("success" to true, "error" to null)) }
             } catch (e: Exception) {
-                Log.w("AuroraRemux", "remuxTsToMp4 failed: ${e.message}")
+                Log.w("AuroraRemux", "remuxTsToMp4 failed: ${e.message}", e)
+                try { muxer?.release() } catch (_: Exception) {}
+                try { extractor?.release() } catch (_: Exception) {}
                 try { File(destPath).delete() } catch (_: Exception) {}
-                runOnUiThread { result.success(mapOf("success" to false, "error" to (e.message ?: "unknown native error"))) }
+                runOnUiThread {
+                    result.success(
+                        mapOf("success" to false, "error" to (e.message ?: "unknown native error")),
+                    )
+                }
             }
         }.start()
+    }
+
+    /**
+     * Ensures AAC [MediaFormat] has `csd-0` (AudioSpecificConfig). Pure HW
+     * decoders (MX Player HW, many OEM codecs) refuse silent tracks without it;
+     * HW+/SW often parse ADTS headers instead and still play sound.
+     */
+    private fun ensureAacCsd0(format: MediaFormat): MediaFormat {
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: return format
+        if (mime != MediaFormat.MIMETYPE_AUDIO_AAC && mime != "audio/mp4a-latm") {
+            return format
+        }
+        if (format.containsKey("csd-0")) return format
+
+        val sampleRate = format.getIntegerOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: return format
+        val channelCount = format.getIntegerOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: 2
+        // KEY_AAC_PROFILE: MediaCodecInfo.CodecProfileLevel.AACObjectLC = 2
+        val profile = format.getIntegerOrNull(MediaFormat.KEY_AAC_PROFILE) ?: 2
+
+        val csd = buildAacAudioSpecificConfig(profile, sampleRate, channelCount) ?: return format
+        format.setByteBuffer("csd-0", ByteBuffer.wrap(csd))
+        Log.i(
+            "AuroraRemux",
+            "synthesized AAC csd-0 profile=$profile rate=$sampleRate ch=$channelCount",
+        )
+        return format
+    }
+
+    /** Builds ISO 14496-3 AudioSpecificConfig for common AAC LC/HE profiles. */
+    private fun buildAacAudioSpecificConfig(
+        aacProfile: Int,
+        sampleRate: Int,
+        channelCount: Int,
+    ): ByteArray? {
+        val samplingFreqIndex = aacSamplingFrequencyIndex(sampleRate) ?: return null
+        // Clamp channels to ISO table (0=defined in AOT specific config — skip)
+        val ch = channelCount.coerceIn(1, 7)
+        // audioObjectType (5 bits) | samplingFrequencyIndex (4) | channelConfiguration (4)
+        // For AOT 1–31 this is 2 bytes.
+        val objectType = aacProfile.coerceIn(1, 31)
+        val csd = ByteArray(2)
+        csd[0] = ((objectType shl 3) or (samplingFreqIndex shr 1)).toByte()
+        csd[1] = (((samplingFreqIndex and 0x01) shl 7) or (ch shl 3)).toByte()
+        return csd
+    }
+
+    private fun aacSamplingFrequencyIndex(sampleRate: Int): Int? {
+        val table = intArrayOf(
+            96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+            16000, 12000, 11025, 8000, 7350,
+        )
+        val idx = table.indexOf(sampleRate)
+        return if (idx >= 0) idx else null
+    }
+
+    private fun MediaFormat.getIntegerOrNull(key: String): Int? {
+        return try {
+            if (containsKey(key)) getInteger(key) else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // ─── Permissions & battery opt ──────────────────────────────────

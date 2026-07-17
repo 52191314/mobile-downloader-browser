@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../downloader/downloader.dart';
-import '../../platform/public_downloads_service.dart';
 import '../../theme/aurora_palette.dart';
+import '../../theme/aurora_tokens.dart';
 import '../notifications/aurora_snackbar.dart';
-import '../widgets/edge_swipe_card.dart';
+import '../widgets/download_card.dart';
 import '../widgets/empty_queue.dart';
-import '../widgets/download_task_row.dart';
 import '../widgets/settings_formatters.dart';
 
 /// Describes a state-filter chip option in the queue page.
@@ -41,6 +40,14 @@ final class _TaskCallbacks {
         onTokenExpired = task.onTokenExpired;
 }
 
+/// Describes a section in the sectioned queue layout.
+final class _TaskSection {
+  final String title;
+  final List<DownloadTask> tasks;
+  final Color accentColor;
+  const _TaskSection(this.title, this.tasks, this.accentColor);
+}
+
 class QueuePage extends StatefulWidget {
   final DownloadQueue queue;
   final TextEditingController urlController;
@@ -57,6 +64,7 @@ class QueuePage extends StatefulWidget {
   final Future<void> Function(DownloadTask task)? onResniffManual;
   final Future<void> Function(DownloadTask task) onShareDownload;
   final Future<void> Function(DownloadTask task)? onExportDownload;
+  final VoidCallback? onOpenBrowser;
 
   const QueuePage({
     super.key,
@@ -75,6 +83,7 @@ class QueuePage extends StatefulWidget {
     this.onResniffManual,
     required this.onShareDownload,
     this.onExportDownload,
+    this.onOpenBrowser,
   });
 
   @override
@@ -97,6 +106,12 @@ class _QueuePageState extends State<QueuePage> {
   TaskSortField _sortBy = TaskSortField.date;
   bool _sortDescending = true;
   Set<DownloadState>? _stateFilter; // null = all states
+  bool _flatList = false;
+  bool _searchExpanded = false;
+  final Set<String> _collapsedSections = {};
+  bool _sectionsInitialized = false;
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -123,6 +138,9 @@ class _QueuePageState extends State<QueuePage> {
     _removedSub = widget.queue.onTaskRemoved.listen((_) {
       if (mounted) setState(() {});
     });
+    if (_searchQuery.isNotEmpty) {
+      _searchExpanded = true;
+    }
   }
 
   void _onUrlTextChanged() {
@@ -181,39 +199,89 @@ class _QueuePageState extends State<QueuePage> {
   @override
   Widget build(BuildContext context) {
     final tasks = widget.queue.allTasks;
-    final completed = widget.queue.completedTasks;
-    final failed = widget.queue.failedTasks;
+    final filteredTasks = _computeFilteredTasks();
+    final _selectedTasks =
+        filteredTasks.where((t) => _selectedIds.contains(t.id)).toList();
 
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Queue'),
-          actions: [
-            Icon(Icons.cloud_done,
-                color: Theme.of(context).colorScheme.primary),
-            if (tasks.isNotEmpty)
-              IconButton(
-                icon: Icon(
-                    _viewMode ? Icons.list_rounded : Icons.grid_view_rounded),
-                tooltip: _viewMode ? 'Show as list' : 'Show as grid',
-                onPressed: () => setState(() => _viewMode = !_viewMode),
+      appBar: _selectionMode
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelectionMode,
               ),
-          ],
-        ),
-        body: SafeArea(
-          child: _buildQueueTab(context, tasks, completed, failed),
-        ),
-      );
+              title: Text('${_selectedIds.length} selected'),
+              actions: _buildSelectionActions(_selectedTasks),
+            )
+          : AppBar(
+              title: const Text('Queue'),
+              actions: [
+                IconButton(
+                  icon: Icon(
+                      _searchExpanded ? Icons.search_off : Icons.search),
+                  tooltip: _searchExpanded ? 'Close search' : 'Search',
+                  onPressed: () => setState(() {
+                    _searchExpanded = !_searchExpanded;
+                    if (!_searchExpanded) {
+                      _searchController.clear();
+                      _searchQuery = '';
+                    }
+                  }),
+                ),
+                if (filteredTasks.isNotEmpty) ...[
+                  IconButton(
+                    icon: const Icon(Icons.checklist),
+                    tooltip: 'Select',
+                    onPressed: _enterSelectionMode,
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: 'Bulk actions',
+                    itemBuilder: (ctx) =>
+                        _buildBulkOverflowMenu(filteredTasks),
+                    onSelected: (value) =>
+                        _handleBulkAction(value, filteredTasks),
+                  ),
+                  IconButton(
+                    icon: Icon(_viewMode
+                        ? Icons.list_rounded
+                        : Icons.grid_view_rounded),
+                    tooltip: _viewMode ? 'Show as list' : 'Completed history grid',
+                    onPressed: () =>
+                        setState(() => _viewMode = !_viewMode),
+                  ),
+                ],
+              ],
+            ),
+      body: SafeArea(
+        child: _buildQueueTab(context, tasks, filteredTasks),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Queue tab
   // ---------------------------------------------------------------------------
 
+  List<DownloadTask> _computeFilteredTasks() {
+    final queriedTasks = widget.queue.queryTasks(
+      states: _stateFilter,
+      query: _searchQuery.isNotEmpty ? _searchQuery : null,
+      sortBy: _flatList ? _sortBy : null,
+      sortDescending: _flatList ? _sortDescending : true,
+    );
+    return queriedTasks.where((task) {
+      if (_selectedFolderFilter == 'All') return true;
+      final folder = _getTaskFolder(task);
+      if (_selectedFolderFilter == 'Default') return folder == null;
+      return folder == _selectedFolderFilter;
+    }).toList();
+  }
+
   Widget _buildQueueTab(
     BuildContext context,
     List<DownloadTask> tasks,
-    List<DownloadTask> completed,
-    List<DownloadTask> failed,
+    List<DownloadTask> filteredTasks,
   ) {
     final ac = context.ac;
     final folders = <String>{};
@@ -228,39 +296,22 @@ class _QueuePageState extends State<QueuePage> {
       _selectedFolderFilter = 'All';
     }
 
-    // Use the new queryTasks API with all search/sort/filter params.
-    final queriedTasks = widget.queue.queryTasks(
-      states: _stateFilter,
-      query: _searchQuery.isNotEmpty ? _searchQuery : null,
-      sortBy: _sortBy,
-      sortDescending: _sortDescending,
-    );
-
-    // Apply folder filter as a post-step (not part of the core API).
-    final filteredTasks = queriedTasks.where((task) {
-      if (_selectedFolderFilter == 'All') return true;
-      final folder = _getTaskFolder(task);
-      if (_selectedFolderFilter == 'Default') return folder == null;
-      return folder == _selectedFolderFilter;
-    }).toList();
-
-    final filteredCompleted =
-        filteredTasks.where((t) => t.state == DownloadState.completed).length;
-    final filteredFailed =
-        filteredTasks.where((t) => t.state == DownloadState.failed).length;
-    final activeCount = filteredTasks
-        .where((t) => widget.queue.activeTasks.any((a) => a.id == t.id))
-        .length;
-    final queuedCount = filteredTasks
-        .where((t) => widget.queue.queuedTasks.any((q) => q.id == t.id))
-        .length;
-    final scheduledCount = filteredTasks
-        .where((t) => t.state == DownloadState.scheduled)
-        .length;
-
-    final totalSpeed = filteredTasks
-        .where((t) => t.state == DownloadState.downloading)
-        .fold<double>(0.0, (sum, t) => sum + t.speed);
+    // Initialize section collapse state once per session (cold-start).
+    if (!_sectionsInitialized) {
+      _sectionsInitialized = true;
+      if (!_flatList) {
+        final hasWork = filteredTasks.any((t) =>
+            t.state == DownloadState.downloading ||
+            t.state == DownloadState.idle ||
+            t.state == DownloadState.merging ||
+            t.state == DownloadState.paused);
+        final completedCount =
+            filteredTasks.where((t) => t.state == DownloadState.completed).length;
+        if (hasWork && completedCount > 8) {
+          _collapsedSections.add('Completed');
+        }
+      }
+    }
 
     final folderTabs = ['All'];
     if (folders.isNotEmpty) {
@@ -269,19 +320,13 @@ class _QueuePageState extends State<QueuePage> {
     }
 
     final headerSlivers = <Widget>[
-      _buildAggregateHeader(
-        context,
-        activeCount: activeCount,
-        queuedCount: queuedCount,
-        scheduledCount: scheduledCount,
-        completedCount: filteredCompleted,
-        failedCount: filteredFailed,
-        totalSpeed: totalSpeed,
-      ),
-      const SizedBox(height: 16),
+      if (_searchExpanded) ...[
+        _buildSearchBar(context),
+        const SizedBox(height: 10),
+      ],
+      _buildStatusLine(),
+      const SizedBox(height: 8),
       _buildUrlInputBar(context),
-      const SizedBox(height: 10),
-      _buildSearchBar(context),
       const SizedBox(height: 10),
       _buildSortAndFilterRow(context),
       const SizedBox(height: 8),
@@ -318,29 +363,203 @@ class _QueuePageState extends State<QueuePage> {
         ),
         const SizedBox(height: 8),
       ],
-      if (filteredTasks.isNotEmpty && !_viewMode) ...[
-        _buildBulkActions(filteredTasks, filteredFailed),
-        const SizedBox(height: 8),
-      ],
     ];
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future<void>.delayed(const Duration(milliseconds: 300));
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(headerSlivers),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          sliver: _buildTaskSliver(filteredTasks),
+        ),
+      ],
+    );
+  }
+
+  /// Compares two tasks using the current global sort settings.
+  int _compareTasks(DownloadTask a, DownloadTask b) {
+    int cmp;
+    switch (_sortBy) {
+      case TaskSortField.date:
+        cmp = a.createdAt.compareTo(b.createdAt);
+        break;
+      case TaskSortField.name:
+        cmp = taskDisplayName(a).compareTo(taskDisplayName(b));
+        break;
+      case TaskSortField.size:
+        cmp = a.totalBytes.compareTo(b.totalBytes);
+        break;
+      case TaskSortField.priority:
+        cmp = a.priority.compareTo(b.priority);
+        break;
+      case TaskSortField.state:
+        cmp = a.state.index.compareTo(b.state.index);
+        break;
+      case TaskSortField.speed:
+        cmp = a.speed.compareTo(b.speed);
+        break;
+    }
+    return _sortDescending ? -cmp : cmp;
+  }
+
+  /// Partitions [tasks] into 4 ordered sections, sorting each section
+  /// according to the section-specific rules (or global sort when
+  /// non-default is active).
+  List<_TaskSection> _partitionIntoSections(
+      List<DownloadTask> tasks, AColors ac) {
+    final work = <DownloadTask>[];
+    final needsAttention = <DownloadTask>[];
+    final scheduled = <DownloadTask>[];
+    final completed = <DownloadTask>[];
+
+    for (final task in tasks) {
+      switch (task.state) {
+        case DownloadState.downloading:
+        case DownloadState.idle:
+        case DownloadState.merging:
+        case DownloadState.paused:
+          work.add(task);
+        case DownloadState.failed:
+          needsAttention.add(task);
+        case DownloadState.scheduled:
+          scheduled.add(task);
+        case DownloadState.completed:
+          completed.add(task);
+      }
+    }
+
+    // Work: state sub-order, then user sort within each state.
+    const statePriority = {
+      DownloadState.downloading: 0,
+      DownloadState.merging: 1,
+      DownloadState.paused: 2,
+      DownloadState.idle: 3,
+    };
+    work.sort((a, b) {
+      final scmp =
+          statePriority[a.state]!.compareTo(statePriority[b.state]!);
+      if (scmp != 0) return scmp;
+      return _compareTasks(a, b);
+    });
+
+    // Needs attention: default date sort → newest first; else user sort.
+    if (_sortBy == TaskSortField.date && _sortDescending) {
+      needsAttention.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    } else {
+      needsAttention.sort(_compareTasks);
+    }
+
+    // Scheduled: default date sort → scheduledStartAt asc; else user sort.
+    if (_sortBy == TaskSortField.date && _sortDescending) {
+      scheduled.sort((a, b) {
+        final aStart = a.scheduledStartAt ?? a.createdAt;
+        final bStart = b.scheduledStartAt ?? b.createdAt;
+        return aStart.compareTo(bStart);
+      });
+    } else {
+      scheduled.sort(_compareTasks);
+    }
+
+    // Completed: always user sort.
+    completed.sort(_compareTasks);
+
+    final result = <_TaskSection>[];
+    if (work.isNotEmpty) {
+      result.add(_TaskSection('Work', work, ac.accentFrost));
+    }
+    if (needsAttention.isNotEmpty) {
+      result.add(
+          _TaskSection('Needs attention', needsAttention, ac.statusError));
+    }
+    if (scheduled.isNotEmpty) {
+      result.add(
+          _TaskSection('Scheduled', scheduled, ac.accentPurple));
+    }
+    if (completed.isNotEmpty) {
+      result.add(
+          _TaskSection('Completed', completed, ac.statusSuccess));
+    }
+    return result;
+  }
+
+  /// Builds a collapsible section header with a left accent bar, name,
+  /// count badge, and rotating chevron.
+  Widget _buildSectionHeader(_TaskSection section, bool isCollapsed) {
+    final ac = context.ac;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          if (isCollapsed) {
+            _collapsedSections.remove(section.title);
+          } else {
+            _collapsedSections.add(section.title);
+          }
+        });
       },
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate(headerSlivers),
-            ),
+      child: SizedBox(
+        height: 32,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 4, right: 4),
+          child: Row(
+            children: [
+              // Colored left accent bar (3px × 16px)
+              Container(
+                width: 3,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: section.accentColor,
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Section name
+              Text(
+                section.title,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: ac.textPrimary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Count badge
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: section.accentColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${section.tasks.length}',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: section.accentColor,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              // Rotating chevron
+              AnimatedRotation(
+                turns: isCollapsed ? -0.25 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  Icons.expand_more,
+                  size: 18,
+                  color: ac.textSecondary,
+                ),
+              ),
+            ],
           ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            sliver: _buildTaskSliver(filteredTasks),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -362,7 +581,7 @@ class _QueuePageState extends State<QueuePage> {
             padding: const EdgeInsets.only(top: 40),
             child: Center(
               child: Text(
-                'No completed downloads yet',
+                'No finished downloads yet. Completed files will appear here.',
                 style: TextStyle(fontFamily: 'Inter', color: ac.textSecondary),
               ),
             ),
@@ -384,10 +603,41 @@ class _QueuePageState extends State<QueuePage> {
       );
     }
 
+    if (_flatList) {
+      return SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => _buildTaskRow(context, filteredTasks[index]),
+          childCount: filteredTasks.length,
+        ),
+      );
+    }
+
+    // Sectioned mode
+    final sections = _partitionIntoSections(filteredTasks, ac);
+
+    final items = <Widget>[];
+    for (int i = 0; i < sections.length; i++) {
+      final section = sections[i];
+      final isCollapsed = _collapsedSections.contains(section.title);
+
+      // Small gap between sections
+      if (i > 0) {
+        items.add(const SizedBox(height: 6));
+      }
+
+      items.add(_buildSectionHeader(section, isCollapsed));
+
+      if (!isCollapsed) {
+        for (final task in section.tasks) {
+          items.add(_buildTaskRow(context, task));
+        }
+      }
+    }
+
     return SliverList(
       delegate: SliverChildBuilderDelegate(
-        (context, index) => _buildTaskRow(context, filteredTasks[index]),
-        childCount: filteredTasks.length,
+        (context, index) => items[index],
+        childCount: items.length,
       ),
     );
   }
@@ -425,7 +675,23 @@ class _QueuePageState extends State<QueuePage> {
         ),
       );
     }
-    return SizedBox(height: 280, child: const EmptyQueue());
+    return SizedBox(
+      height: 280,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const EmptyQueue(),
+          if (widget.onOpenBrowser != null) ...[
+            const SizedBox(height: 16),
+            TextButton.icon(
+              icon: const Icon(Icons.travel_explore, size: 18),
+              label: const Text('Open Browser'),
+              onPressed: widget.onOpenBrowser,
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -746,6 +1012,34 @@ class _QueuePageState extends State<QueuePage> {
                       ),
                     ),
                   ),
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Flat list (no sections)',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 13,
+                            color: ac.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _flatList,
+                        activeColor: ac.accentFrost,
+                        onChanged: (v) {
+                          setState(() => _flatList = v);
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -772,226 +1066,472 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Bulk action buttons
+  // Bulk action overflow menu (AppBar)
   // ---------------------------------------------------------------------------
 
-  Widget _buildBulkActions(List<DownloadTask> filteredTasks, int filteredFailed) {
+  List<PopupMenuEntry<String>> _buildBulkOverflowMenu(
+      List<DownloadTask> filteredTasks) {
     final hasActive = filteredTasks
         .any((t) => t.state == DownloadState.downloading || t.state == DownloadState.idle);
     final hasPaused = filteredTasks.any((t) => t.state == DownloadState.paused);
+    final hasFailed = filteredTasks.any((t) => t.state == DownloadState.failed);
     final hasScheduled = filteredTasks.any((t) => t.state == DownloadState.scheduled);
+
+    final items = <PopupMenuEntry<String>>[];
+    if (hasActive) {
+      items.add(const PopupMenuItem(
+        value: 'pause_all',
+        child: ListTile(
+          leading: Icon(Icons.pause_rounded, size: 20),
+          title: Text('Pause all active'),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+      ));
+    }
+    if (hasPaused) {
+      items.add(const PopupMenuItem(
+        value: 'resume_all',
+        child: ListTile(
+          leading: Icon(Icons.play_arrow_rounded, size: 20),
+          title: Text('Resume all paused'),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+      ));
+    }
+    if (hasFailed) {
+      items.add(const PopupMenuItem(
+        value: 'retry_all',
+        child: ListTile(
+          leading: Icon(Icons.refresh_rounded, size: 20),
+          title: Text('Retry all failed'),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+      ));
+    }
+    if (hasScheduled) {
+      items.add(const PopupMenuItem(
+        value: 'cancel_scheduled',
+        child: ListTile(
+          leading: Icon(Icons.event_busy_rounded, size: 20),
+          title: Text('Cancel scheduled'),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+      ));
+    }
+    items.add(const PopupMenuItem(
+      value: 'cancel_active',
+      child: ListTile(
+        leading: Icon(Icons.cancel_outlined, size: 20),
+        title: Text('Cancel active'),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+      ),
+    ));
+    return items;
+  }
+
+  Future<void> _handleBulkAction(
+      String value, List<DownloadTask> filteredTasks) async {
+    switch (value) {
+      case 'pause_all':
+        for (final task in filteredTasks) {
+          if ((task.state == DownloadState.downloading ||
+                  task.state == DownloadState.idle) &&
+              widget.onPauseTask != null) {
+            widget.onPauseTask!(task)?.call();
+          }
+        }
+        break;
+      case 'resume_all':
+        for (final task in filteredTasks) {
+          if (task.state == DownloadState.paused &&
+              widget.onResumeTask != null) {
+            widget.onResumeTask!(task)?.call();
+          }
+        }
+        break;
+      case 'retry_all':
+        for (final task in filteredTasks) {
+          if (task.state == DownloadState.failed &&
+              widget.onRetryTask != null) {
+            widget.onRetryTask!(task);
+          }
+        }
+        break;
+      case 'cancel_scheduled':
+        if (widget.onCancelTask == null) break;
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Cancel scheduled downloads?'),
+            content: const Text(
+              'All scheduled downloads will be removed.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Keep')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Remove all')),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          for (final task in filteredTasks) {
+            if (task.state == DownloadState.scheduled) {
+              widget.onCancelTask!(task)?.call();
+            }
+          }
+        }
+        break;
+      case 'cancel_active':
+        if (widget.onCancelTask == null) break;
+        final confirmActive = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Cancel active downloads?'),
+            content: const Text(
+              'This removes all active and queued downloads.\n'
+              'Temporary files will be deleted.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Keep')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Remove all')),
+            ],
+          ),
+        );
+        if (confirmActive == true) {
+          for (final task in filteredTasks) {
+            if (task.state != DownloadState.completed &&
+                task.state != DownloadState.scheduled) {
+              widget.onCancelTask!(task)?.call();
+            }
+          }
+        }
+        break;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selection mode helpers
+  // ---------------------------------------------------------------------------
+
+  void _enterSelectionMode() =>
+      setState(() { _selectionMode = true; _selectedIds.clear(); });
+
+  void _exitSelectionMode() =>
+      setState(() { _selectionMode = false; _selectedIds.clear(); });
+
+  List<Widget> _buildSelectionActions(List<DownloadTask> selectedTasks) {
+    final hasActive = selectedTasks.any(
+        (t) => t.state == DownloadState.downloading || t.state == DownloadState.idle);
+    final hasPaused = selectedTasks.any((t) => t.state == DownloadState.paused);
+    final hasFailed = selectedTasks.any((t) => t.state == DownloadState.failed);
+    final hasScheduled = selectedTasks.any((t) => t.state == DownloadState.scheduled);
+
+    return [
+      if (hasActive)
+        IconButton(
+          icon: const Icon(Icons.pause),
+          tooltip: 'Pause selected',
+          onPressed: () => unawaited(
+              _applyBulkActionToSelected(selectedTasks, 'pause')),
+        ),
+      if (hasPaused)
+        IconButton(
+          icon: const Icon(Icons.play_arrow),
+          tooltip: 'Resume selected',
+          onPressed: () => unawaited(
+              _applyBulkActionToSelected(selectedTasks, 'resume')),
+        ),
+      if (hasFailed)
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Retry selected',
+          onPressed: () => unawaited(
+              _applyBulkActionToSelected(selectedTasks, 'retry')),
+        ),
+      if (hasScheduled)
+        IconButton(
+          icon: const Icon(Icons.event_busy),
+          tooltip: 'Cancel scheduled',
+          onPressed: () => unawaited(
+              _applyBulkActionToSelected(selectedTasks, 'cancel_scheduled')),
+        ),
+      IconButton(
+        icon: const Icon(Icons.delete_outline),
+        tooltip: 'Remove selected',
+        onPressed: () =>
+            unawaited(_applyBulkActionToSelected(selectedTasks, 'remove')),
+      ),
+    ];
+  }
+
+  Future<void> _applyBulkActionToSelected(
+      List<DownloadTask> selectedTasks, String action) async {
+    switch (action) {
+      case 'pause':
+        for (final task in selectedTasks) {
+          if ((task.state == DownloadState.downloading ||
+                  task.state == DownloadState.idle) &&
+              widget.onPauseTask != null) {
+            widget.onPauseTask!(task)?.call();
+          }
+        }
+        break;
+      case 'resume':
+        for (final task in selectedTasks) {
+          if (task.state == DownloadState.paused &&
+              widget.onResumeTask != null) {
+            widget.onResumeTask!(task)?.call();
+          }
+        }
+        break;
+      case 'retry':
+        for (final task in selectedTasks) {
+          if (task.state == DownloadState.failed &&
+              widget.onRetryTask != null) {
+            widget.onRetryTask!(task);
+          }
+        }
+        break;
+      case 'cancel_scheduled':
+        if (widget.onCancelTask == null) break;
+        for (final task in selectedTasks) {
+          if (task.state == DownloadState.scheduled) {
+            widget.onCancelTask!(task)?.call();
+          }
+        }
+        break;
+      case 'remove':
+        if (widget.onCancelTask == null) break;
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Remove selected downloads?'),
+            content: const Text(
+              'Selected downloads will be removed.\n'
+              'Temporary files will be deleted.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Keep')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Remove all')),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          for (final task in selectedTasks) {
+            if (task.state != DownloadState.completed) {
+              widget.onCancelTask!(task)?.call();
+            } else {
+              await widget.queue.cancelTaskAsync(task.id);
+            }
+          }
+        }
+        break;
+    }
+    _exitSelectionMode();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Status line (single row, unfiltered counts)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildStatusLine() {
+    final ac = context.ac;
+    final running = widget.queue.activeTasks.length;
+    final waiting = widget.queue.queuedTasks.length;
+    final paused =
+        widget.queue.allTasks.where((t) => t.state == DownloadState.paused).length;
+    final failed =
+        widget.queue.allTasks.where((t) => t.state == DownloadState.failed).length;
+    final totalSpeed = widget.queue.allTasks
+        .where((t) => t.state == DownloadState.downloading)
+        .fold<double>(0.0, (sum, t) => sum + t.speed);
+
+    if (running == 0 && waiting == 0 && paused == 0 && failed == 0) {
+      return const SizedBox.shrink();
+    }
+
+    final children = <Widget>[];
+
+    void addSegment(Widget child) {
+      if (children.isNotEmpty) {
+        children.add(Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text('·',
+              style: TextStyle(
+                  color: ac.textTertiary,
+                  fontSize: 11,
+                  fontFamily: 'JetBrainsMono')),
+        ));
+      }
+      children.add(child);
+    }
+
+    final activeFilter = () => setState(() => _stateFilter = {
+          DownloadState.downloading,
+          DownloadState.idle,
+          DownloadState.merging,
+        });
+    final pausedFilter =
+        () => setState(() => _stateFilter = {DownloadState.paused});
+    final failedFilter =
+        () => setState(() => _stateFilter = {DownloadState.failed});
+
+    // Work section: running + waiting
+    if (running > 0 || waiting > 0) {
+      if (running > 0) {
+        addSegment(_statusSegment(
+          Icons.play_circle_filled,
+          ac.accentFrost,
+          '$running running',
+          activeFilter,
+        ));
+      } else {
+        addSegment(_statusSegment(
+          Icons.play_circle_filled,
+          ac.textTertiary,
+          '0 running',
+          activeFilter,
+        ));
+      }
+      if (waiting > 0) {
+        addSegment(_statusSegment(
+          Icons.pending_actions,
+          ac.accentPurple,
+          '$waiting waiting',
+          activeFilter,
+        ));
+      }
+    }
+
+    // Paused
+    if (paused > 0) {
+      addSegment(_statusSegment(
+        Icons.pause_circle_outline,
+        ac.accentAmber,
+        '$paused paused',
+        pausedFilter,
+      ));
+    }
+
+    // Failed
+    if (failed > 0) {
+      addSegment(_statusSegment(
+        Icons.error_outline,
+        ac.statusError,
+        '$failed failed',
+        failedFilter,
+      ));
+    }
+
+    // Speed (non-interactive)
+    if (totalSpeed > 0) {
+      addSegment(_statusSegment(
+        Icons.speed,
+        ac.accentFrost,
+        formatSpeed(totalSpeed),
+        null,
+      ));
+    }
+
+    // Speed limit (non-interactive)
+    if (widget.speedLimitKbps > 0) {
+      addSegment(_statusSegment(
+        Icons.tune,
+        ac.textTertiary,
+        'limit ${widget.speedLimitKbps.round()} KB/s',
+        null,
+      ));
+    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      child: Row(children: children),
+    );
+  }
+
+  Widget _statusSegment(
+      IconData icon, Color iconColor, String text, VoidCallback? onTap) {
+    final ac = context.ac;
+    return GestureDetector(
+      onTap: onTap,
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasActive && widget.onPauseTask != null)
-            _actionChip(Icons.pause_rounded, 'Pause All', () {
-              for (final task in filteredTasks) {
-                if (task.state == DownloadState.downloading || task.state == DownloadState.idle) {
-                  widget.onPauseTask!(task)?.call();
-                }
-              }
-            }),
-          if (hasPaused && widget.onResumeTask != null)
-            _actionChip(Icons.play_arrow_rounded, 'Resume All', () {
-              for (final task in filteredTasks) {
-                if (task.state == DownloadState.paused) {
-                  widget.onResumeTask!(task)?.call();
-                }
-              }
-            }),
-          if (filteredFailed > 0 && widget.onRetryTask != null)
-            _actionChip(Icons.refresh_rounded, 'Retry All', () {
-              for (final task in filteredTasks) {
-                if (task.state == DownloadState.failed) {
-                  widget.onRetryTask!(task);
-                }
-              }
-            }),
-          if (hasScheduled && widget.onCancelTask != null)
-            _actionChip(Icons.event_busy_rounded, 'Cancel Scheduled', () {
-              for (final task in filteredTasks) {
-                if (task.state == DownloadState.scheduled) {
-                  widget.onCancelTask!(task)?.call();
-                }
-              }
-            }),
-          if (widget.onCancelTask != null)
-            _actionChip(Icons.cancel_outlined, 'Cancel Active', () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Cancel active downloads?'),
-                  content: const Text(
-                    'This removes all active and queued downloads.\nTemporary files will be deleted.',
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove all')),
-                  ],
-                ),
-              );
-              if (confirm == true) {
-                for (final task in filteredTasks) {
-                  if (task.state != DownloadState.completed &&
-                      task.state != DownloadState.scheduled) {
-                    widget.onCancelTask!(task)?.call();
-                  }
-                }
-              }
-            }),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionChip(IconData icon, String label, VoidCallback onPressed) {
-    final ac = context.ac;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ActionChip(
-        avatar: Icon(icon, size: 16, color: ac.accentFrost),
-        label: Text(label, style: TextStyle(fontFamily: 'Inter', fontSize: 12)),
-        backgroundColor: ac.glassSurface,
-        side: BorderSide(color: ac.glassBorder),
-        onPressed: onPressed,
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Aggregate header
-  // ---------------------------------------------------------------------------
-
-  Widget _buildAggregateHeader(
-    BuildContext context, {
-    required int activeCount,
-    required int queuedCount,
-    required int scheduledCount,
-    required int completedCount,
-    required int failedCount,
-    required double totalSpeed,
-  }) {
-    final ac = context.ac;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: ac.surfaceCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ac.glassBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Count badges
-          Row(
-            children: [
-              _statBadge(Icons.bolt, '$activeCount', 'Active',
-                  ac.accentFrost),
-              const SizedBox(width: 8),
-              _statBadge(Icons.pending_actions, '$queuedCount', 'Queued',
-                  ac.accentPurple),
-              const SizedBox(width: 8),
-              if (scheduledCount > 0) ...[
-                _statBadge(Icons.schedule, '$scheduledCount', 'Scheduled',
-                    ac.accentPurple),
-                const SizedBox(width: 8),
-              ],
-              _statBadge(Icons.done_all, '$completedCount', 'Done',
-                  ac.statusSuccess),
-              const SizedBox(width: 8),
-              _statBadge(Icons.error_outline, '$failedCount', 'Failed',
-                  ac.statusError),
-            ],
+          Icon(icon, size: 11, color: iconColor),
+          const SizedBox(width: 3),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontFamily: 'JetBrainsMono',
+              color: onTap != null ? ac.accentFrost : ac.textSecondary,
+              fontWeight: onTap != null ? FontWeight.w600 : FontWeight.normal,
+            ),
           ),
-          if (activeCount > 0 || queuedCount > 0) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.speed, size: 14, color: ac.textSecondary),
-                const SizedBox(width: 4),
-                Text(
-                  formatSpeed(totalSpeed),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: ac.accentFrost,
-                    fontFamily: 'JetBrainsMono',
-                  ),
-                ),
-                const Spacer(),
-                if (widget.speedLimitKbps > 0)
-                  Text(
-                    'limit ${widget.speedLimitKbps.round()} KB/s',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 11,
-                      color: ac.textTertiary,
-                    ),
-                  ),
-              ],
-            ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _statBadge(IconData icon, String count, String label, Color color) {
-    final ac = context.ac;
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(height: 2),
-            Text(
-              count,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: ac.textPrimary,
-              ),
-            ),
-            Text(
-              label,
-              style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: ac.textSecondary),
-            ),
-          ],
-        ),
-      ),
+  // ---------------------------------------------------------------------------
+  // Task row (list view) — delegates to DownloadCard
+  // ---------------------------------------------------------------------------
+
+  Widget _buildTaskRow(BuildContext context, DownloadTask task) {
+    final isMerging = task.state == DownloadState.merging;
+
+    final onPauseClosure = widget.onPauseTask?.call(task);
+    final onResumeClosure = widget.onResumeTask?.call(task);
+
+    return DownloadCard(
+      task: task,
+      onOpenDownload: widget.onOpenDownload,
+      onPause: onPauseClosure,
+      onResume: onResumeClosure,
+      onRetry: widget.onRetryTask == null
+          ? null
+          : () => widget.onRetryTask!(task),
+      onCancel: () => unawaited(_deleteTaskWithUndo(task)),
+      onForceMerge: widget.onForceMergeTask == null
+          ? null
+          : () => unawaited(widget.onForceMergeTask!(task)),
+      onResniffAuto: widget.onResniffAuto,
+      onResniffManual: widget.onResniffManual,
+      onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
+      onShare: widget.onShareDownload,
+      onExport: widget.onExportDownload,
+      enableSwipe: !_selectionMode && !isMerging,
+      selectionMode: _selectionMode,
+      selected: _selectedIds.contains(task.id),
+      onToggleSelected: () => setState(() {
+        if (_selectedIds.contains(task.id)) {
+          _selectedIds.remove(task.id);
+        } else {
+          _selectedIds.add(task.id);
+        }
+      }),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Task row (list view)
-  // ---------------------------------------------------------------------------
-
-  Color _statusColor(DownloadState state) {
-    final ac = context.ac;
-    switch (state) {
-      case DownloadState.downloading:
-      case DownloadState.idle:
-        return ac.accentFrost; // Teal, pulsing
-      case DownloadState.scheduled:
-        return ac.accentPurple; // Purple for scheduled
-      case DownloadState.paused:
-        return ac.accentAmber; // Amber
-      case DownloadState.completed:
-        return ac.statusSuccess; // Green (Nord)
-      case DownloadState.failed:
-        return ac.statusError; // Red (Nord)
-      case DownloadState.merging:
-        return Colors.orange;
-    }
+  String _fileName(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    return normalized.split('/').last;
   }
 
   /// Called when the user left-swipes a task — immediately removes the task
@@ -1025,551 +1565,24 @@ class _QueuePageState extends State<QueuePage> {
 
     AuroraSnackbar.show(
       context,
-      'Done — Removed "${_taskDisplayName(task)}".',
+      'Done — Removed "${taskDisplayName(task)}".',
       actionLabel: 'Undo',
       onAction: undoAction,
     );
   }
 
-  Widget _buildTaskRow(BuildContext context, DownloadTask task) {
-    final ac = context.ac;
-    final color = _statusColor(task.state);
-    // null = unknown total → indeterminate bar animates instead of showing 0%
-    final progress = task.totalBytes > 0
-        ? (task.downloadedBytes / task.totalBytes).clamp(0.0, 1.0)
-        : null;
-
-    // ── Swipe backgrounds ──────────────────────────────────────────────
-    //
-    // HoldSwipeCard conventions:
-    //   * leftBackground  — revealed when swiping RIGHT (offset > 0)
-    //   * rightBackground — revealed when swiping LEFT  (offset < 0)
-    //   * onRightSwipe    — fired after a RIGHT swipe completes
-    //   * onLeftSwipe     — fired after a LEFT  swipe completes
-    //
-    // User decision:  Right = pause/resume/retry/open  ·  Left = delete
-
-    final isMerging = task.state == DownloadState.merging;
-
-    // Right-swipe background  (teal, adaptive icon)
-    Widget? _rightSwipeBackground() {
-      Widget icon;
-      switch (task.state) {
-        case DownloadState.scheduled:
-          icon = Icon(Icons.cancel_outlined, color: ac.statusError);
-        case DownloadState.idle:
-        case DownloadState.downloading:
-          icon = Icon(Icons.pause, color: ac.accentFrost);
-        case DownloadState.paused:
-          icon = Icon(Icons.play_arrow, color: ac.accentFrost);
-        case DownloadState.failed:
-          icon = Icon(Icons.refresh, color: ac.accentFrost);
-        case DownloadState.completed:
-          icon = Icon(Icons.open_in_new, color: ac.accentFrost);
-        case DownloadState.merging:
-          return null; // not swipeable
-      }
-      return Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: task.state == DownloadState.scheduled
-            ? ac.statusError.withValues(alpha: 0.2)
-            : ac.accentFrost.withValues(alpha: 0.2),
-        child: icon,
-      );
-    }
-
-    // Left-swipe background  (red, delete icon)
-    Widget? _leftSwipeBackground() {
-      if (isMerging) return null;
-      return Container(
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.only(left: 20),
-        color: ac.statusError.withValues(alpha: 0.2),
-        child: Icon(Icons.delete_outline, color: ac.statusError),
-      );
-    }
-
-    // Right-swipe action  (state-aware)
-    VoidCallback? _onRightSwipe() {
-      if (isMerging) return null;
-      switch (task.state) {
-        case DownloadState.scheduled:
-          return () => widget.onCancelTask?.call(task)?.call();
-        case DownloadState.idle:
-        case DownloadState.downloading:
-          return () => widget.onPauseTask?.call(task)?.call();
-        case DownloadState.paused:
-          return () => widget.onResumeTask?.call(task)?.call();
-        case DownloadState.failed:
-          return () => widget.onRetryTask?.call(task);
-        case DownloadState.completed:
-          return () => widget.onOpenDownload?.call(task);
-        case DownloadState.merging:
-          return null;
-      }
-    }
-
-    // Left-swipe action  (delete with undo)
-    VoidCallback? _onLeftSwipe() {
-      if (isMerging) return null;
-      return () => unawaited(_deleteTaskWithUndo(task));
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: HoldSwipeCard(
-        leftBackground: _rightSwipeBackground(),   // revealed on RIGHT swipe
-        rightBackground: _leftSwipeBackground(),    // revealed on LEFT  swipe
-        onLeftSwipe: _onLeftSwipe(),                // LEFT  swipe → delete
-        onRightSwipe: _onRightSwipe(),              // RIGHT swipe → adaptive
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 72),
-          decoration: BoxDecoration(
-            color: ac.surfaceCard,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: ac.glassBorder),
-          ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Left edge status indicator
-                Container(
-                  width: 3,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: const BorderRadius.horizontal(
-                        left: Radius.circular(12)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Text block — grows vertically for full failed-error text
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      vertical: task.state == DownloadState.failed ? 10 : 0,
-                    ),
-                    child: Column(
-                      mainAxisAlignment: task.state == DownloadState.failed
-                          ? MainAxisAlignment.start
-                          : MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildNameWidget(
-                          task,
-                          TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: ac.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        // Micro progress bar
-                        // When totalBytes is unknown (null progress), shows an
-                        // indeterminate animated bar so the user can see the
-                        // download is actively receiving data.
-                        if (task.state == DownloadState.downloading ||
-                            task.state == DownloadState.idle)
-                          RepaintBoundary(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(1),
-                              child: LinearProgressIndicator(
-                                value: progress,
-                                minHeight: 2,
-                                backgroundColor: ac.surfaceElevated,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(color),
-                              ),
-                            ),
-                          ),
-                        if (task.state == DownloadState.completed ||
-                            task.state == DownloadState.failed ||
-                            task.state == DownloadState.paused)
-                          const SizedBox(height: 2),
-                        // Metadata line (no truncated error — full text below)
-                        Text(
-                          _metadataLabel(task),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 8.5,
-                            fontFamily: 'JetBrainsMono',
-                            color: ac.textTertiary,
-                          ),
-                        ),
-                        // Transient status (converting, refreshing, resuming…)
-                        if (task.statusMessage != null &&
-                            task.statusMessage!.isNotEmpty &&
-                            task.state != DownloadState.completed &&
-                            task.state != DownloadState.failed)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              task.statusMessage!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontFamily: 'Inter',
-                                color: ac.accentFrost,
-                              ),
-                            ),
-                          ),
-                        // Failed-task error: full message, card expands
-                        if (task.state == DownloadState.failed &&
-                            task.errorMessage != null &&
-                            task.errorMessage!.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6, right: 4),
-                            child: SelectableText(
-                              _displayErrorMessage(task.errorMessage!),
-                              style: TextStyle(
-                                fontSize: 11,
-                                height: 1.35,
-                                fontFamily: 'Inter',
-                                color: ac.statusError,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Action buttons — top-aligned so tall error cards stay tidy
-                Align(
-                  alignment: Alignment.topCenter,
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      top: task.state == DownloadState.failed ? 8 : 0,
-                    ),
-                    child: _buildTaskActions(task, color),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Strips internal markers (e.g. `[PARTIAL:0.42]`) for on-card display.
-  String _displayErrorMessage(String raw) {
-    return raw
-        .replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '')
-        .trim();
-  }
-
-  Widget _compactButton({
-    required IconData icon,
-    required Color color,
-    required String tooltip,
-    required VoidCallback onPressed,
-  }) {
-    return SizedBox(
-      width: 26,
-      height: 26,
-      child: IconButton(
-        icon: Icon(icon, size: 14),
-        color: color,
-        tooltip: tooltip,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
-        splashRadius: 14,
-        onPressed: onPressed,
-      ),
-    );
-  }
-
-  Widget _buildTaskActions(DownloadTask task, Color color) {
-    final ac = context.ac;
-    // ── Primary action icon (visible outside popup) ──────────────
-    Widget? primaryAction;
-
-    if (task.state == DownloadState.scheduled) {
-      primaryAction = _compactButton(
-        icon: Icons.cancel_outlined,
-        color: ac.statusError,
-        tooltip: 'Cancel scheduled',
-        onPressed: () => widget.onCancelTask?.call(task)?.call(),
-      );
-    } else if (task.state == DownloadState.downloading ||
-        task.state == DownloadState.idle) {
-      primaryAction = _compactButton(
-        icon: Icons.pause_rounded,
-        color: ac.accentFrost,
-        tooltip: 'Pause',
-        onPressed: () => widget.onPauseTask?.call(task)?.call(),
-      );
-    } else if (task.state == DownloadState.paused) {
-      primaryAction = _compactButton(
-        icon: Icons.play_arrow_rounded,
-        color: ac.accentFrost,
-        tooltip: 'Resume',
-        onPressed: () => widget.onResumeTask?.call(task)?.call(),
-      );
-    } else if (task.state == DownloadState.merging) {
-      primaryAction = SizedBox(
-        width: 32,
-        height: 32,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(ac.accentFrost),
-          ),
-        ),
-      );
-    } else if (task.state == DownloadState.failed) {
-      primaryAction = _compactButton(
-        icon: Icons.refresh_rounded,
-        color: ac.statusError,
-        tooltip: 'Retry',
-        onPressed: () => widget.onRetryTask?.call(task),
-      );
-    } else if (task.state == DownloadState.completed) {
-      // No primary action needed — file is already in public Downloads.
-    }
-
-    // ── Overflow popup menu with all secondary actions ──────────
-    final popupItems = <PopupMenuEntry<String>>[];
-
-    // Force merge (non-completed, non-active/downloading, non-merging tasks)
-    if (task.state != DownloadState.completed &&
-        task.state != DownloadState.downloading &&
-        task.state != DownloadState.merging &&
-        widget.onForceMergeTask != null) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'force_merge',
-          child: _popupRow(Icons.merge_type, Colors.orange, 'Force merge'),
-        ),
-      );
-    }
-
-    // Resniff (Auto) — probe the URL for a fresher variant
-    if (widget.onResniffAuto != null &&
-        !task.url.startsWith('magnet:') &&
-        !task.url.startsWith('blob:')) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'resniff_auto',
-          child: _popupRow(
-              Icons.find_replace_rounded, ac.accentFrost, 'Refresh link'),
-        ),
-      );
-    }
-
-    // Resniff (Manual) — open source page so user can re-sniff
-    if (widget.onResniffManual != null &&
-        (task.sourcePageUrl != null || !task.url.startsWith('magnet:'))) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'resniff_manual',
-          child: _popupRow(Icons.open_in_browser_rounded,
-              ac.accentPurple, 'Scan in browser'),
-        ),
-      );
-    }
-
-    // Open source page
-    if (task.sourcePageUrl != null && widget.onOpenUrlInBrowser != null) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'open_source',
-          child:
-              _popupRow(Icons.open_in_new, ac.accentPurple, 'View source page'),
-        ),
-      );
-    }
-
-    // Delete / Cancel
-    final isCompleted = task.state == DownloadState.completed;
-    popupItems.add(
-      PopupMenuItem(
-        value: 'delete',
-        child: _popupRow(Icons.delete_outline, ac.statusError,
-            isCompleted ? 'Remove' : 'Cancel'),
-      ),
-    );
-
-    // Properties
-    popupItems.add(
-      PopupMenuItem(
-        value: 'properties',
-        child: _popupRow(Icons.info_outline, ac.textSecondary, 'Properties'),
-      ),
-    );
-
-    final hasPrimary = primaryAction != null;
-    final hasOverflow = popupItems.isNotEmpty;
-
-    if (!hasPrimary && !hasOverflow) return const SizedBox.shrink();
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPressStart: (_) {},
-      onLongPressMoveUpdate: (_) {},
-      onLongPressEnd: (_) {},
-      onLongPressCancel: () {},
-      child: Padding(
-        padding: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (primaryAction != null) ...[
-              primaryAction,
-              const SizedBox(width: 4),
-            ],
-            if (hasOverflow)
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert, size: 14,
-                      color: ac.textSecondary),
-                  padding: EdgeInsets.zero,
-                  splashRadius: 14,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  color: ac.surfaceCard,
-                  elevation: 4,
-                  onSelected: (value) async {
-                    switch (value) {
-                      case 'force_merge':
-                        unawaited(widget.onForceMergeTask!(task));
-                      case 'open_source':
-                        widget.onOpenUrlInBrowser!(task.sourcePageUrl!);
-                      case 'resniff_auto':
-                        unawaited(widget.onResniffAuto?.call(task));
-                      case 'resniff_manual':
-                        unawaited(widget.onResniffManual?.call(task));
-                      case 'delete':
-                        unawaited(_deleteTaskWithUndo(task));
-                      case 'properties':
-                        showDialog(
-                          context: context,
-                          builder: (context) => DownloadPropertiesDialog(
-                            task: task,
-                            onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
-                            onTaskUpdated: (t) => widget.queue.emitTask(t),
-                          ),
-                        ).then((_) {
-                          if (mounted) setState(() {});
-                        });
-                    }
-                  },
-                  itemBuilder: (_) => popupItems,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _popupRow(IconData icon, Color color, String label) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13)),
-        ),
-      ],
-    );
-  }
-
-  String _fileName(String path) {
-    final normalized = path.replaceAll('\\', '/');
-    return normalized.split('/').last;
-  }
-
-  String _taskDisplayName(DownloadTask task) {
-    final filename = _fileName(task.savePath);
-    final dotIdx = filename.lastIndexOf('.');
-    if (dotIdx != -1 && dotIdx > 0 && filename.length - dotIdx <= 6) {
-      return filename;
-    }
-
-    String? ext;
-    if (task.contentType != null && task.contentType!.isNotEmpty) {
-      final cleanMime = task.contentType!.split(';').first.trim().toLowerCase();
-      if (cleanMime == 'application/vnd.apple.mpegurl' || cleanMime == 'application/x-mpegurl') {
-        ext = '.mp4';
-      } else if (cleanMime == 'application/dash+xml') {
-        ext = '.mp4';
-      } else {
-        ext = PublicDownloadsService.extensionForMime(cleanMime);
-      }
-    }
-
-    if (ext == null || ext.isEmpty) {
-      final parsedUri = Uri.tryParse(task.url);
-      if (parsedUri != null && parsedUri.pathSegments.isNotEmpty) {
-        final lastSeg = parsedUri.pathSegments.last;
-        final lastDot = lastSeg.lastIndexOf('.');
-        if (lastDot != -1 && lastDot > 0 && lastSeg.length - lastDot <= 6) {
-          final urlExt = lastSeg.substring(lastDot).toLowerCase();
-          if (urlExt == '.m3u8' || urlExt == '.mpd') {
-            ext = '.mp4';
-          } else {
-            ext = urlExt;
-          }
-        }
-      }
-    }
-
-    if (ext == null || ext.isEmpty) {
-      if (task.url.toLowerCase().contains('.m3u8')) {
-        ext = '.mp4';
-      } else if (task.url.toLowerCase().contains('.mpd')) {
-        ext = '.mp4';
-      } else if (task.url.startsWith('magnet:')) {
-        ext = '.torrent';
-      }
-    }
-
-    if (ext != null && ext.isNotEmpty) {
-      return '$filename$ext';
-    }
-    return filename;
-  }
-
-  /// Renders the task filename with middle-ellipsis: the base name
-  /// is end-ellipsized inside an Expanded (or Flexible when centered),
-  /// while the file extension sits in a separate non-shrinking Text
-  /// so it is always visible. For filenames without a recognizable
-  /// extension, falls back to a plain Text with end-ellipsis.
-  Widget _buildNameWidget(DownloadTask task, TextStyle style, {bool centered = false}) {
-    final name = _taskDisplayName(task);
+  /// Renders the task filename with middle-ellipsis for the grid tile.
+  Widget _buildGridNameWidget(DownloadTask task, TextStyle style) {
+    final name = taskDisplayName(task);
     final dotIdx = name.lastIndexOf('.');
     if (dotIdx > 0 && name.length - dotIdx <= 6) {
       final base = name.substring(0, dotIdx);
-      final ext = name.substring(dotIdx); // includes the dot
-      if (centered) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(
-              child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
-            ),
-            Text(ext, maxLines: 1, style: style),
-          ],
-        );
-      }
+      final ext = name.substring(dotIdx);
       return Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Expanded(
+          Flexible(
             child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
           ),
           Text(ext, maxLines: 1, style: style),
@@ -1577,70 +1590,6 @@ class _QueuePageState extends State<QueuePage> {
       );
     }
     return Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
-  }
-
-  String _metadataLabel(DownloadTask task) {
-    final parts = <String>[];
-    if (task.state == DownloadState.scheduled) {
-      if (task.scheduledStartAt != null) {
-        final diff = task.scheduledStartAt!.difference(DateTime.now());
-        if (diff.isNegative) {
-          parts.add('Starting…');
-        } else {
-          String pad(int n) => n.toString().padLeft(2, '0');
-          if (diff.inDays > 1) {
-            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)} '
-                '${task.scheduledStartAt!.month}/${task.scheduledStartAt!.day}');
-          } else {
-            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)}');
-          }
-          if (diff.inMinutes < 60) {
-            parts.add('${diff.inMinutes}m left');
-          } else if (diff.inHours < 24) {
-            parts.add('${diff.inHours}h ${diff.inMinutes % 60}m left');
-          }
-        }
-      } else {
-        parts.add('Scheduled');
-      }
-    } else if (task.state == DownloadState.downloading ||
-        task.state == DownloadState.idle) {
-      if (task.totalBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
-      } else if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
-      }
-      parts.add(formatSpeed(task.speed));
-      final elapsed = DateTime.now().difference(task.createdAt);
-      final m = elapsed.inMinutes;
-      final s = elapsed.inSeconds % 60;
-      parts.add('${m}m ${s}s');
-    } else if (task.state == DownloadState.completed && task.totalBytes > 0) {
-      parts.add(formatBytes(task.totalBytes));
-    } else if (task.state == DownloadState.completed && task.downloadedBytes > 0) {
-      parts.add('${formatBytes(task.downloadedBytes)} downloaded');
-    } else if (task.state == DownloadState.failed) {
-      // Full error is shown on its own wrapping lines below — keep the
-      // mono metadata row short so the card layout stays scannable.
-      if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} saved');
-      }
-      parts.add('Failed');
-    } else if (task.state == DownloadState.paused) {
-      if (task.totalBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
-      } else if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
-      }
-      parts.add('Paused');
-    } else if (task.state == DownloadState.merging) {
-      if (task.totalBytes > 0 && task.downloadedBytes > 0) {
-        parts.add('Merging chunk ${task.downloadedBytes} of ${task.totalBytes}');
-      } else {
-        parts.add('Merging…');
-      }
-    }
-    return parts.join(' · ');
   }
 
   // ---------------------------------------------------------------------------
@@ -1670,7 +1619,7 @@ class _QueuePageState extends State<QueuePage> {
               color: ac.statusSuccess,
             ),
             const SizedBox(height: 8),
-            _buildNameWidget(
+            _buildGridNameWidget(
               task,
               TextStyle(
                 fontFamily: 'Inter',
@@ -1678,7 +1627,6 @@ class _QueuePageState extends State<QueuePage> {
                 fontWeight: FontWeight.w500,
                 color: ac.textPrimary,
               ),
-              centered: true,
             ),
             if (task.totalBytes > 0) ...[
               const SizedBox(height: 4),

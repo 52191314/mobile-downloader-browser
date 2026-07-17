@@ -12,6 +12,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 import 'package:aurora_downloader/ui/notifications/aurora_snackbar.dart';
@@ -37,7 +38,10 @@ void showMediaInfoSheet(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (ctx) {
-      final colors = Theme.of(ctx).colorScheme;
+      final ac = ctx.ac;
+      final hls = isHlsMedia(item);
+      final accent = mediaAccentFor(ac, item, isHls: hls);
+
       String extLabel = 'FILE';
       try {
         final uri = Uri.tryParse(item.url);
@@ -53,6 +57,9 @@ void showMediaInfoSheet(
           }
         }
       } catch (_) {}
+      if (hls) extLabel = 'HLS';
+      if (extLabel == 'FILE' && item.type == MediaType.video) extLabel = 'MP4';
+      if (extLabel == 'FILE' && item.type == MediaType.audio) extLabel = 'MP3';
 
       return Padding(
         padding: const EdgeInsets.all(20),
@@ -64,10 +71,10 @@ void showMediaInfoSheet(
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: 0.15),
+                    color: accent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: colors.primary.withValues(alpha: 0.3),
+                      color: accent.withValues(alpha: 0.3),
                     ),
                   ),
                   padding: const EdgeInsets.symmetric(
@@ -77,34 +84,34 @@ void showMediaInfoSheet(
                   child: Text(
                     extLabel,
                     style: TextStyle(
-                      color: colors.primary,
+                      color: accent,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Media details',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: ac.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white70),
+                  icon: Icon(Icons.close, color: ac.textSecondary),
                   onPressed: () => Navigator.pop(ctx),
                 ),
               ],
             ),
-            const Divider(color: Colors.white10, height: 24),
-            const Text(
+            Divider(color: ac.borderHairline, height: 24),
+            Text(
               'Filename',
               style: TextStyle(
-                color: Colors.white54,
+                color: ac.textTertiary,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
@@ -112,17 +119,17 @@ void showMediaInfoSheet(
             const SizedBox(height: 4),
             SelectableText(
               item.name,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: ac.textPrimary,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Download URL',
               style: TextStyle(
-                color: Colors.white54,
+                color: ac.textTertiary,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
@@ -131,11 +138,9 @@ void showMediaInfoSheet(
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.black26,
+                color: ac.surfaceField,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.05),
-                ),
+                border: Border.all(color: ac.borderHairline),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,8 +148,8 @@ void showMediaInfoSheet(
                   Expanded(
                     child: SelectableText(
                       item.url,
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: ac.textSecondary,
                         fontSize: 12,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -152,9 +157,9 @@ void showMediaInfoSheet(
                   ),
                   const SizedBox(width: 8),
                   IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.copy,
-                      color: Colors.tealAccent,
+                      color: ac.accentFrost,
                       size: 20,
                     ),
                     onPressed: () {
@@ -169,10 +174,10 @@ void showMediaInfoSheet(
             if (item.sourcePageUrl != null &&
                 item.sourcePageUrl!.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Source page',
                 style: TextStyle(
-                  color: Colors.white54,
+                  color: ac.textTertiary,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
@@ -180,7 +185,7 @@ void showMediaInfoSheet(
               const SizedBox(height: 4),
               SelectableText(
                 item.sourcePageUrl!,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                style: TextStyle(color: ac.textSecondary, fontSize: 13),
               ),
             ],
             const SizedBox(height: 16),
@@ -191,10 +196,10 @@ void showMediaInfoSheet(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Size',
                           style: TextStyle(
-                            color: Colors.white54,
+                            color: ac.textTertiary,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -205,8 +210,8 @@ void showMediaInfoSheet(
                             item.contentLengthBytes!,
                             isEstimated: item.isSizeEstimated,
                           ),
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: ac.textPrimary,
                             fontSize: 14,
                           ),
                         ),
@@ -218,10 +223,10 @@ void showMediaInfoSheet(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Media type',
                         style: TextStyle(
-                          color: Colors.white54,
+                          color: ac.textTertiary,
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -229,8 +234,8 @@ void showMediaInfoSheet(
                       const SizedBox(height: 4),
                       Text(
                         item.type.name.toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: ac.textPrimary,
                           fontSize: 14,
                         ),
                       ),

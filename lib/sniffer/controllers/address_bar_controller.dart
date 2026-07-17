@@ -98,32 +98,96 @@ class AddressBarController {
       rebuild();
       return;
     }
+    final engine = searchEngine ?? SearchEngine.google;
     final local = _localAddressSuggestions(query, library);
     final requestId = ++_suggestionRequestId;
+
+    // Always offer "Search for <query>" when input is not already a full URL
+    // with scheme — keeps smart suggestions useful even offline.
+    final searchFallback = _looksLikeNavigableUrl(query)
+        ? const <AddressSuggestion>[]
+        : [
+            AddressSuggestion(
+              label: 'Search for "$query"',
+              url: engine.buildSearchUrl(query),
+              kind: AddressSuggestionKind.search,
+            ),
+          ];
+
     suggestions
       ..clear()
-      ..addAll(local);
+      ..addAll(local)
+      ..addAll(searchFallback);
     rebuild();
 
-    final looksLikeUrl =
-        Uri.tryParse(query) != null &&
-        (query.contains('://') || query.contains('.') || query.contains(' '));
-    if (looksLikeUrl) return;
+    // Skip remote typeahead when the user is clearly pasting/typing a URL.
+    if (_looksLikeNavigableUrl(query)) return;
 
-    final remote = await _searchSuggestionService.suggestions(query);
+    final remote = await _searchSuggestionService.suggestions(
+      query,
+      engineId: engine.id,
+    );
     if (requestId != _suggestionRequestId) return;
+    if (!addressExpanded) return;
+
     suggestions
       ..removeWhere((s) => s.kind == AddressSuggestionKind.search)
       ..addAll(
         remote.map(
           (q) => AddressSuggestion(
             label: q,
-            url: (searchEngine ?? SearchEngine.google).buildSearchUrl(q),
+            url: engine.buildSearchUrl(q),
             kind: AddressSuggestionKind.search,
           ),
         ),
       );
+    // Keep a trailing "Search for exact query" if remote dropped it.
+    if (searchFallback.isNotEmpty &&
+        !suggestions.any(
+          (s) =>
+              s.kind == AddressSuggestionKind.search &&
+              s.label == searchFallback.first.label,
+        )) {
+      suggestions.add(searchFallback.first);
+    }
+    // Cap total rows for the panel.
+    if (suggestions.length > 10) {
+      suggestions.removeRange(10, suggestions.length);
+    }
     rebuild();
+  }
+
+  /// True for inputs that should navigate as a URL (not search typeahead).
+  /// Multi-word queries (spaces) are never treated as URLs.
+  ///
+  /// Public for unit tests (`looksLikeNavigableUrlForTest` alias).
+  static bool looksLikeNavigableUrlForTest(String query) =>
+      _looksLikeNavigableUrl(query);
+
+  static bool _looksLikeNavigableUrl(String query) {
+    if (query.contains(RegExp(r'\s'))) return false;
+    final parsed = Uri.tryParse(query);
+    if (parsed != null &&
+        parsed.hasScheme &&
+        (parsed.scheme == 'http' ||
+            parsed.scheme == 'https' ||
+            parsed.scheme == 'file' ||
+            parsed.scheme == 'about' ||
+            parsed.scheme == 'magnet') &&
+        (parsed.host.isNotEmpty || parsed.scheme == 'about' || parsed.scheme == 'magnet')) {
+      return true;
+    }
+    // bare host: example.com or example.com/path
+    if (query.contains('.') &&
+        !query.startsWith('.') &&
+        !query.endsWith('.') &&
+        !query.contains(' ')) {
+      final host = query.split('/').first.split(':').first;
+      return host.contains('.') &&
+          !host.startsWith('.') &&
+          !host.endsWith('.');
+    }
+    return false;
   }
 
   List<AddressSuggestion> _localAddressSuggestions(
@@ -137,7 +201,7 @@ class AddressBarController {
 
     void add(String label, String url, AddressSuggestionKind kind) {
       final key = url.toLowerCase();
-      if (seen.add(key) && out.length < 8) {
+      if (seen.add(key) && out.length < 6) {
         out.add(AddressSuggestion(label: label, url: url, kind: kind));
       }
     }

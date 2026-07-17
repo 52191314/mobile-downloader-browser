@@ -99,6 +99,10 @@ abstract interface class SnifferBrowserController {
   /// playback to Aurora's in-app player instead.
   Future<void> setReplaceSitePlayer(bool enabled);
 
+  /// Briefly block main-frame cross-origin navigations after play intercept
+  /// so ad-on-play redirects cannot steal the tab.
+  void armPlayNavigationSuppress([Duration duration]);
+
   int get blockedRequestCount;
   List<String> get adblockAllowlist;
   void updateAdblockAllowlist(List<String> allowlist);
@@ -314,6 +318,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// heuristic difference between the original visit and the revisit.
   bool _isHistoryNavigation = false;
 
+  /// Until this time, main-frame cross-origin navigations are cancelled even
+  /// when the user gesture is present. Armed when replace-site-player
+  /// intercepts `play()` so ad-on-play redirects cannot steal the tab.
+  DateTime? _suppressCrossOriginNavUntil;
+
   // WebView-side WAF-bypass fetch methods (fetch* + getCookiesForDomain).
   late final WebViewFetchDelegate _fetchDelegate = WebViewFetchDelegate(
     controller: _controller,
@@ -447,6 +456,36 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
           )
           .catchError((_) {});
     }
+  }
+
+  /// Block main-frame cross-origin navigations for a short window after
+  /// Aurora intercepts site `play()` (ad-on-play pattern).
+  void armPlayNavigationSuppress([
+    Duration duration = const Duration(milliseconds: 3500),
+  ]) {
+    _suppressCrossOriginNavUntil = DateTime.now().add(duration);
+    // Mirror into JS so location/window.open hooks also suppress.
+    if (_webViewCreated) {
+      unawaited(
+        _controller
+            ?.evaluateJavascript(
+              source:
+                  'window.__auroraSuppressAdNavUntil = Date.now() + '
+                  '${duration.inMilliseconds};',
+            )
+            .catchError((_) {}),
+      );
+    }
+  }
+
+  bool get _isPlayNavSuppressActive {
+    final until = _suppressCrossOriginNavUntil;
+    if (until == null) return false;
+    if (DateTime.now().isAfter(until)) {
+      _suppressCrossOriginNavUntil = null;
+      return false;
+    }
+    return true;
   }
 
   @override
@@ -821,15 +860,23 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     // `_isHistoryNavigation` has already been reset by the time
     // this native callback fires.
     final isHistoryNav = _isHistoryNavigation || _history.contains(url);
-    final shouldPromptStrictRedirect =
-        _invisibleRedirectBlockingEnabled &&
-        action.isForMainFrame &&
+    final crossOriginMainFrame = action.isForMainFrame &&
         !isHistoryNav &&
         pageUri != null &&
         requestUri != null &&
         _isHttpLike(pageUri) &&
         _isHttpLike(requestUri) &&
-        !_sameOrigin(pageUri, requestUri) &&
+        !_sameOrigin(pageUri, requestUri);
+
+    // After replace-site-player intercepts play(), cancel ad navigations
+    // silently (even with user gesture) so the tab stays on the video page.
+    if (crossOriginMainFrame && _isPlayNavSuppressActive) {
+      return NavigationActionPolicy.CANCEL;
+    }
+
+    final shouldPromptStrictRedirect =
+        _invisibleRedirectBlockingEnabled &&
+        crossOriginMainFrame &&
         (action.isRedirect == true || action.hasGesture != true);
     if (shouldPromptStrictRedirect) {
       _onStrictRedirectDetected?.call(
@@ -1750,6 +1797,11 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   Future<void> setReplaceSitePlayer(bool enabled) async {}
+
+  @override
+  void armPlayNavigationSuppress([
+    Duration duration = const Duration(milliseconds: 3500),
+  ]) {}
 
   @override
   int get blockedRequestCount => 0;

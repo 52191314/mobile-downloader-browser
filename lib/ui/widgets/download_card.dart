@@ -1,0 +1,927 @@
+import 'package:flutter/material.dart';
+
+import '../../downloader/downloader.dart';
+import '../../theme/aurora_palette.dart';
+import '../../theme/aurora_tokens.dart';
+import 'download_properties_dialog.dart';
+import 'edge_swipe_card.dart';
+import 'settings_formatters.dart';
+
+/// Determines the [FileCategory] for a [DownloadTask] by inspecting
+/// its URL, content type, and filename extension.
+FileCategory categoryForTask(DownloadTask task) {
+  // 1) Magnet → torrent
+  if (task.url.startsWith('magnet:')) return FileCategory.torrents;
+
+  // 2) URL path hints (.m3u8 / .mpd → video)
+  final urlLower = task.url.toLowerCase();
+  if (urlLower.contains('.m3u8') || urlLower.contains('.mpd')) {
+    return FileCategory.videos;
+  }
+
+  // 3) Content type → MIME → category
+  if (task.contentType != null && task.contentType!.isNotEmpty) {
+    final cleanMime = task.contentType!.split(';').first.trim().toLowerCase();
+    if (cleanMime == 'application/vnd.apple.mpegurl' ||
+        cleanMime == 'application/x-mpegurl' ||
+        cleanMime == 'application/dash+xml') {
+      return FileCategory.videos;
+    }
+    final cat = MediaFileTypes.categoryForExtension(
+      MediaFileTypes.extensionForMime(cleanMime),
+    );
+    if (cat != null && cat != FileCategory.other) return cat;
+  }
+
+  // 4) Extension from task display name
+  final name = taskDisplayName(task);
+  final dotIdx = name.lastIndexOf('.');
+  if (dotIdx > 0) {
+    final ext = name.substring(dotIdx).toLowerCase();
+    final cat = MediaFileTypes.categoryForExtension(ext);
+    if (cat != null && cat != FileCategory.other) return cat;
+  }
+
+  // 5) Extension from URL
+  final parsedUri = Uri.tryParse(task.url);
+  if (parsedUri != null && parsedUri.pathSegments.isNotEmpty) {
+    final lastSeg = parsedUri.pathSegments.last;
+    final lastDot = lastSeg.lastIndexOf('.');
+    if (lastDot > 0) {
+      final ext = lastSeg.substring(lastDot).toLowerCase();
+      final cat = MediaFileTypes.categoryForExtension(ext);
+      if (cat != null && cat != FileCategory.other) return cat;
+    }
+  }
+
+  return FileCategory.other;
+}
+
+/// Maps [FileCategory] to a Material icon for the queue card glyph.
+IconData iconForCategory(FileCategory c) {
+  switch (c) {
+    case FileCategory.videos:
+      return Icons.movie_outlined;
+    case FileCategory.audio:
+      return Icons.audiotrack;
+    case FileCategory.images:
+      return Icons.image_outlined;
+    case FileCategory.documents:
+      return Icons.description_outlined;
+    case FileCategory.archives:
+      return Icons.folder_zip_outlined;
+    case FileCategory.torrents:
+      return Icons.share;
+    case FileCategory.subtitles:
+      return Icons.subtitles_outlined;
+    case FileCategory.playlists:
+    case FileCategory.applications:
+    case FileCategory.other:
+      return Icons.insert_drive_file_outlined;
+  }
+}
+
+/// Single queue list/grid card. Owns presentation, HoldSwipeCard (when
+/// enabled), primary button, and overflow menu construction. Parent owns
+/// engine calls and destructive undo orchestration via callbacks.
+class DownloadCard extends StatelessWidget {
+  const DownloadCard({
+    super.key,
+    required this.task,
+    required this.onOpenDownload,
+    this.onPause,
+    this.onResume,
+    this.onRetry,
+    this.onCancel,
+    this.onForceMerge,
+    this.onResniffAuto,
+    this.onResniffManual,
+    this.onOpenUrlInBrowser,
+    this.onShare,
+    this.onExport,
+    this.onShowProperties,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onToggleSelected,
+    this.enableSwipe = true,
+    this.dense = false,
+  });
+
+  final DownloadTask task;
+
+  final Future<void> Function(DownloadTask task) onOpenDownload;
+  final VoidCallback? onPause;
+  final VoidCallback? onResume;
+  final VoidCallback? onRetry;
+  final VoidCallback? onCancel;
+  final VoidCallback? onForceMerge;
+  final Future<void> Function(DownloadTask task)? onResniffAuto;
+  final Future<void> Function(DownloadTask task)? onResniffManual;
+  final void Function(String url)? onOpenUrlInBrowser;
+  final Future<void> Function(DownloadTask task)? onShare;
+  final Future<void> Function(DownloadTask task)? onExport;
+  final VoidCallback? onShowProperties;
+
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
+
+  final bool enableSwipe;
+  final bool dense;
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  Color _statusColor(AColors ac) {
+    switch (task.state) {
+      case DownloadState.downloading:
+      case DownloadState.idle:
+        return ac.accentFrost;
+      case DownloadState.scheduled:
+        return ac.accentPurple;
+      case DownloadState.paused:
+        return ac.accentAmber;
+      case DownloadState.completed:
+        return ac.statusSuccess;
+      case DownloadState.failed:
+        return ac.statusError;
+      case DownloadState.merging:
+        return Colors.orange;
+    }
+  }
+
+  String _displayErrorMessage(String raw) {
+    return raw
+        .replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '')
+        .trim();
+  }
+
+  String _metadataLabel() {
+    final parts = <String>[];
+    if (task.state == DownloadState.scheduled) {
+      if (task.scheduledStartAt != null) {
+        final diff = task.scheduledStartAt!.difference(DateTime.now());
+        if (diff.isNegative) {
+          parts.add('Starting…');
+        } else {
+          String pad(int n) => n.toString().padLeft(2, '0');
+          if (diff.inDays > 1) {
+            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)} '
+                '${task.scheduledStartAt!.month}/${task.scheduledStartAt!.day}');
+          } else {
+            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)}');
+          }
+          if (diff.inMinutes < 60) {
+            parts.add('${diff.inMinutes}m left');
+          } else if (diff.inHours < 24) {
+            parts.add('${diff.inHours}h ${diff.inMinutes % 60}m left');
+          }
+        }
+      } else {
+        parts.add('Scheduled');
+      }
+    } else if (task.state == DownloadState.downloading ||
+        task.state == DownloadState.idle) {
+      if (task.totalBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
+      } else if (task.downloadedBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
+      }
+      parts.add(formatSpeed(task.speed));
+      if (task.totalBytes > 0 && task.speed > 0) {
+        final eta = formatEta(
+          downloadedBytes: task.downloadedBytes,
+          totalBytes: task.totalBytes,
+          speedEmaBytesPerSec: task.speed,
+        );
+        if (eta != null) parts.add(eta);
+      }
+      final elapsed = DateTime.now().difference(task.createdAt);
+      final m = elapsed.inMinutes;
+      final s = elapsed.inSeconds % 60;
+      parts.add('${m}m ${s}s');
+    } else if (task.state == DownloadState.completed && task.totalBytes > 0) {
+      parts.add(formatBytes(task.totalBytes));
+    } else if (task.state == DownloadState.completed && task.downloadedBytes > 0) {
+      parts.add('${formatBytes(task.downloadedBytes)} downloaded');
+    } else if (task.state == DownloadState.failed) {
+      if (task.downloadedBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} saved');
+      }
+      parts.add('Failed');
+    } else if (task.state == DownloadState.paused) {
+      if (task.totalBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
+      } else if (task.downloadedBytes > 0) {
+        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
+      }
+      parts.add('Paused');
+    } else if (task.state == DownloadState.merging) {
+      if (task.totalBytes > 0 && task.downloadedBytes > 0) {
+        parts.add('Merging chunk ${task.downloadedBytes} of ${task.totalBytes}');
+      } else {
+        parts.add('Merging…');
+      }
+    }
+    return parts.join(' · ');
+  }
+
+  /// Renders the task filename with middle-ellipsis: the base name
+  /// is end-ellipsized inside an Expanded, while the file extension
+  /// sits in a separate non-shrinking Text so it is always visible.
+  Widget _buildNameWidget(TextStyle style, {Color? extensionColor}) {
+    final name = taskDisplayName(task);
+    final dotIdx = name.lastIndexOf('.');
+    if (dotIdx > 0 && name.length - dotIdx <= 6) {
+      final base = name.substring(0, dotIdx);
+      final ext = name.substring(dotIdx);
+      return Row(
+        children: [
+          Expanded(
+            child: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+          ),
+          Text(
+            ext,
+            maxLines: 1,
+            style: extensionColor != null
+                ? style.copyWith(color: extensionColor)
+                : style,
+          ),
+        ],
+      );
+    }
+    return Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    final color = _statusColor(ac);
+    final isMerging = task.state == DownloadState.merging;
+    final progress = task.totalBytes > 0
+        ? (task.downloadedBytes / task.totalBytes).clamp(0.0, 1.0)
+        : null;
+
+    // ── Swipe backgrounds ──────────────────────────────────────────
+    Widget? rightSwipeBg() {
+      Widget icon;
+      switch (task.state) {
+        case DownloadState.scheduled:
+          icon = Icon(Icons.cancel_outlined, color: ac.statusError);
+        case DownloadState.idle:
+        case DownloadState.downloading:
+          icon = Icon(Icons.pause, color: ac.accentFrost);
+        case DownloadState.paused:
+          icon = Icon(Icons.play_arrow, color: ac.accentFrost);
+        case DownloadState.failed:
+          icon = Icon(Icons.refresh, color: ac.accentFrost);
+        case DownloadState.completed:
+          icon = Icon(Icons.open_in_new, color: ac.accentFrost);
+        case DownloadState.merging:
+          return null;
+      }
+      return Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: task.state == DownloadState.scheduled
+            ? ac.statusError.withValues(alpha: 0.2)
+            : ac.accentFrost.withValues(alpha: 0.2),
+        child: icon,
+      );
+    }
+
+    Widget? leftSwipeBg() {
+      if (isMerging) return null;
+      return Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        color: ac.statusError.withValues(alpha: 0.2),
+        child: Icon(Icons.delete_outline, color: ac.statusError),
+      );
+    }
+
+    VoidCallback? onRightSwipe() {
+      if (isMerging) return null;
+      switch (task.state) {
+        case DownloadState.scheduled:
+          return onCancel;
+        case DownloadState.idle:
+        case DownloadState.downloading:
+          return onPause;
+        case DownloadState.paused:
+          return onResume;
+        case DownloadState.failed:
+          return onRetry;
+        case DownloadState.completed:
+          return () => onOpenDownload(task);
+        case DownloadState.merging:
+          return null;
+      }
+    }
+
+    VoidCallback? onLeftSwipe() {
+      if (isMerging) return null;
+      return onCancel;
+    }
+
+    // ── Card body ──────────────────────────────────────────────────
+    final cardBody = Container(
+      constraints: const BoxConstraints(minHeight: 72),
+      decoration: BoxDecoration(
+        color: ac.surfaceCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ac.glassBorder),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Leading checkbox for selection mode
+            if (selectionMode)
+              Padding(
+                padding: const EdgeInsets.only(left: 8, right: 4),
+                child: GestureDetector(
+                  onTap: onToggleSelected,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? ac.accentFrost
+                            : ac.textTertiary,
+                        width: 1.5,
+                      ),
+                      color: selected
+                          ? ac.accentFrost
+                          : Colors.transparent,
+                    ),
+                    child: selected
+                        ? Icon(Icons.check,
+                            size: 12, color: ac.surfaceCard)
+                        : null,
+                  ),
+                ),
+              ),
+            // Type glyph icon
+            const Padding(padding: EdgeInsets.only(left: 8)),
+            Icon(
+              () {
+                final cat = categoryForTask(task);
+                if (cat != FileCategory.other) return iconForCategory(cat);
+                // Fallback to state-appropriate icon
+                switch (task.state) {
+                  case DownloadState.downloading:
+                  case DownloadState.idle:
+                    return Icons.download_outlined;
+                  case DownloadState.paused:
+                    return Icons.pause_circle_outline;
+                  case DownloadState.failed:
+                    return Icons.error_outline;
+                  case DownloadState.completed:
+                    return Icons.check_circle_outline;
+                  case DownloadState.scheduled:
+                    return Icons.schedule;
+                  case DownloadState.merging:
+                    return Icons.merge_type;
+                }
+              }(),
+              size: 20,
+              color: color,
+            ),
+            const SizedBox(width: 8),
+            // Left edge status indicator
+            Container(
+              width: 3,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(12)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Text block
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  vertical: task.state == DownloadState.failed ? 10 : 0,
+                ),
+                child: Column(
+                  mainAxisAlignment: task.state == DownloadState.failed
+                      ? MainAxisAlignment.start
+                      : MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Name row with optional priority pill
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildNameWidget(
+                            TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: ac.textPrimary,
+                            ),
+                            extensionColor: ac.textSecondary,
+                          ),
+                        ),
+                        if (task.priority != DownloadPriority.medium)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: (task.priority == DownloadPriority.high
+                                      ? ac.accentFrost
+                                      : ac.textTertiary)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: Text(
+                              task.priority == DownloadPriority.high
+                                  ? 'High'
+                                  : 'Low',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: task.priority == DownloadPriority.high
+                                    ? ac.accentFrost
+                                    : ac.textSecondary,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    // Progress bar (download / idle)
+                    if (task.state == DownloadState.downloading ||
+                        task.state == DownloadState.idle)
+                      RepaintBoundary(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: ac.borderStrong, width: 0.5),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2.5),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 6,
+                              backgroundColor: ac.surfaceElevated,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(color),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Paused frozen progress bar
+                    if (task.state == DownloadState.paused &&
+                        task.totalBytes > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: ac.borderStrong, width: 0.5),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2.5),
+                            child: LinearProgressIndicator(
+                              value: (task.downloadedBytes /
+                                      task.totalBytes)
+                                  .clamp(0.0, 1.0),
+                              minHeight: 6,
+                              backgroundColor: ac.surfaceElevated,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                ac.accentAmber.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Percent label for downloading state
+                    if (task.state == DownloadState.downloading &&
+                        task.totalBytes > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          '${(progress! * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontFamily: 'JetBrainsMono',
+                            fontWeight: FontWeight.w500,
+                            color: ac.textSecondary,
+                          ),
+                        ),
+                      ),
+                    // Metadata line
+                    Text(
+                      _metadataLabel(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'JetBrainsMono',
+                        color: ac.textTertiary,
+                      ),
+                    ),
+                    // Transient status message
+                    if (task.statusMessage != null &&
+                        task.statusMessage!.isNotEmpty &&
+                        task.state != DownloadState.completed &&
+                        task.state != DownloadState.failed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          task.statusMessage!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'Inter',
+                            color: ac.accentFrost,
+                          ),
+                        ),
+                      ),
+                    // Failed error text
+                    if (task.state == DownloadState.failed &&
+                        task.errorMessage != null &&
+                        task.errorMessage!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, right: 4),
+                        child: SelectableText(
+                          _displayErrorMessage(task.errorMessage!),
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.35,
+                            fontFamily: 'Inter',
+                            color: ac.statusError,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // Action buttons — top-aligned
+            Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: task.state == DownloadState.failed ? 8 : 0,
+                ),
+                child: _buildTaskActions(context, ac, color),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // ── Wrap in HoldSwipeCard when swipe enabled ───────────────────
+    Widget card;
+    if (enableSwipe && !selectionMode && !isMerging) {
+      card = Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: HoldSwipeCard(
+          leftBackground: rightSwipeBg(),
+          rightBackground: leftSwipeBg(),
+          onLeftSwipe: onLeftSwipe(),
+          onRightSwipe: onRightSwipe(),
+          child: cardBody,
+        ),
+      );
+    } else {
+      card = Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: cardBody,
+      );
+    }
+
+    if (selectionMode) {
+      card = GestureDetector(
+        onTap: onToggleSelected,
+        child: card,
+      );
+    }
+
+    // Accessibility label
+    final name = taskDisplayName(task);
+    final stateText = stateLabel(task.state);
+    final progressText = task.totalBytes > 0
+        ? ', ${((task.downloadedBytes / task.totalBytes) * 100).toStringAsFixed(0)}%'
+        : '';
+    return Semantics(
+      label: '$name, $stateText$progressText',
+      button: true,
+      child: card,
+    );
+  }
+
+  bool _isRefreshableFailure(DownloadFailure reason) {
+    switch (reason) {
+      case DownloadFailure.urlExpired:
+      case DownloadFailure.httpForbidden:
+      case DownloadFailure.httpUnauthorized:
+      case DownloadFailure.hlsTokenExpired:
+      case DownloadFailure.hlsCircuitBreaker:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Action buttons
+  // ---------------------------------------------------------------------------
+
+  Widget _compactButton({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: IconButton(
+        icon: Icon(icon, size: 18),
+        color: color,
+        tooltip: tooltip,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        splashRadius: 20,
+        onPressed: onPressed,
+      ),
+    );
+  }
+
+  Widget _popupRow(IconData icon, Color color, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTaskActions(BuildContext context, AColors ac, Color color) {
+    // ── Primary action icon ──────────────────────────────────────
+    Widget? primaryAction;
+
+    if (task.state == DownloadState.scheduled) {
+      primaryAction = _compactButton(
+        icon: Icons.cancel_outlined,
+        color: ac.statusError,
+        tooltip: 'Cancel scheduled',
+        onPressed: onCancel ?? () {},
+      );
+    } else if (task.state == DownloadState.downloading ||
+        task.state == DownloadState.idle) {
+      primaryAction = _compactButton(
+        icon: Icons.pause_rounded,
+        color: ac.accentFrost,
+        tooltip: 'Pause',
+        onPressed: onPause ?? () {},
+      );
+    } else if (task.state == DownloadState.paused) {
+      primaryAction = _compactButton(
+        icon: Icons.play_arrow_rounded,
+        color: ac.accentFrost,
+        tooltip: 'Resume',
+        onPressed: onResume ?? () {},
+      );
+    } else if (task.state == DownloadState.merging) {
+      primaryAction = SizedBox(
+        width: 32,
+        height: 32,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(ac.accentFrost),
+          ),
+        ),
+      );
+    } else if (task.state == DownloadState.failed) {
+      // Smart primary: Refresh link for expired/auth/forbidden failures
+      final needsRefresh = task.failureReason != null &&
+          _isRefreshableFailure(task.failureReason!);
+      if (needsRefresh && onResniffAuto != null) {
+        primaryAction = _compactButton(
+          icon: Icons.find_replace_rounded,
+          color: ac.accentFrost,
+          tooltip: 'Refresh link',
+          onPressed: () => onResniffAuto!(task),
+        );
+      } else {
+        primaryAction = _compactButton(
+          icon: Icons.refresh_rounded,
+          color: ac.statusError,
+          tooltip: 'Retry',
+          onPressed: onRetry ?? () {},
+        );
+      }
+    } else if (task.state == DownloadState.completed) {
+      primaryAction = _compactButton(
+        icon: Icons.open_in_new,
+        color: ac.statusSuccess,
+        tooltip: 'Open',
+        onPressed: () => onOpenDownload(task),
+      );
+    }
+
+    // ── Overflow menu items ──────────────────────────────────────
+    final popupItems = <PopupMenuEntry<String>>[];
+
+    // Open (completed tasks)
+    if (task.state == DownloadState.completed) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'open',
+          child: _popupRow(Icons.open_in_new, ac.statusSuccess, 'Open'),
+        ),
+      );
+    }
+
+    // Share (completed tasks)
+    if (task.state == DownloadState.completed && onShare != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'share',
+          child: _popupRow(Icons.share_outlined, ac.accentFrost, 'Share'),
+        ),
+      );
+    }
+
+    // Export (completed tasks)
+    if (task.state == DownloadState.completed && onExport != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'export',
+          child: _popupRow(Icons.file_download_outlined, ac.accentFrost, 'Export'),
+        ),
+      );
+    }
+
+    // Force merge
+    if (task.state != DownloadState.completed &&
+        task.state != DownloadState.downloading &&
+        task.state != DownloadState.merging &&
+        onForceMerge != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'force_merge',
+          child: _popupRow(Icons.merge_type, Colors.orange, 'Force merge'),
+        ),
+      );
+    }
+
+    // Resniff auto
+    if (onResniffAuto != null &&
+        !task.url.startsWith('magnet:') &&
+        !task.url.startsWith('blob:')) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'resniff_auto',
+          child: _popupRow(
+              Icons.find_replace_rounded, ac.accentFrost, 'Refresh link'),
+        ),
+      );
+    }
+
+    // Resniff manual
+    if (onResniffManual != null &&
+        (task.sourcePageUrl != null || !task.url.startsWith('magnet:'))) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'resniff_manual',
+          child: _popupRow(Icons.open_in_browser_rounded,
+              ac.accentPurple, 'Scan in browser'),
+        ),
+      );
+    }
+
+    // Open source page
+    if (task.sourcePageUrl != null && onOpenUrlInBrowser != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'open_source',
+          child:
+              _popupRow(Icons.open_in_new, ac.accentPurple, 'View source page'),
+        ),
+      );
+    }
+
+    // Delete / Cancel
+    final isCompleted = task.state == DownloadState.completed;
+    popupItems.add(
+      PopupMenuItem(
+        value: 'delete',
+        child: _popupRow(Icons.delete_outline, ac.statusError,
+            isCompleted ? 'Remove' : 'Cancel'),
+      ),
+    );
+
+    // Properties
+    popupItems.add(
+      PopupMenuItem(
+        value: 'properties',
+        child: _popupRow(Icons.info_outline, ac.textSecondary, 'Properties'),
+      ),
+    );
+
+    final hasPrimary = primaryAction != null;
+    final hasOverflow = popupItems.isNotEmpty;
+
+    if (!hasPrimary && !hasOverflow) return const SizedBox.shrink();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: (_) {},
+      onLongPressMoveUpdate: (_) {},
+      onLongPressEnd: (_) {},
+      onLongPressCancel: () {},
+      child: Padding(
+        padding: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (primaryAction != null) ...[
+              primaryAction,
+              const SizedBox(width: 4),
+            ],
+            if (hasOverflow)
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: PopupMenuButton<String>(
+                  icon: Icon(Icons.more_vert, size: 16,
+                      color: ac.textSecondary),
+                  padding: EdgeInsets.zero,
+                  splashRadius: 20,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  color: ac.surfaceCard,
+                  elevation: 4,
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'open':
+                        onOpenDownload(task);
+                      case 'share':
+                        onShare?.call(task);
+                      case 'export':
+                        onExport?.call(task);
+                      case 'force_merge':
+                        onForceMerge?.call();
+                      case 'open_source':
+                        if (task.sourcePageUrl != null) {
+                          onOpenUrlInBrowser?.call(task.sourcePageUrl!);
+                        }
+                      case 'resniff_auto':
+                        onResniffAuto?.call(task);
+                      case 'resniff_manual':
+                        onResniffManual?.call(task);
+                      case 'delete':
+                        onCancel?.call();
+                      case 'properties':
+                        if (onShowProperties != null) {
+                          onShowProperties!();
+                        } else {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) =>
+                                DownloadPropertiesDialog(task: task),
+                          );
+                        }
+                    }
+                  },
+                  itemBuilder: (_) => popupItems,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+}

@@ -20,6 +20,11 @@ class TsRemuxService {
 
   /// Remuxes an MPEG-TS file to MP4 container using Android's native
   /// MediaExtractor + MediaMuxer. No transcoding — just container change.
+  ///
+  /// Native side time-interleaves A/V samples and synthesizes AAC `csd-0`
+  /// when missing so pure HW decoders (e.g. MX Player HW) get sound; HW+
+  /// was more forgiving of the old sequential-track remux.
+  ///
   /// Returns a [RemuxResult]; on failure the `.ts` file is kept as fallback
   /// and the failure reason is logged to AuroraLog for diagnostics.
   static Future<RemuxResult> remuxTsToMp4(
