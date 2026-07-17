@@ -208,184 +208,179 @@ void showSniffedMediaSheet(
                   }
                 }
 
-                // IMPORTANT: with isScrollControlled bottom sheets, DSS needs a
-                // finite-height parent. Column+Expanded inside expand:false DSS
-                // collapses to ~0 height (empty white/black sheet). Give the
-                // sheet the full screen height and expand:true so the Column
-                // receives bounded constraints (sticky batch bar still works).
-                final sheetHeight = MediaQuery.sizeOf(ctx).height;
-                return SizedBox(
-                  height: sheetHeight,
-                  child: DraggableScrollableSheet(
-                    initialChildSize: 0.90,
-                    minChildSize: 0.30,
-                    maxChildSize: 1.0,
-                    snap: true,
-                    snapSizes: const [0.3, 0.5, 0.9, 1.0],
-                    expand: true,
-                    builder: (scrollCtx, scrollController) {
-                      return Material(
-                        color: scrollCtx.ac.surfacePanel,
-                        child: Column(
-                          children: [
-                            Expanded(
-                              child: CustomScrollView(
-                                key: const Key('sniffer_drawer'),
-                                controller: scrollController,
-                                physics: const ClampingScrollPhysics(),
-                                slivers: [
-                              SliverToBoxAdapter(
-                                child: CaptureSheetHeader(
-                                  totalShown: displayedGroups.length,
-                                  selectedCount: selectedCount,
-                                  onSelectBest: () {
-                                    setSheetState(() {
-                                      mediaCatchController.clearSelection();
-                                      mediaCatchController.selectedIndices
-                                          .addAll(
-                                        mediaCatchController
-                                            .recommendedGroupIndices(
-                                          displayedGroups,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  onClearCaptured: () {
-                                    setSheetState(() {
-                                      activeTab.snifferEngine.clearCache();
-                                      mediaCatchController.clearSelection();
-                                    });
-                                  },
-                                  onRescan: onRescan,
-                                ),
+                // Layout contract (proven stable with showModalBottomSheet +
+                // isScrollControlled):
+                //   DraggableScrollableSheet(expand: false)
+                //     → Material
+                //       → CustomScrollView(controller: dssController)
+                // Do NOT wrap in full-screen SizedBox + expand:true + Column/
+                // Expanded — that overflows useSafeArea and paints a blank
+                // sheet after the first frame. Batch bar is a trailing sliver
+                // (scrolls with content) so it never needs Expanded.
+                return DraggableScrollableSheet(
+                  initialChildSize: 0.90,
+                  minChildSize: 0.30,
+                  maxChildSize: 1.0,
+                  snap: true,
+                  snapSizes: const [0.3, 0.5, 0.9, 1.0],
+                  expand: false,
+                  builder: (scrollCtx, scrollController) {
+                    final ac = scrollCtx.ac;
+                    return Material(
+                      color: ac.surfacePanel,
+                      child: CustomScrollView(
+                        key: const Key('sniffer_drawer'),
+                        controller: scrollController,
+                        physics: const ClampingScrollPhysics(),
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: CaptureSheetHeader(
+                              totalShown: displayedGroups.length,
+                              selectedCount: selectedCount,
+                              onSelectBest: () {
+                                setSheetState(() {
+                                  mediaCatchController.clearSelection();
+                                  mediaCatchController.selectedIndices.addAll(
+                                    mediaCatchController
+                                        .recommendedGroupIndices(
+                                      displayedGroups,
+                                    ),
+                                  );
+                                });
+                              },
+                              onClearCaptured: () {
+                                setSheetState(() {
+                                  activeTab.snifferEngine.clearCache();
+                                  mediaCatchController.clearSelection();
+                                });
+                              },
+                              onRescan: onRescan,
+                            ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: CaptureFilterBar(
+                              current: currentSegment,
+                              onSelected: (v) {
+                                setSheetState(() {
+                                  currentSegment = v;
+                                  mediaCatchController.clearSelection();
+                                });
+                              },
+                            ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: CaptureOptionsRow(
+                              settings: sheetSettings,
+                              showAll:
+                                  mediaCatchController.captureShowAllMedia,
+                              onShowAllChanged: (value) {
+                                setSheetState(() {
+                                  mediaCatchController.captureShowAllMedia =
+                                      value;
+                                  mediaCatchController.clearSelection();
+                                  sheetSettings = sheetSettings.copyWith(
+                                    captureShowAllMedia: value,
+                                  );
+                                });
+                                onSettingsChanged?.call(sheetSettings);
+                              },
+                              onSettingsChanged: (next) {
+                                setSheetState(() {
+                                  sheetSettings = next;
+                                });
+                                onSettingsChanged?.call(next);
+                              },
+                            ),
+                          ),
+                          const SliverToBoxAdapter(
+                            child: SizedBox(height: 4),
+                          ),
+                          SliverToBoxAdapter(
+                            child: CaptureStatsRow(
+                              foundCount: allMedia.length,
+                              videoCount: videoCount,
+                              audioCount: audioCount,
+                              totalBytes: totalBytesResult,
+                              filteredCount: captureResult.hiddenCount,
+                            ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                top: 8,
+                                bottom: 4,
                               ),
-                              SliverToBoxAdapter(
-                                child: CaptureFilterBar(
-                                  current: currentSegment,
-                                  onSelected: (v) {
-                                    setSheetState(() {
-                                      currentSegment = v;
-                                      mediaCatchController.clearSelection();
-                                    });
-                                  },
-                                ),
+                              child: Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: ac.borderHairline,
                               ),
-                              // Options zone — show-all + sort + display mode (PR5 / KD25–26).
-                              SliverToBoxAdapter(
-                                child: CaptureOptionsRow(
-                                  settings: sheetSettings,
-                                  showAll:
-                                      mediaCatchController.captureShowAllMedia,
-                                  onShowAllChanged: (value) {
-                                    setSheetState(() {
-                                      mediaCatchController.captureShowAllMedia =
-                                          value;
-                                      mediaCatchController.clearSelection();
-                                      sheetSettings = sheetSettings.copyWith(
-                                        captureShowAllMedia: value,
-                                      );
-                                    });
-                                    onSettingsChanged?.call(sheetSettings);
-                                  },
-                                  onSettingsChanged: (next) {
-                                    // Immediate rebuild uses sheetSettings for
-                                    // sort + display mode; persist async via host.
-                                    setSheetState(() {
-                                      sheetSettings = next;
-                                    });
-                                    onSettingsChanged?.call(next);
-                                  },
-                                ),
+                            ),
+                          ),
+                          if (displayedGroups.isEmpty)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: CaptureEmptyState(onRescan: onRescan),
+                            )
+                          else
+                            SliverPadding(
+                              padding: EdgeInsets.only(
+                                bottom: selectedCount > 0 ? 8 : 16,
                               ),
-                              const SliverToBoxAdapter(
-                                child: SizedBox(height: 4),
-                              ),
-                              SliverToBoxAdapter(
-                                child: CaptureStatsRow(
-                                  foundCount: allMedia.length,
-                                  videoCount: videoCount,
-                                  audioCount: audioCount,
-                                  totalBytes: totalBytesResult,
-                                  filteredCount: captureResult.hiddenCount,
-                                ),
-                              ),
-                              SliverToBoxAdapter(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 8,
-                                    bottom: 4,
-                                  ),
-                                  child: Divider(
-                                    height: 1,
-                                    thickness: 1,
-                                    color: context.ac.borderHairline,
-                                  ),
-                                ),
-                              ),
-                              if (displayedGroups.isEmpty)
-                                SliverFillRemaining(
-                                  hasScrollBody: false,
-                                  child: CaptureEmptyState(onRescan: onRescan),
-                                )
-                              else
-                                SliverPadding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  sliver: SliverList(
-                                    delegate: SliverChildBuilderDelegate(
-                                      (context, index) {
-                                        final group = displayedGroups[index];
-                                        final item = group.primary.media;
-                                        final isSelected = mediaCatchController
-                                            .selectedIndices
-                                            .contains(index);
-                                        final canPreview = item.type ==
-                                                MediaType.video ||
+                              sliver: SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (rowCtx, index) {
+                                    final group = displayedGroups[index];
+                                    final item = group.primary.media;
+                                    final isSelected = mediaCatchController
+                                        .selectedIndices
+                                        .contains(index);
+                                    final canPreview =
+                                        item.type == MediaType.video ||
                                             item.type == MediaType.audio ||
                                             item.type == MediaType.image;
 
-                                        return CaptureMediaRow(
-                                          index: index,
-                                          group: group,
-                                          selected: isSelected,
-                                          displayMode: sheetSettings
-                                              .sniffedMediaDisplayMode,
-                                          onSelectedChanged: (_) {
-                                            setSheetState(() {
-                                              mediaCatchController
-                                                  .toggleSelection(index);
-                                            });
-                                          },
-                                          onPreview: canPreview
-                                              ? () {
-                                                  Navigator.pop(ctx);
-                                                  onPreview(item);
-                                                }
-                                              : null,
-                                          onDownload: () {
-                                            Navigator.pop(ctx);
-                                            unawaited(
-                                              onAddToQueue(
-                                                parentContext,
-                                                item,
-                                                variants: group.candidates
-                                                    .map((c) => c.media)
-                                                    .toList(),
-                                              ),
-                                            );
-                                          },
-                                          onInfo: () =>
-                                              onInfo(parentContext, item),
+                                    return CaptureMediaRow(
+                                      index: index,
+                                      group: group,
+                                      selected: isSelected,
+                                      displayMode: sheetSettings
+                                          .sniffedMediaDisplayMode,
+                                      onSelectedChanged: (_) {
+                                        setSheetState(() {
+                                          mediaCatchController
+                                              .toggleSelection(index);
+                                        });
+                                      },
+                                      onPreview: canPreview
+                                          ? () {
+                                              Navigator.pop(ctx);
+                                              onPreview(item);
+                                            }
+                                          : null,
+                                      onDownload: () {
+                                        Navigator.pop(ctx);
+                                        unawaited(
+                                          onAddToQueue(
+                                            parentContext,
+                                            item,
+                                            variants: group.candidates
+                                                .map((c) => c.media)
+                                                .toList(),
+                                          ),
                                         );
                                       },
-                                      childCount: displayedGroups.length,
-                                    ),
-                                  ),
+                                      onInfo: () =>
+                                          onInfo(parentContext, item),
+                                    );
+                                  },
+                                  childCount: displayedGroups.length,
                                 ),
-                                ],
                               ),
                             ),
-                            if (selectedCount > 0)
-                              CaptureBatchBar(
+                          if (selectedCount > 0)
+                            SliverToBoxAdapter(
+                              child: CaptureBatchBar(
                                 selectedCount: selectedCount,
                                 totalCount: displayedGroups.length,
                                 onToggleSelectAll: () {
@@ -408,11 +403,11 @@ void showSniffedMediaSheet(
                                   unawaited(runBatchDownload(selected));
                                 },
                               ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
                 );
               },
             ),
