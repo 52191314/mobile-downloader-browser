@@ -1,12 +1,54 @@
+# =============================================================================
+# Aurora Downloader — root .gitignore
+# Public clone surface = build + Play Console / signing / compliance docs.
+# Maintainer notes, agent briefs, tests, tools, and local dumps stay local-only.
+# Signing details: docs/play_signing.md · android/key.properties.example
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Secrets / credentials (never commit)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+**/service-account*.json
+**/google-services.json
+**/GoogleService-Info.plist
+**/client_secret*.json
+**/oauth*.json
+**/secrets.json
+**/credentials.json
+# Flutter / Play signing (also ignored under android/.gitignore)
+**/key.properties
+!**/*.example
+!**/*.example.*
+**/*-keystore.jks
+**/*-keystore.keystore
+**/*.jks
+**/*.keystore
+!android/key.properties.example
+
+# -----------------------------------------------------------------------------
 # Miscellaneous
+# -----------------------------------------------------------------------------
 *.class
 *.local.txt
 *.log
 *.pyc
+*.pyo
 *.swp
+*~
 .DS_Store
-.env*
-.vercel/
+Thumbs.db
+Desktop.ini
 .atom/
 .build/
 .buildlog/
@@ -14,51 +56,118 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+.vercel/
+.cache/
+*.tmp
+*.temp
+*.bak
+*.orig
 
-# IntelliJ related
+# -----------------------------------------------------------------------------
+# IDEs / editors
+# -----------------------------------------------------------------------------
 *.iml
 *.ipr
 *.iws
 .idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.code-workspace
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
+# -----------------------------------------------------------------------------
+# Flutter / Dart / Pub
+# -----------------------------------------------------------------------------
 **/doc/api/
+doc/
 **/ios/Flutter/.last_build_id
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+.packages
 .pub-cache/
 .pub/
 /build/
+build/
 build_locked_old/
 build_old*/
+.fvm/
+.fvmrc
+coverage/
+*.lcov
+.melos_tool/
 
-# Symbolication related
+# Symbolication / obfuscation
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
+**/mapping.txt
+**/seeds.txt
+**/unused.txt
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# -----------------------------------------------------------------------------
+# Android (root-level + safety nets; see also android/.gitignore)
+# -----------------------------------------------------------------------------
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/build/
+/android/.gradle/
+/android/local.properties
+/android/captures/
+/android/.cxx/
+**/GeneratedPluginRegistrant.java
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
 
+# -----------------------------------------------------------------------------
 # Local runtime dumps / device exports (never publish)
+# -----------------------------------------------------------------------------
 local_*.json
 local_*.bin
+local_*.txt
 test_output_read.bin
 .playwright-mcp/
+**/logcat*.txt
+**/*_logcat.txt
+**/*_filtered.txt
+monitor.ps1
+settings_shot.png
+build_*.log
+build_*.txt
+flutter_*.log
 
-# Android Gradle intermediate (should not be in VCS)
-/android/build/
+# Accidental APK / bundle drops in repo root
+aurora_downloader.apk
+app-release.apk
+app-debug.apk
+app-release.aab
 
-# Load lab / scratch logs
-tools/archive/*.log
-tools/archive/*_live.txt
-tools/archive/*_results.log
+# -----------------------------------------------------------------------------
+# Maintainer-only (local workspace; not for public fork/clone)
+# Build + Play Console / privacy / signing docs remain tracked under docs/.
+# -----------------------------------------------------------------------------
+.agents/
+AGENTS.md
+DESIGN.md
+ROADMAP.md
+/test/
+/tools/
+
+# Internal docs (agent maps, designs, sessions, freemium backlog)
+docs/code-maps/
+docs/designs/
+docs/sessions/
+docs/audit_remediation_plan.md
+docs/premium_freemium_strategy.md
+docs/premium_implementation_tracker.md
+
+# -----------------------------------------------------------------------------
+# Session / tooling noise sometimes written next to the project
+# -----------------------------------------------------------------------------
+*.hprof
+.claude/
+.cursor/
+.opencode/

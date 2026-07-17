@@ -129,9 +129,9 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 - Do Not Track preference
 - Popup / invisible-redirect controls
 
-### Google Drive & backup
+### ~~Google Drive &~~ backup
 
-- **Google Drive** sign-in + upload/sync (Pro-gated; needs OAuth client IDs)
+- ~~**Google Drive** sign-in + upload/sync (Pro-gated; needs OAuth client IDs)~~ (Cancelled: GCP restricted)
 - **Manual** backup/export & restore (free)
 - **Scheduled auto-backup** of app data JSON to Downloads (Pro-gated interval)
 - Backup retention / restore UI for snapshots
@@ -149,14 +149,14 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 - **Aurora Glass** theme: Nordic dark + light (Snow Storm), optional OLED black
 - Floating **dock** navigation: Queue | Browser | Settings
 - Queue metrics / progress visualization
-- Settings dashboard cards (Defaults, Adblock, Search, Sniffer, Appearance, Network, Backup, Drive, About, **Aurora Pro**)
+- Settings dashboard cards (Defaults, Adblock, Search, Sniffer, Appearance, Network, Backup, ~~Drive~~, About, **Aurora Pro**)
 - Diagnostics page / logging
 - Snackbar coalescing, spring animations, hold-to-swipe cards
 - Brand logo on About
 
 ### Aurora Pro (freemium)
 
-Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premium_freemium_strategy.md`):
+Implemented gates:
 
 | Area | Free | Pro |
 |------|------|-----|
@@ -168,7 +168,7 @@ Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premiu
 | Proxy | no | HTTP + SOCKS5 + auth |
 | Wi‑Fi only / advanced stall knobs | basic retry | full |
 | Per-site UA map | global only | per-site |
-| Drive sync | no | yes |
+| ~~Drive sync~~ | ~~no~~ | ~~yes~~ (Cancelled) |
 | Scheduled auto-backup | manual only | intervals |
 | Sniffer, player, core download, IDM import | **yes** | yes |
 
@@ -180,11 +180,7 @@ Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premiu
 
 - Structured app logging (`AuroraLog`) with verbosity
 - Optional debug log server
-- Session logs under `docs/sessions/`
-- Code map: `docs/code-maps/projects/aurora_downloader.md`
-- Play listing copy: `docs/play_store_listing.md` · compliance: `docs/play_store_compliance.md` · Console runbook: `docs/play_store_console_runbook.md`
-- Unit/widget tests under `test/`
-- Agent notes: `AGENTS.md`
+- Play docs: `docs/play_store_listing.md` · compliance · Console runbook · `docs/build_channels_and_defines.md` · privacy policy under `docs/`
 
 ---
 
@@ -222,17 +218,17 @@ flutter build apk --release --target-platform android-arm64
 
 APKs land in `build/app/outputs/flutter-apk/`.
 
-### Google Drive (optional)
+### ~~Google Drive (optional)~~ (Cancelled: GCP restricted)
 
-Needs an Android OAuth client (`com.personal.aurora_downloader` + SHA-1) and a **Web** client ID at build time:
+~~Needs an Android OAuth client (`com.personal.aurora_downloader` + SHA-1) and a **Web** client ID at build time:~~
 
 ```powershell
-flutter run --dart-define=AURORA_GOOGLE_SERVER_CLIENT_ID="YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+~~flutter run --dart-define=AURORA_GOOGLE_SERVER_CLIENT_ID="YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"~~
 
-flutter build apk --release --dart-define=AURORA_GOOGLE_SERVER_CLIENT_ID="YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+~~flutter build apk --release --dart-define=AURORA_GOOGLE_SERVER_CLIENT_ID="YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"~~
 ```
 
-Use the Web application **Client ID** only. Do **not** commit client secrets.
+~~Use the Web application **Client ID** only. Do **not** commit client secrets.~~
 
 ---
 
@@ -254,7 +250,7 @@ lib/
   sniffer/      # browser, capture, adblock, player, tabs
   premium/      # Pro entitlement + feature gates + upsell
   backup/       # auto-backup
-  sync/         # Google Drive
+  ~~sync/         # Google Drive~~ (Cancelled)
   settings/     # DownloadSettings model
   ui/           # queue, settings, dock, widgets
   theme/        # Aurora colors / glass
