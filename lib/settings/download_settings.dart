@@ -426,6 +426,73 @@ class CosmeticAdRule {
 }
 
 class DownloadSettings {
+  /// User-facing destination under the public Downloads collection.
+  /// Always normalized to `Downloads/<folder…>` (never outside Downloads).
+  static const String defaultDownloadDestination = 'Downloads/Aurora Downloader';
+
+  /// MediaStore / native RELATIVE_PATH form (`Download/...`).
+  static String mediaStoreRelativeFromDisplay(String displayPath) {
+    final n = normalizeDownloadDestination(displayPath);
+    if (n.startsWith('Downloads/')) {
+      return 'Download/${n.substring('Downloads/'.length)}';
+    }
+    return 'Download/Aurora Downloader';
+  }
+
+  /// Display form for UI (`Downloads/...`).
+  static String displayFromMediaStoreRelative(String relativePath) {
+    final r = relativePath.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    if (r.startsWith('Download/')) {
+      return 'Downloads/${r.substring('Download/'.length)}';
+    }
+    if (r.startsWith('Downloads/')) return r;
+    return defaultDownloadDestination;
+  }
+
+  /// Coerce any stored/legacy value into a safe Downloads-relative path.
+  /// Migrates old `Aurora Downloads` → `Aurora Downloader`.
+  static String normalizeDownloadDestination(String? raw) {
+    var s = (raw ?? '').trim().replaceAll('\\', '/');
+    if (s.isEmpty) return defaultDownloadDestination;
+
+    // Legacy app name (plural "Downloads").
+    s = s.replaceAll('Aurora Downloads', 'Aurora Downloader');
+
+    // Strip accidental leading slashes.
+    s = s.replaceFirst(RegExp(r'^/+'), '');
+
+    // MediaStore form → display form.
+    if (s.startsWith('Download/') && !s.startsWith('Downloads/')) {
+      s = 'Downloads/${s.substring('Download/'.length)}';
+    }
+
+    // Force under Downloads/ — Android scoped storage only lets us publish
+    // into the shared Downloads collection via MediaStore without SAF.
+    if (!s.startsWith('Downloads/')) {
+      // If user typed only a folder name, nest it under Downloads.
+      s = 'Downloads/$s';
+    }
+
+    // Drop `..` segments and empty parts.
+    final parts = s
+        .split('/')
+        .where((p) => p.isNotEmpty && p != '.' && p != '..')
+        .toList();
+    if (parts.isEmpty || parts.first != 'Downloads') {
+      return defaultDownloadDestination;
+    }
+    // Need at least Downloads/<something>
+    if (parts.length < 2) {
+      return defaultDownloadDestination;
+    }
+    // Sanitize folder name characters (no control chars).
+    final cleaned = parts.map((p) {
+      return p.replaceAll(RegExp(r'[<>:"|?*\x00-\x1f]'), '_').trim();
+    }).where((p) => p.isNotEmpty).toList();
+    if (cleaned.length < 2) return defaultDownloadDestination;
+    return cleaned.join('/');
+  }
+
   final int maxConcurrentDownloads;
   final int chunksPerTask;
   final String downloadDestination;
@@ -578,7 +645,7 @@ class DownloadSettings {
   factory DownloadSettings.defaults() => DownloadSettings(
     maxConcurrentDownloads: 3,
     chunksPerTask: 16,
-    downloadDestination: 'Downloads/Aurora Downloader',
+    downloadDestination: defaultDownloadDestination,
     searchEngine: SearchEngine.google,
     adblockEnabled: true,
     popupBlockingEnabled: true,
@@ -683,7 +750,9 @@ class DownloadSettings {
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
-      downloadDestination: downloadDestination ?? this.downloadDestination,
+      downloadDestination: downloadDestination != null
+          ? normalizeDownloadDestination(downloadDestination)
+          : this.downloadDestination,
       searchEngine: searchEngine ?? this.searchEngine,
       adblockEnabled: adblockEnabled ?? this.adblockEnabled,
       popupBlockingEnabled: popupBlockingEnabled ?? this.popupBlockingEnabled,
@@ -796,9 +865,10 @@ class DownloadSettings {
           defaults.maxConcurrentDownloads,
       chunksPerTask:
           (json['chunksPerTask'] as num?)?.round() ?? defaults.chunksPerTask,
-      downloadDestination:
-          json['downloadDestination'] as String? ??
-          defaults.downloadDestination,
+      downloadDestination: normalizeDownloadDestination(
+        json['downloadDestination'] as String? ??
+            defaults.downloadDestination,
+      ),
       searchEngine: json['searchEngine'] is Map
           ? SearchEngine.fromJson(
               Map<String, dynamic>.from(json['searchEngine'] as Map),

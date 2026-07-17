@@ -195,3 +195,25 @@ int sliderIndexToSpeedKbps(int index) {
   if (index < 0 || index >= _speedKbpsPresets.length) return 0;
   return _speedKbpsPresets[index];
 }
+
+/// ETA smoothing helper. Returns a coarse-bucket estimate like "~30s",
+/// "~2m", "~5m", "~15m", "~1h", "~2h", or null when ETA is not meaningful.
+///
+/// [speedEmaBytesPerSec] should be an EMA-smoothed speed to avoid thrash.
+String? formatEta({
+  required int downloadedBytes,
+  required int totalBytes,
+  required double speedEmaBytesPerSec,
+}) {
+  if (totalBytes <= 0 || speedEmaBytesPerSec <= 8192) return null; // min 8 KB/s
+  final remaining = totalBytes - downloadedBytes;
+  if (remaining <= 0) return null;
+  final etaSeconds = (remaining / speedEmaBytesPerSec).round();
+  if (etaSeconds < 45) return '~30s';
+  if (etaSeconds < 150) return '~2m';
+  if (etaSeconds < 450) return '~5m';
+  if (etaSeconds < 1050) return '~15m';
+  if (etaSeconds < 4500) return '~${(etaSeconds / 3600 * 2).round() / 2}h';
+  if (etaSeconds < 9000) return '~${(etaSeconds / 3600).round()}h';
+  return '~2h';
+}

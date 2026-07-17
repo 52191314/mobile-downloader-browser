@@ -28,6 +28,7 @@ import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
+import '../widgets/dock_order_store.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
@@ -522,13 +523,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.download_rounded, title: 'Download Defaults'),
             const SizedBox(height: 8),
             Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _label('Destination'),
-              Text(
-                local.downloadDestination.isNotEmpty
-                    ? local.downloadDestination
-                    : 'App support directory',
-                style:
-                    TextStyle(fontSize: 13, color: context.ac.textSecondary, fontFamily: 'JetBrainsMono'),
+              _label('Destination (under Downloads)'),
+              const SizedBox(height: 6),
+              _DownloadDestinationEditor(
+                value: local.downloadDestination,
+                autoClassifyEnabled: local.autoClassifyEnabled,
+                onChanged: (dest) {
+                  setLocal(
+                    () => local = local.copyWith(downloadDestination: dest),
+                  );
+                  _update(local);
+                },
               ),
               const SizedBox(height: 16),
               _label('Max concurrent downloads'),
@@ -1174,7 +1179,9 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 16),
               SwitchListTile(
                 title: const Text('In-app snackbar alerts'),
-                subtitle: const Text('Show slide-up alerts for queue events. Use this when you want to glance at progress without leaving the browser.'),
+                subtitle: const Text(
+                  'Show slide-up alerts for queue events. Use this when you want to glance at progress without leaving the browser.',
+                ),
                 value: _settings.showSnackbars,
                 onChanged: (v) {
                   setLocal(() {});
@@ -1183,6 +1190,30 @@ class _SettingsPageState extends State<SettingsPage> {
                 contentPadding: EdgeInsets.zero,
               ),
             ])),
+            const SizedBox(height: 20),
+            PanelHeader(
+              icon: Icons.view_carousel_outlined,
+              title: 'Bottom dock',
+            ),
+            const SizedBox(height: 8),
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Drag to reorder icons on each dock slide. '
+                    'Add or remove actions (up to $kMaxDockItemsPerSlide per slide). '
+                    'Swipe the browser dock left/right to switch slides.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.ac.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const _DockReorderEditor(),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1415,18 +1446,24 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Row(
                   children: [
                     Expanded(
+                      flex: 3,
                       child: Text(entry.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               fontSize: 13,
                               color: context.ac.textPrimary)),
                     ),
-                    const SizedBox(width: 8),
-                    Text(': ${entry.value}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: context.ac.textSecondary)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      flex: 2,
+                      child: Text(': ${entry.value}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: context.ac.textSecondary)),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.close, size: 16),
                       padding: EdgeInsets.zero,
@@ -2173,9 +2210,25 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _loadLocalBackups() async {
     try {
-      final files = await PublicDownloadsService.listBackupFiles(
+      final root = DownloadSettings.mediaStoreRelativeFromDisplay(
+        widget.settings.downloadDestination,
+      );
+      // Primary + legacy roots so old backups remain restorable.
+      final primary = await PublicDownloadsService.listBackupFiles(
+        relativePath: '$root/Backup',
+      );
+      final legacyDefault = await PublicDownloadsService.listBackupFiles(
+        relativePath: 'Download/Aurora Downloader/Backup',
+      );
+      final legacyOldName = await PublicDownloadsService.listBackupFiles(
         relativePath: 'Download/Aurora Downloads/Backups',
       );
+      final seen = <String>{};
+      final files = <Map<String, dynamic>>[];
+      for (final item in [...primary, ...legacyDefault, ...legacyOldName]) {
+        final key = (item['uri'] ?? item['displayName'] ?? item).toString();
+        if (seen.add(key)) files.add(item);
+      }
       if (mounted) {
         setState(() {
           _localBackups = files;
@@ -2208,12 +2261,16 @@ class _BackupPageState extends State<BackupPage> {
         settingsJson: settingsJson,
       );
 
-      // Publish the file directly to public Download/Aurora Downloads/Backups/
-      await const MethodChannel('aurora_downloader/public_downloads').invokeMapMethod<String, Object?>('publishFile', {
+      final root = DownloadSettings.mediaStoreRelativeFromDisplay(
+        widget.settings.downloadDestination,
+      );
+      // Public folder: Downloads/<your folder>/Backup/
+      await const MethodChannel('aurora_downloader/public_downloads')
+          .invokeMapMethod<String, Object?>('publishFile', {
         'sourcePath': file.path,
         'displayName': p.basename(file.path),
         'mimeType': 'application/json',
-        'relativePath': 'Download/Aurora Downloads/Backups',
+        'relativePath': '$root/Backup',
       });
 
       // Delete the private temporary file
@@ -4402,5 +4459,422 @@ class _SchedulePageContentState extends State<_SchedulePageContent> {
           '(${diff.inMinutes}m remaining)';
     }
     return '${pad(dt.hour)}:${pad(dt.minute)} (less than a minute)';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bottom dock reorder editor (Settings → Appearance)
+// ---------------------------------------------------------------------------
+
+/// Drag-to-reorder UI for the two browser dock slides.
+class _DockReorderEditor extends StatefulWidget {
+  const _DockReorderEditor();
+
+  @override
+  State<_DockReorderEditor> createState() => _DockReorderEditorState();
+}
+
+class _DockReorderEditorState extends State<_DockReorderEditor> {
+  late List<String> _slide1;
+  late List<String> _slide2;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await dockOrderStore.load();
+    if (!mounted) return;
+    setState(() {
+      _slide1 = List<String>.from(dockOrderStore.slide1Order);
+      _slide2 = List<String>.from(dockOrderStore.slide2Order);
+      _ready = true;
+    });
+  }
+
+  Future<void> _persist() async {
+    await dockOrderStore.update(slide1: _slide1, slide2: _slide2);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _reset() async {
+    await dockOrderStore.reset();
+    if (!mounted) return;
+    setState(() {
+      _slide1 = List<String>.from(kDefaultSlide1Order);
+      _slide2 = List<String>.from(kDefaultSlide2Order);
+    });
+  }
+
+  List<DockItem> get _available {
+    final used = {..._slide1, ..._slide2};
+    return kAllDockItems.where((i) => !used.contains(i.id)).toList();
+  }
+
+  Future<void> _addTo(int slide) async {
+    final pool = _available;
+    if (pool.isEmpty) {
+      AuroraSnackbar.show(context, 'Every dock action is already assigned.');
+      return;
+    }
+    final target = slide == 1 ? _slide1 : _slide2;
+    if (target.length >= kMaxDockItemsPerSlide) {
+      AuroraSnackbar.show(
+        context,
+        'This slide is full (max $kMaxDockItemsPerSlide). Remove one first.',
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                'Add to slide $slide',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: ctx.ac.textPrimary,
+                ),
+              ),
+            ),
+            for (final item in pool)
+              ListTile(
+                leading: Icon(item.icon, color: ctx.ac.accentFrost),
+                title: Text(item.label),
+                onTap: () => Navigator.pop(ctx, item.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (slide == 1) {
+        _slide1 = [..._slide1, picked];
+      } else {
+        _slide2 = [..._slide2, picked];
+      }
+    });
+    await _persist();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSlideSection(
+          title: 'Slide 1 (default)',
+          slideIndex: 1,
+          ids: _slide1,
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (newIndex > oldIndex) newIndex -= 1;
+              final item = _slide1.removeAt(oldIndex);
+              _slide1.insert(newIndex, item);
+            });
+            unawaited(_persist());
+          },
+          onRemove: (id) {
+            setState(() => _slide1 = _slide1.where((x) => x != id).toList());
+            unawaited(_persist());
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildSlideSection(
+          title: 'Slide 2 (swipe left)',
+          slideIndex: 2,
+          ids: _slide2,
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (newIndex > oldIndex) newIndex -= 1;
+              final item = _slide2.removeAt(oldIndex);
+              _slide2.insert(newIndex, item);
+            });
+            unawaited(_persist());
+          },
+          onRemove: (id) {
+            setState(() => _slide2 = _slide2.where((x) => x != id).toList());
+            unawaited(_persist());
+          },
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _reset,
+            icon: const Icon(Icons.restart_alt, size: 18),
+            label: const Text('Reset dock to default'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSlideSection({
+    required String title,
+    required int slideIndex,
+    required List<String> ids,
+    required void Function(int oldIndex, int newIndex) onReorder,
+    required void Function(String id) onRemove,
+  }) {
+    final ac = context.ac;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: ac.textPrimary,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => unawaited(_addTo(slideIndex)),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add'),
+            ),
+          ],
+        ),
+        if (ids.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No icons on this slide. Tap Add.',
+              style: TextStyle(fontSize: 13, color: ac.textSecondary),
+            ),
+          )
+        else
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: ids.length,
+            onReorder: onReorder,
+            itemBuilder: (context, index) {
+              final id = ids[index];
+              final item = DockOrderStore.byId(id);
+              if (item == null) {
+                return SizedBox(key: ValueKey('missing_$id'));
+              }
+              return ListTile(
+                key: ValueKey('$slideIndex-$id'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(Icons.drag_handle, color: ac.textSecondary),
+                ),
+                title: Row(
+                  children: [
+                    Icon(item.icon, size: 20, color: ac.accentFrost),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(item.label)),
+                  ],
+                ),
+                trailing: IconButton(
+                  tooltip: 'Remove',
+                  icon: Icon(Icons.close, size: 18, color: ac.textSecondary),
+                  onPressed: ids.length <= 1
+                      ? null
+                      : () => onRemove(id),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Download destination editor (Settings → Download Defaults)
+// ---------------------------------------------------------------------------
+
+/// Edits the folder under public Downloads. Android MediaStore only allows
+/// publishing into the Downloads collection without a one-off SAF picker.
+class _DownloadDestinationEditor extends StatefulWidget {
+  final String value;
+  final bool autoClassifyEnabled;
+  final ValueChanged<String> onChanged;
+
+  const _DownloadDestinationEditor({
+    required this.value,
+    required this.autoClassifyEnabled,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DownloadDestinationEditor> createState() =>
+      _DownloadDestinationEditorState();
+}
+
+class _DownloadDestinationEditorState
+    extends State<_DownloadDestinationEditor> {
+  late final TextEditingController _controller;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    final normalized =
+        DownloadSettings.normalizeDownloadDestination(widget.value);
+    final folder = normalized.startsWith('Downloads/')
+        ? normalized.substring('Downloads/'.length)
+        : normalized;
+    _controller = TextEditingController(text: folder);
+    _focus = FocusNode();
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _commit();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _DownloadDestinationEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value && !_focus.hasFocus) {
+      final normalized =
+          DownloadSettings.normalizeDownloadDestination(widget.value);
+      final folder = normalized.startsWith('Downloads/')
+          ? normalized.substring('Downloads/'.length)
+          : normalized;
+      if (_controller.text != folder) {
+        _controller.text = folder;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final dest = DownloadSettings.normalizeDownloadDestination(
+      'Downloads/${_controller.text.trim()}',
+    );
+    final folder = dest.startsWith('Downloads/')
+        ? dest.substring('Downloads/'.length)
+        : dest;
+    if (_controller.text != folder) {
+      _controller.text = folder;
+    }
+    if (dest !=
+        DownloadSettings.normalizeDownloadDestination(widget.value)) {
+      widget.onChanged(dest);
+    }
+  }
+
+  void _reset() {
+    _controller.text = 'Aurora Downloader';
+    widget.onChanged(DownloadSettings.defaultDownloadDestination);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saved = DownloadSettings.normalizeDownloadDestination(widget.value);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _controller,
+          focusNode: _focus,
+          decoration: InputDecoration(
+            prefixText: 'Downloads/',
+            prefixStyle: TextStyle(
+              color: context.ac.textSecondary,
+              fontFamily: 'JetBrainsMono',
+              fontSize: 13,
+            ),
+            hintText: 'Aurora Downloader',
+            isDense: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          style: TextStyle(
+            fontSize: 13,
+            color: context.ac.textPrimary,
+            fontFamily: 'JetBrainsMono',
+          ),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _commit(),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: context.ac.accentAmber.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: context.ac.accentAmber.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline,
+                  size: 18, color: context.ac.accentAmber),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Android limits where apps can write. Aurora publishes into the '
+                  'shared Downloads collection only (and subfolders you name here). '
+                  'You cannot choose DCIM, arbitrary SD-card roots, or other apps\' '
+                  'folders without using a one-time system folder picker for a single file. '
+                  'With auto-classify on, files also go into Videos / Audio / Images / … '
+                  'under this folder.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: context.ac.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            TextButton(
+              onPressed: _reset,
+              child: const Text('Reset to default'),
+            ),
+            const Spacer(),
+          ],
+        ),
+        Text(
+          'Publishes to: $saved'
+          '${widget.autoClassifyEnabled ? '/Videos|Audio|…' : ''}',
+          style: TextStyle(
+            fontSize: 12,
+            color: context.ac.textSecondary,
+            fontFamily: 'JetBrainsMono',
+          ),
+        ),
+      ],
+    );
   }
 }

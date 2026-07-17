@@ -46,6 +46,7 @@ import 'autofill_store.dart';
 import 'safe_browsing_service.dart';
 import 'sniffer_url_utils.dart';
 import '../theme/aurora_palette.dart';
+import 'package:aurora_downloader/ui/widgets/dock_order_store.dart';
 
 import 'actions/autofill_action.dart';
 import 'actions/context_menu_action.dart';
@@ -1948,11 +1949,15 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   void _setupTabCallbacks(BrowserTab tab) {
+    // Drive smart address suggestions while the user types.
+    tab.attachAddressListener(_onAddressChanged);
     tab.controller.setOnUrlChanged((url) {
       if (!mounted) return;
       final changed =
           tab.currentUrl != url || tab.addressController.text != url;
       if (!changed) return;
+      // Writing the URL into the controller would re-fire suggestion
+      // refresh during navigation — only update when the bar is collapsed.
       tab.addressController.text = url;
       tab.currentUrl = url;
       _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
@@ -2558,11 +2563,20 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   void _onAddressChanged() {
+    // Only the active tab drives the suggestion panel; other tabs still
+    // have listeners so switching mid-type is consistent, but we ignore
+    // non-active edits (should not happen while typing).
+    if (!_addressExpanded) {
+      _addressBarController.clearSuggestions();
+      return;
+    }
     _addressBarController.onAddressChanged(
       tab: _activeTab,
       library: _library,
       searchEngine: widget.settings.searchEngine,
-      rebuild: () => setState(() {}),
+      rebuild: () {
+        if (mounted) setState(() {});
+      },
     );
   }
 
@@ -2741,12 +2755,14 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   void _handlePopupEvent(BrowserTab tab, String rawMessage) {
-    if (!mounted || !widget.settings.popupBlockingEnabled) return;
     Map<String, dynamic> data = {};
     try {
       final decoded = jsonDecode(rawMessage);
       if (decoded is Map) data = Map<String, dynamic>.from(decoded);
     } catch (_) {}
+    final playSuppress = data['reason'] == 'play-ad-suppress';
+    if (!playSuppress && !widget.settings.popupBlockingEnabled) return;
+    if (!mounted) return;
     final event = BlockedPopupEvent.fromJson(data);
     final url = event.url?.trim();
     tab.controller.incrementBlockedPopups();
@@ -2757,9 +2773,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     _suppressBlockedRedirectNoise(
       tab,
       url,
-      reason: 'popup ad',
+      reason: playSuppress ? 'play ad popup' : 'popup ad',
       userInitiated: event.userInitiated,
     );
+    // Silent during play open — keep the player UX clean.
+    if (playSuppress) return;
     unawaited(
       _showStrictRedirectPrompt(
         tab: tab,
@@ -2772,12 +2790,19 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   void _handleInvisibleRedirect(BrowserTab tab, String rawMessage) {
-    if (!mounted || !widget.settings.invisibleRedirectBlockingEnabled) return;
     Map<String, dynamic> data = {};
     try {
       final decoded = jsonDecode(rawMessage);
       if (decoded is Map) data = Map<String, dynamic>.from(decoded);
     } catch (_) {}
+    final suppressedDuringPlay = data['suppressedDuringPlay'] == true;
+    // During play-ad suppress we always accept the cancel (even if the
+    // global setting is off) so the video page is not stolen.
+    if (!suppressedDuringPlay &&
+        !widget.settings.invisibleRedirectBlockingEnabled) {
+      return;
+    }
+    if (!mounted) return;
     final url = (data['url'] as String?)?.trim();
     if (url == null || url.isEmpty) return;
     final uri = Uri.tryParse(url);
@@ -2788,9 +2813,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     _suppressBlockedRedirectNoise(
       tab,
       url,
-      reason: 'invisible redirect',
+      reason: suppressedDuringPlay ? 'play ad redirect' : 'invisible redirect',
       userInitiated: userInitiated,
     );
+    // Silent during play open — dialog would stack under the player.
+    if (suppressedDuringPlay) return;
     unawaited(
       _showStrictRedirectPrompt(
         tab: tab,
@@ -3090,22 +3117,39 @@ class _SnifferScreenState extends State<SnifferScreen>
     return 'New Tab';
   }
 
-  Widget _buildSuggestionPanel() {
+  static const double _suggestionRowHeight = 52.0;
+
+  Widget _buildSuggestionPanel({required bool allowScroll}) {
     return ListView.builder(
       key: const Key('address_suggestion_panel'),
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: _addressSuggestions.length,
+      // Only scroll when content exceeds the max panel height; otherwise
+      // the panel shrinks to fit and feels like a native typeahead list.
+      physics: allowScroll
+          ? const ClampingScrollPhysics()
+          : const NeverScrollableScrollPhysics(),
       itemBuilder: (context, i) {
         final suggestion = _addressSuggestions[i];
         final icon = switch (suggestion.kind) {
-          AddressSuggestionKind.favorite => Icons.star,
-          AddressSuggestionKind.history => Icons.history,
-          AddressSuggestionKind.search => Icons.search,
+          AddressSuggestionKind.favorite => Icons.star_rounded,
+          AddressSuggestionKind.history => Icons.history_rounded,
+          AddressSuggestionKind.search => Icons.search_rounded,
+        };
+        final subtitle = switch (suggestion.kind) {
+          AddressSuggestionKind.search =>
+            widget.settings.searchEngine.name,
+          AddressSuggestionKind.favorite ||
+          AddressSuggestionKind.history =>
+            () {
+              final host = Uri.tryParse(suggestion.url)?.host;
+              return (host != null && host.isNotEmpty) ? host : suggestion.url;
+            }(),
         };
         return InkWell(
           onTap: () => _acceptSuggestion(suggestion),
           child: Container(
-            height: 44,
+            height: _suggestionRowHeight,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               border: Border(
@@ -3117,26 +3161,33 @@ class _SnifferScreenState extends State<SnifferScreen>
             ),
             child: Row(
               children: [
-                Icon(icon, size: 16, color: context.ac.accentFrost),
-                const SizedBox(width: 10),
+                Icon(icon, size: 18, color: context.ac.accentFrost),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    suggestion.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.ac.textPrimary,
-                    ),
-                  ),
-                ),
-                Text(
-                  suggestion.url,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: context.ac.textTertiary,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        suggestion.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: context.ac.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.ac.textTertiary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -3250,13 +3301,19 @@ class _SnifferScreenState extends State<SnifferScreen>
   Widget build(BuildContext context) {
     final tab = _activeTab;
     final sniffedCount = tab.snifferEngine.detectedMedia.length;
-    final suggestionHeight = _addressExpanded && _addressSuggestions.isNotEmpty
-        ? (_addressSuggestions.length * 44.0 + 8.0).clamp(0.0, 280.0)
-        : 0.0;
-    // Top bar: only the find bar. Suggestions are now rendered as an overlay
-    // above the address bar in the bottom bar so they sit next to the field
-    // they belong to.
+    // Top bar: only the find bar. Suggestions overlay the main Stack above
+    // the bottom chrome (not inside the short bottom-bar Stack, which
+    // previously clipped the panel to ~one row).
     final double topHeight = _findVisible ? 54.0 : 0.0;
+    final screenH = MediaQuery.sizeOf(context).height;
+    // Grow with suggestion count; cap at 65% of the screen so typeahead can
+    // show many rows without covering the whole UI.
+    final maxSuggestionH = screenH * 0.65;
+    final rawSuggestionH = _addressSuggestions.isEmpty
+        ? 0.0
+        : _addressSuggestions.length * _suggestionRowHeight + 8.0;
+    final suggestionHeight = rawSuggestionH.clamp(0.0, maxSuggestionH);
+    final suggestionNeedsScroll = rawSuggestionH > maxSuggestionH + 0.5;
 
     final topBar = AnimatedPositioned(
       duration: const Duration(milliseconds: 200),
@@ -3434,6 +3491,9 @@ class _SnifferScreenState extends State<SnifferScreen>
                                                 );
                                                 _addressFocusNode
                                                     .requestFocus();
+                                                // Seed suggestions for the current
+                                                // text so the panel appears on open.
+                                                _onAddressChanged();
                                               });
                                         },
                                         child: Container(
@@ -3521,20 +3581,6 @@ class _SnifferScreenState extends State<SnifferScreen>
                 _buildConsolidatedStrip(tab, toolbarHeight),
               ],
             ),
-            // Suggestion panel overlay above the address bar pill
-            if (_addressExpanded && _addressSuggestions.isNotEmpty)
-              Positioned(
-                bottom: addressBarHeight + tabStripHeight + 16,
-                left: 8,
-                right: 8,
-                height: suggestionHeight,
-                child: Material(
-                  elevation: 12,
-                  color: context.ac.overlay,
-                  borderRadius: BorderRadius.circular(16),
-                  child: _buildSuggestionPanel(),
-                ),
-              ),
           ],
         ),
       ),
@@ -3619,10 +3665,32 @@ class _SnifferScreenState extends State<SnifferScreen>
         key: _scaffoldKey,
         body: SafeArea(
           child: Stack(
+            clipBehavior: Clip.none,
             children: [
               webView,
               topBar,
               bottomBar,
+              // Typeahead above the bottom chrome so it can grow to ~65% of
+              // the screen. Anchored just above the bottom bar.
+              if (_addressExpanded &&
+                  _addressSuggestions.isNotEmpty &&
+                  suggestionHeight > 0)
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: _barsVisible ? bottomHeight + 4 : 8,
+                  height: suggestionHeight,
+                  child: Material(
+                    elevation: 16,
+                    shadowColor: Colors.black54,
+                    color: context.ac.overlay,
+                    borderRadius: BorderRadius.circular(16),
+                    clipBehavior: Clip.antiAlias,
+                    child: _buildSuggestionPanel(
+                      allowScroll: suggestionNeedsScroll,
+                    ),
+                  ),
+                ),
               if (_elementPickerActive) _buildPickerCancelButton(),
             ],
           ),
@@ -3645,11 +3713,21 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  /// Unified bottom strip — browser nav (back/forward/tabs) +
+  /// Open the search-engine home page for the Home dock button.
+  void _goDockHome() {
+    final engineId = widget.settings.searchEngine.id;
+    final home = switch (engineId) {
+      'duckduckgo' => 'https://duckduckgo.com/',
+      'bing' => 'https://www.bing.com/',
+      'brave' => 'https://search.brave.com/',
+      _ => 'https://www.google.com/',
+    };
+    unawaited(_loadUrlWithHostSettings(_activeTab, Uri.parse(home)));
+  }
+
   /// Unified bottom strip — a two-slide browser dock.
   ///
-  /// Slide 1: Backward · Forward · Sniffer · Download · Tab
-  /// Slide 2: Browser Tools · Settings
+  /// Icon order is customizable in Settings → Appearance → Bottom dock.
   /// Swipe horizontally to switch slides.
   Widget _buildConsolidatedStrip(BrowserTab tab, double height) {
     return SizedBox(
@@ -3671,6 +3749,9 @@ class _SnifferScreenState extends State<SnifferScreen>
             onSettings: () => widget.onOpenSettings?.call(),
             onHistory: _showHistorySheet,
             onBookmarks: _showFavoritesSheet,
+            onHome: _goDockHome,
+            onAdblock: () => _showAdblockPopup(tab),
+            onReaderMode: () => unawaited(_showReaderMode()),
           ),
         ),
       ),
@@ -4935,6 +5016,10 @@ class _SnifferScreenState extends State<SnifferScreen>
         now.difference(_lastAuroraPlayAt!) < const Duration(milliseconds: 1500)) {
       return;
     }
+
+    // Keep the tab on the video page while ads try to navigate away on the
+    // same click that started play (MissAV and similar).
+    _activeTab.controller.armPlayNavigationSuppress();
 
     Map<String, dynamic>? data;
     try {

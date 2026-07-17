@@ -84,6 +84,12 @@ class BrowserTab {
     }
   }
 
+  void attachAddressListener(void Function() listener) {
+    // Idempotent: remove first so double-setup on tab restore is safe.
+    addressController.removeListener(listener);
+    addressController.addListener(listener);
+  }
+
   void detachAddressListener(void Function() listener) {
     addressController.removeListener(listener);
   }

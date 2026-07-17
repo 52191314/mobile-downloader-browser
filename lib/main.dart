@@ -195,7 +195,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final ProEntitlement _proEntitlement = ProEntitlement();
   final PublicDownloadsService _publicDownloadsService =
-      const PublicDownloadsService();
+      PublicDownloadsService();
   final DownloadNotificationService _notificationService =
       DownloadNotificationService();
   late final AutoBackupService _autoBackupService = AutoBackupService(
@@ -652,6 +652,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onResniffManual: _resniffManual,
                             onShareDownload: _shareDownload,
                             onExportDownload: _exportCompletedFile,
+                            onOpenBrowser: () => _selectTab(1),
                           ),
                         ),
                       ),
@@ -1207,6 +1208,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   void _applySettings(DownloadSettings settings) {
     final isPro = _proEntitlement.isPro;
+
+    // Keep public publish root in sync with Settings → Download Defaults.
+    final dest = DownloadSettings.normalizeDownloadDestination(
+      settings.downloadDestination,
+    );
+    _publicDownloadsService.rootRelativePath =
+        DownloadSettings.mediaStoreRelativeFromDisplay(dest);
 
     unawaited(_autoBackupService.configure(settings));
     _downloadQueue.wifiOnly = settings.wifiOnly;
