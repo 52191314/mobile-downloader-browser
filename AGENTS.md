@@ -166,17 +166,47 @@ This applies regardless of whether the command was given directly or through the
 
 ## Active Branch Constraint
 
-- All development, testing, builds, and commits in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`) must occur on the **`Post-Gate-Production`** branch.
-- Never check out, switch to, or pull changes from other branches in this repository.
+Two long-lived branches in this monorepo directory (`D:\02_Projects\Final_52191314_Server_and_Apps\aurora_downloader`):
+
+| Branch | Use for |
+|--------|---------|
+| **`Post-Gate-Production`** | General production line already landed (Capture fixes, Play branding baseline, notifications, etc.). Do not invent unrelated side branches for ordinary fixes unless the user asks. |
+| **`Play-Console-Launch`** | **Active stream for Play Store first publish / Console testing and non–launch-critical freemium residual work.** |
+
+### `Play-Console-Launch` (default for the following)
+
+All development, testing, builds, and commits for **these** topics must use **`Play-Console-Launch`** (create/check out that branch; do not put this work on `Post-Gate-Production` unless the user explicitly merges or cherry-picks):
+
+- Google Play Console setup, internal/closed testing, AAB/release signing, listing assets
+- Play policy follow-ups after branding (privacy policy wiring, Data safety, FGS declarations, IAP product live testing)
+- Play-channel builds (`AURORA_BUILD_CHANNEL=play`) aimed at store validation
+- Remaining **`docs/premium_implementation_tracker.md`** open items that are **not** P0–P2.3 core:
+  - Player residual (**U.1.4+**, U.3 PiP/resume/external player, etc.)
+  - **P2.4+** multi-device / Drive queue sync, **P2.5** WebDAV/S3
+  - **P3 / P4** (FFmpeg, library, clipboard intelligence, themes, …)
+  - **L.*** license packaging, CI secrets, F-Droid/GitHub free APK recipe
+
+Checkout:
+
+```bash
+git fetch origin
+git checkout Play-Console-Launch
+# if missing locally:
+git checkout -b Play-Console-Launch origin/Play-Console-Launch
+```
+
+Do **not** casually switch to unrelated feature branches or pull random remote branches. Prefer `Play-Console-Launch` for the work above; use `Post-Gate-Production` only when the user asks for production-line work outside that stream.
 
 ## Freemium / Pro implementation tracker
 
-When working on Play Store freemium, Pro gates, or items listed in the strategy:
+When working on Play Store freemium, Pro gates, residual tracker items, or items listed in the strategy:
 
+0. **Branch:** use **`Play-Console-Launch`** (see Active Branch Constraint above).
 1. Read and update **`docs/premium_implementation_tracker.md`** (source of truth for remaining work).
 2. Product intent lives in **`docs/premium_freemium_strategy.md`**.
-3. **Mandatory strikethrough rule:** After a tracker item is fully implemented and verified, **cross it out with Markdown strikethrough** (`~~like this~~`) on the item title/checkbox line, and add a short **Done:** note (date + key files). Do **not** delete completed items. Partial work: strike only finished sub-bullets.
-4. Do not re-gate free-forever items (sniffer, IDM import, native adblock engine baseline, UC-class player toggle, etc.).
+3. Play listing / Console runbooks: **`docs/play_store_listing.md`**, **`docs/play_store_console_runbook.md`**, **`docs/play_store_compliance.md`**, **`docs/build_channels_and_defines.md`**.
+4. **Mandatory strikethrough rule:** After a tracker item is fully implemented and verified, **cross it out with Markdown strikethrough** (`~~like this~~`) on the item title/checkbox line, and add a short **Done:** note (date + key files). Do **not** delete completed items. Partial work: strike only finished sub-bullets.
+5. Do not re-gate free-forever items (sniffer, IDM import, native adblock engine baseline, UC-class player toggle, etc.).
 
 ## Interaction & Output Rules
 
