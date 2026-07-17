@@ -15,14 +15,13 @@ Answers match the **Play-channel** product as of 2026-07-17.
 | Answer | Use this |
 |--------|----------|
 | **All features available without login** | **Yes** for core browser, sniffer, queue, downloads, settings. |
-| **Special access / login required?** | **Optional only:** Google Sign-In for **Drive sync** (Pro). Not required to use the app. |
+| **Special access / login required?** | **No login required** (Optional Google Sign-In for Drive sync is cancelled/unsupported). |
 | **Instructions for reviewers** | Paste something like: |
 
 ```text
 No login required for core features (browser, media capture tray, download queue).
 
-Optional: Settings → Drive (or profile) — Google Sign-In only if testing cloud backup / Drive sync.
-That path is Pro-gated; use a license-tester account with Aurora Pro if needed, or debug Force Pro is not available in release Play builds.
+Optional Google Drive sync has been cancelled due to restricted GCP credentials. No login or special credentials needed.
 
 YouTube media download/sniff is intentionally disabled for Play policy compliance.
 ```
@@ -44,14 +43,14 @@ You **are** a **web browser + download tool** — users can navigate the open we
 Publish a page that includes:
 
 1. **Developer / contact email**  
-2. **What the app does:** private browser + download manager; local queue; optional Drive; optional Play purchase.  
+2. **What the app does:** private browser + download manager; local queue; optional Play purchase.  
 3. **Data collected:**  
    - On device: browsing state (tabs, history/favorites if used), download queue, settings, cookies in WebView.  
    - **Not** sold to advertisers.  
-   - Optional: Google account if user links Drive (handled by Google Sign-In + Drive APIs).  
-   - Purchase status via Google Play Billing (Google processes payment).  
+   - ~~Optional: Google account if user links Drive~~ (Cancelled)  
+Purchase status via Google Play Billing (Google processes payment).  
 4. **Permissions:** Internet, notifications, foreground service for downloads, legacy storage on old Android only; MediaStore for Downloads.  
-5. **Third parties:** Google (Play Billing, optional Sign-In/Drive); websites the user chooses to visit.  
+5. **Third parties:** Google (Play Billing); websites the user chooses to visit.  
 6. **Children:** App not directed at children under 13.  
 7. **Contact / deletion:** email to request help deleting local data (uninstall clears most local data).  
 
@@ -69,7 +68,7 @@ Aurora Downloader is a private web browser and download manager for Android.
 
 Data we process
 • On your device: browser tabs and related session data, download queue and file paths, app settings, and WebView cookies for sites you visit.
-• Optional Google account: only if you choose to connect Google Drive for backup/sync. Authentication is performed by Google; we use tokens to access Drive on your behalf.
+• ~~Optional Google account: only if you choose to connect Google Drive for backup/sync.~~ (Cancelled)
 • Purchases: one-time Aurora Pro unlock is processed by Google Play Billing. We do not receive your full payment card details.
 
 What we do not do
@@ -91,7 +90,7 @@ Aurora Downloader is not directed at children under 13.
 
 Your choices
 • Uninstalling the app removes local app data on your device.
-• Disconnect Drive in settings to stop cloud access.
+• ~~Disconnect Drive in settings to stop cloud access.~~ (Cancelled)
 • Contact us at YOUR_EMAIL with privacy questions.
 ```
 
@@ -102,7 +101,7 @@ Your choices
 | Question | Answer |
 |----------|--------|
 | All functionality available without special access? | **Yes** (core app). |
-| Login credentials for Google? | Only if testing Drive: provide a **test Google account** you control, or state “reviewer can skip Drive; core app works without sign-in.” |
+| Login credentials for Google? | ~~Only if testing Drive...~~ (Cancelled: Google Drive feature cancelled/unsupported). |
 | Any geo / paid wall? | Pro features are IAP; free tier is fully usable. License testers for purchase testing. |
 
 ---
@@ -161,27 +160,27 @@ Declare **what the app actually does**. Approximate form answers:
 | Data type | Collected? | Shared? | Purpose | Optional? | Encrypted in transit? | Deletable? |
 |-----------|------------|---------|---------|-----------|----------------------|------------|
 | App activity (e.g. app interactions) | **No** as analytics product | — | — | — | — | — |
-| Web browsing history | **Yes — on device** | No (unless user enables Drive backup that includes such data) | App functionality | Required for browser features | HTTPS for network | Uninstall / clear app data |
-| Files and docs (downloads) | **Yes — on device** | Optional Drive if user enables | App functionality | User-initiated | HTTPS when uploading | User deletes files / uninstall |
+| Web browsing history | **Yes — on device** | No | App functionality | Required for browser features | HTTPS for network | Uninstall / clear app data |
+| Files and docs (downloads) | **Yes — on device** | No | App functionality | User-initiated | — | User deletes files / uninstall |
 | App info and performance (crash) | Only if you add a crash SDK later → today **No** third-party crash service assumed | No | — | — | — | — |
 | Device or other IDs | Advertising ID: **No**. Purchase token handled by Play | No | — | — | — | — |
-| Personal info — name/email | Only via **Google Sign-In** if user connects Drive (provided by Google) | Shared with Google as part of Sign-In/Drive | App functionality (cloud backup) | **Optional** | Yes (Google) | Disconnect account |
+| ~~Personal info — name/email~~ | ~~Only via **Google Sign-In** if user connects Drive~~ (Cancelled) | — | — | — | — | — |
 | Financial info | **No** card data in app; Play handles purchase | Google Play | — | — | — | — |
-| Photos/videos | User-downloaded media stored as files they chose | Only if they use Drive sync | App functionality | User-initiated | HTTPS for Drive | User control |
+| Photos/videos | User-downloaded media stored as files they chose | No | App functionality | User-initiated | — | User control |
 
 ### Toggles / statements
 
 | Statement | Answer |
 |-----------|--------|
 | Data is encrypted in transit | **Yes** for network APIs you use (HTTPS). Local disk is normal app/MediaStore storage. |
-| Users can request data deletion | **Yes** — uninstall + contact email; Drive disconnect |
+| Users can request data deletion | **Yes** — uninstall + contact email |
 | Independent security review | **No** (unless you paid for one) |
 | Committed to Play Families Policy | **No** (not a kids app) |
 
 ### Data sharing
 
-- **Do not** claim “no data collected” if you have Drive + purchases.  
-- Prefer: **data collected**, **not sold**, **shared with Google only** for Sign-In/Drive/Play Billing as the user uses those features.
+- **Do not** claim “no data collected” if you have purchases.  
+- Prefer: **data collected**, **not sold**, **shared with Google only** for Play Billing as the user uses those features.
 
 ---
 

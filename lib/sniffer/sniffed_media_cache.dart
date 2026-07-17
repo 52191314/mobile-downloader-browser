@@ -6,6 +6,7 @@ import 'worker_isolate_pool.dart';
 
 import 'package:flutter/foundation.dart';
 
+import '../compliance/restricted_media_policy.dart';
 import '../logging/aurora_log.dart';
 import 'models/sniffed_media.dart';
 
@@ -292,6 +293,15 @@ class SniffedMediaCache {
       for (final item in items) {
         final media = _mediaFromCacheItem(item);
         if (media == null) continue;
+        // Play channel: drop persisted YouTube UI sounds / media that were
+        // cached before the policy gate (e.g. m.youtube.com/.../success.mp3).
+        if (RestrictedMediaPolicy.isBlocked(
+          mediaUrl: media.url,
+          sourcePageUrl: media.sourcePageUrl,
+          headers: media.headers,
+        )) {
+          continue;
+        }
         detectedMedia.add(media);
         // Repopulate both the per-engine and global cross-tab dedup caches
         // so that restored entries are not duplicated on re-sniff
@@ -301,14 +311,40 @@ class SniffedMediaCache {
         _globalUrlCache.add(norm);
         added++;
       }
-      if (added > 0) {
+      // Second pass if channel/policy changed since items were written.
+      purgeRestrictedMedia();
+      if (added > 0 && detectedMedia.isNotEmpty) {
         mediaChangedController.add(detectedMedia.last);
       }
-      return added > 0;
+      return detectedMedia.isNotEmpty;
     } catch (e) {
       debugPrint('[SniffedMediaCache] Failed to load media cache: $e');
       return false;
     }
+  }
+
+  /// Removes Play-restricted URLs already in memory (e.g. YouTube UI .mp3).
+  int purgeRestrictedMedia() {
+    if (!RestrictedMediaPolicy.enforcementEnabled) return 0;
+    final before = detectedMedia.length;
+    detectedMedia.removeWhere((media) {
+      final blocked = RestrictedMediaPolicy.isBlocked(
+        mediaUrl: media.url,
+        sourcePageUrl: media.sourcePageUrl,
+        headers: media.headers,
+      );
+      if (blocked) {
+        final norm = normalizeUrl(media.url);
+        urlCache.remove(norm);
+        _globalUrlCache.remove(norm);
+      }
+      return blocked;
+    });
+    final removed = before - detectedMedia.length;
+    if (removed > 0 && detectedMedia.isNotEmpty) {
+      mediaChangedController.add(detectedMedia.last);
+    }
+    return removed;
   }
 
   List<dynamic>? _cacheItemsFromDecoded(Object? decoded) {

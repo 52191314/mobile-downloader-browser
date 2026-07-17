@@ -323,8 +323,8 @@ class DownloadQueue {
       sourcePageUrl: task.sourcePageUrl,
       headers: task.headers,
     )) {
-      _warn(RestrictedMediaPolicy.userMessageYouTube);
-      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageYouTube);
+      _warn(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
       return;
     }
     task.scheduledStartAt = startAt;
@@ -339,15 +339,15 @@ class DownloadQueue {
 
   void addTask(DownloadTask task, {bool force = false}) {
     if (_isDisposed) return;
-    // Play compliance: never enqueue YouTube / YouTube-CDN media.
+    // Play compliance: never enqueue restricted platform media (Wave 1+).
     // (See lib/compliance/restricted_media_policy.dart.)
     if (RestrictedMediaPolicy.isBlocked(
       mediaUrl: task.url,
       sourcePageUrl: task.sourcePageUrl,
       headers: task.headers,
     )) {
-      _warn(RestrictedMediaPolicy.userMessageYouTube);
-      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageYouTube);
+      _warn(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
       return;
     }
     _autoRetryAttempts.remove(task.id);
@@ -1411,6 +1411,33 @@ class DownloadQueue {
     });
   }
 
+  /// True if a task with the same base filename AND same source page already
+  /// exists in the queue.  Catches the case where two quality variants of the
+  /// same video are sniffed from one page under different URLs.
+  bool samePageFilenameExists(String filename, String? sourcePageUrl) {
+    if (sourcePageUrl == null || sourcePageUrl.isEmpty) return false;
+    final base = _stripUniqueSuffix(filename);
+    final normalizedSource = _normalizeUrl(sourcePageUrl);
+    return _tasks.values.any((t) {
+      if (t.state == DownloadState.scheduled) return false;
+      if (_normalizeUrl(t.sourcePageUrl ?? '') != normalizedSource) return false;
+      final existingBase = _stripUniqueSuffix(
+        p.basename(t.savePath),
+      );
+      return existingBase.toLowerCase() == base.toLowerCase();
+    });
+  }
+
+  /// Strips ` (1)`, ` (2)`, … suffixes appended by [FilenameService.uniquePath].
+  static String _stripUniqueSuffix(String filename) {
+    final ext = p.extension(filename);
+    final base = p.basenameWithoutExtension(filename);
+    // Match "filename (N)" pattern where N is one or more digits.
+    final match = RegExp(r'^(.*) \((\d+)\)$').firstMatch(base);
+    final stripped = match != null ? match.group(1)! : base;
+    return '$stripped$ext';
+  }
+
   // ---------------------------------------------------------------------------
   // Search, sort, and filter helpers
   // ---------------------------------------------------------------------------
@@ -1936,9 +1963,8 @@ class DownloadQueue {
       final task = _tasks[firstId];
       if (task != null) {
         fileName = task.savePath.split(RegExp(r'[/\\]')).last;
-        if (task.totalBytes > 0) {
-          percent = (task.downloadedBytes * 100 ~/ task.totalBytes).round();
-        }
+        // Same source as Queue + system notifications (segments for HLS).
+        percent = task.progressPercent;
       }
     }
     unawaited(DownloadForegroundService.update(

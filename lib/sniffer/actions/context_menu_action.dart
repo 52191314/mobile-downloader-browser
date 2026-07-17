@@ -431,7 +431,8 @@ Future<void> addContextTargetToQueue(
         tab.controller.getCookiesForDomain(url: url);
 
     bool force = false;
-    if (downloadQueue.urlExists(targetUrl)) {
+    if (downloadQueue.urlExists(targetUrl) ||
+        downloadQueue.samePageFilenameExists(filename, curUrl)) {
       if (!isMounted) return;
       // ignore: use_build_context_synchronously
       final choice = await showDuplicatePrompt(context, filename);

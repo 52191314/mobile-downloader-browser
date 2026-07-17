@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../compliance/restricted_media_policy.dart';
 import '../downloader/hls_models.dart';
 import '../platform/network_binding_service.dart';
 import '../settings/download_settings.dart';
@@ -64,13 +65,27 @@ abstract interface class SnifferBrowserController {
   Future<double?> getZoomScale();
   Future<void> freeze();
   Future<void> thaw();
+
+  /// Process-global: pauses JS timers / layout for **all** WebViews.
+  /// Use only when the app is backgrounded or the Browser shell is hidden.
+  /// Never call this when switching between browser tabs while browsing.
   Future<void> pauseAllWebViews();
+
+  /// Process-global: resumes JS timers for all WebViews, plus a health check
+  /// on this controller's instance when it has a live WebView.
   Future<void> resumeActiveWebView();
+
+  /// Per-WebView render pause (Android `onPause`). Does **not** call
+  /// process-global [pauseAllWebViews]/pauseTimers — that would freeze the
+  /// active tab if used on a background tab after resume.
   Future<void> pauseWebView();
+
+  /// Resume this WebView's render pipeline and ensure process timers run.
+  /// Always ends with resumeTimers so a prior global pause cannot stick.
   Future<void> resumeWebView();
 
   /// Suspend this WebView's rendering pipeline (Android-only, per-WebView).
-  /// Unlike [pauseWebView], this does NOT call the global pauseTimers()
+  /// Unlike a global timer pause, this does NOT call pauseTimers()
   /// which would affect ALL WebViews in the process.
   Future<void> suspendTab();
 
@@ -102,6 +117,10 @@ abstract interface class SnifferBrowserController {
   /// Briefly block main-frame cross-origin navigations after play intercept
   /// so ad-on-play redirects cannot steal the tab.
   void armPlayNavigationSuppress([Duration duration]);
+
+  /// Allow the next cross-origin main-frame load (address bar / user confirmed
+  /// redirect dialog) without re-prompting the invisible-redirect blocker.
+  Future<void> allowNextCrossOriginNavigation([String? url]);
 
   int get blockedRequestCount;
   List<String> get adblockAllowlist;
@@ -320,6 +339,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// heuristic difference between the original visit and the revisit.
   bool _isHistoryNavigation = false;
 
+  /// Trusted cross-origin load (address bar / "Current tab" confirmation).
+  String? _trustedCrossOriginNavUrl;
+  DateTime? _trustedCrossOriginNavUntil;
+
   /// Until this time, main-frame cross-origin navigations are cancelled even
   /// when the user gesture is present. Armed when replace-site-player
   /// intercepts `play()` so ad-on-play redirects cannot steal the tab.
@@ -462,6 +485,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   /// Block main-frame cross-origin navigations for a short window after
   /// Aurora intercepts site `play()` (ad-on-play pattern).
+  @override
   void armPlayNavigationSuppress([
     Duration duration = const Duration(milliseconds: 3500),
   ]) {
@@ -478,6 +502,57 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
             .catchError((_) {}),
       );
     }
+  }
+
+  @override
+  Future<void> allowNextCrossOriginNavigation([String? url]) async {
+    // Empty/null → short wildcard window so address-bar loads can follow
+    // HTTP redirect chains without re-prompting on each hop.
+    final token = (url == null || url.isEmpty) ? '*' : url;
+    _trustedCrossOriginNavUrl = token;
+    _trustedCrossOriginNavUntil =
+        DateTime.now().add(const Duration(seconds: 12));
+    if (!_webViewCreated) return;
+    final encoded = jsonEncode(token);
+    await _controller
+        ?.evaluateJavascript(
+          source:
+              'window.__auroraAllowNextCrossOriginNav='
+              '{url:$encoded,until:Date.now()+12000};',
+        )
+        .catchError((_) {});
+  }
+
+  /// Whether [url] is inside the intentional-nav trust window (address bar or
+  /// user-confirmed redirect). Not single-shot: redirect chains must pass.
+  bool _isTrustedCrossOriginNav(String url) {
+    final until = _trustedCrossOriginNavUntil;
+    if (until == null) return false;
+    if (DateTime.now().isAfter(until)) {
+      _trustedCrossOriginNavUrl = null;
+      _trustedCrossOriginNavUntil = null;
+      return false;
+    }
+    final trusted = _trustedCrossOriginNavUrl;
+    if (trusted == null) return false;
+    if (trusted == '*') return true;
+    if (url == trusted ||
+        url.startsWith(trusted) ||
+        trusted.startsWith(url)) {
+      return true;
+    }
+    // Same host as the confirmed URL (path/query hop after allow).
+    try {
+      final t = Uri.parse(trusted);
+      final u = Uri.parse(url);
+      if (t.hasScheme &&
+          u.hasScheme &&
+          t.host.isNotEmpty &&
+          t.host.toLowerCase() == u.host.toLowerCase()) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   bool get _isPlayNavSuppressActive {
@@ -641,14 +716,23 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         request.isForMainFrame != true &&
         request.method == 'GET') {
       final reqUrl = request.url.toString();
-      final lowUrl = reqUrl.toLowerCase();
-      final isHls =
-          lowUrl.contains('.m3u8') ||
-          isPlaylistPathHint(lowUrl) ||
-          (request.headers?['Accept']?.toLowerCase().contains('mpegurl') ??
-              false);
-      if (isHls) {
-        unawaited(_captureHlsPlaylistBody(reqUrl));
+      // Play: no HLS body capture on restricted pages or restricted CDN URLs.
+      final hardOff =
+          RestrictedMediaPolicy.shouldHardOffSniffing(_currentUrl);
+      final urlBlocked = RestrictedMediaPolicy.isBlocked(
+        mediaUrl: reqUrl,
+        sourcePageUrl: _currentUrl,
+      );
+      if (!hardOff && !urlBlocked) {
+        final lowUrl = reqUrl.toLowerCase();
+        final isHls =
+            lowUrl.contains('.m3u8') ||
+            isPlaylistPathHint(lowUrl) ||
+            (request.headers?['Accept']?.toLowerCase().contains('mpegurl') ??
+                false);
+        if (isHls) {
+          unawaited(_captureHlsPlaylistBody(reqUrl));
+        }
       }
     }
 
@@ -831,7 +915,12 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   void _scheduleGuardReinstall() {
     _guardReinstallDebounce?.cancel();
     _guardReinstallDebounce = Timer(const Duration(milliseconds: 300), () {
-      _guardInstaller.installBrowserGuards(force: true);
+      unawaited(() async {
+        await _guardInstaller.installBrowserGuards(force: true);
+        // Re-sync flags after force re-wrap (page/SPA can reset window vars).
+        await _syncPopupBlockingFlag();
+        await setInvisibleRedirectBlocking(_invisibleRedirectBlockingEnabled);
+      }());
     });
   }
 
@@ -856,14 +945,17 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     final allowlisted =
         pageHost.isNotEmpty && _adblockAllowlistSet.contains(pageHost);
 
-    // Skip adblock for history navigation (back/forward) so that URLs
-    // that were successfully visited before are never blocked on revisit.
-    // The `_history.contains(url)` fallback catches the race where
-    // `_isHistoryNavigation` has already been reset by the time
-    // this native callback fires.
-    final isHistoryNav = _isHistoryNavigation || _history.contains(url);
+    // Back/forward only for redirect trust — do NOT treat "URL is somewhere
+    // in history" as trusted. Ads reusing a previously visited host would
+    // otherwise escape the invisible-redirect prompt.
+    final isLiveHistoryNav = _isHistoryNavigation;
+    final trustedNav = isLiveHistoryNav || _isTrustedCrossOriginNav(url);
+    // Adblock still uses history-contains fallback (race with goBack flag).
+    final isHistoryNavForAdblock =
+        isLiveHistoryNav || _history.contains(url);
+
     final crossOriginMainFrame = action.isForMainFrame &&
-        !isHistoryNav &&
+        !trustedNav &&
         pageUri != null &&
         requestUri != null &&
         _isHttpLike(pageUri) &&
@@ -876,26 +968,50 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       return NavigationActionPolicy.CANCEL;
     }
 
-    final shouldPromptStrictRedirect =
-        _invisibleRedirectBlockingEnabled &&
-        crossOriginMainFrame &&
-        (action.isRedirect == true || action.hasGesture != true);
-    if (shouldPromptStrictRedirect) {
-      _onStrictRedirectDetected?.call(
-        StrictRedirectEvent(
-          url: url,
-          sourceUrl: pageUri.toString(),
-          method: action.isRedirect == true
-              ? 'http-redirect'
-              : 'main-frame navigation',
-          userInitiated: action.hasGesture == true,
-          isRedirect: action.isRedirect == true,
-        ),
+    if (_invisibleRedirectBlockingEnabled && crossOriginMainFrame) {
+      final hasGesture = action.hasGesture == true;
+      final isRedirect = action.isRedirect == true;
+      final navType = action.navigationType;
+      // navigationType is iOS/desktop only — on Android it is usually null.
+      final knownNonLink = navType != null &&
+          navType != NavigationType.LINK_ACTIVATED &&
+          navType != NavigationType.BACK_FORWARD &&
+          navType != NavigationType.RELOAD;
+      final looksLikeAdDocument = shouldBlockUrl(
+        url,
+        sourceHost: sourceHost,
+        requestType: 'document',
+        isThirdParty: true,
       );
-      return NavigationActionPolicy.CANCEL;
+      // Prompt + cancel when: server redirect, no gesture, non-link nav type,
+      // or the destination is an adblock-listed document (gesture stamped
+      // ad hops that previously escaped).
+      final shouldPromptStrictRedirect = isRedirect ||
+          !hasGesture ||
+          knownNonLink ||
+          looksLikeAdDocument;
+      if (shouldPromptStrictRedirect) {
+        final method = isRedirect
+            ? 'http-redirect'
+            : knownNonLink
+                ? 'scripted navigation'
+                : looksLikeAdDocument
+                    ? 'ad navigation'
+                    : 'main-frame navigation';
+        _onStrictRedirectDetected?.call(
+          StrictRedirectEvent(
+            url: url,
+            sourceUrl: pageUri.toString(),
+            method: method,
+            userInitiated: hasGesture,
+            isRedirect: isRedirect,
+          ),
+        );
+        return NavigationActionPolicy.CANCEL;
+      }
     }
     if (!allowlisted &&
-        !isHistoryNav &&
+        !isHistoryNavForAdblock &&
         shouldBlockUrl(
           url,
           sourceHost: sourceHost,
@@ -915,7 +1031,15 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// Routes the download URL to the sniffer so it appears in the FAB drawer.
   void onDownloadStartRequestCallback(DownloadStartRequest request) {
     final url = request.url.toString();
-    if (url.isNotEmpty && _onDownloadStartRequest != null) {
+    if (url.isEmpty) return;
+    // Play channel: never route YouTube download starts into the sniffer.
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: url,
+      sourcePageUrl: _currentUrl,
+    )) {
+      return;
+    }
+    if (_onDownloadStartRequest != null) {
       _onDownloadStartRequest!(url, request.suggestedFilename);
     }
   }
@@ -928,6 +1052,18 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (resource == null) return;
     final url = resource.url?.toString() ?? '';
     if (url.isEmpty) return;
+
+    // Play: hard-off when main frame is a restricted surface (primary gate).
+    if (RestrictedMediaPolicy.shouldHardOffSniffing(_currentUrl)) {
+      return;
+    }
+    // Play: URL/CDN backstop.
+    if (RestrictedMediaPolicy.isBlocked(
+      mediaUrl: url,
+      sourcePageUrl: _currentUrl,
+    )) {
+      return;
+    }
 
     // SKIP: segment files (HLS .ts fragments, DASH .m4s fragments)
     final lowUrl = url.toLowerCase();
@@ -1031,6 +1167,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (addToHistory) {
       _recordHistoryNavigation(urlStr);
     }
+    // Address bar / intentional loads must not trip the redirect prompt
+    // (wildcard covers server redirect chains off the typed URL).
+    await allowNextCrossOriginNavigation();
     // Only fire synthetic callbacks for EXISTING WebViews (already ready).
     // For NEW WebViews, skip and let the real onLoadStart/onUpdateVisitedHistory
     // callbacks handle the UI update, avoiding a race where the WebView hasn't
@@ -1314,6 +1453,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     // DOM via visibility:hidden, but if Android kills the WebView renderer
     // while the tab is in the background, thaw() fails silently and the
     // user sees a permanent blank/blue screen when returning to the tab.
+    //
+    // pauseTimers is process-global. Call it at most once per hide/background
+    // transition — never per background tab after the active tab has resumed.
     try {
       await _controller?.pauseTimers();
     } catch (_) {}
@@ -1324,6 +1466,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     try {
       await _controller?.resumeTimers();
     } catch (_) {}
+    if (Platform.isAndroid) {
+      try {
+        await _controller?.android.resume();
+      } catch (_) {}
+    }
     // Check if the WebView is still alive after resuming.  If the renderer
     // was killed by Android, reload the current page so the user doesn't
     // see a blank screen.
@@ -1357,22 +1504,28 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   @override
   Future<void> pauseWebView() async {
+    // Per-WebView only. Global pauseTimers must NOT be used here: when
+    // multiple tabs call pauseWebView after the active tab resumed, the
+    // last pauseTimers wins and freezes the visible page (scrollbar may
+    // still move while pixels stay stale).
+    if (!Platform.isAndroid) return;
     try {
-      await _controller?.pauseTimers();
-      if (Platform.isAndroid) {
-        await _controller?.android.pause();
-      }
+      await _controller?.android.pause();
     } catch (_) {}
   }
 
   @override
   Future<void> resumeWebView() async {
+    // Always re-enable process timers first so a stuck global pause cannot
+    // leave the active tab with a frozen compositor.
     try {
       await _controller?.resumeTimers();
-      if (Platform.isAndroid) {
-        await _controller?.android.resume();
-      }
     } catch (_) {}
+    if (Platform.isAndroid) {
+      try {
+        await _controller?.android.resume();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -1798,12 +1951,15 @@ class MockBrowserController implements SnifferBrowserController {
   }
 
   @override
-  Future<void> setReplaceSitePlayer(bool enabled) async {}
-
-  @override
   void armPlayNavigationSuppress([
     Duration duration = const Duration(milliseconds: 3500),
   ]) {}
+
+  @override
+  Future<void> allowNextCrossOriginNavigation([String? url]) async {}
+
+  @override
+  Future<void> setReplaceSitePlayer(bool enabled) async {}
 
   @override
   int get blockedRequestCount => 0;

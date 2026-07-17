@@ -184,18 +184,40 @@ class DownloadCard extends StatelessWidget {
     } else if (task.state == DownloadState.downloading ||
         task.state == DownloadState.idle) {
       if (task.totalBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
+        final totalLabel = task.downloadedBytes > task.totalBytes
+            ? '~${formatBytes(task.downloadedBytes)}+'
+            : formatBytes(task.totalBytes);
+        parts.add(
+          '${formatBytes(task.downloadedBytes)} / $totalLabel',
+        );
       } else if (task.downloadedBytes > 0) {
         parts.add('${formatBytes(task.downloadedBytes)} downloaded');
       }
       parts.add(formatSpeed(task.speed));
-      if (task.totalBytes > 0 && task.speed > 0) {
-        final eta = formatEta(
-          downloadedBytes: task.downloadedBytes,
-          totalBytes: task.totalBytes,
-          speedEmaBytesPerSec: task.speed,
-        );
-        if (eta != null) parts.add(eta);
+      // ETA: for HLS prefer remaining parts × avg speed when total bytes lag.
+      if (task.speed > 0) {
+        if (task.totalParts > 0 &&
+            task.completedParts < task.totalParts &&
+            task.completedParts > 0 &&
+            task.downloadedBytes > 0) {
+          final avgPerPart = task.downloadedBytes / task.completedParts;
+          final remainBytes =
+              ((task.totalParts - task.completedParts) * avgPerPart).round();
+          final eta = formatEta(
+            downloadedBytes: 0,
+            totalBytes: remainBytes,
+            speedEmaBytesPerSec: task.speed,
+          );
+          if (eta != null) parts.add(eta);
+        } else if (task.totalBytes > 0 &&
+            task.downloadedBytes < task.totalBytes) {
+          final eta = formatEta(
+            downloadedBytes: task.downloadedBytes,
+            totalBytes: task.totalBytes,
+            speedEmaBytesPerSec: task.speed,
+          );
+          if (eta != null) parts.add(eta);
+        }
       }
       final elapsed = DateTime.now().difference(task.createdAt);
       final m = elapsed.inMinutes;
@@ -263,8 +285,12 @@ class DownloadCard extends StatelessWidget {
     final ac = context.ac;
     final color = _statusColor(ac);
     final isMerging = task.state == DownloadState.merging;
-    final progress = task.totalBytes > 0
-        ? (task.downloadedBytes / task.totalBytes).clamp(0.0, 1.0)
+    // Prefer segment/chunk progress (task.progress); fall back to null only
+    // when nothing is known yet so the bar can stay indeterminate-looking.
+    final progress = (task.totalParts > 0 ||
+            task.chunks.isNotEmpty ||
+            task.totalBytes > 0)
+        ? task.progress
         : null;
 
     // ── Swipe backgrounds ──────────────────────────────────────────
@@ -511,11 +537,13 @@ class DownloadCard extends StatelessWidget {
                       ),
                     // Percent label for downloading state
                     if (task.state == DownloadState.downloading &&
-                        task.totalBytes > 0)
+                        progress != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 1),
                         child: Text(
-                          '${(progress! * 100).toStringAsFixed(0)}%',
+                          task.totalParts > 0
+                              ? '${task.progressPercent}% · ${task.completedParts}/${task.totalParts} segs'
+                              : '${task.progressPercent}%',
                           style: TextStyle(
                             fontSize: 10,
                             fontFamily: 'JetBrainsMono',
@@ -618,8 +646,8 @@ class DownloadCard extends StatelessWidget {
     // Accessibility label
     final name = taskDisplayName(task);
     final stateText = stateLabel(task.state);
-    final progressText = task.totalBytes > 0
-        ? ', ${((task.downloadedBytes / task.totalBytes) * 100).toStringAsFixed(0)}%'
+    final progressText = (task.totalParts > 0 || task.totalBytes > 0)
+        ? ', ${task.progressPercent}%'
         : '';
     return Semantics(
       label: '$name, $stateText$progressText',

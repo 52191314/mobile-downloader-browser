@@ -158,7 +158,9 @@ class SniffIntakeController {
   }) {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
-    // Play compliance: never sniff YouTube pages or YouTube CDN media.
+    // Play: site-level hard-off (restricted surface page) — primary gate.
+    if (!tab.sniffingEnabled) return;
+    // Play: URL/CDN/page backstop (embeds, paste-equivalent captures).
     final pageUrl = sourcePageUrl ?? tab.currentUrl;
     if (RestrictedMediaPolicy.isBlocked(
       mediaUrl: trimmed,
@@ -263,6 +265,7 @@ class SniffIntakeController {
             tab.addressController.text,
           ]) ??
           '';
+      if (!tab.sniffingEnabled) return;
       if (RestrictedMediaPolicy.isBlocked(
         mediaUrl: url,
         sourcePageUrl: pageUrl.isEmpty ? null : pageUrl,

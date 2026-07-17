@@ -551,21 +551,16 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   /// Switches the active main tab (Queue=0, Browser=1, Settings=2).
-  /// Automatically pauses browser WebViews when leaving the Browser tab
-  /// and resumes them when re-entering, so the Dart event loop is freed
-  /// for download HTTP stream processing.
+  ///
+  /// Browser pause/resume is driven by [SnifferScreen.isShellVisible]
+  /// (set from `_currentTabIndex == 1`), not by the shell
+  /// [_browserController] — that instance has no attached platform WebView.
   void _selectTab(int index) {
     final previous = _currentTabIndex;
     setState(() {
       _currentTabIndex = index;
       _visitedMainTabs.add(index);
     });
-    AuroraLog.instance.info(
-      'Tab switch: $previous → $index',
-      category: LogCategory.app,
-      screen: LogScreen.settings,
-      eventType: LogEventType.navigation,
-    );
     AuroraLog.instance.info(
       'Tab switch: $previous → $index',
       category: LogCategory.app,
@@ -739,6 +734,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             libraryUpdateNotifier: _libraryUpdateNotifier,
                             openRequestBus: _browserOpenRequestBus,
                             isProCallback: () => _proEntitlement.isPro,
+                            // Drive pause/resume when leaving/entering Browser
+                            // so platform views do not freeze under opacity 0.
+                            isShellVisible: _currentTabIndex == 1,
                             onOpenQueue: () => _selectTab(0),
                             onOpenSettings: () => _selectTab(2),
                             onSniffedCountChanged: (count) {
@@ -827,7 +825,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
 
     if (RestrictedMediaPolicy.isBlocked(mediaUrl: rawUrl)) {
-      _showSnack(RestrictedMediaPolicy.userMessageYouTube);
+      _showSnack(RestrictedMediaPolicy.userMessageRestricted);
       return;
     }
 

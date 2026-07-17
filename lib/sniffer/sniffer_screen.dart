@@ -64,6 +64,7 @@ import 'sheets/sniffed_media_sheet.dart';
 import 'sheets/tabs_sheet.dart';
 import 'models/tab_group.dart' show TabGroup;
 import 'widgets/draggable_tab_card.dart' show DraggableTabCard, TabListDropSlot;
+import 'widgets/floating_video_button.dart';
 import 'widgets/group_drop_zone.dart' show GroupDropZone;
 import 'widgets/tab_grid_view.dart' show TabGridView;
 import 'tab_groups/tab_group_palette.dart' show TabGroupPalette;
@@ -328,6 +329,11 @@ class SnifferScreen extends StatefulWidget {
   /// and auto-host features for free users.
   final bool Function()? isProCallback;
 
+  /// Whether the main shell is currently showing the Browser tab.
+  /// When false (Queue/Settings visible), WebViews are paused so switching
+  /// main tabs does not leave a frozen compositor under opacity 0.
+  final bool isShellVisible;
+
   SnifferScreen({
     super.key,
     this.controller,
@@ -344,6 +350,7 @@ class SnifferScreen extends StatefulWidget {
     this.libraryUpdateNotifier,
     this.openRequestBus,
     this.isProCallback,
+    this.isShellVisible = true,
   }) : settings = settings ?? DownloadSettings.defaults(),
        libraryStore = libraryStore ?? const BrowserLibraryStore(),
        safeBrowsing =
@@ -445,14 +452,21 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// chains) trigger only one `setState` instead of three per step.
   Timer? _navSetStateDebounce;
 
-  /// Best sniffed video on the active page (HLS > large MP4 > other).
-  /// Used when site play is intercepted but `src` is blob/MSE — Aurora
-  /// falls back to this sniffed URL for the in-app player.
+  /// Best sniffed video for the **current active tab only**.
+  /// Must never retain a stream from another tab (float was opening the
+  /// wrong page's video). Refreshed on tab switch and page navigation.
   SniffedMedia? _latestVideoMedia;
 
   /// Debounce for auto-open player when site `play()` is intercepted.
   bool _playerOpening = false;
   DateTime? _lastAuroraPlayAt;
+
+  /// Page URL for which the user long-pressed dismiss on the float button.
+  String? _floatingPlayerDismissedForUrl;
+
+  /// Largest visible `<video>` rect from [VideoFloatChannel], in CSS pixels
+  /// relative to the WebView viewport (top-left origin).
+  Rect? _videoFloatRect;
 
   /// Set of tab IDs whose WebViews have already been built (lazy creation).
   /// Only tabs in this set get a real [BrowserWidget] — others render an empty
@@ -674,6 +688,21 @@ class _SnifferScreenState extends State<SnifferScreen>
           ),
         );
       }
+      // Auto-replace on → hide float; float mode on → clear stale dismiss.
+      if (widget.settings.replaceSitePlayer) {
+        _videoFloatRect = null;
+      } else {
+        _floatingPlayerDismissedForUrl = null;
+      }
+    }
+    // Main-shell Queue/Settings vs Browser: pause/resume platform WebViews so
+    // leaving Browser cannot leave a frozen compositor under opacity 0.
+    if (oldWidget.isShellVisible != widget.isShellVisible) {
+      if (widget.isShellVisible) {
+        unawaited(_resumeBrowserShell());
+      } else {
+        unawaited(_pauseBrowserShell());
+      }
     }
   }
 
@@ -724,6 +753,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     _barsVisible = true;
     _lastScrollY = 0.0;
     _clearAddressSuggestions();
+    // Floating player / auto-replace must use THIS tab's streams only.
+    _resyncPlaybackMediaForActiveTab();
     // Wake deferred restore work only after tabs are loaded. During bulk
     // restore switchToActiveTab runs before markTabsLoaded — ensure is
     // scheduled separately with a delay so WebView/downloads do not thrash.
@@ -1119,33 +1150,68 @@ class _SnifferScreenState extends State<SnifferScreen>
       debugPrint(
         '[SnifferScreen] App backgrounded — pausing WebViews and timers',
       );
-      for (final tab in _tabs) {
-        tab.videoPollTimer?.cancel();
-        tab.videoPollTimer = null;
-        if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
-          unawaited(tab.controller.freeze());
-          unawaited(tab.controller.pauseWebView());
-        }
-      }
+      unawaited(_pauseBrowserShell(includeGlobalTimers: true));
     } else if (state == AppLifecycleState.resumed) {
       debugPrint(
         '[SnifferScreen] App resumed — resuming active WebView and timers',
       );
-      for (final tab in _tabs) {
-        if (tab == _activeTab) {
-          if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
-            unawaited(tab.controller.thaw());
-            unawaited(tab.controller.resumeWebView());
-          }
-          _startVideoPoll(tab);
-        } else {
-          if (Platform.isAndroid && _builtWebViewTabIds.contains(tab.id)) {
-            unawaited(tab.controller.freeze());
-            unawaited(tab.controller.pauseWebView());
-          }
-        }
+      // Only resume if the Browser shell is the visible main tab.
+      if (widget.isShellVisible) {
+        unawaited(_resumeBrowserShell());
       }
     }
+  }
+
+  /// Pause every built WebView's render pipeline. Optionally pause process-
+  /// global timers once (app background / leave Browser shell).
+  ///
+  /// Critical: never call process-global pauseTimers *after* resuming the
+  /// active tab — that freezes the visible page while the scrollbar still
+  /// moves (Android compositor stuck).
+  Future<void> _pauseBrowserShell({bool includeGlobalTimers = true}) async {
+    for (final tab in _tabs) {
+      tab.videoPollTimer?.cancel();
+      tab.videoPollTimer = null;
+      if (!Platform.isAndroid || !_builtWebViewTabIds.contains(tab.id)) {
+        continue;
+      }
+      try {
+        await tab.controller.suspendTab();
+      } catch (_) {}
+    }
+    if (includeGlobalTimers) {
+      // Prefer a controller that already has a live platform WebView so the
+      // process-global pauseTimers channel call is not a no-op.
+      SnifferBrowserController? timerCtrl;
+      for (final tab in _tabs) {
+        if (_builtWebViewTabIds.contains(tab.id)) {
+          timerCtrl = tab.controller;
+          break;
+        }
+      }
+      timerCtrl ??= _tabs.isNotEmpty ? _activeTab.controller : null;
+      try {
+        await timerCtrl?.pauseAllWebViews();
+      } catch (_) {}
+    }
+  }
+
+  /// Resume process timers + active tab only; keep background tabs suspended
+  /// with per-view pause (never global pauseTimers on those).
+  Future<void> _resumeBrowserShell() async {
+    if (_tabs.isEmpty) return;
+    final active = _activeTab;
+    try {
+      await active.controller.resumeWebView();
+    } catch (_) {}
+    for (final tab in _tabs) {
+      if (!_builtWebViewTabIds.contains(tab.id)) continue;
+      if (identical(tab, active)) continue;
+      try {
+        await tab.controller.suspendTab();
+      } catch (_) {}
+    }
+    _startVideoPoll(active);
   }
 
   @override
@@ -2064,6 +2130,16 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (navHost != null) {
         _sniffIntakeController.clearCookieCacheForHost(navHost);
       }
+      // Play: site-level hard-off as soon as main-frame navigation starts.
+      final hardOff = RestrictedMediaPolicy.shouldHardOffSniffing(url);
+      tab.sniffingEnabled = !hardOff;
+      if (!hardOff) {
+        tab.complianceNoticeShown = false;
+      } else {
+        tab.videoPollTimer?.cancel();
+        tab.videoPollTimer = null;
+        tab.snifferEngine.purgeRestrictedMedia();
+      }
       // Only clear the media cache when navigating to a genuinely different
       // page. The authority is the last *fully-loaded* main-frame URL
       // (`committedMainFrameUrl`, updated on onPageFinished), NOT the raw
@@ -2085,6 +2161,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         tab.snifferEngine.clearCache();
         if (tab == _activeTab) {
           _latestVideoMedia = null;
+          _videoFloatRect = null;
+          // New page → allow the float button again.
+          _floatingPlayerDismissedForUrl = null;
         }
       } else {
         AuroraLog.instance.debug(
@@ -2095,7 +2174,9 @@ class _SnifferScreenState extends State<SnifferScreen>
           eventType: LogEventType.sniff,
         );
       }
-      _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
+      if (tab.sniffingEnabled) {
+        _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
+      }
       _updateTabNavState(tab);
       // Debounce setState — onPageStarted may fire for background tabs too.
       if (tab == _activeTab) {
@@ -2117,18 +2198,26 @@ class _SnifferScreenState extends State<SnifferScreen>
         screen: LogScreen.browser,
         eventType: LogEventType.navigation,
       );
-      // Play channel only — GitHub builds keep YouTube capture enabled.
-      if (RestrictedMediaPolicy.enforcementEnabled &&
-          RestrictedMediaPolicy.isYouTubePage(url) &&
-          tab == _activeTab &&
-          !tab.youtubeComplianceNoticeShown) {
-        tab.youtubeComplianceNoticeShown = true;
-        AuroraSnackbar.show(
-          context,
-          RestrictedMediaPolicy.pageNoticeYouTube,
-        );
+      // Play: re-affirm site-level hard-off after main frame commits.
+      final hardOff = RestrictedMediaPolicy.shouldHardOffSniffing(url);
+      tab.sniffingEnabled = !hardOff;
+      if (hardOff) {
+        tab.snifferEngine.purgeRestrictedMedia();
+        tab.videoPollTimer?.cancel();
+        tab.videoPollTimer = null;
+        if (tab == _activeTab && !tab.complianceNoticeShown) {
+          tab.complianceNoticeShown = true;
+          AuroraSnackbar.show(
+            context,
+            RestrictedMediaPolicy.pageNoticeRestricted,
+          );
+        }
+      } else {
+        tab.complianceNoticeShown = false;
       }
-      _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
+      if (tab.sniffingEnabled) {
+        _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
+      }
       _updateTabNavState(tab);
       unawaited(_refreshPageInfo(tab, recordHistory: true));
       unawaited(_applyCosmeticRules(tab));
@@ -2240,6 +2329,13 @@ class _SnifferScreenState extends State<SnifferScreen>
       onMessageReceived: (message) {
         if (tab != _activeTab) return;
         unawaited(_handleAuroraPlayRequest(message));
+      },
+    );
+    tab.controller.addJavaScriptChannel(
+      'VideoFloatChannel',
+      onMessageReceived: (message) {
+        if (tab != _activeTab) return;
+        _handleVideoFloatMessage(message);
       },
     );
     tab.controller.addJavaScriptChannel(
@@ -2427,8 +2523,8 @@ class _SnifferScreenState extends State<SnifferScreen>
       _sniffIntakeController.scheduleMediaSave(tab);
     });
 
-    // Track best video candidate for auto-replace when site play uses
-    // blob/MSE (no direct URL). No floating button — toggle in Settings.
+    // Track best video candidate for the floating play button and for
+    // blob/MSE fallback when auto-replace is enabled — active tab only.
     tab.mediaSubscription?.cancel();
     tab.mediaSubscription = tab.snifferEngine.onMediaDetected.listen((media) {
       if (!mounted) return;
@@ -2436,17 +2532,61 @@ class _SnifferScreenState extends State<SnifferScreen>
         return;
       }
       if (tab != _activeTab) return;
+      if (!_mediaBelongsToActiveTab(media)) return;
       if (_shouldReplaceVideo(media)) {
+        final prevUrl = _latestVideoMedia?.url;
         _latestVideoMedia = media;
+        // Rebuild so the float button appears once a stream is known.
+        if (prevUrl != media.url &&
+            !widget.settings.replaceSitePlayer &&
+            mounted) {
+          setState(() {});
+        }
       }
     });
+  }
+
+  /// Drop any cached float/auto-replace media that is not from the active
+  /// tab, then re-pick the best stream from that tab's sniffer only.
+  void _resyncPlaybackMediaForActiveTab() {
+    _videoFloatRect = null;
+    final best = _bestDetectedVideoForPlayback();
+    _latestVideoMedia = best;
+  }
+
+  /// True when [media] was sniffed for the active tab's page (not another
+  /// tab's leftover URL).
+  bool _mediaBelongsToActiveTab(SniffedMedia media) {
+    final engine = _activeTab.snifferEngine;
+    if (engine.detectedMedia.any((m) => m.url == media.url)) {
+      return true;
+    }
+    final page = (media.sourcePageUrl ?? '').trim();
+    final active = (_activeTab.currentUrl ?? _activeTab.addressController.text)
+        .trim();
+    if (page.isEmpty || active.isEmpty) return false;
+    final a = Uri.tryParse(page);
+    final b = Uri.tryParse(active);
+    if (a == null || b == null || a.host.isEmpty || b.host.isEmpty) {
+      return false;
+    }
+    return a.host.toLowerCase() == b.host.toLowerCase();
+  }
+
+  /// Stream to open from the float / auto-replace — never another tab's.
+  SniffedMedia? _videoForActiveTabPlayback() {
+    final best = _bestDetectedVideoForPlayback();
+    if (best != null) return best;
+    final latest = _latestVideoMedia;
+    if (latest != null && _mediaBelongsToActiveTab(latest)) return latest;
+    return null;
   }
 
   /// Returns `true` if [incoming] should replace the current [_latestVideoMedia]
   /// used for auto-replace playback. Keeps the best candidate: HLS > large > other.
   bool _shouldReplaceVideo(SniffedMedia incoming) {
     final current = _latestVideoMedia;
-    if (current == null) return true;
+    if (current == null || !_mediaBelongsToActiveTab(current)) return true;
 
     final incomingIsHls = _isHlsUrl(incoming.url);
     final currentIsHls = _isHlsUrl(current.url);
@@ -2794,6 +2934,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
+  // OLED dark: tint page chrome only. Never invert media — a prior
+  // invert+hue-rotate on video/iframe/canvas made players look negative
+  // (e.g. povpow.com and other site players). System theme skips this overlay.
   static const String _darkModeCssOverlay = r'''
 (function(){
   if (window.__auroraDarkModeActive) {
@@ -2804,13 +2947,23 @@ class _SnifferScreenState extends State<SnifferScreen>
   style.id = 'aurora-dark-mode-style';
   style.textContent = `
     html.aurora-dark, html.aurora-dark body {
-      background-color: #111418 !important;
+      background-color: #0a0a0a !important;
       color: #E5E9F0 !important;
+      color-scheme: dark !important;
     }
+    /* Media must keep true colors — never invert / hue-rotate. */
     html.aurora-dark video,
+    html.aurora-dark audio,
     html.aurora-dark iframe,
-    html.aurora-dark canvas {
-      filter: invert(0.92) hue-rotate(180deg) !important;
+    html.aurora-dark canvas,
+    html.aurora-dark img,
+    html.aurora-dark picture,
+    html.aurora-dark svg,
+    html.aurora-dark embed,
+    html.aurora-dark object,
+    html.aurora-dark [style*="background-image"] {
+      filter: none !important;
+      -webkit-filter: none !important;
     }
   `;
   (document.head || document.documentElement).appendChild(style);
@@ -3059,6 +3212,9 @@ class _SnifferScreenState extends State<SnifferScreen>
           _showSnack('Opened in background: $targetHost');
           break;
         case _RedirectPromptAction.currentTab:
+          // Explicit allow so the invisible-redirect / ad-nav gate does not
+          // re-prompt the same destination after the user confirmed.
+          unawaited(tab.controller.allowNextCrossOriginNavigation(url));
           unawaited(_loadUrlWithHostSettings(tab, uri));
           break;
         case _RedirectPromptAction.ignore:
@@ -3759,6 +3915,10 @@ class _SnifferScreenState extends State<SnifferScreen>
             clipBehavior: Clip.none,
             children: [
               webView,
+              // IDM-style floating play control over the largest <video>
+              // (or bottom-right of the page when no rect yet).
+              if (_shouldShowFloatingPlayerButton)
+                _buildFloatingPlayerOverlay(toolbarHeight),
               topBar,
               bottomBar,
               // Typeahead above the bottom chrome so it can grow to ~65% of
@@ -5098,6 +5258,133 @@ class _SnifferScreenState extends State<SnifferScreen>
     await _showMediaPreview(media);
   }
 
+  /// Updates the floating button position from [VideoFloatChannel] (JS).
+  void _handleVideoFloatMessage(String message) {
+    if (!mounted || widget.settings.replaceSitePlayer) {
+      if (_videoFloatRect != null) {
+        setState(() => _videoFloatRect = null);
+      }
+      return;
+    }
+    Map<String, dynamic>? data;
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is Map) {
+        data = Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      data = null;
+    }
+    if (data == null || data['hasVideo'] != true) {
+      if (_videoFloatRect != null && mounted) {
+        setState(() => _videoFloatRect = null);
+      }
+      return;
+    }
+    final left = (data['left'] as num?)?.toDouble();
+    final top = (data['top'] as num?)?.toDouble();
+    final width = (data['width'] as num?)?.toDouble();
+    final height = (data['height'] as num?)?.toDouble();
+    if (left == null || top == null || width == null || height == null) {
+      return;
+    }
+    final next = Rect.fromLTWH(left, top, width, height);
+    final prev = _videoFloatRect;
+    // Ignore sub-pixel jitter to avoid rebuild thrash while scrolling.
+    if (prev != null &&
+        (prev.left - next.left).abs() < 2 &&
+        (prev.top - next.top).abs() < 2 &&
+        (prev.width - next.width).abs() < 2 &&
+        (prev.height - next.height).abs() < 2) {
+      return;
+    }
+    setState(() => _videoFloatRect = next);
+  }
+
+  /// Whether the IDM-style float should paint on the active browser tab.
+  bool get _shouldShowFloatingPlayerButton {
+    if (widget.settings.replaceSitePlayer) return false;
+    if (_playerOpening) return false;
+    final media = _videoForActiveTabPlayback();
+    if (media == null) return false;
+    final pageUrl = _activeTab.addressController.text.trim();
+    if (pageUrl.isNotEmpty &&
+        _floatingPlayerDismissedForUrl != null &&
+        _floatingPlayerDismissedForUrl == pageUrl) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _openFloatingPlayer() async {
+    if (_playerOpening) return;
+    // Always re-resolve from the active tab at tap time (never a stale
+    // _latestVideoMedia from a previous tab).
+    final media = _videoForActiveTabPlayback();
+    if (media == null) {
+      if (mounted) {
+        _showSnack(
+          'No playable stream found on this tab yet. Wait a moment or open the capture tray.',
+        );
+      }
+      return;
+    }
+    _playerOpening = true;
+    try {
+      await _openVideoPlayer(media);
+    } finally {
+      _playerOpening = false;
+    }
+  }
+
+  /// Positions [FloatingVideoButton] on the largest video rect from JS, or
+  /// falls back to the lower-right of the WebView (above the bottom strip).
+  Widget _buildFloatingPlayerOverlay(double toolbarHeight) {
+    final media = _videoForActiveTabPlayback();
+    String? subtitle;
+    if (media != null) {
+      final h = media.height;
+      if (h != null && h > 0) {
+        subtitle = '${h}p';
+      } else if (media.url.toLowerCase().contains('.m3u8')) {
+        subtitle = 'HLS';
+      }
+    }
+
+    final button = FloatingVideoButton(
+      onTap: () => unawaited(_openFloatingPlayer()),
+      onDismiss: () {
+        final pageUrl = _activeTab.addressController.text.trim();
+        setState(() {
+          _floatingPlayerDismissedForUrl =
+              pageUrl.isEmpty ? '__dismissed__' : pageUrl;
+        });
+      },
+      subtitle: subtitle,
+    );
+
+    final rect = _videoFloatRect;
+    if (rect != null && rect.width >= 80 && rect.height >= 45) {
+      // Park on the video's top-right corner (IDM-like), inset slightly.
+      const size = 48.0;
+      final left = (rect.right - size - 10).clamp(8.0, double.infinity);
+      final top = (rect.top + 10).clamp(toolbarHeight + 4, double.infinity);
+      return Positioned(
+        left: left,
+        top: top,
+        child: button,
+      );
+    }
+
+    // No video box yet — still show when we have sniffed media (blob/MSE
+    // pages often hide real <video> geometry until play).
+    return Positioned(
+      right: 14,
+      bottom: toolbarHeight + 18,
+      child: button,
+    );
+  }
+
   /// Handles JS [AuroraPlayChannel] when replace-site-player is on.
   Future<void> _handleAuroraPlayRequest(String message) async {
     if (!mounted || !widget.settings.replaceSitePlayer) return;
@@ -5162,13 +5449,13 @@ class _SnifferScreenState extends State<SnifferScreen>
         }),
       );
     } else {
-      media = _latestVideoMedia ?? _bestDetectedVideoForPlayback();
+      media = _videoForActiveTabPlayback();
     }
 
     if (media == null) {
       if (mounted) {
         _showSnack(
-          'No playable stream found yet. Wait a moment or open the capture tray.',
+          'No playable stream found on this tab yet. Wait a moment or open the capture tray.',
         );
       }
       return;
@@ -5183,9 +5470,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
-  /// Picks the best sniffed video/playlist for auto-replace when the site
-  /// only exposes a blob/MSE element.
+  /// Picks the best sniffed video/playlist for the **active tab only**.
+  /// Does not fall back to another tab's cached stream.
   SniffedMedia? _bestDetectedVideoForPlayback() {
+    final pageUrl =
+        (_activeTab.currentUrl ?? _activeTab.addressController.text).trim();
+    final pageHost = Uri.tryParse(pageUrl)?.host.toLowerCase() ?? '';
+
     final items = _activeTab.snifferEngine.detectedMedia
         .where(
           (m) =>
@@ -5194,7 +5485,8 @@ class _SnifferScreenState extends State<SnifferScreen>
               m.type == MediaType.audio,
         )
         .toList();
-    if (items.isEmpty) return _latestVideoMedia;
+    if (items.isEmpty) return null;
+
     items.sort((a, b) {
       int score(SniffedMedia m) {
         var s = 0;
@@ -5206,6 +5498,12 @@ class _SnifferScreenState extends State<SnifferScreen>
           s += ((m.contentLengthBytes! / (1024 * 1024)).clamp(0, 50)).toInt();
         }
         if (m.height != null && m.height! >= 720) s += 10;
+        // Prefer streams tied to this page's host over random CDNs from ads.
+        final src = (m.sourcePageUrl ?? '').trim();
+        if (pageHost.isNotEmpty && src.isNotEmpty) {
+          final sh = Uri.tryParse(src)?.host.toLowerCase() ?? '';
+          if (sh == pageHost) s += 50;
+        }
         return s;
       }
 
@@ -5759,9 +6057,14 @@ class _SnifferScreenState extends State<SnifferScreen>
       forceReload: forceReload,
     );
 
-    // Check for duplicates.
+    // Check for duplicates — exact URL match OR same filename on same source page
+    // (different-quality variants of the same video).
     bool force = false;
-    if (_downloadQueue.urlExists(url)) {
+    if (_downloadQueue.urlExists(url) ||
+        _downloadQueue.samePageFilenameExists(
+          suggestedName,
+          media?.sourcePageUrl ?? currentUrl,
+        )) {
       final choice = await _showDuplicatePrompt(context, suggestedName);
       if (choice == DuplicateChoice.skip) return;
       if (choice == DuplicateChoice.updateExisting) {

@@ -42,8 +42,14 @@ class BrowserTab {
   bool canGoForward = false;
   bool isLoading = false;
   int progress = 0;
-  /// One-shot Play-compliance snackbar when the user lands on YouTube.
-  bool youtubeComplianceNoticeShown = false;
+  /// One-shot Play-compliance snackbar when the user lands on a restricted page.
+  bool complianceNoticeShown = false;
+
+  /// Play channel: when false, all media sniffing is hard-off for this tab
+  /// (restricted site). URL-level [RestrictedMediaPolicy.isBlocked] remains a
+  /// backstop for paste/queue/CDN. Default true (sniffing allowed).
+  bool sniffingEnabled = true;
+
   PageMeta pageMeta = const PageMeta();
 
   /// Per-tab cache of HLS playlist response bodies captured by

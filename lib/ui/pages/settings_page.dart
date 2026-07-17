@@ -1063,11 +1063,11 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 8),
             Panel(
               child: SwitchListTile(
-                title: const Text('Replace site player with Aurora'),
+                title: const Text('Auto-open Aurora on site play'),
                 subtitle: Text(
                   localReplacePlayer
-                      ? 'When a page plays video or audio, Aurora opens its own player with the page session (cookies). Turn off to use the site\'s player.'
-                      : 'Site players run normally. Turn on to auto-open Aurora\'s player (like UC Browser) with cookies and headers.',
+                      ? 'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.'
+                      : 'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.',
                   style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                 ),
                 value: localReplacePlayer,

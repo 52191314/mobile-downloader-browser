@@ -179,6 +179,11 @@ class DownloadTask implements Comparable<DownloadTask> {
   DownloadState state;
   int totalBytes;
   int downloadedBytes;
+  /// Discrete progress for HLS (segments) or multi-chunk HTTP.
+  /// When [totalParts] > 0, [progress] uses completed/total parts instead of
+  /// byte estimates — keeps Queue + notifications consistent.
+  int completedParts;
+  int totalParts;
   double speed; // In bytes/second
   String? actualHash;
   String? errorMessage;
@@ -239,6 +244,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.state = DownloadState.idle,
     this.totalBytes = -1,
     this.downloadedBytes = 0,
+    this.completedParts = 0,
+    this.totalParts = 0,
     this.speed = 0.0,
     this.actualHash,
     this.errorMessage,
@@ -275,7 +282,30 @@ class DownloadTask implements Comparable<DownloadTask> {
     return cleaned;
   }
 
-  double get progress => totalBytes > 0 ? downloadedBytes / totalBytes : 0.0;
+  /// 0.0–1.0 for UI / notifications.
+  ///
+  /// Priority:
+  /// 1. **Parts** — HLS segments or HTTP chunks (`completedParts / totalParts`)
+  /// 2. **Bytes** — `downloadedBytes / totalBytes` (clamped; estimates can lag)
+  /// 3. **Legacy chunks list** — completed chunk objects
+  double get progress {
+    if (totalParts > 0) {
+      final p = completedParts / totalParts;
+      if (p.isNaN || p.isInfinite) return 0.0;
+      return p.clamp(0.0, 1.0);
+    }
+    if (chunks.isNotEmpty) {
+      final done = chunks.where((c) => c.isCompleted).length;
+      return (done / chunks.length).clamp(0.0, 1.0);
+    }
+    if (totalBytes <= 0) return 0.0;
+    final p = downloadedBytes / totalBytes;
+    if (p.isNaN || p.isInfinite) return 0.0;
+    return p.clamp(0.0, 1.0);
+  }
+
+  /// Integer 0–100 for notifications / FGS (same source as [progress]).
+  int get progressPercent => (progress * 100).round().clamp(0, 100);
 
   /// True when this task is scheduled to start at a future time.
   bool get isScheduled => scheduledStartAt != null && scheduledStartAt!.isAfter(DateTime.now());
@@ -321,6 +351,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     'state': state.name,
     'totalBytes': totalBytes,
     'downloadedBytes': downloadedBytes,
+    'completedParts': completedParts,
+    'totalParts': totalParts,
     'speed': speed,
     'actualHash': actualHash,
     'errorMessage': errorMessage,
@@ -361,6 +393,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     final stateStr = optString('state', 'paused');
     final totalBytes = optInt('totalBytes', 0);
     final downloadedBytes = optInt('downloadedBytes', 0);
+    final completedParts = optInt('completedParts', 0);
+    final totalParts = optInt('totalParts', 0);
 
     final chunksList = json['chunks'];
     final chunks = <DownloadChunk>[];
@@ -403,6 +437,8 @@ class DownloadTask implements Comparable<DownloadTask> {
       state: state,
       totalBytes: totalBytes,
       downloadedBytes: downloadedBytes,
+      completedParts: completedParts,
+      totalParts: totalParts,
       speed: (json['speed'] as num?)?.toDouble() ?? 0.0,
       actualHash: json['actualHash'] as String?,
       errorMessage: json['errorMessage'] as String?,

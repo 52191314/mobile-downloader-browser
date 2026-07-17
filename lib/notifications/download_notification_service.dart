@@ -197,7 +197,7 @@ class DownloadNotificationService {
           onlyAlertOnce: true,
           showProgress: true,
           maxProgress: 100,
-          progress: progress.clamp(0, 100),
+          progress: progress,
           indeterminate: task.totalBytes <= 0 && task.chunks.isEmpty,
           ongoing: true,
           priority: Priority.low,
@@ -242,7 +242,7 @@ class DownloadNotificationService {
           onlyAlertOnce: true,
           showProgress: task.totalBytes > 0 || task.chunks.isNotEmpty,
           maxProgress: 100,
-          progress: progress.clamp(0, 100),
+          progress: progress,
           ongoing: false,
           autoCancel: false,
           priority: Priority.low,
@@ -365,18 +365,9 @@ class DownloadNotificationService {
     _activeLiveNotificationIds.remove(task.id);
   }
 
-  int _progressPercent(DownloadTask task) {
-    if (task.totalBytes > 0) {
-      return (task.downloadedBytes / task.totalBytes * 100).round();
-    }
-    if (task.chunks.isNotEmpty) {
-      return (task.chunks.where((c) => c.isCompleted).length /
-              task.chunks.length *
-              100)
-          .round();
-    }
-    return 0;
-  }
+  /// Same 0–100 as Queue: [DownloadTask.progressPercent]
+  /// (HLS = segments done / total; else bytes or HTTP chunks).
+  int _progressPercent(DownloadTask task) => task.progressPercent;
 
   int _notificationIdFor(String taskId) => taskId.hashCode.abs() % 100000 + 1;
 

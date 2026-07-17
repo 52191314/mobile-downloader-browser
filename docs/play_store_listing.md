@@ -67,13 +67,13 @@ QUEUE & FILES
 • Progress, speed, and status at a glance
 • Notifications for finished work
 • Publish completed files to public Downloads via MediaStore
-• Optional Google Drive backup for Pro users
+~~• Optional Google Drive backup for Pro users~~ (Cancelled: GCP restricted)
 
 AURORA PRO (optional one-time unlock)
 • Higher concurrent downloads and chunk counts
 • Extra adblock filter lists and tracker pack
 • Download rules, schedules, and per-site profiles
-• Drive sync and automatic backups
+• ~~Drive sync and~~ automatic backups (Note: Drive sync cancelled)
 • Sold only via Google Play Billing in the Play edition
 
 PRIVACY & COMPLIANCE
@@ -139,15 +139,15 @@ Update when code changes. Baseline:
 | Data type | Collected? | Shared? | Purpose |
 |-----------|------------|---------|---------|
 | App activity / diagnostics | Only if you add crash analytics | No (local logs default) | Debugging |
-| Files / docs user downloads | On device | No (unless user enables Drive) | App functionality |
+| Files / docs user downloads | On device | No ~~(unless user enables Drive)~~ (Cancelled) | App functionality |
 | Web browsing | On device in WebView | No | App functionality |
-| Google account | Only if user links Drive | To Google APIs user authorizes | Cloud backup (Pro) |
+| ~~Google account~~ | ~~Only if user links Drive~~ | ~~To Google APIs user authorizes~~ | ~~Cloud backup (Pro)~~ (Cancelled) |
 | Purchase history | Via Play Billing | Google Play | Pro unlock |
 
 **Privacy policy URL:** required before production. Host a page that covers:
 
 - Local storage of queue, tabs, cookies in app sandbox  
-- Optional Google Drive sync  
+- ~~Optional Google Drive sync~~ (Cancelled)  
 - Play Billing purchases  
 - No sale of personal data  
 - Contact email for privacy requests  
@@ -161,7 +161,7 @@ Suggested path later: `https://<your-domain>/aurora-privacy` or GitHub Pages.
 Account status: **approved developer account** (you already have this).
 
 1. **Create app** → name `Aurora Downloader`, language EN, free app, declarations  
-2. **App access** → all features available without login (Drive optional)  
+2. **App access** → all features available without login ~~(Drive optional)~~  
 3. **Ads** → declare if you show ads (default: no ads in Aurora)  
 4. **Content rating** → complete questionnaire  
 5. **Target audience** → not primarily children  

@@ -61,7 +61,10 @@ Also block media whose **origin/referrer** is YouTube even if the file URL is on
 
 * `lib/compliance/restricted_media_policy.dart` — host + page + Referer/Origin evaluation  
 * **Enforced only when `AURORA_BUILD_CHANNEL=play`.** GitHub / default builds keep YouTube sniff + download enabled.  
-* Sniffer intake, `DownloadQueue`, paste URL, capture sheet, page-load notice all call `isBlocked` / `enforcementEnabled`  
+* **Primary sniffer gates (required for Play AAB):**
+  * `lib/sniffer/browser_controller.dart` — `onLoadResource`, download-start, native HLS playlist capture  
+  * `lib/sniffer/media_sniffer_engine.dart` — `sniff()` entry rejects YouTube / CDN / YouTube page context  
+* Also: sniffer intake, `DownloadQueue`, paste URL, capture sheet, page-load notice  
 * Unit tests: `test/compliance/restricted_media_policy_test.dart`
 
 **Important limit:** YouTube blocking is **necessary**, not **sufficient**. DNA also bans using **any** service/API in a way that violates **its** terms. IP policy also targets apps that facilitate unauthorized offline copies of copyrighted works in general — not only YouTube. Product + listing must not be positioned as a multi-platform “grabber” for locked services (Netflix, TikTok, Instagram, etc.).

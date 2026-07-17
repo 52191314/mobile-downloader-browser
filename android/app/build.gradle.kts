@@ -1,8 +1,18 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release signing: load android/key.properties (gitignored). See docs/play_signing.md.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -21,10 +31,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.personal.aurora_downloader"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -35,19 +42,37 @@ android {
     }
 
     // Native adblock engine — C++ implementation with domain trie + Aho-Corasick.
-    // Uses a RE2 stub (re2_stub/) with HAVE_RE2=0 since re2 is not bundled with
-    // the Android NDK. Falls back to std::regex for regex rule matching.
-    // The Dart side auto-detects libaurora_adblock.so at runtime and falls
-    // back to pure-Dart matching if the native library is unavailable.
     externalNativeBuild {
         cmake {
             path = file("CMakeLists.txt")
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                // storeFile is relative to the android/ directory when path is relative.
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // Prefer upload keystore; fail closed if missing so we never
+            // silently ship a debug-signed AAB to Play again.
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                throw GradleException(
+                    "Missing android/key.properties — release builds must use a " +
+                        "Play upload keystore. See docs/play_signing.md. " +
+                        "Do not use the debug keystore for Play Console uploads.",
+                )
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

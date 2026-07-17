@@ -386,7 +386,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         setState(() => isSubmitting = false);
                         AuroraSnackbar.show(
                           context,
-                          RestrictedMediaPolicy.userMessageYouTube,
+                          RestrictedMediaPolicy.userMessageRestricted,
                         );
                       }
                       return;
@@ -452,7 +452,12 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                         widget.tab.controller.getCookiesForDomain(url: url);
 
                     bool force = false;
-                    if (widget.downloadQueue.urlExists(mediaUrl)) {
+                    final hasDuplicate = widget.downloadQueue.urlExists(mediaUrl) ||
+                        widget.downloadQueue.samePageFilenameExists(
+                          filename,
+                          selectedMedia.sourcePageUrl,
+                        );
+                    if (hasDuplicate) {
                       if (!context.mounted) return;
                       final choice = await showDialog<DuplicateChoice>(
                         context: context,

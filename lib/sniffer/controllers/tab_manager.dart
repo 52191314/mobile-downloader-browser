@@ -83,24 +83,27 @@ class TabManager {
     if (previous != activeTabIndex && previous >= 0 && previous < tabs.length) {
       final oldActive = tabs[previous];
       oldActive.videoPollTimer?.cancel();
-      unawaited(oldActive.controller.freeze());
-      // Use pauseWebView (pauseTimers + android.pause) instead of suspendTab
-      // (android.pause only) so the old tab's JS timers (MutationObserver,
-      // setTimeout scanMedia) are also stopped — not just rendering.
-      // pauseTimers is process-global: it pauses ALL WebViews' JS timers.
-      // The subsequent resumeWebView on the new tab restarts them globally.
-      unawaited(oldActive.controller.pauseWebView());
+      // Per-WebView render pause only. Do NOT call pauseTimers / freeze here:
+      // - pauseTimers is process-global; if it completes after the new tab's
+      //   resume, the active page freezes (scrollbar may still move).
+      // - freeze() sets visibility:hidden via JS; if thaw races or fails the
+      //   user sees a permanent blank/stale surface.
+      unawaited(oldActive.controller.suspendTab());
     }
 
     final newActive = activeTab;
-    unawaited(newActive.controller.thaw());
-    // resumeWebView (resumeTimers + android.resume) restarts JS timers for
-    // ALL WebViews in the process.  The old tab's rendering stays paused
-    // (android.pause) even though its JS timers are re-enabled.
-    unawaited(newActive.controller.resumeWebView());
+    // Sequential resume so resumeTimers always wins over any prior pause.
+    unawaited(_activateTabWebView(newActive));
 
     onRebuild?.call();
     return previous;
+  }
+
+  /// Brings [tab]'s WebView back to a live render + timer state.
+  Future<void> _activateTabWebView(BrowserTab tab) async {
+    try {
+      await tab.controller.resumeWebView();
+    } catch (_) {}
   }
 
   /// Close the tab at [index], returning it if actually removed.

@@ -12,6 +12,7 @@ Related docs (detail, not this plan):
 | [`play_store_compliance.md`](./play_store_compliance.md) | Policy gates (YouTube, billing, storage) |
 | [`play_signing.md`](./play_signing.md) | Upload keystore / release AAB |
 | [`play_console_app_content.md`](./play_console_app_content.md) | App content form answers (privacy, ads, rating, data safety, …) |
+| [`play_restricted_hosts_plan.md`](./play_restricted_hosts_plan.md) | Expand Play-only blocks (YT, TikTok, Meta, Netflix, …); keep other sites |
 | [`build_channels_and_defines.md`](./build_channels_and_defines.md) | `AURORA_BUILD_CHANNEL` |
 | [`premium_implementation_tracker.md`](./premium_implementation_tracker.md) | Full freemium backlog (strike items when done) |
 
@@ -106,7 +107,7 @@ Track detail and Done notes in [`premium_implementation_tracker.md`](./premium_i
 | # | Task | Tracker | Status |
 |---|------|---------|--------|
 | B.2.1 | Multi-device entitlement notes (Play handles) | P2.4.1 | ○ |
-| B.2.2 | Queue metadata sync via Drive | P2.4.2 | ○ |
+| ~~B.2.2~~ | ~~Queue metadata sync via Drive~~ | ~~P2.4.2~~ | ~~—~~ (Cancelled) |
 | B.2.3 | WebDAV | P2.5.1 | ○ |
 | B.2.4 | S3 / Nextcloud | P2.5.2 | ○ |
 

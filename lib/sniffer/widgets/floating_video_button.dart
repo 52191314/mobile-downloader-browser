@@ -2,19 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../theme/aurora_palette.dart';
 
-/// A small floating play button that appears when the sniffer detects a video
-/// on the current page, similar to UC Browser's mini-player trigger.
+/// IDM-style floating play control that sits over (or near) a detected video.
 ///
-/// Positioned near the bottom of the browser viewport. Tapping opens the
-/// full-screen [AuroraVideoPlayer]. Long-pressing or swiping down dismisses.
+/// Tap → open Aurora's in-app player. Long-press → dismiss for this page.
+/// Optional drag so the user can move it if it covers controls.
 class FloatingVideoButton extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback? onDismiss;
+
+  /// Optional label under the icon (kept short, e.g. quality).
+  final String? subtitle;
 
   const FloatingVideoButton({
     super.key,
     required this.onTap,
     this.onDismiss,
+    this.subtitle,
   });
 
   @override
@@ -25,13 +28,14 @@ class _FloatingVideoButtonState extends State<FloatingVideoButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _animCtrl;
   late final Animation<double> _scaleAnim;
+  Offset _dragOffset = Offset.zero;
 
   @override
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 280),
     );
     _scaleAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.elasticOut);
     _animCtrl.forward();
@@ -45,39 +49,75 @@ class _FloatingVideoButtonState extends State<FloatingVideoButton>
 
   void _dismiss() {
     _animCtrl.reverse().then((_) {
-      widget.onDismiss?.call();
+      if (mounted) widget.onDismiss?.call();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scaleAnim,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        onLongPress: _dismiss,
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: context.ac.surfacePanel,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-            border: Border.all(
-              color: context.ac.accentFrost.withOpacity(0.6),
-              width: 2,
+    final ac = context.ac;
+    return Transform.translate(
+      offset: _dragOffset,
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          onLongPress: _dismiss,
+          onPanUpdate: (d) {
+            setState(() => _dragOffset += d.delta);
+          },
+          child: Material(
+            color: Colors.transparent,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: ac.surfacePanel.withValues(alpha: 0.94),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: ac.accentFrost.withValues(alpha: 0.75),
+                      width: 2,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    color: ac.accentFrost,
+                    size: 30,
+                  ),
+                ),
+                if (widget.subtitle != null && widget.subtitle!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.65),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      widget.subtitle!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ),
-          child: Icon(
-            Icons.play_arrow_rounded,
-            color: context.ac.accentFrost,
-            size: 28,
           ),
         ),
       ),

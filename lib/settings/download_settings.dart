@@ -600,7 +600,10 @@ class DownloadSettings {
     this.privateMode = false,
     this.wifiOnly = false,
     this.readerMode = false,
-    this.replaceSitePlayer = true,
+    // Default off: site players work normally; an IDM-style floating
+    // button opens Aurora when the user wants it. Auto-replace on play
+    // remains available as an optional Settings toggle.
+    this.replaceSitePlayer = false,
     this.captureShowAllMedia = false,
     this.maxDetectedMedia = 200,
     this.disabledMediaTypes = const {},
@@ -919,7 +922,7 @@ class DownloadSettings {
       privateMode: json['privateMode'] as bool? ?? false,
       wifiOnly: json['wifiOnly'] as bool? ?? false,
       readerMode: json['readerMode'] as bool? ?? false,
-      replaceSitePlayer: json['replaceSitePlayer'] as bool? ?? true,
+      replaceSitePlayer: json['replaceSitePlayer'] as bool? ?? false,
       captureShowAllMedia: json['captureShowAllMedia'] as bool? ?? false,
       maxDetectedMedia:
           (json['maxDetectedMedia'] as num?)?.round() ?? 200,

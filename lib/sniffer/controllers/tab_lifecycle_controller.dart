@@ -550,12 +550,21 @@ class TabLifecycleController {
     // Only run the video poll on the active tab.
     if (tab != _activeTab) return;
     tab.videoPollTimer?.cancel();
+    // Play: no video/audio src polling on restricted sites (hard-off).
+    if (!tab.sniffingEnabled) return;
     int emptyPollCount = 0;
     // Poll interval tuned to 5s (was 3s).
     tab.videoPollTimer = Timer.periodic(const Duration(seconds: 5), (
       timer,
     ) async {
       if (!host.isMounted || !_tabs.contains(tab)) {
+        timer.cancel();
+        if (identical(tab.videoPollTimer, timer)) {
+          tab.videoPollTimer = null;
+        }
+        return;
+      }
+      if (!tab.sniffingEnabled) {
         timer.cancel();
         if (identical(tab.videoPollTimer, timer)) {
           tab.videoPollTimer = null;
