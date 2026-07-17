@@ -97,6 +97,14 @@ class CaptureMediaRow extends StatelessWidget {
       );
     }
 
+    // NOTE: Do NOT nest LayoutBuilder under IntrinsicHeight — Flutter throws
+    // "LayoutBuilder does not support returning intrinsic dimensions", which
+    // blanked the Capture sheet as soon as any media row was built (console:
+    // RenderIntrinsicHeight hasSize assertion cascade).
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+    final actionSize =
+        MediaQuery.sizeOf(context).width >= 400 ? 44.0 : 40.0;
+
     return Padding(
       key: Key('sniffed_item_$index'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -108,184 +116,142 @@ class CaptureMediaRow extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onInfo,
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(width: 4, color: accent),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                        child: Builder(
-                          builder: (context) {
-                            final narrow =
-                                MediaQuery.sizeOf(context).width < 360;
-                            // Prefer wider action targets when room allows.
-                            final actionSize =
-                                MediaQuery.sizeOf(context).width >= 400
-                                    ? 44.0
-                                    : 40.0;
-
-                            return Row(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Accent rail — fixed height so we never need IntrinsicHeight.
+                  Container(
+                    width: 4,
+                    height: 64,
+                    color: accent,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Checkbox(
+                              value: selected,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.standard,
+                              fillColor: WidgetStateProperty.resolveWith((s) {
+                                if (s.contains(WidgetState.selected)) {
+                                  return ac.accentFrost;
+                                }
+                                return null;
+                              }),
+                              checkColor: context.auroraColorScheme.onPrimary,
+                              onChanged: (v) {
+                                if (v != null) onSelectedChanged(v);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              mediaTypeIcon(item.type),
+                              color: accent,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                SizedBox(
-                                  width: 40,
-                                  height: 40,
-                                  child: Checkbox(
-                                    value: selected,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: VisualDensity.standard,
-                                    fillColor:
-                                        WidgetStateProperty.resolveWith((s) {
-                                      if (s.contains(WidgetState.selected)) {
-                                        return ac.accentFrost;
-                                      }
-                                      return null;
-                                    }),
-                                    checkColor:
-                                        context.auroraColorScheme.onPrimary,
-                                    onChanged: (v) {
-                                      if (v != null) onSelectedChanged(v);
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: accent.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Icon(
-                                    mediaTypeIcon(item.type),
-                                    color: accent,
-                                    size: 22,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  // LayoutBuilder measures *title column* width
-                                  // (after checkbox/well, before actions) so
-                                  // Quality drop uses title remaining space.
-                                  child: LayoutBuilder(
-                                    builder: (context, titleConstraints) {
-                                      // Design: Flexible title min ~80dp; drop
-                                      // Quality first when both pills would
-                                      // starve the title; keep Best.
-                                      const titleMin = 80.0;
-                                      const bestReserve = 48.0;
-                                      const qualityReserve = 52.0;
-                                      const gaps = 8.0;
-                                      final showQualityWithBest =
-                                          titleConstraints.maxWidth >=
-                                              titleMin +
-                                                  bestReserve +
-                                                  qualityReserve +
-                                                  gaps;
-
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  item.name.isNotEmpty
-                                                      ? item.name
-                                                      : 'Unknown media',
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: ac.textPrimary,
-                                                    fontSize: 13,
-                                                    fontWeight:
-                                                        FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (showQuality &&
-                                                  recommended) ...[
-                                                if (showQualityWithBest) ...[
-                                                  const SizedBox(width: 4),
-                                                  _QualityPill(label: qLabel),
-                                                ],
-                                                const SizedBox(width: 4),
-                                                const _BestPill(),
-                                              ] else if (showQuality) ...[
-                                                const SizedBox(width: 4),
-                                                _QualityPill(label: qLabel),
-                                              ] else if (recommended) ...[
-                                                const SizedBox(width: 4),
-                                                const _BestPill(),
-                                              ],
-                                            ],
-                                          ),
-                                          if (subtitle.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              subtitle,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                color: ac.textSecondary,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ),
-                                if (narrow)
-                                  _OverflowActions(
-                                    index: index,
-                                    canPreview: canPreview,
-                                    onPreview: onPreview,
-                                    onDownload: onDownload,
-                                    onInfo: onInfo,
-                                    actionSize: actionSize,
-                                  )
-                                else ...[
-                                  if (canPreview)
-                                    _ActionIcon(
-                                      key: Key('preview_item_$index'),
-                                      icon: Icons.play_circle_outline,
-                                      color: ac.accentFrost,
-                                      tooltip: 'Preview item',
-                                      size: actionSize,
-                                      onPressed: onPreview!,
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.name.isNotEmpty
+                                            ? item.name
+                                            : 'Unknown media',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: ac.textPrimary,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ),
-                                  _ActionIcon(
-                                    key: Key('download_item_$index'),
-                                    icon: Icons.download,
-                                    color: ac.accentFrost,
-                                    tooltip: 'Download this',
-                                    size: actionSize,
-                                    onPressed: onDownload,
-                                  ),
-                                  _ActionIcon(
-                                    key: Key('info_item_$index'),
-                                    icon: Icons.info_outline,
-                                    color: ac.textSecondary,
-                                    tooltip: 'Details',
-                                    size: actionSize,
-                                    onPressed: onInfo,
+                                    if (recommended) ...[
+                                      const SizedBox(width: 4),
+                                      const _BestPill(),
+                                    ],
+                                    if (showQuality) ...[
+                                      const SizedBox(width: 4),
+                                      _QualityPill(label: qLabel),
+                                    ],
+                                  ],
+                                ),
+                                if (subtitle.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: ac.textSecondary,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ],
                               ],
-                            );
-                          },
-                        ),
+                            ),
+                          ),
+                          if (narrow)
+                            _OverflowActions(
+                              index: index,
+                              canPreview: canPreview,
+                              onPreview: onPreview,
+                              onDownload: onDownload,
+                              onInfo: onInfo,
+                              actionSize: actionSize,
+                            )
+                          else ...[
+                            if (canPreview)
+                              _ActionIcon(
+                                key: Key('preview_item_$index'),
+                                icon: Icons.play_circle_outline,
+                                color: ac.accentFrost,
+                                tooltip: 'Preview item',
+                                size: actionSize,
+                                onPressed: onPreview!,
+                              ),
+                            _ActionIcon(
+                              key: Key('download_item_$index'),
+                              icon: Icons.download,
+                              color: ac.accentFrost,
+                              tooltip: 'Download this',
+                              size: actionSize,
+                              onPressed: onDownload,
+                            ),
+                            _ActionIcon(
+                              key: Key('info_item_$index'),
+                              icon: Icons.info_outline,
+                              color: ac.textSecondary,
+                              tooltip: 'Details',
+                              size: actionSize,
+                              onPressed: onInfo,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
