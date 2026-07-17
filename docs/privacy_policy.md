@@ -1,18 +1,18 @@
-# Privacy Policy — Aurora Downloader
+# Privacy Policy — Aurora: Browser & Downloader
 
 **Last updated:** 2026-07-17  
 
-**App:** Aurora Downloader (Android)  
+**App:** Aurora: Browser & Downloader  
 **Package:** `com.personal.aurora_downloader`  
-**Contact:** *[set your email in Play Console and replace this line before publishing]*  
+**Contact:** Xianspired@gmail.com  
 
-This Privacy Policy describes how Aurora Downloader (“the App”, “we”) handles information when you use the App distributed on Google Play or other channels.
+This Privacy Policy describes how Aurora: Browser & Downloader (“the App”, “we”) handles information when you use the App distributed on Google Play or other channels.
 
 ---
 
 ## 1. What the App is
 
-Aurora Downloader is a **private web browser and download manager**. It lets you browse the web in an in-app browser, detect media and file links, and download files to your device. Optional features include Google Drive backup/sync and a one-time Aurora Pro unlock via Google Play Billing.
+Aurora: Browser & Downloader is a **private web browser and download manager**. It lets you browse the web in an in-app browser, detect media and file links, and download files to your device. Optional features include Google Drive backup/sync and a one-time Aurora Pro unlock via Google Play Billing.
 
 ---
 
@@ -110,7 +110,7 @@ For questions: use the contact email on this page / Play listing.
 
 ## 7. Children
 
-Aurora Downloader is **not directed at children under 13**. The App includes an unrestricted web browser and is intended for a general adult audience.
+Aurora: Browser & Downloader is **not directed at children under 13**. The App includes an unrestricted web browser and is intended for a general adult audience.
 
 ---
 
@@ -128,8 +128,8 @@ We may update this Privacy Policy. The “Last updated” date at the top will c
 
 ## 10. Contact
 
-For privacy questions about Aurora Downloader, contact the developer email listed on the Google Play store listing for this app, or update the contact line at the top of this document.
+For privacy questions about the app, contact us at Xianspired@gmail.com.
 
 ---
 
-*This policy applies to the Aurora Downloader Android application. It is provided for transparency under Google Play’s User Data policy.*
+*This policy applies to the Aurora: Browser & Downloader Android application. It is provided for transparency under Google Play’s User Data policy.*
