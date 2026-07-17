@@ -317,11 +317,12 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                           );
                         });
                       },
-                      onClearCaptured: () {
-                        setState(() {
-                          widget.activeTab.snifferEngine.clearCache();
-                          widget.mediaCatchController.clearSelection();
-                        });
+                      onDownloadSelected: () {
+                        final selected =
+                            widget.mediaCatchController.selectedFrom(
+                          displayedGroups,
+                        );
+                        unawaited(_runBatchDownload(selected));
                       },
                       onRescan: widget.onRescan,
                     ),
@@ -418,18 +419,6 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                                       widget.onPreview(item);
                                     }
                                   : null,
-                              onDownload: () {
-                                Navigator.of(context).pop();
-                                unawaited(
-                                  widget.onAddToQueue(
-                                    widget.parentContext,
-                                    item,
-                                    variants: group.candidates
-                                        .map((c) => c.media)
-                                        .toList(),
-                                  ),
-                                );
-                              },
                               onInfo: () =>
                                   widget.onInfo(widget.parentContext, item),
                             );

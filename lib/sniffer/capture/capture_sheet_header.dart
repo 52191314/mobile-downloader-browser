@@ -2,21 +2,24 @@ import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
-/// Capture sheet zone header: frost icon well, title/subtitle, Rescan / Best / Clear.
+/// Capture sheet zone header: frost icon well, title/subtitle, Rescan / Best / Download.
+///
+/// Download acts on the current multi-select (checkbox selection). Clear-all was
+/// removed in favor of select + download workflow.
 class CaptureSheetHeader extends StatelessWidget {
   const CaptureSheetHeader({
     super.key,
     required this.totalShown,
     required this.selectedCount,
     required this.onSelectBest,
-    required this.onClearCaptured,
+    required this.onDownloadSelected,
     required this.onRescan,
   });
 
   final int totalShown;
   final int selectedCount;
   final VoidCallback onSelectBest;
-  final VoidCallback onClearCaptured;
+  final VoidCallback onDownloadSelected;
   final VoidCallback onRescan;
 
   @override
@@ -25,6 +28,7 @@ class CaptureSheetHeader extends StatelessWidget {
     final subtitle = totalShown == 0
         ? 'Browse to find downloadable media'
         : '$selectedCount selected · $totalShown shown';
+    final canDownload = selectedCount > 0;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 12),
@@ -85,9 +89,15 @@ class CaptureSheetHeader extends StatelessWidget {
             onPressed: totalShown == 0 ? null : onSelectBest,
           ),
           IconButton(
-            tooltip: 'Clear all detected media',
-            icon: Icon(Icons.delete_sweep, color: ac.statusError),
-            onPressed: totalShown == 0 ? null : onClearCaptured,
+            key: const Key('capture_download_selected_button'),
+            tooltip: canDownload
+                ? 'Download $selectedCount selected'
+                : 'Select items to download',
+            icon: Icon(
+              Icons.download,
+              color: canDownload ? ac.accentFrost : ac.textDisabled,
+            ),
+            onPressed: canDownload ? onDownloadSelected : null,
           ),
         ],
       ),

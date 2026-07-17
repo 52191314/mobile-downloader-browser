@@ -344,8 +344,15 @@ void main() {
         expect(find.text('Capture Media'), findsOneWidget);
         expect(find.text('lecture.pdf'), findsOneWidget);
 
-        // Tap download on the sniffed item
-        await tester.tap(find.byKey(const Key('download_item_0')));
+        // Select item, then header Download (multi-select flow)
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(const Key('sniffed_item_0')),
+            matching: find.byType(Checkbox),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('capture_download_selected_button')));
         await tester.pumpAndSettle();
 
          // Verify "Add to Download Queue" dialog opened
@@ -529,7 +536,15 @@ void main() {
 
         await tester.tap(find.byKey(const Key('sniffer_fab')));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('download_item_0')));
+        // Select item, then header Download (multi-select flow)
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(const Key('sniffed_item_0')),
+            matching: find.byType(Checkbox),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('capture_download_selected_button')));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('dialog_add_button')));
         await tester.pumpAndSettle();
