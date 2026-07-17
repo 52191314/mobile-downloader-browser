@@ -188,7 +188,7 @@ Implemented gates (see `docs/premium_implementation_tracker.md` and `docs/premiu
 
 ## Screenshots
 
-_Add screenshots here when ready (queue, browser capture tray, player, settings)._
+__
 
 ---
 
