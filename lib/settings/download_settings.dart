@@ -577,6 +577,10 @@ class DownloadSettings {
   final AutoBackupInterval autoBackupInterval;
   final bool neverAskBatteryOpt;
 
+  /// True after we have shown the POST_NOTIFICATIONS system prompt once.
+  /// Prevents re-requesting on every launch when the user already denied.
+  final bool notificationPermissionAsked;
+
   const DownloadSettings({
     required this.maxConcurrentDownloads,
     required this.chunksPerTask,
@@ -633,6 +637,7 @@ class DownloadSettings {
     this.lastBackupTimestamp = 0,
     this.autoBackupInterval = AutoBackupInterval.daily,
     this.neverAskBatteryOpt = false,
+    this.notificationPermissionAsked = false,
   });
 
   static const trustedAdblockSources = [
@@ -720,6 +725,7 @@ class DownloadSettings {
     int? lastBackupTimestamp,
     AutoBackupInterval? autoBackupInterval,
     bool? neverAskBatteryOpt,
+    bool? notificationPermissionAsked,
   }) {
     return DownloadSettings(
       autoRetry: autoRetry ?? this.autoRetry,
@@ -747,6 +753,8 @@ class DownloadSettings {
       lastBackupTimestamp: lastBackupTimestamp ?? this.lastBackupTimestamp,
       autoBackupInterval: autoBackupInterval ?? this.autoBackupInterval,
       neverAskBatteryOpt: neverAskBatteryOpt ?? this.neverAskBatteryOpt,
+      notificationPermissionAsked:
+          notificationPermissionAsked ?? this.notificationPermissionAsked,
       maxConcurrentDownloads:
           maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       chunksPerTask: chunksPerTask ?? this.chunksPerTask,
@@ -855,6 +863,7 @@ class DownloadSettings {
     'lastBackupTimestamp': lastBackupTimestamp,
     'autoBackupInterval': autoBackupInterval.name,
     'neverAskBatteryOpt': neverAskBatteryOpt,
+    'notificationPermissionAsked': notificationPermissionAsked,
   };
 
   factory DownloadSettings.fromJson(Map<String, dynamic> json) {
@@ -988,6 +997,8 @@ class DownloadSettings {
       autoBackupInterval:
           AutoBackupInterval.fromName(json['autoBackupInterval'] as String?),
       neverAskBatteryOpt: json['neverAskBatteryOpt'] as bool? ?? false,
+      notificationPermissionAsked:
+          json['notificationPermissionAsked'] as bool? ?? false,
     );
   }
 

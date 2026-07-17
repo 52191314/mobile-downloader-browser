@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
+import '../downloader/headless_webview_fetcher.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
 import '../ui/notifications/aurora_snackbar.dart';
@@ -723,6 +724,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     _barsVisible = true;
     _lastScrollY = 0.0;
     _clearAddressSuggestions();
+    // Wake deferred restore work only after tabs are loaded. During bulk
+    // restore switchToActiveTab runs before markTabsLoaded — ensure is
+    // scheduled separately with a delay so WebView/downloads do not thrash.
+    if (_tabsLoaded) {
+      unawaited(_ensureTabStartupReady(_activeTab));
+    }
     _startVideoPoll(_activeTab);
 
     // --- LRU tracking & WebView eviction ---
@@ -732,6 +739,67 @@ class _SnifferScreenState extends State<SnifferScreen>
     _evictStaleTabs();
     _progressNotifier.value = _activeTab.progress;
     setState(() {});
+  }
+
+  /// Completes cold-start work that [openNewTab] deferred for bulk restore.
+  /// Idempotent via [BrowserTab.startupReady].
+  Future<void> _ensureTabStartupReady(BrowserTab tab) async {
+    if (tab.startupReady) return;
+    tab.startupReady = true;
+
+    // Lazy headless: only allocate when a playlist fetch actually needs it
+    // (avoids a second Chromium process on every cold start).
+    tab.snifferEngine.fetchPlaylistBodyViaHeadlessWebView = (url) {
+      tab.headlessFetcher ??= HeadlessWebViewFetcher();
+      return tab.headlessFetcher!.fetchText(url);
+    };
+
+    // Adblock for this tab only — unawaited so first paint is not blocked.
+    unawaited(_configureTabAdblock(tab));
+
+    // Media cache can be large on Secure Folder; load off the critical path.
+    final base = _baseDir;
+    if (base != null) {
+      unawaited(
+        tab.snifferEngine.loadDetectedMedia(
+          '$base/sniffed_media_cache_${tab.id}.json',
+        ),
+      );
+    }
+
+    final url = (tab.currentUrl ?? tab.addressController.text).trim();
+    if (url.isEmpty || url == 'about:blank') {
+      tab.canSeedWebViewUrl = true;
+      return;
+    }
+
+    // Mount blank WebView first (canSeed still false), then navigate.
+    // Contends far less with queue resume / GPU init on Knox dual-user.
+    tab.canSeedWebViewUrl = true;
+    if (mounted) setState(() {});
+
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted || !_tabs.contains(tab)) return;
+
+    unawaited(
+      _loadUrlWithHostSettings(
+        tab,
+        Uri.parse(url),
+        addToHistory: false,
+      ),
+    );
+    unawaited(() async {
+      try {
+        final ua = await tab.controller.evaluateJavaScript(
+          'navigator.userAgent',
+        );
+        if (ua is String && ua.isNotEmpty) {
+          tab.userAgent = ua.startsWith('"') && ua.endsWith('"')
+              ? ua.substring(1, ua.length - 1)
+              : ua;
+        }
+      } catch (_) {}
+    }());
   }
 
   /// Evict the least-recently-used tabs' native WebViews when the number
@@ -839,12 +907,16 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (!_tabsLoaded) {
       _tabsLoaded = true;
       AuroraLog.instance.info(
-        'markTabsLoaded: flushing ${_pendingOpenUrlsAfterTabsLoaded.length} '
+        'markTabsLoaded: tabs=${_tabs.length} '
+        'flushing ${_pendingOpenUrlsAfterTabsLoaded.length} '
         'pending external open(s)',
         category: LogCategory.browser,
         screen: LogScreen.browser,
         eventType: LogEventType.navigation,
       );
+      // Rebuild so the active tab's real WebView mounts (restore left
+      // _tabsLoaded false during switchToActiveTab's earlier setState).
+      if (mounted) setState(() {});
       final pending = List<String>.from(_pendingOpenUrlsAfterTabsLoaded);
       _pendingOpenUrlsAfterTabsLoaded.clear();
       if (pending.isNotEmpty) {
@@ -859,6 +931,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       _onOpenRequestBus();
     }
   }
+
+  @override
+  Future<void> ensureTabStartupReady(BrowserTab tab) =>
+      _ensureTabStartupReady(tab);
 
   int _lastHandledOpenSeq = 0;
 
@@ -3632,7 +3708,10 @@ class _SnifferScreenState extends State<SnifferScreen>
               final shouldBuild = _builtWebViewTabIds.contains(t.id);
               // Seed first paint from address bar / committed URL so external
               // opens (Queue source page) navigate even if loadRequest races.
+              // Restored cold-start tabs keep canSeedWebViewUrl false until
+              // ensureTabStartupReady so we mount a blank WebView first.
               final seedUrl = () {
+                if (!t.canSeedWebViewUrl) return null;
                 final fromAddress = t.addressController.text.trim();
                 if (fromAddress.isNotEmpty) return fromAddress;
                 final fromCurrent = t.currentUrl?.trim();

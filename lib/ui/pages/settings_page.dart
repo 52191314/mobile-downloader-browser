@@ -102,21 +102,11 @@ class _SettingsPageState extends State<SettingsPage> {
   late DownloadSettings _settings;
   late double _speedLimitKbps;
 
-  StreamSubscription<DriveSyncState>? _driveSubscription;
-
   @override
   void initState() {
     super.initState();
     _settings = widget.settings;
     _speedLimitKbps = widget.speedLimitKbps;
-    _subscribeDriveSync();
-  }
-
-  void _subscribeDriveSync() {
-    _driveSubscription?.cancel();
-    _driveSubscription = widget.driveSyncService.onStateChanged.listen((_) {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
@@ -130,12 +120,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
-    _driveSubscription?.cancel();
     super.dispose();
   }
-
-  bool get _driveConnected =>
-      widget.driveSyncService.state.status == DriveConnectionStatus.connected;
 
   @override
   Widget build(BuildContext context) {
@@ -306,10 +292,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.cloud_outlined,
                 title: 'Google Drive',
-                subtitle: _driveConnected
-                    ? 'Linked · manage sync'
-                    : 'Link account for backup sync',
-                badge: isPro ? null : 'Pro',
+                subtitle: 'Upcoming — cloud sync & backup',
                 onTap: () => _openPage(_buildDrivePage()),
               ),
               _NavItem(
@@ -1126,12 +1109,58 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildDrivePage() {
-    return _DriveSyncPageContent(
-      driveSyncService: widget.driveSyncService,
-      folderController: widget.folderController,
-      initialState: widget.driveSyncService.state,
-      initialConnected: _driveConnected,
-      proEntitlement: widget.proEntitlement,
+    return Scaffold(
+      appBar: AppBar(title: const Text('Google Drive Sync')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PanelHeader(icon: Icons.cloud_outlined, title: 'Google Drive Sync'),
+          const SizedBox(height: 8),
+          Panel(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Icon(Icons.construction_rounded,
+                      size: 48, color: context.ac.accentFrost),
+                  const SizedBox(height: 16),
+                  Text(
+                    'This feature is under consideration.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: context.ac.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Google Drive sync for cloud backup and cross-device '
+                    'downloads is planned but currently unavailable. '
+                    'The required cloud service configuration is not yet provisioned.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.ac.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Use local backup in the meantime — '
+                    'tap "Backup" on the previous screen.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.ac.textTertiary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -273,6 +273,23 @@ class AdBlockEngine {
     );
   }
 
+  /// Process-wide shared built-in engine (enabled only).
+  ///
+  /// Creating a full [AdBlockEngine] loads the native `.so` and runs
+  /// `loadRules`. On cold start we open one controller per restored tab;
+  /// sharing the default engine avoids N× native compile of the same
+  /// lightweight list. Controllers that call [fromFilterSources] replace
+  /// their local reference and do not mutate this instance.
+  static AdBlockEngine? _sharedBuiltInEnabled;
+  static AdBlockEngine? _sharedBuiltInDisabled;
+
+  static AdBlockEngine sharedBuiltIn({bool enabled = true}) {
+    if (!enabled) {
+      return _sharedBuiltInDisabled ??= AdBlockEngine.builtIn(enabled: false);
+    }
+    return _sharedBuiltInEnabled ??= AdBlockEngine.builtIn(enabled: true);
+  }
+
   static Future<AdBlockEngine> fromFilterSources({
     required bool enabled,
     required List<AdblockFilterSource> sources,

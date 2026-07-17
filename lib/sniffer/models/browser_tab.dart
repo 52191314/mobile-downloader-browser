@@ -62,6 +62,18 @@ class BrowserTab {
   /// and disposed when the tab is closed. Uses same-origin XHR from the
   /// CDN domain to bypass CORS and Cloudflare WAF.
   HeadlessWebViewFetcher? headlessFetcher;
+
+  /// True after deferred cold-start work has run for this tab (adblock
+  /// configure, sniffed-media cache load, initial URL navigation).
+  /// Background tabs restored at launch leave this false until first
+  /// activation so Secure Folder / large tab lists do not freeze startup.
+  bool startupReady = false;
+
+  /// When false, [BrowserWidget] must not seed [initialUrl] from the
+  /// address bar — lets cold start mount a blank WebView first, then
+  /// navigate after the UI frame and download-hold settle.
+  bool canSeedWebViewUrl = true;
+
   BrowserTab({
     required this.id,
     required this.controller,

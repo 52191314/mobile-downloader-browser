@@ -89,6 +89,16 @@ class DownloadQueue {
   bool _isSaving = false;
   Future<void>? _pendingSaveFuture;
 
+  /// When true, [_schedule] is a no-op. Used during queue file restore and
+  /// for a short post-launch hold so Secure Folder cold start is not
+  /// saturated by multi-connection HLS resume + headless WebViews while the
+  /// browser UI is still mounting.
+  bool _startupHold = false;
+  Timer? _startupHoldTimer;
+
+  /// How long to keep downloads paused after queue restore.
+  static const Duration startupHoldDuration = Duration(seconds: 5);
+
   /// Debounce timer for persisting the queue to disk.  Without this the
   /// queue is written on every 500ms progress tick (from every active
   /// download), which saturates flash I/O and causes the UI progress bar
@@ -727,7 +737,12 @@ class DownloadQueue {
     if (pending != null) {
       await pending;
     }
-    _schedule();
+    // Explicit resume always wins over the cold-start hold.
+    if (!isAutoRetry) {
+      releaseStartupHold();
+    } else {
+      _schedule();
+    }
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
     }
@@ -1165,14 +1180,43 @@ class DownloadQueue {
       await _preserveCorruptQueueFile(file, e.toString());
     } finally {
       _isLoading = false;
+      // Tasks are already in _executionQueue as idle. Hold multi-connection
+      // resume for a few seconds so browser/WebView cold start can finish.
+      // Without this, Secure Folder freezes ~10–15s under HLS+GPU load.
+      holdSchedulingForStartup();
     }
 
     // Recover any tasks from previous corrupt backups
     await _recoverCorruptQueueFiles(path);
   }
 
+  /// Blocks automatic task starts for [duration] (default 5s), then runs
+  /// [_schedule]. Call after cold-start queue restore so the UI can paint.
+  void holdSchedulingForStartup([Duration? duration]) {
+    _startupHold = true;
+    _startupHoldTimer?.cancel();
+    _startupHoldTimer = Timer(duration ?? startupHoldDuration, () {
+      _startupHold = false;
+      _startupHoldTimer = null;
+      if (!_isDisposed) _schedule();
+    });
+  }
+
+  /// Ends the startup hold early (e.g. user manually starts a download).
+  void releaseStartupHold() {
+    _startupHoldTimer?.cancel();
+    _startupHoldTimer = null;
+    if (_startupHold) {
+      _startupHold = false;
+      _schedule();
+    }
+  }
+
   void _schedule() {
     if (_isDisposed) return;
+    // Do not start downloads while restoring the queue or during the
+    // post-launch hold — that contention freezes Secure Folder cold start.
+    if (_isLoading || _startupHold) return;
     // 1. Sort execution queue: priority descending, then createdAt ascending
     _executionQueue.sort((aId, bId) {
       final a = _tasks[aId]!;
@@ -1768,6 +1812,8 @@ class DownloadQueue {
 
     _saveDebounceTimer?.cancel();
     _scheduleTimer?.cancel();
+    _startupHoldTimer?.cancel();
+    _startupHold = false;
     if (!_taskUpdateController.isClosed) {
       await _taskUpdateController.close();
     }

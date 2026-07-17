@@ -278,7 +278,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   bool _adBlockerEnabled = true;
   bool _popupBlockingEnabled = true;
   bool _invisibleRedirectBlockingEnabled = true;
-  AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
+  // Shared default until [configureAdBlock] installs a full filter engine.
+  // Avoids N× native loadRules when restoring many tabs at cold start.
+  AdBlockEngine _adBlockEngine = AdBlockEngine.sharedBuiltIn();
   int _blockedRequestCount = 0;
   int _blockedInvisibleRedirectsCount = 0;
 
@@ -334,10 +336,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     controller: _controller,
   );
 
-  // Cosmetic filter + scriptlet injector.
+  // Cosmetic filter + scriptlet injector (shared default engine — see above).
   final AdblockInjector _adblockInjector = AdblockInjector(
     controller: null,
-    engine: AdBlockEngine.builtIn(),
+    engine: AdBlockEngine.sharedBuiltIn(),
   );
 
   void _setCurrentUrl(String? url, {bool clearOnNull = false}) {
