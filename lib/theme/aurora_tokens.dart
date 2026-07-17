@@ -101,6 +101,8 @@ class AColors {
   final Color mediaImage;
   final Color mediaHls;
   final Color mediaOther;
+  /// Torrent type accent — deep teal (not amber, not frost cyan).
+  final Color mediaTorrent;
 
   // --- Tab-group palette (8 distinct hues) ---
   final Color groupCyan;
@@ -142,6 +144,7 @@ class AColors {
     required this.mediaImage,
     required this.mediaHls,
     required this.mediaOther,
+    required this.mediaTorrent,
     required this.groupCyan,
     required this.groupAmber,
     required this.groupPurple,
@@ -192,6 +195,7 @@ class AColors {
         mediaImage: Color(0xFF4F7A3A),
         mediaHls: Color(0xFFD08770),
         mediaOther: Color(0xFF3D6C9A),
+        mediaTorrent: Color(0xFF3D8B84),
         // Tab groups
         groupCyan: Color(0xFF88C0D0),
         groupAmber: Color(0xFFEBCB8B),
@@ -239,11 +243,12 @@ class AColors {
         statusSuccess: Color(0xFF4F7A3A),
         statusError: Color(0xFFA12D2D),
         // Media
-        mediaVideo: Color(0xFF3D6C9A),
+        mediaVideo: Color(0xFF1E5A8C),
         mediaAudio: Color(0xFF8F6A85),
         mediaImage: Color(0xFF4F7A3A),
-        mediaHls: Color(0xFFA35A00),
-        mediaOther: Color(0xFF3D6C9A),
+        mediaHls: Color(0xFFC45C3E),
+        mediaOther: Color(0xFF5A6B7D),
+        mediaTorrent: Color(0xFF2F6F6F),
         // Tab groups
         groupCyan: Color(0xFF3D6C9A),
         groupAmber: Color(0xFFA35A00),
