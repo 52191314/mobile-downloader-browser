@@ -1,8 +1,8 @@
 // Standalone library — Capture sheet orchestrator.
-// Visual chrome lives under `lib/sniffer/capture/`. Selection semantics and
-// the displayedGroups pipeline come from PR1.
+// Visual chrome lives under `lib/sniffer/capture/`.
 
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
@@ -25,48 +25,6 @@ import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 export 'package:aurora_downloader/sniffer/capture/media_filter.dart';
 
-/// Lightweight StatefulWidget that subscribes to a [Stream<SniffedMedia>]
-/// and triggers a rebuild of the outer [StatefulBuilder] whenever the
-/// stream emits.
-class _MediaSheetReBuilder extends StatefulWidget {
-  final Stream<SniffedMedia> stream;
-  final VoidCallback onChanged;
-  final Widget child;
-
-  const _MediaSheetReBuilder({
-    required this.stream,
-    required this.onChanged,
-    required this.child,
-  });
-
-  @override
-  State<_MediaSheetReBuilder> createState() => _MediaSheetReBuilderState();
-}
-
-class _MediaSheetReBuilderState extends State<_MediaSheetReBuilder> {
-  StreamSubscription<SniffedMedia>? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    _sub = widget.stream.listen((_) {
-      if (mounted) widget.onChanged();
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
-}
-
-/// Maps the segmented control's [MediaFilter] to the corresponding
-/// [MediaType] stored on the [MediaCatchController]. HLS has no
-/// [MediaType] match so it returns `null`.
 MediaType? _mediaTypeForFilter(MediaFilter filter) {
   return switch (filter) {
     MediaFilter.all => null,
@@ -78,8 +36,6 @@ MediaType? _mediaTypeForFilter(MediaFilter filter) {
   };
 }
 
-/// Inverse of [_mediaTypeForFilter] — seeds the segmented control from
-/// the controller's persisted `activeFilter`.
 MediaFilter _filterForMediaType(MediaType? mt) {
   return switch (mt) {
     null => MediaFilter.all,
@@ -97,9 +53,8 @@ int _totalBytes(Iterable<SniffedMedia> list) {
 
 /// Shows the rich caught-media bottom sheet for [activeTab].
 ///
-/// [onAddToQueue] is awaitable and returns `true` when the user confirmed
-/// enqueue (or dialog completed as success), `false` on cancel — batch
-/// download stops the sequential loop on `false` (KD13 / KD23).
+/// [onAddToQueue] returns `true` when enqueue was confirmed, `false` on
+/// cancel — batch download stops the sequential loop on `false`.
 void showSniffedMediaSheet(
   BuildContext context, {
   required BrowserTab activeTab,
@@ -119,306 +74,388 @@ void showSniffedMediaSheet(
   required VoidCallback onRescan,
 }) {
   if (!isMounted) return;
-  final parentContext = context;
-  final tab = activeTab;
   mediaCatchController.clearSelection();
 
+  developer.log('Capture sheet open', name: 'capture_sheet');
+
+  // Fixed-height sheet (no DraggableScrollableSheet). DSS was collapsing or
+  // flashing blank when TikTok's onMediaChanged stream rebuilt it every few
+  // hundred ms. Fixed SizedBox + Column/Expanded is the stable pattern for
+  // isScrollControlled modals.
   showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     showDragHandle: true,
     isScrollControlled: true,
     useSafeArea: true,
+    isDismissible: true,
+    enableDrag: true,
     backgroundColor: context.ac.surfacePanel,
-    builder: (ctx) {
-      MediaFilter currentSegment = _filterForMediaType(
-        mediaCatchController.activeFilter,
-      );
-      // Local mirror so dropdowns, display mode, and group sort update
-      // immediately. Host settings are written via onSettingsChanged for
-      // persistence only (list order uses sheetSettings, not host sortMedia).
-      var sheetSettings = settings;
-
-      return StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          return _MediaSheetReBuilder(
-            stream: tab.snifferEngine.onMediaChanged,
-            onChanged: () {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (ctx.mounted) setSheetState(() {});
-              });
-            },
-            child: Builder(
-              builder: (innerCtx) {
-                // --- Gather & analyse media (single pipeline) ---
-                // Flat sortMedia is optional pre-order; analyzer re-orders by
-                // confidence, so displayedGroups are re-sorted below by
-                // sheetSettings.sniffedMediaSort (Issue 1 / KD25).
-                final allMedia = sortMedia(tab.snifferEngine.detectedMedia)
-                    .where((m) => !m.isShortClip)
-                    .toList();
-
-                final captureResult = mediaCatchController.analyze(allMedia);
-
-                mediaCatchController.activeFilter =
-                    _mediaTypeForFilter(currentSegment);
-
-                var displayedGroups = mediaCatchController.filteredGroups(
-                  captureResult.groups,
-                );
-
-                if (currentSegment == MediaFilter.hls) {
-                  displayedGroups = displayedGroups
-                      .where(
-                        (g) =>
-                            isHlsMedia(g.primary.media) ||
-                            g.candidates.any((c) => isHlsMedia(c.media)),
-                      )
-                      .toList(growable: false);
-                }
-
-                // User Sort by — after analyzer confidence + type/HLS filters.
-                displayedGroups = sortCaptureGroups(
-                  displayedGroups,
-                  sheetSettings.sniffedMediaSort,
-                );
-
-                final selectedCount = mediaCatchController.selectedCount(
-                  displayedGroups.length,
-                );
-                final totalBytesResult = _totalBytes(allMedia);
-                final videoCount =
-                    allMedia.where((m) => m.type == MediaType.video).length;
-                final audioCount =
-                    allMedia.where((m) => m.type == MediaType.audio).length;
-
-                Future<void> runBatchDownload(
-                  List<CaptureGroup> selected,
-                ) async {
-                  if (selected.isEmpty) return;
-                  Navigator.pop(ctx);
-                  for (final group in selected) {
-                    if (!parentContext.mounted) break;
-                    final ok = await onAddToQueue(
-                      parentContext,
-                      group.primary.media,
-                      variants:
-                          group.candidates.map((c) => c.media).toList(),
-                    );
-                    if (!ok) break;
-                  }
-                }
-
-                // IMPORTANT: with isScrollControlled bottom sheets, DSS needs a
-                // finite-height parent. Column+Expanded inside expand:false DSS
-                // collapses to ~0 height (empty white/black sheet). Give the
-                // sheet the full screen height and expand:true so the Column
-                // receives bounded constraints (sticky batch bar still works).
-                final sheetHeight = MediaQuery.sizeOf(ctx).height;
-                return SizedBox(
-                  height: sheetHeight,
-                  child: DraggableScrollableSheet(
-                    initialChildSize: 0.90,
-                    minChildSize: 0.30,
-                    maxChildSize: 1.0,
-                    snap: true,
-                    snapSizes: const [0.3, 0.5, 0.9, 1.0],
-                    expand: true,
-                    builder: (scrollCtx, scrollController) {
-                      return Material(
-                        color: scrollCtx.ac.surfacePanel,
-                        child: Column(
-                          children: [
-                            Expanded(
-                              child: CustomScrollView(
-                                key: const Key('sniffer_drawer'),
-                                controller: scrollController,
-                                physics: const ClampingScrollPhysics(),
-                                slivers: [
-                              SliverToBoxAdapter(
-                                child: CaptureSheetHeader(
-                                  totalShown: displayedGroups.length,
-                                  selectedCount: selectedCount,
-                                  onSelectBest: () {
-                                    setSheetState(() {
-                                      mediaCatchController.clearSelection();
-                                      mediaCatchController.selectedIndices
-                                          .addAll(
-                                        mediaCatchController
-                                            .recommendedGroupIndices(
-                                          displayedGroups,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  onClearCaptured: () {
-                                    setSheetState(() {
-                                      activeTab.snifferEngine.clearCache();
-                                      mediaCatchController.clearSelection();
-                                    });
-                                  },
-                                  onRescan: onRescan,
-                                ),
-                              ),
-                              SliverToBoxAdapter(
-                                child: CaptureFilterBar(
-                                  current: currentSegment,
-                                  onSelected: (v) {
-                                    setSheetState(() {
-                                      currentSegment = v;
-                                      mediaCatchController.clearSelection();
-                                    });
-                                  },
-                                ),
-                              ),
-                              // Options zone — show-all + sort + display mode (PR5 / KD25–26).
-                              SliverToBoxAdapter(
-                                child: CaptureOptionsRow(
-                                  settings: sheetSettings,
-                                  showAll:
-                                      mediaCatchController.captureShowAllMedia,
-                                  onShowAllChanged: (value) {
-                                    setSheetState(() {
-                                      mediaCatchController.captureShowAllMedia =
-                                          value;
-                                      mediaCatchController.clearSelection();
-                                      sheetSettings = sheetSettings.copyWith(
-                                        captureShowAllMedia: value,
-                                      );
-                                    });
-                                    onSettingsChanged?.call(sheetSettings);
-                                  },
-                                  onSettingsChanged: (next) {
-                                    // Immediate rebuild uses sheetSettings for
-                                    // sort + display mode; persist async via host.
-                                    setSheetState(() {
-                                      sheetSettings = next;
-                                    });
-                                    onSettingsChanged?.call(next);
-                                  },
-                                ),
-                              ),
-                              const SliverToBoxAdapter(
-                                child: SizedBox(height: 4),
-                              ),
-                              SliverToBoxAdapter(
-                                child: CaptureStatsRow(
-                                  foundCount: allMedia.length,
-                                  videoCount: videoCount,
-                                  audioCount: audioCount,
-                                  totalBytes: totalBytesResult,
-                                  filteredCount: captureResult.hiddenCount,
-                                ),
-                              ),
-                              SliverToBoxAdapter(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 8,
-                                    bottom: 4,
-                                  ),
-                                  child: Divider(
-                                    height: 1,
-                                    thickness: 1,
-                                    color: context.ac.borderHairline,
-                                  ),
-                                ),
-                              ),
-                              if (displayedGroups.isEmpty)
-                                SliverFillRemaining(
-                                  hasScrollBody: false,
-                                  child: CaptureEmptyState(onRescan: onRescan),
-                                )
-                              else
-                                SliverPadding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  sliver: SliverList(
-                                    delegate: SliverChildBuilderDelegate(
-                                      (context, index) {
-                                        final group = displayedGroups[index];
-                                        final item = group.primary.media;
-                                        final isSelected = mediaCatchController
-                                            .selectedIndices
-                                            .contains(index);
-                                        final canPreview = item.type ==
-                                                MediaType.video ||
-                                            item.type == MediaType.audio ||
-                                            item.type == MediaType.image;
-
-                                        return CaptureMediaRow(
-                                          index: index,
-                                          group: group,
-                                          selected: isSelected,
-                                          displayMode: sheetSettings
-                                              .sniffedMediaDisplayMode,
-                                          onSelectedChanged: (_) {
-                                            setSheetState(() {
-                                              mediaCatchController
-                                                  .toggleSelection(index);
-                                            });
-                                          },
-                                          onPreview: canPreview
-                                              ? () {
-                                                  Navigator.pop(ctx);
-                                                  onPreview(item);
-                                                }
-                                              : null,
-                                          onDownload: () {
-                                            Navigator.pop(ctx);
-                                            unawaited(
-                                              onAddToQueue(
-                                                parentContext,
-                                                item,
-                                                variants: group.candidates
-                                                    .map((c) => c.media)
-                                                    .toList(),
-                                              ),
-                                            );
-                                          },
-                                          onInfo: () =>
-                                              onInfo(parentContext, item),
-                                        );
-                                      },
-                                      childCount: displayedGroups.length,
-                                    ),
-                                  ),
-                                ),
-                                ],
-                              ),
-                            ),
-                            if (selectedCount > 0)
-                              CaptureBatchBar(
-                                selectedCount: selectedCount,
-                                totalCount: displayedGroups.length,
-                                onToggleSelectAll: () {
-                                  setSheetState(() {
-                                    final allSelected = selectedCount ==
-                                        displayedGroups.length;
-                                    if (allSelected) {
-                                      mediaCatchController.clearSelection();
-                                    } else {
-                                      mediaCatchController
-                                          .selectAll(displayedGroups.length);
-                                    }
-                                  });
-                                },
-                                onDownloadSelected: () {
-                                  final selected =
-                                      mediaCatchController.selectedFrom(
-                                    displayedGroups,
-                                  );
-                                  unawaited(runBatchDownload(selected));
-                                },
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-          );
-        },
+    builder: (sheetContext) {
+      return _CaptureSheetScaffold(
+        activeTab: activeTab,
+        mediaCatchController: mediaCatchController,
+        settings: settings,
+        onSettingsChanged: onSettingsChanged,
+        sortMedia: sortMedia,
+        onPreview: onPreview,
+        onInfo: onInfo,
+        onAddToQueue: onAddToQueue,
+        onRescan: onRescan,
+        parentContext: context,
       );
     },
-  );
+  ).whenComplete(() {
+    developer.log('Capture sheet closed', name: 'capture_sheet');
+  });
+}
+
+/// Owns sheet local state + media-stream subscription so rebuilds do not
+/// tear down a DraggableScrollableSheet (which caused flash-then-blank).
+class _CaptureSheetScaffold extends StatefulWidget {
+  const _CaptureSheetScaffold({
+    required this.activeTab,
+    required this.mediaCatchController,
+    required this.settings,
+    required this.onSettingsChanged,
+    required this.sortMedia,
+    required this.onPreview,
+    required this.onInfo,
+    required this.onAddToQueue,
+    required this.onRescan,
+    required this.parentContext,
+  });
+
+  final BrowserTab activeTab;
+  final MediaCatchController mediaCatchController;
+  final DownloadSettings settings;
+  final ValueChanged<DownloadSettings>? onSettingsChanged;
+  final List<SniffedMedia> Function(List<SniffedMedia> media) sortMedia;
+  final void Function(SniffedMedia media) onPreview;
+  final void Function(BuildContext context, SniffedMedia item) onInfo;
+  final Future<bool> Function(
+    BuildContext context,
+    SniffedMedia media, {
+    List<SniffedMedia> variants,
+  }) onAddToQueue;
+  final VoidCallback onRescan;
+  final BuildContext parentContext;
+
+  @override
+  State<_CaptureSheetScaffold> createState() => _CaptureSheetScaffoldState();
+}
+
+class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
+  late MediaFilter _segment;
+  late DownloadSettings _sheetSettings;
+  StreamSubscription<SniffedMedia>? _mediaSub;
+  Timer? _rebuildDebounce;
+  Object? _buildError;
+
+  @override
+  void initState() {
+    super.initState();
+    _segment = _filterForMediaType(widget.mediaCatchController.activeFilter);
+    _sheetSettings = widget.settings;
+    // Debounce stream rebuilds — TikTok can emit dozens of media events/sec.
+    // Immediate setState on every event was rebuilding the whole sheet and
+    // blanking it after the first paint.
+    _mediaSub = widget.activeTab.snifferEngine.onMediaChanged.listen((_) {
+      _rebuildDebounce?.cancel();
+      _rebuildDebounce = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) setState(() {});
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _rebuildDebounce?.cancel();
+    _mediaSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _runBatchDownload(List<CaptureGroup> selected) async {
+    if (selected.isEmpty) return;
+    final nav = Navigator.of(context);
+    nav.pop();
+    for (final group in selected) {
+      if (!widget.parentContext.mounted) break;
+      final ok = await widget.onAddToQueue(
+        widget.parentContext,
+        group.primary.media,
+        variants: group.candidates.map((c) => c.media).toList(),
+      );
+      if (!ok) break;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    final screenH = MediaQuery.sizeOf(context).height;
+    // useSafeArea already inset the modal; take most of remaining height.
+    final sheetH = screenH * 0.88;
+
+    List<CaptureGroup> displayedGroups = const [];
+    var selectedCount = 0;
+    var allMedia = <SniffedMedia>[];
+    var videoCount = 0;
+    var audioCount = 0;
+    var totalBytes = 0;
+    var filteredCount = 0;
+
+    try {
+      allMedia = widget
+          .sortMedia(widget.activeTab.snifferEngine.detectedMedia)
+          .where((m) => !m.isShortClip)
+          .toList();
+
+      final captureResult = widget.mediaCatchController.analyze(allMedia);
+      filteredCount = captureResult.hiddenCount;
+
+      widget.mediaCatchController.activeFilter = _mediaTypeForFilter(_segment);
+
+      displayedGroups = widget.mediaCatchController.filteredGroups(
+        captureResult.groups,
+      );
+
+      if (_segment == MediaFilter.hls) {
+        displayedGroups = displayedGroups
+            .where(
+              (g) =>
+                  isHlsMedia(g.primary.media) ||
+                  g.candidates.any((c) => isHlsMedia(c.media)),
+            )
+            .toList(growable: false);
+      }
+
+      displayedGroups = sortCaptureGroups(
+        displayedGroups,
+        _sheetSettings.sniffedMediaSort,
+      );
+
+      selectedCount = widget.mediaCatchController.selectedCount(
+        displayedGroups.length,
+      );
+      totalBytes = _totalBytes(allMedia);
+      videoCount = allMedia.where((m) => m.type == MediaType.video).length;
+      audioCount = allMedia.where((m) => m.type == MediaType.audio).length;
+      _buildError = null;
+    } catch (e, st) {
+      _buildError = e;
+      developer.log(
+        'Capture sheet build failed: $e',
+        name: 'capture_sheet',
+        error: e,
+        stackTrace: st,
+      );
+    }
+
+    if (_buildError != null) {
+      return SizedBox(
+        height: sheetH,
+        child: Material(
+          color: ac.surfacePanel,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, color: ac.statusError, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Capture sheet error',
+                    style: TextStyle(
+                      color: ac.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$_buildError',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: ac.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => setState(() {}),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: sheetH,
+      child: Material(
+        color: ac.surfacePanel,
+        child: Column(
+          children: [
+            Expanded(
+              child: CustomScrollView(
+                key: const Key('sniffer_drawer'),
+                physics: const ClampingScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: CaptureSheetHeader(
+                      totalShown: displayedGroups.length,
+                      selectedCount: selectedCount,
+                      onSelectBest: () {
+                        setState(() {
+                          widget.mediaCatchController.clearSelection();
+                          widget.mediaCatchController.selectedIndices.addAll(
+                            widget.mediaCatchController.recommendedGroupIndices(
+                              displayedGroups,
+                            ),
+                          );
+                        });
+                      },
+                      onDownloadSelected: () {
+                        final selected =
+                            widget.mediaCatchController.selectedFrom(
+                          displayedGroups,
+                        );
+                        unawaited(_runBatchDownload(selected));
+                      },
+                      onRescan: widget.onRescan,
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: CaptureFilterBar(
+                      current: _segment,
+                      onSelected: (v) {
+                        setState(() {
+                          _segment = v;
+                          widget.mediaCatchController.clearSelection();
+                        });
+                      },
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: CaptureOptionsRow(
+                      settings: _sheetSettings,
+                      showAll: widget.mediaCatchController.captureShowAllMedia,
+                      onShowAllChanged: (value) {
+                        setState(() {
+                          widget.mediaCatchController.captureShowAllMedia =
+                              value;
+                          widget.mediaCatchController.clearSelection();
+                          _sheetSettings = _sheetSettings.copyWith(
+                            captureShowAllMedia: value,
+                          );
+                        });
+                        widget.onSettingsChanged?.call(_sheetSettings);
+                      },
+                      onSettingsChanged: (next) {
+                        setState(() => _sheetSettings = next);
+                        widget.onSettingsChanged?.call(next);
+                      },
+                    ),
+                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 4)),
+                  SliverToBoxAdapter(
+                    child: CaptureStatsRow(
+                      foundCount: allMedia.length,
+                      videoCount: videoCount,
+                      audioCount: audioCount,
+                      totalBytes: totalBytes,
+                      filteredCount: filteredCount,
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 4),
+                      child: Divider(
+                        height: 1,
+                        thickness: 1,
+                        color: ac.borderHairline,
+                      ),
+                    ),
+                  ),
+                  if (displayedGroups.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: CaptureEmptyState(onRescan: widget.onRescan),
+                    )
+                  else
+                    SliverPadding(
+                      padding: EdgeInsets.only(
+                        bottom: selectedCount > 0 ? 8 : 16,
+                      ),
+                      sliver: SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (rowCtx, index) {
+                            final group = displayedGroups[index];
+                            final item = group.primary.media;
+                            final isSelected = widget
+                                .mediaCatchController.selectedIndices
+                                .contains(index);
+                            final canPreview = item.type == MediaType.video ||
+                                item.type == MediaType.audio ||
+                                item.type == MediaType.image;
+
+                            return CaptureMediaRow(
+                              index: index,
+                              group: group,
+                              selected: isSelected,
+                              displayMode:
+                                  _sheetSettings.sniffedMediaDisplayMode,
+                              onSelectedChanged: (_) {
+                                setState(() {
+                                  widget.mediaCatchController
+                                      .toggleSelection(index);
+                                });
+                              },
+                              onPreview: canPreview
+                                  ? () {
+                                      Navigator.of(context).pop();
+                                      widget.onPreview(item);
+                                    }
+                                  : null,
+                              onInfo: () =>
+                                  widget.onInfo(widget.parentContext, item),
+                            );
+                          },
+                          childCount: displayedGroups.length,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (selectedCount > 0)
+              CaptureBatchBar(
+                selectedCount: selectedCount,
+                totalCount: displayedGroups.length,
+                onToggleSelectAll: () {
+                  setState(() {
+                    final allSelected =
+                        selectedCount == displayedGroups.length;
+                    if (allSelected) {
+                      widget.mediaCatchController.clearSelection();
+                    } else {
+                      widget.mediaCatchController
+                          .selectAll(displayedGroups.length);
+                    }
+                  });
+                },
+                onDownloadSelected: () {
+                  final selected = widget.mediaCatchController.selectedFrom(
+                    displayedGroups,
+                  );
+                  unawaited(_runBatchDownload(selected));
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

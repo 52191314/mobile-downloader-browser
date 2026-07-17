@@ -8,6 +8,7 @@ import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 /// One capture-group row with selection, type well, metadata, and actions.
 ///
+/// Download is not per-row — use checkbox multi-select + header Download.
 /// Density strategy (KD18): default 40dp action targets; when width &lt; 360,
 /// Preview/Info collapse into a trailing [PopupMenuButton].
 class CaptureMediaRow extends StatelessWidget {
@@ -18,7 +19,6 @@ class CaptureMediaRow extends StatelessWidget {
     required this.selected,
     required this.onSelectedChanged,
     required this.onPreview,
-    required this.onDownload,
     required this.onInfo,
     this.displayMode = SniffedMediaDisplayMode.both,
   });
@@ -28,7 +28,6 @@ class CaptureMediaRow extends StatelessWidget {
   final bool selected;
   final ValueChanged<bool> onSelectedChanged;
   final VoidCallback? onPreview;
-  final VoidCallback onDownload;
   final VoidCallback onInfo;
 
   /// Controls size/duration richness in the subtitle (PR5 / KD25).
@@ -41,10 +40,10 @@ class CaptureMediaRow extends StatelessWidget {
     final item = group.primary.media;
     final hls = isHlsMedia(item);
     final accent = mediaAccentFor(ac, item, isHls: hls);
-    final qLabel = group.primary.qualityLabel;
-    final showQuality = qLabel != null &&
-        qLabel.isNotEmpty &&
-        qLabel != 'HLS';
+    final qualityLabel = group.primary.qualityLabel;
+    final showQuality = qualityLabel != null &&
+        qualityLabel.isNotEmpty &&
+        qualityLabel != 'HLS';
     final recommended = group.isRecommended;
     final subtitle = buildCaptureSubtitle(
       item,
@@ -97,9 +96,14 @@ class CaptureMediaRow extends StatelessWidget {
       );
     }
 
+    // Do NOT nest LayoutBuilder under IntrinsicHeight (layout crash).
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+    // Compact trailing actions so title keeps horizontal room.
+    const actionSize = 32.0;
+
     return Padding(
       key: Key('sniffed_item_$index'),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Container(
         decoration: decoration,
         child: ClipRRect(
@@ -108,182 +112,136 @@ class CaptureMediaRow extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onInfo,
-              child: IntrinsicHeight(
+              // Left-leaning inset (wall gone) — pull checkbox/icon left.
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Container(width: 4, color: accent),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                        child: Builder(
-                          builder: (context) {
-                            final narrow =
-                                MediaQuery.sizeOf(context).width < 360;
-                            // Prefer wider action targets when room allows.
-                            final actionSize =
-                                MediaQuery.sizeOf(context).width >= 400
-                                    ? 44.0
-                                    : 40.0;
-
-                            return Row(
-                              children: [
-                                SizedBox(
-                                  width: 40,
-                                  height: 40,
-                                  child: Checkbox(
-                                    value: selected,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: VisualDensity.standard,
-                                    fillColor:
-                                        WidgetStateProperty.resolveWith((s) {
-                                      if (s.contains(WidgetState.selected)) {
-                                        return ac.accentFrost;
-                                      }
-                                      return null;
-                                    }),
-                                    checkColor:
-                                        context.auroraColorScheme.onPrimary,
-                                    onChanged: (v) {
-                                      if (v != null) onSelectedChanged(v);
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: accent.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Icon(
-                                    mediaTypeIcon(item.type),
-                                    color: accent,
-                                    size: 22,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  // LayoutBuilder measures *title column* width
-                                  // (after checkbox/well, before actions) so
-                                  // Quality drop uses title remaining space.
-                                  child: LayoutBuilder(
-                                    builder: (context, titleConstraints) {
-                                      // Design: Flexible title min ~80dp; drop
-                                      // Quality first when both pills would
-                                      // starve the title; keep Best.
-                                      const titleMin = 80.0;
-                                      const bestReserve = 48.0;
-                                      const qualityReserve = 52.0;
-                                      const gaps = 8.0;
-                                      final showQualityWithBest =
-                                          titleConstraints.maxWidth >=
-                                              titleMin +
-                                                  bestReserve +
-                                                  qualityReserve +
-                                                  gaps;
-
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  item.name.isNotEmpty
-                                                      ? item.name
-                                                      : 'Unknown media',
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: ac.textPrimary,
-                                                    fontSize: 13,
-                                                    fontWeight:
-                                                        FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (showQuality &&
-                                                  recommended) ...[
-                                                if (showQualityWithBest) ...[
-                                                  const SizedBox(width: 4),
-                                                  _QualityPill(label: qLabel),
-                                                ],
-                                                const SizedBox(width: 4),
-                                                const _BestPill(),
-                                              ] else if (showQuality) ...[
-                                                const SizedBox(width: 4),
-                                                _QualityPill(label: qLabel),
-                                              ] else if (recommended) ...[
-                                                const SizedBox(width: 4),
-                                                const _BestPill(),
-                                              ],
-                                            ],
-                                          ),
-                                          if (subtitle.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              subtitle,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                color: ac.textSecondary,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ),
-                                if (narrow)
-                                  _OverflowActions(
-                                    index: index,
-                                    canPreview: canPreview,
-                                    onPreview: onPreview,
-                                    onDownload: onDownload,
-                                    onInfo: onInfo,
-                                    actionSize: actionSize,
-                                  )
-                                else ...[
-                                  if (canPreview)
-                                    _ActionIcon(
-                                      key: Key('preview_item_$index'),
-                                      icon: Icons.play_circle_outline,
-                                      color: ac.accentFrost,
-                                      tooltip: 'Preview item',
-                                      size: actionSize,
-                                      onPressed: onPreview!,
-                                    ),
-                                  _ActionIcon(
-                                    key: Key('download_item_$index'),
-                                    icon: Icons.download,
-                                    color: ac.accentFrost,
-                                    tooltip: 'Download this',
-                                    size: actionSize,
-                                    onPressed: onDownload,
-                                  ),
-                                  _ActionIcon(
-                                    key: Key('info_item_$index'),
-                                    icon: Icons.info_outline,
-                                    color: ac.textSecondary,
-                                    tooltip: 'Details',
-                                    size: actionSize,
-                                    onPressed: onInfo,
-                                  ),
-                                ],
-                              ],
-                            );
-                          },
-                        ),
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Checkbox(
+                        value: selected,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                        fillColor: WidgetStateProperty.resolveWith((s) {
+                          if (s.contains(WidgetState.selected)) {
+                            return ac.accentFrost;
+                          }
+                          return null;
+                        }),
+                        checkColor: context.auroraColorScheme.onPrimary,
+                        onChanged: (v) {
+                          if (v != null) onSelectedChanged(v);
+                        },
                       ),
                     ),
+                    const SizedBox(width: 2),
+                    // Type icon + quality tag stacked under it.
+                    SizedBox(
+                      width: 40,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              mediaTypeIcon(item.type),
+                              color: accent,
+                              size: 20,
+                            ),
+                          ),
+                          if (showQuality) ...[
+                            const SizedBox(height: 3),
+                            _QualityPill(
+                              label: qualityLabel,
+                              color: accent,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  item.name.isNotEmpty
+                                      ? item.name
+                                      : 'Unknown media',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: ac.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              if (recommended) ...[
+                                const SizedBox(width: 4),
+                                const _BestPill(),
+                              ],
+                            ],
+                          ),
+                          if (subtitle.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: ac.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    // Tight cluster — no extra gap before actions.
+                    if (narrow)
+                      _OverflowActions(
+                        index: index,
+                        canPreview: canPreview,
+                        onPreview: onPreview,
+                        onInfo: onInfo,
+                        actionSize: actionSize,
+                      )
+                    else
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (canPreview)
+                            _ActionIcon(
+                              key: Key('preview_item_$index'),
+                              icon: Icons.play_circle_outline,
+                              color: ac.accentFrost,
+                              tooltip: 'Preview item',
+                              size: actionSize,
+                              onPressed: onPreview!,
+                            ),
+                          _ActionIcon(
+                            key: Key('info_item_$index'),
+                            icon: Icons.info_outline,
+                            color: ac.textSecondary,
+                            tooltip: 'Details',
+                            size: actionSize,
+                            onPressed: onInfo,
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -339,24 +297,31 @@ String buildCaptureSubtitle(
 }
 
 class _QualityPill extends StatelessWidget {
-  const _QualityPill({required this.label});
+  const _QualityPill({
+    required this.label,
+    required this.color,
+  });
 
   final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final ac = context.ac;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
-        color: ac.accentFrost.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
         style: TextStyle(
-          color: ac.accentFrost,
-          fontSize: 10,
+          color: color,
+          fontSize: 9,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -416,21 +381,28 @@ class _ActionIcon extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       padding: EdgeInsets.zero,
-      constraints: BoxConstraints(minWidth: size, minHeight: size),
-      icon: Icon(icon, size: 20),
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        minimumSize: Size(size, size),
+        maximumSize: Size(size, size),
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+      ),
+      constraints: BoxConstraints.tightFor(width: size, height: size),
+      icon: Icon(icon, size: 18),
       color: color,
       onPressed: onPressed,
     );
   }
 }
 
-/// Narrow-width overflow: keep Download primary when possible; menu for rest.
+/// Narrow-width overflow: Preview / Details only (download is header multi-select).
 class _OverflowActions extends StatelessWidget {
   const _OverflowActions({
     required this.index,
     required this.canPreview,
     required this.onPreview,
-    required this.onDownload,
     required this.onInfo,
     required this.actionSize,
   });
@@ -438,7 +410,6 @@ class _OverflowActions extends StatelessWidget {
   final int index;
   final bool canPreview;
   final VoidCallback? onPreview;
-  final VoidCallback onDownload;
   final VoidCallback onInfo;
   final double actionSize;
 
@@ -448,14 +419,6 @@ class _OverflowActions extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _ActionIcon(
-          key: Key('download_item_$index'),
-          icon: Icons.download,
-          color: ac.accentFrost,
-          tooltip: 'Download this',
-          size: actionSize,
-          onPressed: onDownload,
-        ),
         PopupMenuButton<String>(
           tooltip: 'More actions',
           icon: Icon(Icons.more_vert, color: ac.textSecondary, size: 20),
