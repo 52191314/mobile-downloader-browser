@@ -5460,7 +5460,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     sortMedia: _sortedMedia,
     onPreview: (media) => _showMediaPreview(media),
     onInfo: (ctx, item) => _showMediaInfoSheet(ctx, item),
-    onAddToQueue: (ctx, media, {List<SniffedMedia> variants = const []}) =>
+    onAddToQueue: (ctx, media, {List<SniffedMedia> variants = const []}) async =>
         _showAddQueueDialog(ctx, media, variants: variants),
     onRescan: () => unawaited(_activeTab.controller.rescanPage()),
   );
@@ -5644,7 +5644,10 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  Future<void> _showAddQueueDialog(
+  /// Returns `true` when the user confirmed enqueue (or link update),
+  /// `false` when cancelled / dismissed. Capture batch download stops on
+  /// `false` so remaining sequential dialogs are not opened.
+  Future<bool> _showAddQueueDialog(
     BuildContext context,
     SniffedMedia media, {
     List<SniffedMedia> variants = const [],
@@ -5676,9 +5679,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
     final currentUrl = await tab.controller.currentUrl();
 
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
 
-    await showDialog<void>(
+    final result = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return _AddQueueDialogContent(
@@ -5700,6 +5703,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         );
       },
     );
+    return result ?? false;
   }
 
   String _buildSuggestedFilename(

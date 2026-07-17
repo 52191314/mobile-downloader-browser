@@ -1,6 +1,6 @@
 # Aurora Downloader — Code Map
 
-> Maintained per AGENTS.md. Last updated: 2026-07-16.
+> Maintained per AGENTS.md. Last updated: 2026-07-17.
 
 ## Overview
 Aurora Downloader is a Flutter (Android) media downloader with an integrated
@@ -40,7 +40,17 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
 
 ## Key Files
 - `lib/sniffer/sniffer_screen.dart` — main browser/sniffer UI, tab management,
-  dock, sniffed-media sheet.
+  dock; hosts Capture sheet via `showSniffedMediaSheet` + `_showAddQueueDialog`
+  (`Future<bool>` for batch cancel-stop).
+- `lib/sniffer/sheets/sniffed_media_sheet.dart` — Capture sheet orchestrator
+  (displayedGroups pipeline, sticky batch bar, stream rebuilds).
+- `lib/sniffer/capture/` — Capture UI library (dual-theme chrome):
+  `media_accent.dart` / `media_filter.dart`,
+  `capture_sheet_header.dart`, `capture_filter_bar.dart`, `capture_stats_row.dart`,
+  `capture_media_row.dart`, `capture_batch_bar.dart`, `capture_empty_state.dart`.
+  Sort/display Options dropdowns deferred to a follow-up PR (PR5).
+- `lib/sniffer/controllers/media_catch_controller.dart` — group-index selection
+  into the **displayed** list (`recommendedGroupIndices` / `selectedFrom`).
 - `lib/sniffer/browser_controller.dart` — `SnifferWebViewControllerImpl`
   (freeze/thaw, resource timer, dispose lifecycle).
 - `lib/sniffer/browser_guard_installer.dart` — injects guard JS, 20s refresh timer.

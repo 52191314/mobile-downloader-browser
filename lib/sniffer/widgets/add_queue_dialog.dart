@@ -352,7 +352,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
           onPressed: isSubmitting
               ? null
               : () {
-                  Navigator.of(context).pop();
+                  Navigator.of(context).pop(false);
                 },
           child: const Text('Cancel'),
         ),
@@ -481,7 +481,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                             task,
                           );
                           if (!mounted) return;
-                          navigator.pop();
+                          navigator.pop(true);
                           AuroraSnackbar.show(
                             context,
                             'Done — Link updated. Download will retry.',
@@ -502,7 +502,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     );
 
                     if (!mounted) return;
-                    navigator.pop();
+                    navigator.pop(true);
                     AuroraSnackbar.show(context, 'Added "$filename" to queue.');
                   } catch (e) {
                     if (mounted) {
