@@ -15,10 +15,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/settings/download_settings.dart';
+import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/controllers/media_catch_controller.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
+import 'package:aurora_downloader/theme/aurora_tokens.dart';
 
 /// Filter options for the rich catch sheet segmented control.
 /// Mirrors the `MediaFilter` enum that previously lived at the top of
@@ -246,16 +248,9 @@ IconData _mediaIcon(MediaType type) {
   };
 }
 
-/// Accent color for a [SniffedMedia] row. HLS streams always use orange.
-Color _accentFor(SniffedMedia item, bool isHls) {
-  if (isHls) return Colors.orange;
-  return switch (item.type) {
-    MediaType.video => Colors.blue,
-    MediaType.audio => Colors.purple,
-    MediaType.image => Colors.green,
-    MediaType.torrent => Colors.amber,
-    _ => Colors.teal,
-  };
+/// Accent color for a [SniffedMedia] row — thin wire to [mediaAccentFor].
+Color _accentFor(AColors ac, SniffedMedia item, bool isHls) {
+  return mediaAccentFor(ac, item, isHls: isHls);
 }
 
 /// Short label for a byte count, used in the stats row of the catch sheet.
@@ -278,11 +273,7 @@ String _formatDuration(Duration d) {
 }
 
 /// True when the media looks like an HLS stream (URL or content-type).
-bool _isHlsItem(SniffedMedia m) {
-  return m.url.contains('.m3u8') ||
-      (m.contentType?.contains('m3u8') ?? false) ||
-      (m.contentType?.contains('apple/mpegurl') ?? false);
-}
+bool _isHlsItem(SniffedMedia m) => isHlsMedia(m);
 
 /// Sum of known content lengths across a list of media.
 int _totalBytes(Iterable<SniffedMedia> list) {
@@ -382,12 +373,13 @@ void showSniffedMediaSheet(
                 mediaCatchController.activeFilter =
                     _mediaTypeForFilter(currentSegment);
 
-                var filteredGroups = mediaCatchController.filteredGroups(
+                // Single source of truth for list + Best + selection indices.
+                var displayedGroups = mediaCatchController.filteredGroups(
                   captureResult.groups,
                 );
 
                 if (currentSegment == MediaFilter.hls) {
-                  filteredGroups = filteredGroups
+                  displayedGroups = displayedGroups
                       .where(
                         (g) =>
                             _isHlsItem(g.primary.media) ||
@@ -397,7 +389,7 @@ void showSniffedMediaSheet(
                 }
 
                 final selectedCount = mediaCatchController.selectedCount(
-                  filteredGroups.length,
+                  displayedGroups.length,
                 );
                 final totalBytesResult = _totalBytes(allMedia);
 
@@ -418,20 +410,17 @@ void showSniffedMediaSheet(
                           child: buildCatchSheetHeader(
                             ctx,
                             setSheetState,
-                            totalShown: filteredGroups.length,
+                            totalShown: displayedGroups.length,
                             selectedCount: selectedCount,
                             onSelectBest: () {
+                              // Use the same displayedGroups list as the list
+                              // builder — never re-analyze without short-clip
+                              // + HLS post-filter transforms.
                               setSheetState(() {
                                 mediaCatchController.clearSelection();
                                 mediaCatchController.selectedIndices.addAll(
-                                  mediaCatchController.recommendedCaptureIndices(
-                                    mediaCatchController.filteredGroups(
-                                      mediaCatchController.analyze(
-                                        sortMedia(
-                                          activeTab.snifferEngine.detectedMedia,
-                                        ),
-                                      ).groups,
-                                    ),
+                                  mediaCatchController.recommendedGroupIndices(
+                                    displayedGroups,
                                   ),
                                 );
                               });
@@ -609,7 +598,7 @@ void showSniffedMediaSheet(
                           ),
                         ),
                         const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                        if (filteredGroups.isEmpty)
+                        if (displayedGroups.isEmpty)
                           SliverFillRemaining(
                             hasScrollBody: false,
                             child: Center(
@@ -631,13 +620,14 @@ void showSniffedMediaSheet(
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
-                                  final group = filteredGroups[index];
+                                  final group = displayedGroups[index];
                                   final item = group.primary.media;
                                   final isSelected = mediaCatchController
                                       .selectedIndices
                                       .contains(index);
                                   final hls = _isHlsItem(item);
-                                  final accentColor = _accentFor(item, hls);
+                                  final accentColor =
+                                      _accentFor(context.ac, item, hls);
                                   final qLabel = group.primary.qualityLabel;
                                   final sizeLabel =
                                       _sizeText(item.contentLengthBytes);
@@ -929,7 +919,7 @@ void showSniffedMediaSheet(
                                     ),
                                   );
                                 },
-                                childCount: filteredGroups.length,
+                                childCount: displayedGroups.length,
                               ),
                             ),
                           ),

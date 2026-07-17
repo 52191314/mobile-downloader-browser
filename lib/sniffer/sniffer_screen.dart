@@ -5465,60 +5465,6 @@ class _SnifferScreenState extends State<SnifferScreen>
     onRescan: () => unawaited(_activeTab.controller.rescanPage()),
   );
 
-  /// Header row shown above the segmented filter in the rich catch sheet.
-  Widget _buildCatchSheetHeader(
-    BuildContext ctx,
-    void Function(void Function()) setSheetState,
-    int totalShown,
-    int selectedCount,
-  ) => buildCatchSheetHeader(
-    ctx,
-    setSheetState,
-    totalShown: totalShown,
-    selectedCount: selectedCount,
-    onSelectBest: () {
-      setSheetState(() {
-        _mediaCatchController.clearSelection();
-        _mediaCatchController.selectedIndices.addAll(
-          _recommendedCaptureIndices(
-            _mediaCatchController.filteredGroups(
-              _mediaCatchController
-                  .analyze(_sortedMedia(_activeTab.snifferEngine.detectedMedia))
-                  .groups,
-            ),
-          ),
-        );
-      });
-    },
-    onClearCaptured: () {
-      setSheetState(() {
-        _activeTab.snifferEngine.clearCache();
-        _mediaCatchController.clearSelection();
-      });
-    },
-    onRescan: () => unawaited(_activeTab.controller.rescanPage()),
-  );
-
-  Widget _compactFilterChip(
-    String label,
-    MediaFilter value,
-    IconData icon,
-    MediaFilter current,
-    ValueChanged<MediaFilter> onSelected,
-  ) => compactFilterChip(context, label, value, icon, current, onSelected);
-
-  _filteredGroups(List<CaptureGroup> groups) =>
-      _mediaCatchController.filteredGroups(groups);
-
-  List<SniffedMedia> _selectedGroups(List<CaptureGroup> groups) =>
-      _mediaCatchController.selectedGroups(groups);
-
-  Set<int> _recommendedCaptureIndices(List<CaptureGroup> groups) =>
-      _mediaCatchController.recommendedCaptureIndices(groups);
-
-  String _captureMetadataLabel(CaptureGroup group) =>
-      _mediaCatchController.captureMetadataLabel(group);
-
   /// Directly enqueue a download from a captured URL without showing
   /// the "Add to Queue" dialog.
   Future<void> _enqueueDirectDownload(
