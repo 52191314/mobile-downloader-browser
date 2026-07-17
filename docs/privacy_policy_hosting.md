@@ -6,27 +6,31 @@ Play Console only needs a **public https URL**. You do **not** need to buy a dom
 
 You already have a GitHub repo for Aurora. Use it.
 
+**Important:** `docs/.nojekyll` disables Jekyll so the whole `docs/` tree is served as **static files**. That avoids Pages build failures when Jekyll chokes on project markdown.
+
 ### Option A — File in this repo (simplest)
 
-1. Commit `docs/privacy_policy.md` (already in the project).  
+1. Ensure these are on the Pages branch (e.g. `Play-Console-Launch`):
+   - `docs/privacy.html` (policy page)
+   - `docs/.nojekyll` (disables Jekyll)
+   - `docs/index.html` (optional landing link)
 2. On GitHub: **Settings → Pages**  
    - Source: **Deploy from a branch**  
-   - Branch: `Play-Console-Launch` or `main` / `Post-Gate-Production` (whichever has the file)  
+   - Branch: `Play-Console-Launch`  
    - Folder: `/docs`  
-3. Save. After a minute, open:
+3. Save. After the Pages action succeeds, open:
 
 ```text
-https://52191314.github.io/Aurora-Downloader/privacy_policy.html
+https://52191314.github.io/Aurora-Downloader/privacy.html
 ```
 
-**Note:** GitHub Pages serves Markdown from `/docs` as **`.md` → often as HTML with same name**.  
-If the URL 404s, try:
+Also works:
 
 ```text
-https://52191314.github.io/Aurora-Downloader/privacy_policy.md
+https://52191314.github.io/Aurora-Downloader/
 ```
 
-or enable Pages and confirm the published site URL under Settings → Pages.
+(index links to the privacy policy).
 
 ### Option B — Single HTML page (most reliable for Play)
 
