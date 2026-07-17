@@ -208,22 +208,32 @@ void showSniffedMediaSheet(
                   }
                 }
 
-                return DraggableScrollableSheet(
-                  initialChildSize: 0.90,
-                  minChildSize: 0.30,
-                  maxChildSize: 1.0,
-                  snap: true,
-                  snapSizes: const [0.3, 0.5, 0.9, 1.0],
-                  expand: false,
-                  builder: (scrollCtx, scrollController) {
-                    return Column(
-                      children: [
-                        Expanded(
-                          child: CustomScrollView(
-                            key: const Key('sniffer_drawer'),
-                            controller: scrollController,
-                            physics: const ClampingScrollPhysics(),
-                            slivers: [
+                // IMPORTANT: with isScrollControlled bottom sheets, DSS needs a
+                // finite-height parent. Column+Expanded inside expand:false DSS
+                // collapses to ~0 height (empty white/black sheet). Give the
+                // sheet the full screen height and expand:true so the Column
+                // receives bounded constraints (sticky batch bar still works).
+                final sheetHeight = MediaQuery.sizeOf(ctx).height;
+                return SizedBox(
+                  height: sheetHeight,
+                  child: DraggableScrollableSheet(
+                    initialChildSize: 0.90,
+                    minChildSize: 0.30,
+                    maxChildSize: 1.0,
+                    snap: true,
+                    snapSizes: const [0.3, 0.5, 0.9, 1.0],
+                    expand: true,
+                    builder: (scrollCtx, scrollController) {
+                      return Material(
+                        color: scrollCtx.ac.surfacePanel,
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: CustomScrollView(
+                                key: const Key('sniffer_drawer'),
+                                controller: scrollController,
+                                physics: const ClampingScrollPhysics(),
+                                slivers: [
                               SliverToBoxAdapter(
                                 child: CaptureSheetHeader(
                                   totalShown: displayedGroups.length,
@@ -371,36 +381,38 @@ void showSniffedMediaSheet(
                                     ),
                                   ),
                                 ),
-                            ],
-                          ),
+                                ],
+                              ),
+                            ),
+                            if (selectedCount > 0)
+                              CaptureBatchBar(
+                                selectedCount: selectedCount,
+                                totalCount: displayedGroups.length,
+                                onToggleSelectAll: () {
+                                  setSheetState(() {
+                                    final allSelected = selectedCount ==
+                                        displayedGroups.length;
+                                    if (allSelected) {
+                                      mediaCatchController.clearSelection();
+                                    } else {
+                                      mediaCatchController
+                                          .selectAll(displayedGroups.length);
+                                    }
+                                  });
+                                },
+                                onDownloadSelected: () {
+                                  final selected =
+                                      mediaCatchController.selectedFrom(
+                                    displayedGroups,
+                                  );
+                                  unawaited(runBatchDownload(selected));
+                                },
+                              ),
+                          ],
                         ),
-                        if (selectedCount > 0)
-                          CaptureBatchBar(
-                            selectedCount: selectedCount,
-                            totalCount: displayedGroups.length,
-                            onToggleSelectAll: () {
-                              setSheetState(() {
-                                final allSelected = selectedCount ==
-                                    displayedGroups.length;
-                                if (allSelected) {
-                                  mediaCatchController.clearSelection();
-                                } else {
-                                  mediaCatchController
-                                      .selectAll(displayedGroups.length);
-                                }
-                              });
-                            },
-                            onDownloadSelected: () {
-                              final selected =
-                                  mediaCatchController.selectedFrom(
-                                displayedGroups,
-                              );
-                              unawaited(runBatchDownload(selected));
-                            },
-                          ),
-                      ],
-                    );
-                  },
+                      );
+                    },
+                  ),
                 );
               },
             ),
