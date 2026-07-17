@@ -11,6 +11,7 @@ import 'package:aurora_downloader/sniffer/capture/capture_batch_bar.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_empty_state.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_filter_bar.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_media_row.dart';
+import 'package:aurora_downloader/sniffer/capture/capture_options_row.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_sheet_header.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_stats_row.dart';
 import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
@@ -131,6 +132,10 @@ void showSniffedMediaSheet(
       MediaFilter currentSegment = _filterForMediaType(
         mediaCatchController.activeFilter,
       );
+      // Local mirror so dropdowns + display mode update immediately; host
+      // settings are written via onSettingsChanged (sort re-reads host
+      // widget.settings after the parent applies the change).
+      var sheetSettings = settings;
 
       return StatefulBuilder(
         builder: (ctx, setSheetState) {
@@ -144,6 +149,7 @@ void showSniffedMediaSheet(
             child: Builder(
               builder: (innerCtx) {
                 // --- Gather & analyse media (single pipeline) ---
+                // sortMedia → host _sortedMedia reads DownloadSettings.sniffedMediaSort
                 final allMedia = sortMedia(tab.snifferEngine.detectedMedia)
                     .where((m) => !m.isShortClip)
                     .toList();
@@ -245,52 +251,42 @@ void showSniffedMediaSheet(
                                   },
                                 ),
                               ),
-                              // Options shell — show-all only (sort/display = PR5).
+                              // Options zone — show-all + sort + display mode (PR5 / KD25–26).
                               SliverToBoxAdapter(
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                                  child: SwitchListTile.adaptive(
-                                    key: const Key('capture_show_all_switch'),
-                                    dense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    activeTrackColor: context.ac.accentFrost,
-                                    secondary: Icon(
-                                      Icons.tune,
-                                      size: 20,
-                                      color: context.ac.textSecondary,
-                                    ),
-                                    title: Text(
-                                      'Show all captured media',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: context.ac.textPrimary,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      mediaCatchController.captureShowAllMedia
-                                          ? 'Show every detected URL, including non-media assets'
-                                          : 'Show only URLs that look like playable media',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: context.ac.textSecondary,
-                                      ),
-                                    ),
-                                    value: mediaCatchController
-                                        .captureShowAllMedia,
-                                    onChanged: (value) {
-                                      setSheetState(() {
-                                        mediaCatchController
-                                            .captureShowAllMedia = value;
-                                        mediaCatchController.clearSelection();
-                                      });
-                                      onSettingsChanged?.call(
-                                        settings.copyWith(
-                                          captureShowAllMedia: value,
-                                        ),
+                                child: CaptureOptionsRow(
+                                  settings: sheetSettings,
+                                  showAll:
+                                      mediaCatchController.captureShowAllMedia,
+                                  onShowAllChanged: (value) {
+                                    setSheetState(() {
+                                      mediaCatchController.captureShowAllMedia =
+                                          value;
+                                      mediaCatchController.clearSelection();
+                                      sheetSettings = sheetSettings.copyWith(
+                                        captureShowAllMedia: value,
                                       );
-                                    },
-                                  ),
+                                    });
+                                    onSettingsChanged?.call(sheetSettings);
+                                  },
+                                  onSettingsChanged: (next) {
+                                    final sortChanged =
+                                        next.sniffedMediaSort !=
+                                            sheetSettings.sniffedMediaSort;
+                                    setSheetState(() {
+                                      sheetSettings = next;
+                                    });
+                                    onSettingsChanged?.call(next);
+                                    // Host _sortedMedia reads widget.settings;
+                                    // re-run the pipeline after parent applies.
+                                    if (sortChanged) {
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                        if (ctx.mounted) {
+                                          setSheetState(() {});
+                                        }
+                                      });
+                                    }
+                                  },
                                 ),
                               ),
                               const SliverToBoxAdapter(
@@ -343,6 +339,8 @@ void showSniffedMediaSheet(
                                           index: index,
                                           group: group,
                                           selected: isSelected,
+                                          displayMode: sheetSettings
+                                              .sniffedMediaDisplayMode,
                                           onSelectedChanged: (_) {
                                             setSheetState(() {
                                               mediaCatchController

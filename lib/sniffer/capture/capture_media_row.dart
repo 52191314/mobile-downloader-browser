@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/media_capture_analyzer.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
@@ -19,6 +20,7 @@ class CaptureMediaRow extends StatelessWidget {
     required this.onPreview,
     required this.onDownload,
     required this.onInfo,
+    this.displayMode = SniffedMediaDisplayMode.both,
   });
 
   final int index;
@@ -28,6 +30,9 @@ class CaptureMediaRow extends StatelessWidget {
   final VoidCallback? onPreview;
   final VoidCallback onDownload;
   final VoidCallback onInfo;
+
+  /// Controls size/duration richness in the subtitle (PR5 / KD25).
+  final SniffedMediaDisplayMode displayMode;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +46,12 @@ class CaptureMediaRow extends StatelessWidget {
         qLabel.isNotEmpty &&
         qLabel != 'HLS';
     final recommended = group.isRecommended;
-    final subtitle = _buildSubtitle(item, group, hls: hls);
+    final subtitle = buildCaptureSubtitle(
+      item,
+      group,
+      hls: hls,
+      displayMode: displayMode,
+    );
     final canPreview = onPreview != null &&
         (item.type == MediaType.video ||
             item.type == MediaType.audio ||
@@ -286,21 +296,35 @@ class CaptureMediaRow extends StatelessWidget {
 }
 
 /// Ordered metadata recipe: size (~ if estimated) · res · duration · HLS/type · variants.
-String _buildSubtitle(
+///
+/// [displayMode] gates size/duration only; resolution, HLS/content-type, and
+/// variant count remain eligible whenever present.
+@visibleForTesting
+String buildCaptureSubtitle(
   SniffedMedia item,
   CaptureGroup group, {
   required bool hls,
+  SniffedMediaDisplayMode displayMode = SniffedMediaDisplayMode.both,
 }) {
   final parts = <String>[];
-  final size = formatCaptureBytes(
-    item.contentLengthBytes,
-    estimated: item.isSizeEstimated,
-  );
-  if (size.isNotEmpty) parts.add(size);
+  final includeSize = displayMode == SniffedMediaDisplayMode.size ||
+      displayMode == SniffedMediaDisplayMode.both;
+  final includeDuration = displayMode == SniffedMediaDisplayMode.duration ||
+      displayMode == SniffedMediaDisplayMode.both;
+
+  if (includeSize) {
+    final size = formatCaptureBytes(
+      item.contentLengthBytes,
+      estimated: item.isSizeEstimated,
+    );
+    if (size.isNotEmpty) parts.add(size);
+  }
   if (item.width != null && item.height != null) {
     parts.add('${item.width}x${item.height}');
   }
-  if (item.duration != null && item.duration!.inSeconds > 0) {
+  if (includeDuration &&
+      item.duration != null &&
+      item.duration!.inSeconds > 0) {
     parts.add(formatCaptureDuration(item.duration!));
   }
   if (hls) {
