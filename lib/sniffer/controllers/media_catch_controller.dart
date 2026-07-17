@@ -37,8 +37,13 @@ class MediaCatchController {
   }
 
   /// Select all visible groups. Caller passes the count of displayed groups.
+  ///
+  /// Clears any prior selection first so stale indices above [count] cannot
+  /// resurrect when the displayed list later grows.
   void selectAll(int count) {
-    selectedIndices.addAll(Iterable.generate(count));
+    selectedIndices
+      ..clear()
+      ..addAll(Iterable.generate(count));
   }
 
   /// Number of selected items that fall within [visibleCount].
@@ -75,6 +80,10 @@ class MediaCatchController {
   ///
   /// Indices in [selectedIndices] / the optional [indices] override refer
   /// to positions in [visibleGroups], not flat candidates.
+  ///
+  /// Batch download / multi-select consumers (PR3 sticky bar) must resolve
+  /// selection **only** via this helper with the same `displayedGroups` the
+  /// list built — never re-filter or re-analyze.
   List<CaptureGroup> selectedFrom(
     List<CaptureGroup> visibleGroups, [
     Set<int>? indices,

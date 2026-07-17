@@ -20,7 +20,6 @@ import 'package:aurora_downloader/sniffer/controllers/media_catch_controller.dar
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
-import 'package:aurora_downloader/theme/aurora_tokens.dart';
 
 /// Filter options for the rich catch sheet segmented control.
 /// Mirrors the `MediaFilter` enum that previously lived at the top of
@@ -246,11 +245,6 @@ IconData _mediaIcon(MediaType type) {
     MediaType.executable => Icons.insert_drive_file,
     MediaType.playlist => Icons.queue_music,
   };
-}
-
-/// Accent color for a [SniffedMedia] row — thin wire to [mediaAccentFor].
-Color _accentFor(AColors ac, SniffedMedia item, bool isHls) {
-  return mediaAccentFor(ac, item, isHls: isHls);
 }
 
 /// Short label for a byte count, used in the stats row of the catch sheet.
@@ -626,8 +620,11 @@ void showSniffedMediaSheet(
                                       .selectedIndices
                                       .contains(index);
                                   final hls = _isHlsItem(item);
-                                  final accentColor =
-                                      _accentFor(context.ac, item, hls);
+                                  final accentColor = mediaAccentFor(
+                                    context.ac,
+                                    item,
+                                    isHls: hls,
+                                  );
                                   final qLabel = group.primary.qualityLabel;
                                   final sizeLabel =
                                       _sizeText(item.contentLengthBytes);

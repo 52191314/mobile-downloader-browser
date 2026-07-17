@@ -143,28 +143,49 @@ void main() {
     test(
       'recommendedGroupIndices empty when recommended group filtered out (HLS)',
       () {
-        // Recommended group is a progressive MP4; displayed list is HLS-only
-        // (simulating HLS chip post-filter). Best must select nothing.
-        final displayedHlsOnly = [
-          _group(
-            key: 'hls-stream',
-            candidates: [
-              _media(
-                url: 'https://cdn.example.com/stream.m3u8',
-                name: 'stream.m3u8',
-                type: MediaType.video,
-              ),
-            ],
-            recommended: false,
-          ),
-        ];
-
-        expect(
-          controller.recommendedGroupIndices(displayedHlsOnly),
-          isEmpty,
+        // Full analyzed list: recommended progressive MP4 + non-recommended HLS.
+        final recommendedMp4 = _group(
+          key: 'feature-mp4',
+          candidates: [
+            _media(
+              url: 'https://cdn.example.com/feature.mp4',
+              name: 'feature.mp4',
+              type: MediaType.video,
+              contentLengthBytes: 200 * 1024 * 1024,
+              duration: const Duration(minutes: 40),
+            ),
+          ],
+          recommended: true,
         );
+        final hlsNotRecommended = _group(
+          key: 'hls-stream',
+          candidates: [
+            _media(
+              url: 'https://cdn.example.com/stream.m3u8',
+              name: 'stream.m3u8',
+              type: MediaType.video,
+            ),
+          ],
+          recommended: false,
+        );
+
+        final analyzed = [recommendedMp4, hlsNotRecommended];
+        // Sheet HLS chip post-filter: only HLS groups remain (sheet must pass
+        // this list to Best — never the unfiltered analyzed list).
+        final displayedHlsOnly = [hlsNotRecommended];
+
+        expect(controller.recommendedGroupIndices(analyzed), {0});
+        expect(controller.recommendedGroupIndices(displayedHlsOnly), isEmpty);
       },
     );
+
+    test('selectAll clears stale high indices before selecting', () {
+      controller.selectedIndices.addAll({0, 1, 5, 9});
+      controller.selectAll(2);
+      expect(controller.selectedIndices, {0, 1});
+      expect(controller.selectedIndices.contains(5), isFalse);
+      expect(controller.selectedIndices.contains(9), isFalse);
+    });
 
     test(
       'recommendedGroupIndices indexes into displayed list, not candidate slots',
