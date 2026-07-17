@@ -48,6 +48,8 @@ Historic `aurora_colors.dart` (AuroraColors + AuroraColorsLight) has been delete
   `media_accent.dart` / `media_filter.dart`,
   `capture_sheet_header.dart`, `capture_filter_bar.dart`,
   `capture_options_row.dart` (show-all + sort + display mode; KD25–26),
+  `capture_group_sort.dart` (post-filter `sortCaptureGroups` by
+  `SniffedMediaSort` on primary media — overrides analyzer confidence order),
   `capture_stats_row.dart`, `capture_media_row.dart` (subtitle honors
   `SniffedMediaDisplayMode`), `capture_batch_bar.dart`, `capture_empty_state.dart`.
 - `lib/sniffer/controllers/media_catch_controller.dart` — group-index selection

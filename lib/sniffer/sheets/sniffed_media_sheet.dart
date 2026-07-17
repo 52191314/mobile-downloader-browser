@@ -10,6 +10,7 @@ import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_batch_bar.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_empty_state.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_filter_bar.dart';
+import 'package:aurora_downloader/sniffer/capture/capture_group_sort.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_media_row.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_options_row.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_sheet_header.dart';
@@ -132,9 +133,9 @@ void showSniffedMediaSheet(
       MediaFilter currentSegment = _filterForMediaType(
         mediaCatchController.activeFilter,
       );
-      // Local mirror so dropdowns + display mode update immediately; host
-      // settings are written via onSettingsChanged (sort re-reads host
-      // widget.settings after the parent applies the change).
+      // Local mirror so dropdowns, display mode, and group sort update
+      // immediately. Host settings are written via onSettingsChanged for
+      // persistence only (list order uses sheetSettings, not host sortMedia).
       var sheetSettings = settings;
 
       return StatefulBuilder(
@@ -149,7 +150,9 @@ void showSniffedMediaSheet(
             child: Builder(
               builder: (innerCtx) {
                 // --- Gather & analyse media (single pipeline) ---
-                // sortMedia → host _sortedMedia reads DownloadSettings.sniffedMediaSort
+                // Flat sortMedia is optional pre-order; analyzer re-orders by
+                // confidence, so displayedGroups are re-sorted below by
+                // sheetSettings.sniffedMediaSort (Issue 1 / KD25).
                 final allMedia = sortMedia(tab.snifferEngine.detectedMedia)
                     .where((m) => !m.isShortClip)
                     .toList();
@@ -172,6 +175,12 @@ void showSniffedMediaSheet(
                       )
                       .toList(growable: false);
                 }
+
+                // User Sort by — after analyzer confidence + type/HLS filters.
+                displayedGroups = sortCaptureGroups(
+                  displayedGroups,
+                  sheetSettings.sniffedMediaSort,
+                );
 
                 final selectedCount = mediaCatchController.selectedCount(
                   displayedGroups.length,
@@ -269,23 +278,12 @@ void showSniffedMediaSheet(
                                     onSettingsChanged?.call(sheetSettings);
                                   },
                                   onSettingsChanged: (next) {
-                                    final sortChanged =
-                                        next.sniffedMediaSort !=
-                                            sheetSettings.sniffedMediaSort;
+                                    // Immediate rebuild uses sheetSettings for
+                                    // sort + display mode; persist async via host.
                                     setSheetState(() {
                                       sheetSettings = next;
                                     });
                                     onSettingsChanged?.call(next);
-                                    // Host _sortedMedia reads widget.settings;
-                                    // re-run the pipeline after parent applies.
-                                    if (sortChanged) {
-                                      WidgetsBinding.instance
-                                          .addPostFrameCallback((_) {
-                                        if (ctx.mounted) {
-                                          setSheetState(() {});
-                                        }
-                                      });
-                                    }
                                   },
                                 ),
                               ),

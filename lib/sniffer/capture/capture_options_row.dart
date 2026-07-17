@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/settings/download_settings.dart';
+import 'package:aurora_downloader/sniffer/capture/capture_group_sort.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 /// Capture Options zone: show-all toggle + sort + display-mode dropdowns.
@@ -69,7 +70,7 @@ class CaptureOptionsRow extends StatelessWidget {
                   label: 'Sort by',
                   value: settings.sniffedMediaSort,
                   items: SniffedMediaSort.values,
-                  itemLabel: (sort) => sort.name,
+                  itemLabel: sniffedMediaSortLabel,
                   onChanged: onSettingsChanged == null
                       ? null
                       : (value) {
@@ -86,7 +87,7 @@ class CaptureOptionsRow extends StatelessWidget {
                   label: 'Show type',
                   value: settings.sniffedMediaDisplayMode,
                   items: SniffedMediaDisplayMode.values,
-                  itemLabel: (mode) => mode.name,
+                  itemLabel: sniffedMediaDisplayModeLabel,
                   onChanged: onSettingsChanged == null
                       ? null
                       : (value) {

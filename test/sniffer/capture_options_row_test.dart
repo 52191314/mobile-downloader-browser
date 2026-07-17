@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aurora_downloader/settings/download_settings.dart';
+import 'package:aurora_downloader/sniffer/capture/capture_group_sort.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_media_row.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_options_row.dart';
 import 'package:aurora_downloader/sniffer/media_capture_analyzer.dart';
@@ -65,7 +66,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('capture_sort_dropdown')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('size').last);
+      await tester.tap(find.text('Size').last);
       await tester.pumpAndSettle();
 
       expect(next, isNotNull);
@@ -93,7 +94,7 @@ void main() {
 
         await tester.tap(find.byKey(const Key('capture_display_mode_dropdown')));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('duration').last);
+        await tester.tap(find.text('Duration').last);
         await tester.pumpAndSettle();
 
         expect(next, isNotNull);
@@ -104,6 +105,102 @@ void main() {
         );
       },
     );
+  });
+
+  group('sortCaptureGroups', () {
+    CaptureGroup group(
+      String name, {
+      int? bytes,
+      Duration? duration,
+      MediaType type = MediaType.video,
+      DateTime? sniffedAt,
+      double confidence = 0.5,
+    }) {
+      final media = SniffedMedia(
+        url: 'https://cdn.example.com/$name',
+        name: name,
+        type: type,
+        contentLengthBytes: bytes,
+        duration: duration,
+        sniffedAt: sniffedAt ?? DateTime.utc(2026, 1, 1),
+      );
+      return CaptureGroup(
+        groupKey: media.url,
+        candidates: [
+          CaptureCandidate(
+            media: media,
+            groupKey: media.url,
+            confidence: confidence,
+          ),
+        ],
+      );
+    }
+
+    test('name sort ignores analyzer confidence order', () {
+      // High-confidence "zebra" first (as analyzer would), low "alpha" second.
+      final input = [
+        group('zebra.mp4', confidence: 0.99),
+        group('alpha.mp4', confidence: 0.1),
+        group('mid.mp4', confidence: 0.5),
+      ];
+      final sorted = sortCaptureGroups(input, SniffedMediaSort.name);
+      expect(
+        sorted.map((g) => g.primary.media.name).toList(),
+        ['alpha.mp4', 'mid.mp4', 'zebra.mp4'],
+      );
+    });
+
+    test('size sort is largest first', () {
+      final input = [
+        group('small.mp4', bytes: 100),
+        group('big.mp4', bytes: 9000),
+        group('mid.mp4', bytes: 500),
+      ];
+      final sorted = sortCaptureGroups(input, SniffedMediaSort.size);
+      expect(
+        sorted.map((g) => g.primary.media.name).toList(),
+        ['big.mp4', 'mid.mp4', 'small.mp4'],
+      );
+    });
+
+    test('duration sort is longest first', () {
+      final input = [
+        group('short.mp4', duration: const Duration(seconds: 10)),
+        group('long.mp4', duration: const Duration(minutes: 5)),
+        group('mid.mp4', duration: const Duration(minutes: 1)),
+      ];
+      final sorted = sortCaptureGroups(input, SniffedMediaSort.duration);
+      expect(
+        sorted.map((g) => g.primary.media.name).toList(),
+        ['long.mp4', 'mid.mp4', 'short.mp4'],
+      );
+    });
+
+    test('newest sort is latest sniffedAt first', () {
+      final input = [
+        group('old.mp4', sniffedAt: DateTime.utc(2026, 1, 1)),
+        group('new.mp4', sniffedAt: DateTime.utc(2026, 6, 1)),
+        group('mid.mp4', sniffedAt: DateTime.utc(2026, 3, 1)),
+      ];
+      final sorted = sortCaptureGroups(input, SniffedMediaSort.newest);
+      expect(
+        sorted.map((g) => g.primary.media.name).toList(),
+        ['new.mp4', 'mid.mp4', 'old.mp4'],
+      );
+    });
+
+    test('type sort is alphabetical by type name', () {
+      final input = [
+        group('v.mp4', type: MediaType.video),
+        group('a.mp3', type: MediaType.audio),
+        group('i.png', type: MediaType.image),
+      ];
+      final sorted = sortCaptureGroups(input, SniffedMediaSort.type);
+      expect(
+        sorted.map((g) => g.primary.media.type).toList(),
+        [MediaType.audio, MediaType.image, MediaType.video],
+      );
+    });
   });
 
   group('buildCaptureSubtitle display mode', () {
