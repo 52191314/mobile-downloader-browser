@@ -1,6 +1,29 @@
-part of '../sniffer_screen.dart';
+import 'dart:io';
 
-class _AddQueueDialogContent extends StatefulWidget {
+import 'package:flutter/material.dart';
+
+import '../../compliance/restricted_media_policy.dart';
+import '../../downloader/downloader.dart';
+import '../../downloader/file_classifier.dart';
+import '../../downloader/filename_service.dart';
+import '../../logging/aurora_log.dart';
+import '../../theme/aurora_palette.dart';
+import '../../ui/notifications/aurora_snackbar.dart';
+import '../filename_utils.dart';
+import '../hls_playlist_cache_lookup.dart';
+import '../models/browser_tab.dart';
+import '../models/sniffed_media.dart';
+import '../sheets/duplicate_download_dialog.dart';
+import '../sniffer_url_utils.dart';
+import 'folder_selector.dart';
+import 'rename_file_dialog.dart';
+
+/// Full-featured "Add to Download Queue" dialog.
+///
+/// Shows the captured media URL, suggested filename, quality dropdown
+/// (for HLS variants), folder picker, and priority.  The user can
+/// rename the file, pick a folder, and confirm enqueue or cancel.
+class AddQueueDialogContent extends StatefulWidget {
   final SniffedMedia media;
   final List<SniffedMedia> variants;
   final BrowserTab tab;
@@ -14,7 +37,8 @@ class _AddQueueDialogContent extends StatefulWidget {
   final Future<List<SniffedMedia>> Function(String url)?
       fetchMasterPlaylistVariants;
 
-  const _AddQueueDialogContent({
+  const AddQueueDialogContent({
+    super.key,
     required this.media,
     this.variants = const [],
     required this.tab,
@@ -29,10 +53,10 @@ class _AddQueueDialogContent extends StatefulWidget {
   });
 
   @override
-  _AddQueueDialogContentState createState() => _AddQueueDialogContentState();
+  AddQueueDialogContentState createState() => AddQueueDialogContentState();
 }
 
-class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
+class AddQueueDialogContentState extends State<AddQueueDialogContent> {
   late TextEditingController filenameController;
   DownloadPriority selectedPriority = DownloadPriority.medium;
   /// True while master-playlist variants are loading for the quality dropdown.
@@ -53,7 +77,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
     var name = widget.suggestedName;
     if (FilenameService.utf8ByteLength(name) >
         FilenameService.defaultMaxFileNameBytes) {
-      name = _SnifferScreenState.truncateFilename(
+      name = truncateFilename(
         name,
         maxLength: FilenameService.defaultMaxFileNameBytes,
       );
@@ -169,13 +193,11 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       ext = originalName.substring(dotIndex);
     }
 
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (context) => _RenameFileDialog(
-        initialValue: filenameController.text,
-        textFieldKey: const Key('dialog_filename_input'),
-        okButtonKey: const Key('dialog_rename_ok_button'),
-      ),
+    final newName = await showRenameFileDialog(
+      context,
+      initialValue: filenameController.text,
+      textFieldKey: const Key('dialog_filename_input'),
+      okButtonKey: const Key('dialog_rename_ok_button'),
     );
 
     if (newName != null && mounted) {
@@ -185,7 +207,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       }
       if (FilenameService.utf8ByteLength(finalName) >
           FilenameService.defaultMaxFileNameBytes) {
-        finalName = _SnifferScreenState.truncateFilename(
+        finalName = truncateFilename(
           finalName,
           maxLength: FilenameService.defaultMaxFileNameBytes,
         );
@@ -272,7 +294,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                               FilenameService.defaultMaxFileNameBytes) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'Filename is long and was auto-truncated to fit Android’s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
+                          'Filename is long and was auto-truncated to fit Android\'s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
                           style: const TextStyle(
                             color: Colors.redAccent,
                             fontSize: 11,
@@ -398,7 +420,7 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
                     final cookieHeaders = await widget.getCookiesForUrl(
                       selectedMedia.url,
                     );
-                    final taskHeaders = _buildSniffedDownloadHeaders(
+                    final taskHeaders = buildSniffedDownloadHeaders(
                       tab: widget.tab,
                       media: selectedMedia,
                       cookieHeaders: cookieHeaders,
@@ -546,4 +568,41 @@ class _AddQueueDialogContentState extends State<_AddQueueDialogContent> {
       ],
     );
   }
+}
+
+/// Convenience wrapper that shows [AddQueueDialogContent] in a dialog and
+/// returns `true` when the user confirmed enqueue, `false` otherwise.
+Future<bool> showAddQueueDialog(
+  BuildContext context, {
+  required SniffedMedia media,
+  List<SniffedMedia> variants = const [],
+  required BrowserTab tab,
+  required String? currentUrl,
+  required String suggestedName,
+  required String? baseDir,
+  required String? baseTemp,
+  required Future<Map<String, String>> Function(String) getCookiesForUrl,
+  required DownloadQueue downloadQueue,
+  Future<String?> Function({bool forceReload})? onTokenExpired,
+  Future<List<SniffedMedia>> Function(String url)? fetchMasterPlaylistVariants,
+}) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return AddQueueDialogContent(
+        media: media,
+        variants: variants,
+        tab: tab,
+        currentUrl: currentUrl,
+        suggestedName: suggestedName,
+        baseDir: baseDir,
+        baseTemp: baseTemp,
+        getCookiesForUrl: getCookiesForUrl,
+        downloadQueue: downloadQueue,
+        onTokenExpired: onTokenExpired,
+        fetchMasterPlaylistVariants: fetchMasterPlaylistVariants,
+      );
+    },
+  );
+  return result ?? false;
 }

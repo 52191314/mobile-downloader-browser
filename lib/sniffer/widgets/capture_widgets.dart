@@ -1,11 +1,16 @@
-part of '../sniffer_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:aurora_downloader/ui/widgets/dock_order_store.dart';
 
-class _CompactNavButton extends StatelessWidget {
+import '../../theme/aurora_palette.dart';
+import '../models/browser_tab.dart';
+
+/// Compact, flat icon button used in the browser bottom dock.
+class CompactNavButton extends StatelessWidget {
   final IconData icon;
   final bool enabled;
   final VoidCallback? onTap;
 
-  const _CompactNavButton({
+  const CompactNavButton({
     super.key,
     required this.icon,
     this.enabled = true,
@@ -36,7 +41,7 @@ class _CompactNavButton extends StatelessWidget {
 /// outline). A small pill indicator shows the active slide.
 ///
 /// Icon order comes from [dockOrderStore] (Settings → Appearance → Bottom dock).
-class _BrowserDock extends StatefulWidget {
+class BrowserDock extends StatefulWidget {
   final BrowserTab tab;
   final VoidCallback onSniffer;
   final VoidCallback onDownload;
@@ -49,7 +54,8 @@ class _BrowserDock extends StatefulWidget {
   final VoidCallback onAdblock;
   final VoidCallback onReaderMode;
 
-  const _BrowserDock({
+  const BrowserDock({
+    super.key,
     required this.tab,
     required this.onSniffer,
     required this.onDownload,
@@ -64,10 +70,10 @@ class _BrowserDock extends StatefulWidget {
   });
 
   @override
-  State<_BrowserDock> createState() => _BrowserDockState();
+  State<BrowserDock> createState() => _BrowserDockState();
 }
 
-class _BrowserDockState extends State<_BrowserDock> {
+class _BrowserDockState extends State<BrowserDock> {
   final PageController _pageController = PageController();
   int _page = 0;
 
@@ -127,84 +133,84 @@ class _BrowserDockState extends State<_BrowserDock> {
 
     switch (id) {
       case 'back':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('sniffer_back_button'),
           icon: item.icon,
           enabled: tab.canGoBack,
           onTap: tab.canGoBack ? () => tab.controller.goBack() : null,
         );
       case 'forward':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('sniffer_forward_button'),
           icon: item.icon,
           enabled: tab.canGoForward,
           onTap: tab.canGoForward ? () => tab.controller.goForward() : null,
         );
       case 'sniffer':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('sniffer_sniffer_button'),
           icon: badgeCount > 0 ? Icons.radar : Icons.add,
           enabled: true,
           onTap: widget.onSniffer,
         );
       case 'downloads':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_queue'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onDownload,
         );
       case 'tabs':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('browser_tabs_button'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onTab,
         );
       case 'home':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_home'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onHome,
         );
       case 'menu':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_menu'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onBrowserTools,
         );
       case 'history':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_history'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onHistory,
         );
       case 'bookmarks':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_bookmarks'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onBookmarks,
         );
       case 'settings':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_settings'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onSettings,
         );
       case 'adblock':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_adblock'),
           icon: item.icon,
           enabled: true,
           onTap: widget.onAdblock,
         );
       case 'readerMode':
-        return _CompactNavButton(
+        return CompactNavButton(
           key: const Key('mini_dock_reader'),
           icon: item.icon,
           enabled: true,

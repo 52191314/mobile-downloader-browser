@@ -1,21 +1,29 @@
-part of '../sniffer_screen.dart';
+import 'package:flutter/material.dart';
 
-class _RenameFileDialog extends StatefulWidget {
+import '../../downloader/filename_service.dart';
+import '../filename_utils.dart';
+
+/// Simple dialog that lets the user rename a filename.  The result is
+/// returned via [Navigator.pop] — either the confirmed string or `null`
+/// when cancelled.  Names exceeding Android's byte limit are
+/// auto-truncated.
+class RenameFileDialog extends StatefulWidget {
   final String initialValue;
   final Key? textFieldKey;
   final Key? okButtonKey;
 
-  const _RenameFileDialog({
+  const RenameFileDialog({
+    super.key,
     required this.initialValue,
     this.textFieldKey,
     this.okButtonKey,
   });
 
   @override
-  State<_RenameFileDialog> createState() => _RenameFileDialogState();
+  State<RenameFileDialog> createState() => _RenameFileDialogState();
 }
 
-class _RenameFileDialogState extends State<_RenameFileDialog> {
+class _RenameFileDialogState extends State<RenameFileDialog> {
   late TextEditingController _controller;
   final _formKey = GlobalKey<FormState>();
 
@@ -65,7 +73,7 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
                 FilenameService.defaultMaxFileNameBytes) ...[
               const SizedBox(height: 8),
               Text(
-                'Filename exceeds Android’s ${FilenameService.defaultMaxFileNameBytes}-byte limit. It will be auto-truncated on save, or you can shorten it manually.',
+                'Filename exceeds Android\'s ${FilenameService.defaultMaxFileNameBytes}-byte limit. It will be auto-truncated on save, or you can shorten it manually.',
                 style: const TextStyle(
                   color: Colors.redAccent,
                   fontSize: 11,
@@ -85,7 +93,7 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
           key: widget.okButtonKey ?? const Key('dialog_rename_ok_button'),
           onPressed: () {
             if (_formKey.currentState?.validate() ?? false) {
-              final finalName = _SnifferScreenState.truncateFilename(
+              final finalName = truncateFilename(
                 _controller.text.trim(),
                 maxLength: FilenameService.defaultMaxFileNameBytes,
               );
@@ -97,4 +105,22 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
       ],
     );
   }
+}
+
+/// Convenience wrapper that shows [RenameFileDialog] and returns the
+/// confirmed name, or `null` if cancelled.
+Future<String?> showRenameFileDialog(
+  BuildContext context, {
+  required String initialValue,
+  Key? textFieldKey,
+  Key? okButtonKey,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => RenameFileDialog(
+      initialValue: initialValue,
+      textFieldKey: textFieldKey,
+      okButtonKey: okButtonKey,
+    ),
+  );
 }

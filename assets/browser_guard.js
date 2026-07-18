@@ -285,8 +285,15 @@
   }
   var _mediaPage = _isMediaPage();
 
+  // Cap inline-script scans so multi-MB SPA bundles do not freeze WebView JS.
+  var _AURORA_MAX_SCRIPT_SCAN_CHARS = 250000;
+  var _AURORA_MAX_INLINE_SCRIPTS = 40;
   function scanTextForUrls(text) {
     if (!text) return;
+    // Truncate huge blobs before regex — exec on multi-MB strings is costly.
+    if (text.length > _AURORA_MAX_SCRIPT_SCAN_CHARS) {
+      text = text.slice(0, _AURORA_MAX_SCRIPT_SCAN_CHARS);
+    }
     // Greedy match (+ not +?) so URLs like
     //   https://cdn.beeg24.org/.../video_1080p.mp4/index-v1-a1.m3u8?token=...
     // are captured fully (ending in .m3u8) rather than truncated at the
@@ -437,6 +444,36 @@
         resolved.search === cur.search;
     } catch(_) { return false; }
   }
+  // Hosts that should almost never be treated as silent ad redirects
+  // (OAuth / IdP / payment). Skip intercept unless play-ad suppress is armed.
+  var _AURORA_AUTH_HOST_SUFFIXES = [
+    'accounts.google.com', 'accounts.youtube.com',
+    'login.microsoftonline.com', 'login.live.com', 'account.live.com',
+    'appleid.apple.com', 'id.apple.com',
+    'www.facebook.com', 'm.facebook.com', 'facebook.com',
+    'github.com', 'gitlab.com',
+    'twitter.com', 'x.com', 'api.twitter.com',
+    'auth0.com', 'okta.com',
+    'paypal.com', 'checkout.stripe.com', 'js.stripe.com',
+    'login.yahoo.com', 'api.amazon.com', 'amazon.com'
+  ];
+  function hostMatchesSuffix(host, suffix) {
+    return host === suffix || host.endsWith('.' + suffix);
+  }
+  function isLikelyAuthOrPaymentUrl(url) {
+    try {
+      var u = new URL(String(url), document.baseURI);
+      var h = (u.host || '').toLowerCase();
+      for (var i = 0; i < _AURORA_AUTH_HOST_SUFFIXES.length; i++) {
+        if (hostMatchesSuffix(h, _AURORA_AUTH_HOST_SUFFIXES[i])) return true;
+      }
+      var path = (u.pathname || '').toLowerCase();
+      if (/\/(oauth2?|authorize|signin|sign-in|sign_in|login|sso|openid|saml|connect\/|checkout|pay)\b/.test(path)) {
+        return true;
+      }
+    } catch(_) {}
+    return false;
+  }
   function shouldInterceptRedirect(url) {
     if (url == null || url === '') return false;
     if (consumeAllowNextCrossOriginNav(url)) return false;
@@ -446,6 +483,12 @@
     if (!force && window.__auroraInvisibleRedirectBlockingEnabled === false) {
       return false;
     }
+    // User-initiated navigations (click / key / touch within gesture window)
+    // must not be treated as silent ad redirects — that breaks OAuth, payments,
+    // and intentional full-page hops. Scripted cross-origin still blocked below.
+    if (!force && hasAuroraUserGesture()) return false;
+    // Defense-in-depth: known auth/payment destinations (even without gesture).
+    if (!force && isLikelyAuthOrPaymentUrl(url)) return false;
     try {
       var resolved = new URL(String(url), document.baseURI);
       // During play suppress, block same-origin hops too (ad intermediate
@@ -518,10 +561,13 @@
   };
 
   // --- location.href / window.location / replace / assign ---
+  // Wrap only when descriptors are configurable. Preserve enumerability.
+  // Failures under CSP/Trusted Types are swallowed so pages still load.
+  // History API (pushState/replaceState) is intentionally NOT overridden.
   try {
     var _hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href') ||
       Object.getOwnPropertyDescriptor(location, 'href');
-    if (_hrefDesc && _hrefDesc.set) {
+    if (_hrefDesc && _hrefDesc.set && _hrefDesc.configurable !== false) {
       Object.defineProperty(Location.prototype, 'href', {
         get: function() { return _hrefDesc.get.call(this); },
         set: function(v) {
@@ -530,13 +576,13 @@
           return _hrefDesc.set.call(this, v);
         },
         configurable: true,
-        enumerable: _hrefDesc.enumerable
+        enumerable: _hrefDesc.enumerable !== false
       });
     }
   } catch(_) {}
   try {
     var _winLocDesc = Object.getOwnPropertyDescriptor(Window.prototype, 'location');
-    if (_winLocDesc && _winLocDesc.set) {
+    if (_winLocDesc && _winLocDesc.set && _winLocDesc.configurable !== false) {
       Object.defineProperty(Window.prototype, 'location', {
         get: function() { return _winLocDesc.get.call(this); },
         set: function(v) {
@@ -547,14 +593,15 @@
           }
           return _winLocDesc.set.call(this, v);
         },
-        configurable: true
+        configurable: true,
+        enumerable: _winLocDesc.enumerable !== false
       });
     }
   } catch(_) {}
   // document.location is often an accessor on Document.prototype.
   try {
     var _docLocDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'location');
-    if (_docLocDesc && _docLocDesc.set) {
+    if (_docLocDesc && _docLocDesc.set && _docLocDesc.configurable !== false) {
       Object.defineProperty(Document.prototype, 'location', {
         get: function() { return _docLocDesc.get.call(this); },
         set: function(v) {
@@ -565,7 +612,8 @@
           }
           return _docLocDesc.set.call(this, v);
         },
-        configurable: true
+        configurable: true,
+        enumerable: _docLocDesc.enumerable !== false
       });
     }
   } catch(_) {}
@@ -1266,8 +1314,14 @@
     // <a> elements so the broad innerHTML scan is fully redundant for those.
     try {
       var scripts = document.querySelectorAll('script:not([src])');
-      for (var si = 0; si < scripts.length; si++) {
-        if (scripts[si].textContent) scanTextForUrls(scripts[si].textContent);
+      var scanned = 0;
+      for (var si = 0; si < scripts.length && scanned < _AURORA_MAX_INLINE_SCRIPTS; si++) {
+        var body = scripts[si].textContent;
+        if (!body) continue;
+        // Skip oversized inline scripts entirely (after global char cap in scanner).
+        if (body.length > _AURORA_MAX_SCRIPT_SCAN_CHARS) continue;
+        scanTextForUrls(body);
+        scanned++;
       }
     } catch(_) {}
     setTimeout(function() { try { scanMedia(document); } catch(_) {} }, 500);

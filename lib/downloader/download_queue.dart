@@ -160,7 +160,7 @@ class DownloadQueue {
   DownloadQueue({
     this.maxConcurrentDownloads = 3,
     this.enablePreemption = true,
-    this.useNativeTorrentEngine = false,
+    this.useNativeTorrentEngine = true,
     this.numChunksPerTask = 8,
     this.httpClient,
     this.completedDownloadPublisher,

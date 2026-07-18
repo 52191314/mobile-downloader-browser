@@ -43,7 +43,7 @@ class TorrentDownloader implements BaseDownloader {
     this.client,
     this.metadata,
     this.verifyPieceHashes = true,
-    this.useNativeEngine = false,
+    this.useNativeEngine = true,
     Set<int>? corruptPieceIndices,
   }) : corruptPieceIndices = Set<int>.from(corruptPieceIndices ?? <int>{});
 
@@ -60,6 +60,14 @@ class TorrentDownloader implements BaseDownloader {
       return;
     }
 
+    // Pure-Dart tick path only exists for unit tests that override
+    // [syntheticDataLength]. Production must never write zero-filled
+    // mock files for magnets/.torrent links.
+    if (syntheticDataLength == null) {
+      _failNativeRequired();
+      return;
+    }
+
     if (task.state == DownloadState.downloading) {
       if (!_isPaused) return;
     }
@@ -67,6 +75,7 @@ class TorrentDownloader implements BaseDownloader {
     _isPaused = false;
     task.state = DownloadState.downloading;
     task.errorMessage = null;
+    task.failureReason = null;
     _startTime = DateTime.now();
     _startDownloadedBytes = task.downloadedBytes;
     _taskUpdateController.add(task);
@@ -88,6 +97,19 @@ class TorrentDownloader implements BaseDownloader {
       task.speed = 0.0;
       _taskUpdateController.add(task);
     }
+  }
+
+  void _failNativeRequired() {
+    final isMagnet = task.url.startsWith('magnet:');
+    task.state = DownloadState.failed;
+    task.failureReason = DownloadFailure.nativeEngineUnavailable;
+    task.errorMessage = isMagnet
+        ? 'Magnet downloads require the native torrent engine, which is '
+            'unavailable for this task.'
+        : 'Torrent downloads require the native torrent engine, which is '
+            'unavailable for this task.';
+    task.speed = 0.0;
+    _taskUpdateController.add(task);
   }
 
   @override
@@ -138,6 +160,7 @@ class TorrentDownloader implements BaseDownloader {
     _isPaused = false;
     task.state = DownloadState.downloading;
     task.errorMessage = null;
+    task.failureReason = null;
     _taskUpdateController.add(task);
 
     try {
@@ -167,7 +190,18 @@ class TorrentDownloader implements BaseDownloader {
       }
     } catch (e) {
       task.state = DownloadState.failed;
-      task.errorMessage = e.toString();
+      // Prefer the dedicated unavailable reason for init/load failures so the
+      // UI can show a clear "engine not available" message for magnets.
+      final msg = e.toString();
+      final unavailable = msg.contains('UnimplementedError') ||
+          msg.contains('MissingPluginException') ||
+          msg.contains('not available') ||
+          msg.contains('Failed to load') ||
+          msg.contains('cannot find');
+      task.failureReason = unavailable
+          ? DownloadFailure.nativeEngineUnavailable
+          : DownloadFailure.torrentEngineError;
+      task.errorMessage = msg;
       task.speed = 0.0;
       _taskUpdateController.add(task);
     }
@@ -288,30 +322,40 @@ class TorrentDownloader implements BaseDownloader {
 
     if (metadata != null) {
       _setupChunksFromMetadata();
-    } else {
-      // Fallback configuration if no metadata is found
-      final totalSize = syntheticDataLength ?? 102400;
-      task.totalBytes = totalSize;
-      final pieceSize = 20480;
-      final pieceCount = (totalSize / pieceSize).ceil();
-      final chunks = <DownloadChunk>[];
-      for (var i = 0; i < pieceCount; i++) {
-        final start = i * pieceSize;
-        final end = (i == pieceCount - 1)
-            ? totalSize - 1
-            : start + pieceSize - 1;
-        chunks.add(
-          DownloadChunk(
-            index: i,
-            start: start,
-            end: end,
-            bytesDownloaded: 0,
-            isCompleted: false,
-          ),
-        );
-      }
-      task.chunks = chunks;
+      return;
     }
+
+    final synthetic = syntheticDataLength;
+    if (synthetic == null) {
+      // Never invent a zero-filled mock torrent for production.
+      throw StateError(
+        task.url.startsWith('magnet:')
+            ? 'Magnet downloads require the native torrent engine.'
+            : 'Unable to load torrent metadata. Provide a readable .torrent '
+                'file or enable the native torrent engine.',
+      );
+    }
+
+    // Test-only synthetic progress path (subclass sets syntheticDataLength).
+    final totalSize = synthetic;
+    task.totalBytes = totalSize;
+    const pieceSize = 20480;
+    final pieceCount = (totalSize / pieceSize).ceil();
+    final chunks = <DownloadChunk>[];
+    for (var i = 0; i < pieceCount; i++) {
+      final start = i * pieceSize;
+      final end = (i == pieceCount - 1) ? totalSize - 1 : start + pieceSize - 1;
+      chunks.add(
+        DownloadChunk(
+          index: i,
+          start: start,
+          end: end,
+          bytesDownloaded: 0,
+          isCompleted: false,
+        ),
+      );
+    }
+    task.chunks = chunks;
   }
 
   void _setupChunksFromMetadata() {

@@ -1,11 +1,35 @@
-import 'package:flutter/foundation.dart';
-
 import 'models/browser_tab.dart';
+import 'models/sniffed_media.dart';
 
 /// Desktop Chrome UA used for download requests to mimic a browser.
 const String snifferDownloadUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
+/// Default mobile Chrome UA (browser UI profile + download fallback).
+const String snifferMobileUserAgent =
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+/// Predefined User-Agent profiles keyed by [DownloadSettings.userAgentProfile].
+const Map<String, String> uaProfiles = <String, String>{
+  'mobile': snifferMobileUserAgent,
+  'desktop_chrome': snifferDownloadUserAgent,
+  'desktop_firefox':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) '
+      'Gecko/20100101 Firefox/127.0',
+  'safari':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 '
+      '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+};
+
+/// Human-readable label for each profile key.
+const Map<String, String> uaProfileLabels = <String, String>{
+  'mobile': 'Mobile Chrome',
+  'desktop_chrome': 'Desktop Chrome',
+  'desktop_firefox': 'Desktop Firefox',
+  'safari': 'Safari (macOS)',
+};
 
 /// Regex matching common media file extensions for fast-path detection.
 final RegExp mediaFastPathRegExp = RegExp(
@@ -21,9 +45,12 @@ final RegExp mediaFastPathRegExp = RegExp(
   caseSensitive: false,
 );
 
-/// The original UA string from the WebView with `wv` (WebView) marker and
-/// version suffixes stripped. Many CDNs throttle requests that carry a `wv`
-/// marker, so we clean it.
+/// Returns the User-Agent string for a given profile key.
+String uaForProfile(String profile) =>
+    uaProfiles[profile] ?? snifferMobileUserAgent;
+
+/// Aggressive UA rewrite for callers that want a desktop-like fingerprint.
+/// Prefer [stripWebViewUaMarkers] for download requests (Cloudflare-safe).
 String cleanUserAgent(String raw) {
   return raw
       .replaceAll(RegExp(r'\s*; wv\b'), '')
@@ -35,23 +62,59 @@ String cleanUserAgent(String raw) {
       .replaceAll(RegExp(r'\s*Version/[0-9.]+'), '');
 }
 
+/// Strips only WebView markers (`; wv`, bare `wv`, `Version/4.0`) so the rest
+/// of the browser UA stays intact. Used for download User-Agent selection.
+String stripWebViewUaMarkers(String? ua) {
+  if (ua == null || ua.isEmpty) return snifferMobileUserAgent;
+  return ua
+      .replaceAll(RegExp(r';\s*wv', caseSensitive: false), '')
+      .replaceAll(RegExp(r'\bwv\b', caseSensitive: false), '')
+      .replaceAll(RegExp(r'Version/4\.0\s*', caseSensitive: false), '');
+}
+
 /// Returns the download-appropriate User-Agent for [targetUrl].
+///
 /// For Cloudflare-protected sites (surrit.com), the raw WebView UA must be
-/// preserved (it earned the `cf_clearance` cookie). For other hosts, the
-/// cleaned UA is used to avoid CDN throttling.
+/// preserved (it earned the `cf_clearance` cookie). For other hosts, only
+/// WebView markers are stripped to avoid CDN throttling while keeping the
+/// rest of the UA stable.
 String downloadUserAgent(String targetUrl, BrowserTab tab) {
   final raw = tab.userAgent;
-  if (raw == null || raw.isEmpty) return snifferDownloadUserAgent;
+  if (raw == null || raw.isEmpty) return snifferMobileUserAgent;
   if (targetUrl.toLowerCase().contains('surrit.com')) {
     return raw; // Must match the UA that earned Cloudflare clearance.
   }
-  return cleanUserAgent(raw);
+  return stripWebViewUaMarkers(raw);
 }
 
-/// Normalizes headers for media requests to protected CDNs.
-/// For surrit.com, the Referer must be the current-page URL (not the source
-/// page that contains the video link) because the CDN validates Referer
-/// against the short-lived auth token embedded in the media URL.
+/// Case-insensitive header presence check.
+bool hasHeader(Map<String, String> headers, String name) {
+  return headers.keys.any((key) => key.toLowerCase() == name.toLowerCase());
+}
+
+/// Merges [source] into [target], replacing any existing key with the same
+/// name ignoring case.
+void mergeHeaders(Map<String, String> target, Map<String, String> source) {
+  for (final entry in source.entries) {
+    target.removeWhere(
+      (key, _) => key.toLowerCase() == entry.key.toLowerCase(),
+    );
+    target[entry.key] = entry.value;
+  }
+}
+
+/// If [headers] lacks `Origin`, derives one from [referer] (scheme + host).
+void ensureOriginHeader(Map<String, String> headers, String referer) {
+  if (hasHeader(headers, 'Origin')) return;
+  final uri = Uri.tryParse(referer);
+  if (uri != null && uri.host.isNotEmpty && uri.scheme.isNotEmpty) {
+    headers['Origin'] = '${uri.scheme}://${uri.host}';
+  }
+}
+
+/// Normalizes headers for media requests to protected CDNs (surrit.com).
+///
+/// Mutates [headers] in place and returns the same map.
 Map<String, String> normalizeHeadersForUrl(
   Map<String, String> headers,
   String targetUrl, {
@@ -60,29 +123,129 @@ Map<String, String> normalizeHeadersForUrl(
   String? sourcePageUrl,
 }) {
   final targetLower = targetUrl.toLowerCase();
-  if (targetLower.contains('surrit.com')) {
-    String? refererKey;
-    for (final key in headers.keys) {
-      if (key.toLowerCase() == 'referer') {
-        refererKey = key;
-        break;
-      }
+  if (!targetLower.contains('surrit.com')) return headers;
+
+  String? refererKey;
+  for (final key in headers.keys) {
+    if (key.toLowerCase() == 'referer') {
+      refererKey = key;
+      break;
     }
+  }
+
+  String? currentReferer = refererKey != null ? headers[refererKey] : null;
+
+  // 1. Always fix missav.com -> missav.ws domain migration if present.
+  if (currentReferer != null &&
+      currentReferer.toLowerCase().contains('missav.com')) {
+    currentReferer = currentReferer.replaceAll(
+      RegExp(r'missav\.com', caseSensitive: false),
+      'missav.ws',
+    );
     if (refererKey != null) {
-      final candidate = firstNonEmpty([currentUrl, addressText, sourcePageUrl]);
-      if (candidate != null && candidate.isNotEmpty) {
-        headers = Map<String, String>.from(headers);
-        headers[refererKey] = candidate;
+      headers.remove(refererKey);
+    }
+    headers['Referer'] = currentReferer;
+    ensureOriginHeader(headers, currentReferer);
+    return headers;
+  }
+
+  // 2. If the referer is already a surrit.com URL, keep it (CDN needs it).
+  if (currentReferer != null &&
+      currentReferer.toLowerCase().contains('surrit.com')) {
+    ensureOriginHeader(headers, currentReferer);
+    return headers;
+  }
+
+  // 3. No referer (or empty) — build a fallback.
+  if (currentReferer == null || currentReferer.isEmpty) {
+    final candidate = firstNonEmpty([
+      sourcePageUrl,
+      currentUrl,
+      addressText,
+    ]);
+    if (candidate != null && !candidate.toLowerCase().contains('surrit.com')) {
+      currentReferer = candidate;
+    } else {
+      final targetUri = Uri.tryParse(targetUrl);
+      if (targetUri != null && targetUri.host.isNotEmpty) {
+        currentReferer = '${targetUri.scheme}://${targetUri.host}/';
+      } else {
+        currentReferer = 'https://missav.ws/';
       }
     }
   }
+
+  if (!currentReferer.startsWith('http://') &&
+      !currentReferer.startsWith('https://')) {
+    final targetUri = Uri.tryParse(targetUrl);
+    if (targetUri != null && targetUri.host.isNotEmpty) {
+      currentReferer = '${targetUri.scheme}://${targetUri.host}/';
+    } else {
+      currentReferer = 'https://missav.ws/';
+    }
+  }
+
+  if (refererKey != null) {
+    headers.remove(refererKey);
+  }
+  headers['Referer'] = currentReferer;
+  ensureOriginHeader(headers, currentReferer);
   return headers;
 }
 
-/// Returns the first non-null, non-empty string from the iterable.
+/// Builds the full header map for a sniffed-media download enqueue.
+Map<String, String> buildSniffedDownloadHeaders({
+  required BrowserTab tab,
+  required SniffedMedia media,
+  required Map<String, String> cookieHeaders,
+  String? currentUrl,
+}) {
+  final headers = <String, String>{
+    'User-Agent': downloadUserAgent(media.url, tab),
+  };
+  mergeHeaders(headers, tab.controller.currentHeaders);
+  mergeHeaders(headers, sanitizeSniffedMediaHeaders(media.headers));
+
+  if (!hasHeader(headers, 'Referer')) {
+    final referer = firstNonEmpty([
+      media.sourcePageUrl,
+      currentUrl,
+      tab.addressController.text,
+    ]);
+    if (referer != null) {
+      headers['Referer'] = referer;
+    }
+  }
+
+  mergeHeaders(headers, cookieHeaders);
+
+  // Re-add Authorization from sniff-time cache (sanitized out of media.headers).
+  final cachedAuth = tab.authHeaderCache[media.url];
+  if (cachedAuth != null &&
+      cachedAuth.isNotEmpty &&
+      !hasHeader(headers, 'Authorization')) {
+    headers['Authorization'] = cachedAuth;
+  }
+
+  normalizeHeadersForUrl(
+    headers,
+    media.url,
+    currentUrl: currentUrl,
+    addressText: tab.addressController.text,
+    sourcePageUrl: media.sourcePageUrl,
+  );
+
+  return headers;
+}
+
+/// Returns the first non-null, non-empty (after trim) string from [values].
 String? firstNonEmpty(Iterable<String?> values) {
-  for (final v in values) {
-    if (v != null && v.isNotEmpty) return v;
+  for (final value in values) {
+    final trimmed = value?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      return trimmed;
+    }
   }
   return null;
 }

@@ -103,6 +103,11 @@ class HlsDownloader implements BaseDownloader {
 
   /// When true, MPEG-TS merge output is remuxed to MP4 after completion.
   /// fMP4 and audio-only playlists never remux regardless of this flag.
+  ///
+  /// Remux uses MediaExtractor→MediaMuxer with **PTS rewriting**: plain
+  /// byte-concat of HLS .ts segments leaves discontinuous timestamps, which
+  /// otherwise become multi-minute freezes (last frame + silence) in HW
+  /// players after a naive remux.
   final bool remuxTsToMp4;
 
   HlsDownloader({

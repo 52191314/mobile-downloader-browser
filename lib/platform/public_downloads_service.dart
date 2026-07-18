@@ -128,9 +128,28 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     return result ?? false;
   }
 
-  static Future<void> shareFile(String filePath) async {
+  /// Opens the system share sheet for a local file path.
+  ///
+  /// Pass [mimeType] for media (video/audio/image); if omitted the native
+  /// side guesses from the extension (defaults used to force `text/plain`,
+  /// which broke sharing of completed downloads).
+  static Future<void> shareFile(String filePath, {String? mimeType}) async {
     await _channel.invokeMethod<void>('shareFile', {
       'filePath': filePath,
+      if (mimeType != null && mimeType.isNotEmpty) 'mimeType': mimeType,
+    });
+  }
+
+  /// Share an already-published content URI (no second MediaStore copy).
+  static Future<void> shareContentUri(
+    String uri, {
+    required String mimeType,
+    String? title,
+  }) async {
+    await _channel.invokeMethod<void>('shareContentUri', {
+      'uri': uri,
+      'mimeType': mimeType,
+      if (title != null && title.isNotEmpty) 'title': title,
     });
   }
 
@@ -161,6 +180,11 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     return result;
   }
 
+  /// Opens the system "Save as" picker and copies [sourcePath] there.
+  ///
+  /// [sourcePath] may be an absolute filesystem path **or** a `content://`
+  /// URI. After a download is published, the private app-data file is deleted
+  /// and only [DownloadTask.publicUri] remains — pass that content URI here.
   Future<bool> exportFile({
     required String sourcePath,
     required String displayName,

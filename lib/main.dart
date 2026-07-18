@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'downloader/download_rules.dart';
@@ -714,7 +715,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onResniffAuto: _resniffAuto,
                             onResniffManual: _resniffManual,
                             onShareDownload: _shareDownload,
-                            onExportDownload: _exportCompletedFile,
+                            onRedownload: _redownloadTask,
                             onOpenBrowser: () => _selectTab(1),
                           ),
                         ),
@@ -1380,31 +1381,95 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _shareDownload(DownloadTask task) async {
+  /// Source for share/export after completion.
+  ///
+  /// On success the queue **deletes** the private `.../data/com.../completed/`
+  /// copy and keeps only [DownloadTask.publicUri] (MediaStore content URI).
+  /// Callers must never require the private path when [publicUri] is set.
+  Future<String?> _resolvedCompletedSource(DownloadTask task) async {
+    final publicUri = task.publicUri?.trim();
+    if (publicUri != null && publicUri.isNotEmpty) {
+      return publicUri;
+    }
+
+    final path = task.savePath;
+    if (await File(path).exists()) {
+      return path;
+    }
+
+    // Private copy already gone and no URI — cannot recover without re-download.
+    return null;
+  }
+
+  /// Enqueue a fresh download of the same URL (new task id / temp / save path).
+  /// Differs from Retry (which resumes partial work on the same task).
+  Future<void> _redownloadTask(DownloadTask task) async {
     try {
-      await PublicDownloadsService.shareFile(task.savePath);
+      if (task.url.startsWith('magnet:') || task.url.startsWith('blob:')) {
+        if (mounted) {
+          _showSnack('Can\u2019t redownload this type of link from the queue.');
+        }
+        return;
+      }
+      final baseDir = await _completedWorkspaceDirectory();
+      final tempDir = await _tempWorkspaceDirectory();
+      final newId = DateTime.now().microsecondsSinceEpoch.toString();
+      final baseName = p.basename(task.savePath);
+      final savePath = FilenameService.uniquePath(
+        p.join(baseDir.path, baseName.isEmpty ? 'download' : baseName),
+        reservedPaths: _downloadQueue.allTasks.map((t) => t.savePath),
+      );
+      final newTask = DownloadTask(
+        id: newId,
+        url: task.url,
+        headers: task.headers != null
+            ? Map<String, String>.from(task.headers!)
+            : null,
+        savePath: savePath,
+        tempDir: p.join(tempDir.path, newId),
+        contentType: task.contentType,
+        sourcePageUrl: task.sourcePageUrl,
+        expectedHash: task.expectedHash,
+      );
+      newTask.copyBrowserBridgesFrom(task);
+      _downloadQueue.addTask(newTask, force: true);
+      if (mounted) {
+        _showSnack('Redownload started.');
+        setState(() {});
+      }
     } catch (error) {
-      _showSnack('Couldn\u2019t share the file. $error');
+      _showSnack('Couldn\u2019t redownload. $error');
     }
   }
 
-  Future<void> _exportCompletedFile(DownloadTask task) async {
+  Future<void> _shareDownload(DownloadTask task) async {
     try {
-      final displayName = task.savePath.split('/').last;
-      final mimeType = PublicDownloadsService.mimeTypeForName(task.savePath);
-      final success = await _publicDownloadsService.exportFile(
-        sourcePath: task.savePath,
-        displayName: displayName,
-        mimeType: mimeType,
-      );
-      if (!mounted) return;
-      if (success) {
-        _showSnack('Done \u2014 file exported.');
-      } else {
-        _showSnack('Export cancelled.');
+      final mime = PublicDownloadsService.mimeTypeForName(task.savePath);
+      final title = p.basename(task.savePath);
+      final source = await _resolvedCompletedSource(task);
+
+      if (source == null) {
+        if (!mounted) return;
+        _showSnack(
+          'Couldn\u2019t share — the file is not available. '
+          'It may still be publishing to Downloads, or was removed.',
+        );
+        return;
       }
+
+      if (source.startsWith('content:')) {
+        await PublicDownloadsService.shareContentUri(
+          source,
+          mimeType: mime,
+          title: title,
+        );
+        return;
+      }
+
+      // Still on private disk (not published yet) — share via native path.
+      await PublicDownloadsService.shareFile(source, mimeType: mime);
     } catch (error) {
-      _showSnack('Couldn\u2019t export the file. $error');
+      _showSnack('Couldn\u2019t share the file. $error');
     }
   }
 

@@ -5,6 +5,21 @@ import 'package:video_player/video_player.dart';
 
 import '../theme/aurora_palette.dart';
 
+/// One selectable HLS/DASH (or progressive) quality for [AuroraVideoPlayer].
+class PlayerQualityOption {
+  final String url;
+  final String label;
+  final int? height;
+  final int? bandwidth;
+
+  const PlayerQualityOption({
+    required this.url,
+    required this.label,
+    this.height,
+    this.bandwidth,
+  });
+}
+
 /// A full-screen custom video player with UC Browser-style controls.
 ///
 /// Wraps [VideoPlayerController] directly (no Chewie) so we own every pixel
@@ -14,6 +29,8 @@ import '../theme/aurora_palette.dart';
 /// - Tapping the video toggles the control overlays (auto-hide after 3s).
 /// - Long-pressing the video temporarily boosts playback to 2×.
 /// - A lock icon at the left edge disables all overlay controls.
+/// - When [qualityOptions] has 2+ entries, a quality picker appears in the
+///   bottom bar (and overflow menu) so the user can switch mid-playback.
 class AuroraVideoPlayer extends StatefulWidget {
   final String url;
   final String title;
@@ -30,6 +47,14 @@ class AuroraVideoPlayer extends StatefulWidget {
   /// Optional – if given, used for the "Add to Favorites" flow.
   final String? sourcePageUrl;
 
+  /// Alternate stream qualities (HLS variants, etc.). When length ≥ 2, the
+  /// player shows an in-UI quality picker.
+  final List<PlayerQualityOption> qualityOptions;
+
+  /// Re-resolve auth/CDN headers when the user switches quality. If null,
+  /// the current [headers] map is reused for the new URL.
+  final Future<Map<String, String>> Function(String url)? resolveHeadersForUrl;
+
   const AuroraVideoPlayer({
     super.key,
     required this.url,
@@ -38,6 +63,8 @@ class AuroraVideoPlayer extends StatefulWidget {
     this.onDownload,
     this.onFavorite,
     this.sourcePageUrl,
+    this.qualityOptions = const [],
+    this.resolveHeadersForUrl,
   });
 
   @override
@@ -50,6 +77,12 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   bool _initialized = false;
   String? _error;
   VoidCallback? _controllerListener;
+
+  /// Active stream URL/headers (may differ from [widget.url] after a quality switch).
+  late String _activeUrl;
+  late Map<String, String> _activeHeaders;
+  String _activeQualityLabel = 'Auto';
+  bool _switchingQuality = false;
 
   // --- UI state ---
   bool _controlsVisible = true;
@@ -97,13 +130,33 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   double _videoWidth = 16;
   double _videoHeight = 9;
 
+  bool get _hasQualityPicker => widget.qualityOptions.length >= 2;
+
   @override
   void initState() {
     super.initState();
+    _activeUrl = widget.url;
+    _activeHeaders = Map<String, String>.from(widget.headers);
+    _activeQualityLabel = _labelForUrl(_activeUrl) ?? 'Auto';
     _initPlayer();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  String? _labelForUrl(String url) {
+    for (final q in widget.qualityOptions) {
+      if (q.url == url) return q.label;
+    }
+    // Soft match: same path without query (signed tokens often differ).
+    final path = Uri.tryParse(url)?.path;
+    if (path != null && path.isNotEmpty) {
+      for (final q in widget.qualityOptions) {
+        final qp = Uri.tryParse(q.url)?.path;
+        if (qp != null && qp == path) return q.label;
+      }
+    }
+    return null;
   }
 
   Future<void> _initPlayer({bool retry = false}) async {
@@ -114,7 +167,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       });
     }
 
-    final uri = Uri.tryParse(widget.url);
+    final uri = Uri.tryParse(_activeUrl);
     if (uri == null || !uri.hasScheme) {
       if (mounted) {
         setState(() {
@@ -133,8 +186,8 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       await _controller?.dispose();
       _controller = null;
 
-      final headers = widget.headers.isNotEmpty
-          ? Map<String, String>.from(widget.headers)
+      final headers = _activeHeaders.isNotEmpty
+          ? Map<String, String>.from(_activeHeaders)
           : <String, String>{};
 
       // Ensure Accept covers common media/HLS responses; some CDNs
@@ -142,8 +195,9 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       if (!headers.keys.any((k) => k.toLowerCase() == 'accept')) {
         headers['Accept'] = '*/*';
       }
+      _activeHeaders = headers;
 
-      final formatHint = _formatHintForUrl(widget.url);
+      final formatHint = _formatHintForUrl(_activeUrl);
       final controller = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: headers,
@@ -171,7 +225,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       _startAutoHideTimer();
     } catch (e) {
       if (mounted) {
-        final hasCookie = widget.headers.keys.any(
+        final hasCookie = _activeHeaders.keys.any(
           (k) => k.toLowerCase() == 'cookie',
         );
         setState(() {
@@ -244,14 +298,14 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   Future<void> _ensurePreviewController() async {
     if (_previewReady || _previewInitStarted) return;
     _previewInitStarted = true;
-    final uri = Uri.tryParse(widget.url);
+    final uri = Uri.tryParse(_activeUrl);
     if (uri == null || !uri.hasScheme) {
       _previewInitStarted = false;
       return;
     }
     try {
-      final headers = widget.headers.isNotEmpty
-          ? Map<String, String>.from(widget.headers)
+      final headers = _activeHeaders.isNotEmpty
+          ? Map<String, String>.from(_activeHeaders)
           : <String, String>{};
       if (!headers.keys.any((k) => k.toLowerCase() == 'accept')) {
         headers['Accept'] = '*/*';
@@ -259,7 +313,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       final c = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: headers,
-        formatHint: _formatHintForUrl(widget.url),
+        formatHint: _formatHintForUrl(_activeUrl),
       );
       await c.initialize();
       await c.setVolume(0);
@@ -448,6 +502,159 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     );
   }
 
+  // ---- Quality selector ----
+
+  void _showQualityMenu() {
+    if (!_hasQualityPicker) return;
+    final ac = context.ac;
+    _resetAutoHideTimer();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: ac.surfacePanel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Select quality',
+                  style: TextStyle(
+                    color: ac.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(ctx).height * 0.45,
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final option in widget.qualityOptions)
+                        ListTile(
+                          leading: Icon(
+                            option.url == _activeUrl ||
+                                    option.label == _activeQualityLabel
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: option.url == _activeUrl ||
+                                    option.label == _activeQualityLabel
+                                ? ac.accentFrost
+                                : ac.textSecondary,
+                          ),
+                          title: Text(
+                            option.label,
+                            style: TextStyle(
+                              color: ac.textPrimary,
+                              fontWeight: option.url == _activeUrl
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                          subtitle: option.bandwidth != null
+                              ? Text(
+                                  _formatBandwidth(option.bandwidth!),
+                                  style: TextStyle(
+                                    color: ac.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                )
+                              : null,
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            unawaited(_switchQuality(option));
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatBandwidth(int bps) {
+    if (bps >= 1_000_000) {
+      return '${(bps / 1_000_000).toStringAsFixed(1)} Mbps';
+    }
+    if (bps >= 1_000) return '${(bps / 1_000).toStringAsFixed(0)} Kbps';
+    return '$bps bps';
+  }
+
+  Future<void> _switchQuality(PlayerQualityOption option) async {
+    if (_switchingQuality) return;
+    if (option.url == _activeUrl) return;
+
+    final pos = _controller?.value.position ?? Duration.zero;
+    final wasPlaying = _controller?.value.isPlaying ?? true;
+    final speed = _currentSpeed;
+
+    setState(() {
+      _switchingQuality = true;
+      _error = null;
+      _initialized = false;
+      _activeQualityLabel = option.label;
+    });
+
+    // Drop scrub-preview so it re-inits against the new stream.
+    _previewSeekDebounce?.cancel();
+    await _previewController?.dispose();
+    _previewController = null;
+    _previewReady = false;
+    _previewInitStarted = false;
+
+    Map<String, String> headers = Map<String, String>.from(_activeHeaders);
+    if (widget.resolveHeadersForUrl != null) {
+      try {
+        final resolved = await widget.resolveHeadersForUrl!(option.url);
+        if (resolved.isNotEmpty) {
+          headers = Map<String, String>.from(resolved);
+        }
+      } catch (_) {
+        // Keep previous headers on resolver failure.
+      }
+    }
+    if (!headers.keys.any((k) => k.toLowerCase() == 'accept')) {
+      headers['Accept'] = '*/*';
+    }
+
+    _activeUrl = option.url;
+    _activeHeaders = headers;
+
+    await _initPlayer(retry: true);
+
+    if (!mounted) return;
+
+    final c = _controller;
+    if (c != null && c.value.isInitialized) {
+      try {
+        if (pos > Duration.zero) {
+          await c.seekTo(pos);
+        }
+        await c.setPlaybackSpeed(speed);
+        if (wasPlaying) {
+          await c.play();
+        } else {
+          await c.pause();
+        }
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() => _switchingQuality = false);
+    }
+  }
+
   void _onToggleAspectRatio() {
     _resetAutoHideTimer();
     final fits = [BoxFit.contain, BoxFit.fill, BoxFit.cover];
@@ -476,6 +683,20 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       ),
       color: ac.surfacePanel,
       items: [
+        if (_hasQualityPicker)
+          PopupMenuItem(
+            value: 'quality',
+            child: ListTile(
+              leading: Icon(Icons.high_quality_rounded,
+                  color: ac.textPrimary, size: 20),
+              title: Text(
+                'Quality ($_activeQualityLabel)',
+                style: TextStyle(color: ac.textPrimary, fontSize: 14),
+              ),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
         PopupMenuItem(
           value: 'open_browser',
           child: ListTile(
@@ -505,7 +726,9 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         ),
       ],
     ).then((value) {
-      if (value == 'open_browser') {
+      if (value == 'quality') {
+        _showQualityMenu();
+      } else if (value == 'open_browser') {
         // Pop and let the caller handle it (or use the sourcePageUrl)
         Navigator.pop(context, 'open_browser');
       } else if (value == 'copy_url') {
@@ -903,6 +1126,32 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                     style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   const Spacer(),
+                  // Quality (HLS variants / multi-rendition)
+                  if (_hasQualityPicker) ...[
+                    _miniButton(
+                      onTap: _switchingQuality ? () {} : _showQualityMenu,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.high_quality_rounded,
+                            color: ac.accentFrost,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            _switchingQuality ? '…' : _activeQualityLabel,
+                            style: TextStyle(
+                              color: ac.accentFrost,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                  ],
                   // Speed
                   _miniButton(
                     onTap: _showSpeedMenu,

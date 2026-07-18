@@ -73,11 +73,7 @@ String _truncateUrl(String url, {int maxLength = 35}) {
   return '${url.substring(0, maxLength - 3)}...';
 }
 
-/// Case-insensitive header-name lookup, matching `_hasHeader` in the
-/// original state class.
-bool _hasHeader(Map<String, String> headers, String name) {
-  return headers.keys.any((key) => key.toLowerCase() == name.toLowerCase());
-}
+
 
 /// Displays the long-press / context-menu sheet for a picked page element.
 ///
@@ -391,7 +387,7 @@ Future<void> addContextTargetToQueue(
     };
     final curUrl = await activeTab.controller.currentUrl();
 
-    if (!_hasHeader(taskHeaders, 'Referer')) {
+    if (!hasHeader(taskHeaders, 'Referer')) {
       final referer = firstNonEmpty([
         curUrl,
         activeTab.addressController.text,
