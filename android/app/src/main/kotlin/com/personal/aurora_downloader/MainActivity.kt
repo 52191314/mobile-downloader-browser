@@ -76,6 +76,7 @@ class MainActivity : FlutterActivity() {
                     "openUri" -> openUri(call, result)
                     "renamePublishedFile" -> renamePublishedFile(call, result)
                     "shareFile" -> shareFile(call, result)
+                    "shareContentUri" -> shareContentUri(call, result)
                     "pickImportFile" -> pickImportFile(result)
                     "openUrl" -> openUrl(call, result)
                     "shareUrl" -> shareUrl(call, result)
@@ -525,6 +526,63 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun mimeTypeForFileName(name: String): String {
+        val lower = name.lowercase(Locale.US)
+        return when {
+            lower.endsWith(".mp4") || lower.endsWith(".m4v") -> "video/mp4"
+            lower.endsWith(".webm") -> "video/webm"
+            lower.endsWith(".mkv") -> "video/x-matroska"
+            lower.endsWith(".ts") -> "video/mp2t"
+            lower.endsWith(".mp3") -> "audio/mpeg"
+            lower.endsWith(".m4a") -> "audio/mp4"
+            lower.endsWith(".aac") -> "audio/aac"
+            lower.endsWith(".wav") -> "audio/wav"
+            lower.endsWith(".ogg") || lower.endsWith(".opus") -> "audio/ogg"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".pdf") -> "application/pdf"
+            lower.endsWith(".zip") -> "application/zip"
+            lower.endsWith(".json") -> "application/json"
+            lower.endsWith(".txt") || lower.endsWith(".log") -> "text/plain"
+            lower.endsWith(".vtt") -> "text/vtt"
+            lower.endsWith(".srt") -> "application/x-subrip"
+            else -> {
+                val guessed = android.webkit.MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(lower.substringAfterLast('.', ""))
+                guessed ?: "application/octet-stream"
+            }
+        }
+    }
+
+    /** Launch the system share sheet for an existing content:// (or file) URI. */
+    private fun launchShareChooser(uri: Uri, mimeType: String, title: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newRawUri(title, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, title))
+    }
+
+    private fun shareContentUri(call: MethodCall, result: MethodChannel.Result) {
+        val uriStr = call.argument<String>("uri")
+        val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+        val title = call.argument<String>("title") ?: "Share"
+        if (uriStr.isNullOrBlank()) {
+            result.error("bad_args", "uri is required.", null)
+            return
+        }
+        try {
+            launchShareChooser(Uri.parse(uriStr), mimeType, title)
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("share_failed", error.message, null)
+        }
+    }
+
     private fun shareFile(call: MethodCall, result: MethodChannel.Result) {
         val filePath = call.argument<String>("filePath")
         if (filePath.isNullOrBlank()) {
@@ -532,62 +590,73 @@ class MainActivity : FlutterActivity() {
             return
         }
         val source = File(filePath)
-        if (!source.exists()) {
+        if (!source.exists() || !source.isFile) {
             result.error("missing_file", "File not found: $filePath", null)
             return
         }
 
-        val mimeType = if (source.name.endsWith(".json", ignoreCase = true)) {
-            "application/json"
-        } else {
-            "text/plain"
-        }
+        val mimeType = call.argument<String>("mimeType")
+            ?.takeIf { it.isNotBlank() }
+            ?: mimeTypeForFileName(source.name)
 
         val resolver = applicationContext.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloader")
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
-
-        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        } else {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val destDir = File(downloadsDir, "Aurora Downloader")
-            if (!destDir.exists()) destDir.mkdirs()
-            val destFile = File(destDir, source.name)
-            source.copyTo(destFile, overwrite = true)
-            MediaScannerConnection.scanFile(this, arrayOf(destFile.absolutePath), null, null)
-            result.success(null)
-            return
-        }
-
-        if (uri == null) {
-            result.error("insert_failed", "Could not create MediaStore item for sharing.", null)
-            return
-        }
 
         try {
-            resolver.openOutputStream(uri)?.use { output ->
-                FileInputStream(source).use { input -> input.copyTo(output) }
-            } ?: throw IllegalStateException("Could not open output stream.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Aurora Downloader")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Could not create MediaStore item for sharing.")
+                try {
+                    resolver.openOutputStream(uri)?.use { output ->
+                        FileInputStream(source).use { input -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("Could not open output stream.")
 
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = mimeType
-                putExtra(Intent.EXTRA_STREAM, uri)
-                clipData = android.content.ClipData.newRawUri(null, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    val done = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                    launchShareChooser(uri, mimeType, source.name)
+                    result.success(null)
+                } catch (error: Exception) {
+                    resolver.delete(uri, null, null)
+                    throw error
+                }
+            } else {
+                // Pre-Q: copy into public Downloads then share via MediaScanner URI.
+                val downloadsDir =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val destDir = File(downloadsDir, "Aurora Downloader")
+                if (!destDir.exists()) destDir.mkdirs()
+                val destFile = File(destDir, source.name)
+                source.copyTo(destFile, overwrite = true)
+                MediaScannerConnection.scanFile(
+                    this,
+                    arrayOf(destFile.absolutePath),
+                    arrayOf(mimeType),
+                ) { path, uri ->
+                    try {
+                        val shareUri = uri ?: Uri.fromFile(File(path))
+                        runOnUiThread {
+                            try {
+                                launchShareChooser(shareUri, mimeType, source.name)
+                                result.success(null)
+                            } catch (error: Exception) {
+                                result.error("share_failed", error.message, null)
+                            }
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            result.error("share_failed", error.message, null)
+                        }
+                    }
+                }
             }
-            startActivity(Intent.createChooser(intent, source.name))
-            result.success(null)
         } catch (error: Exception) {
-            resolver.delete(uri, null, null)
             result.error("share_failed", error.message, null)
         }
     }
@@ -646,14 +715,15 @@ class MainActivity : FlutterActivity() {
             }
             pendingImportResult = null
         } else if (requestCode == REQUEST_EXPORT_FILE && pendingExportResult != null) {
-            val sourcePath = pendingExportSourcePath
-            if (resultCode == Activity.RESULT_OK && data?.data != null && sourcePath != null) {
-                val uri = data.data!!
+            // pendingExportSourcePath is either an absolute filesystem path or a
+            // content:// URI (after publish, the private app-data copy is deleted).
+            val sourceRef = pendingExportSourcePath
+            if (resultCode == Activity.RESULT_OK && data?.data != null && sourceRef != null) {
+                val destUri = data.data!!
                 try {
-                    val source = File(sourcePath)
-                    contentResolver.openOutputStream(uri)?.use { output ->
-                        FileInputStream(source).use { input -> input.copyTo(output) }
-                    }
+                    contentResolver.openOutputStream(destUri)?.use { output ->
+                        openReadableSource(sourceRef).use { input -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("Could not open export destination.")
                     pendingExportResult?.success(true)
                 } catch (error: Exception) {
                     pendingExportResult?.error("write_failed", error.message, null)
@@ -926,6 +996,11 @@ class MainActivity : FlutterActivity() {
      *   video-only in pure HW mode while HW+/SW still has sound.
      * - AAC tracks need `csd-0` (AudioSpecificConfig). MPEG-TS ADTS streams
      *   sometimes omit it; HW decoders then open silent audio tracks.
+     * - HLS segment concatenation often yields **discontinuous PTS/PCR**
+     *   (each segment restarts timestamps, or mid-stream #EXT-X-DISCONTINUITY).
+     *   Passing those raw times into MediaMuxer creates multi-minute timeline
+     *   gaps: players freeze on the last frame with no audio until the next
+     *   sample's PTS. We re-stamp every sample onto a continuous timeline.
      *
      * Runs on a background thread because MediaMuxer.start() / writeSampleData()
      * can take noticeable time on large files.
@@ -950,6 +1025,8 @@ class MainActivity : FlutterActivity() {
 
                 // extractor track index → muxer track index (only A/V)
                 val trackMap = LinkedHashMap<Int, Int>()
+                // Default sample step (µs) when PTS is missing or after a discontinuity.
+                val defaultStepUs = HashMap<Int, Long>()
                 muxer = MediaMuxer(destPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
                 for (i in 0 until extractor.trackCount) {
@@ -962,12 +1039,14 @@ class MainActivity : FlutterActivity() {
                     }
                     val muxerIndex = muxer.addTrack(format)
                     trackMap[i] = muxerIndex
+                    defaultStepUs[i] = estimateSampleStepUs(format, mime)
                     Log.i(
                         "AuroraRemux",
                         "track $i → muxer $muxerIndex mime=$mime " +
                             "hasCsd0=${format.containsKey("csd-0")} " +
                             "sampleRate=${format.getIntegerOrNull(MediaFormat.KEY_SAMPLE_RATE)} " +
-                            "channels=${format.getIntegerOrNull(MediaFormat.KEY_CHANNEL_COUNT)}",
+                            "channels=${format.getIntegerOrNull(MediaFormat.KEY_CHANNEL_COUNT)} " +
+                            "stepUs=${defaultStepUs[i]}",
                     )
                 }
 
@@ -991,9 +1070,17 @@ class MainActivity : FlutterActivity() {
                 extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
                 muxer.start()
-                val buffer = ByteBuffer.allocateDirect(2 * 1024 * 1024)
+                // Large HEVC/AVC keyframes from 1080p/4K HLS can exceed 2 MiB.
+                var buffer = ByteBuffer.allocateDirect(4 * 1024 * 1024)
                 val info = MediaCodec.BufferInfo()
                 var sampleCount = 0
+                var discontinuityCount = 0
+                var maxGapClosedUs = 0L
+
+                // Continuous output timeline for HLS-concatenated MPEG-TS.
+                // See class docs: raw PTS gaps freeze HW playback for minutes.
+                val ptsState = PtsRewriteState()
+
                 while (true) {
                     val extractorTrack = extractor.sampleTrackIndex
                     if (extractorTrack < 0) break
@@ -1004,11 +1091,51 @@ class MainActivity : FlutterActivity() {
                         continue
                     }
                     buffer.clear()
-                    val size = extractor.readSampleData(buffer, 0)
+                    var size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
+                    // readSampleData may report a size larger than the buffer;
+                    // grow and re-read the same sample before advancing.
+                    if (size > buffer.capacity()) {
+                        val needed = (size + 64 * 1024).coerceAtMost(32 * 1024 * 1024)
+                        Log.i(
+                            "AuroraRemux",
+                            "growing remux buffer ${buffer.capacity()} → $needed (sample=$size)",
+                        )
+                        buffer = ByteBuffer.allocateDirect(needed)
+                        size = extractor.readSampleData(buffer, 0)
+                        if (size < 0) break
+                        if (size > buffer.capacity()) {
+                            throw IllegalStateException(
+                                "sample too large for remux buffer ($size bytes)",
+                            )
+                        }
+                    }
+
+                    val rawPts = extractor.sampleTime
+                    val stepUs = defaultStepUs[extractorTrack] ?: 33_333L
+                    val rewrite = ptsState.next(
+                        extractorTrack = extractorTrack,
+                        rawPtsUs = rawPts,
+                        stepUs = stepUs,
+                    )
+                    if (rewrite.discontinuity) {
+                        discontinuityCount++
+                        if (rewrite.gapClosedUs > maxGapClosedUs) {
+                            maxGapClosedUs = rewrite.gapClosedUs
+                        }
+                        if (discontinuityCount <= 8 || discontinuityCount % 50 == 0) {
+                            Log.w(
+                                "AuroraRemux",
+                                "PTS discontinuity #$discontinuityCount track=$extractorTrack " +
+                                    "raw=$rawPts out=${rewrite.outPtsUs} " +
+                                    "closedGapUs=${rewrite.gapClosedUs}",
+                            )
+                        }
+                    }
+
                     info.offset = 0
                     info.size = size
-                    info.presentationTimeUs = extractor.sampleTime.coerceAtLeast(0L)
+                    info.presentationTimeUs = rewrite.outPtsUs
                     info.flags = extractor.sampleFlags
                     // MediaMuxer requires buffer position/limit to describe the sample.
                     buffer.position(0)
@@ -1023,7 +1150,12 @@ class MainActivity : FlutterActivity() {
                 muxer = null
                 extractor.release()
                 extractor = null
-                Log.i("AuroraRemux", "remux OK samples=$sampleCount tracks=${trackMap.size} → $destPath")
+                Log.i(
+                    "AuroraRemux",
+                    "remux OK samples=$sampleCount tracks=${trackMap.size} " +
+                        "discontinuities=$discontinuityCount maxGapClosedUs=$maxGapClosedUs " +
+                        "durationUs=${ptsState.maxOutPtsUs} → $destPath",
+                )
                 runOnUiThread { result.success(mapOf("success" to true, "error" to null)) }
             } catch (e: Exception) {
                 Log.w("AuroraRemux", "remuxTsToMp4 failed: ${e.message}", e)
@@ -1038,6 +1170,133 @@ class MainActivity : FlutterActivity() {
             }
         }.start()
     }
+
+    /**
+     * Rough inter-sample duration used when input PTS is missing or after a
+     * discontinuity rebase. Prefer format metadata; fall back to 30 fps / AAC frame.
+     */
+    private fun estimateSampleStepUs(format: MediaFormat, mime: String): Long {
+        if (mime.startsWith("video/")) {
+            // KEY_FRAME_RATE may be int or float depending on extractor.
+            try {
+                if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                    val fps = try {
+                        format.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble()
+                    } catch (_: Exception) {
+                        format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+                    }
+                    if (fps > 1.0 && fps < 240.0) {
+                        return (1_000_000.0 / fps).toLong().coerceIn(4_000L, 100_000L)
+                    }
+                }
+            } catch (_: Exception) {
+                // fall through
+            }
+            return 33_333L // ~30 fps
+        }
+        if (mime.startsWith("audio/")) {
+            val sampleRate = format.getIntegerOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: 48000
+            // AAC-LC frame = 1024 samples.
+            return ((1_000_000L * 1024L) / sampleRate.toLong()).coerceIn(10_000L, 64_000L)
+        }
+        return 33_333L
+    }
+
+    /**
+     * Rewrites MediaExtractor presentation times into a continuous timeline.
+     *
+     * Concatenated HLS MPEG-TS almost always has PTS restarts / jumps. Without
+     * this rewrite, MediaMuxer embeds multi-minute gaps and HW players freeze
+     * on the last frame (with silence) until the next sample's absolute PTS.
+     */
+    private class PtsRewriteState {
+        /** Added to every raw PTS: out = raw + offset (after first-sample base). */
+        private var globalOffsetUs: Long = 0L
+        private var baseSet = false
+        private var firstRawPtsUs: Long = 0L
+
+        /** Last *output* PTS written per extractor track index. */
+        private val lastOutPtsUs = HashMap<Int, Long>()
+
+        /** Highest output PTS across all tracks (approx. media duration). */
+        var maxOutPtsUs: Long = 0L
+            private set
+
+        /**
+         * Gaps larger than this (and any negative delta) are treated as
+         * discontinuities and closed. ~1.5s is above one long HLS segment
+         * delta while still catching multi-minute freezes.
+         */
+        private val maxGapUs = 1_500_000L
+
+        fun next(extractorTrack: Int, rawPtsUs: Long, stepUs: Long): RewriteResult {
+            val step = stepUs.coerceIn(1_000L, 200_000L)
+            // Missing timestamps (-1) — synthesize from last output + step.
+            if (rawPtsUs < 0L) {
+                val last = lastOutPtsUs[extractorTrack]
+                val out = if (last == null) 0L else last + step
+                lastOutPtsUs[extractorTrack] = out
+                if (out > maxOutPtsUs) maxOutPtsUs = out
+                return RewriteResult(outPtsUs = out, discontinuity = last != null, gapClosedUs = 0L)
+            }
+
+            if (!baseSet) {
+                firstRawPtsUs = rawPtsUs
+                globalOffsetUs = -rawPtsUs
+                baseSet = true
+            }
+
+            var out = rawPtsUs + globalOffsetUs
+            var discontinuity = false
+            var gapClosed = 0L
+
+            val last = lastOutPtsUs[extractorTrack]
+            if (last != null) {
+                val delta = out - last
+                // Backwards PTS, or a gap large enough to freeze the player.
+                if (delta <= 0L || delta > maxGapUs) {
+                    val desired = last + step
+                    // Shift the global offset so this sample lands on [desired].
+                    // desired = raw + globalOffset  →  globalOffset = desired - raw
+                    globalOffsetUs = desired - rawPtsUs
+                    gapClosed = if (delta > maxGapUs) delta - step else 0L
+                    out = desired
+                    discontinuity = true
+                }
+            } else {
+                // First sample of this track — if it's far ahead of other tracks'
+                // timeline (e.g. audio starts after video), still allow it, but
+                // clamp large negative (before zero) after offset.
+                if (out < 0L) {
+                    globalOffsetUs += -out
+                    out = 0L
+                    discontinuity = true
+                }
+            }
+
+            // MediaMuxer requires non-decreasing PTS *per track*.
+            val prev = lastOutPtsUs[extractorTrack]
+            if (prev != null && out <= prev) {
+                out = prev + step
+                globalOffsetUs = out - rawPtsUs
+                discontinuity = true
+            }
+
+            lastOutPtsUs[extractorTrack] = out
+            if (out > maxOutPtsUs) maxOutPtsUs = out
+            return RewriteResult(
+                outPtsUs = out,
+                discontinuity = discontinuity,
+                gapClosedUs = gapClosed,
+            )
+        }
+    }
+
+    private data class RewriteResult(
+        val outPtsUs: Long,
+        val discontinuity: Boolean,
+        val gapClosedUs: Long,
+    )
 
     /**
      * Ensures AAC [MediaFormat] has `csd-0` (AudioSpecificConfig). Pure HW
@@ -1388,7 +1647,39 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Opens a readable stream for either an absolute file path or a content:// URI.
+     * Completed downloads delete the private app-data copy after MediaStore publish,
+     * so export/share must accept content URIs.
+     */
+    private fun openReadableSource(sourceRef: String): java.io.InputStream {
+        return if (sourceRef.startsWith("content:", ignoreCase = true)) {
+            contentResolver.openInputStream(Uri.parse(sourceRef))
+                ?: throw IllegalStateException("Could not open content URI: $sourceRef")
+        } else {
+            val source = File(sourceRef)
+            if (!source.exists() || !source.isFile) {
+                throw IllegalStateException("File not found: $sourceRef")
+            }
+            FileInputStream(source)
+        }
+    }
+
+    private fun sourceRefExists(sourceRef: String): Boolean {
+        return try {
+            if (sourceRef.startsWith("content:", ignoreCase = true)) {
+                contentResolver.openInputStream(Uri.parse(sourceRef))?.use { true } ?: false
+            } else {
+                val f = File(sourceRef)
+                f.exists() && f.isFile
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun exportFile(call: MethodCall, result: MethodChannel.Result) {
+        // sourcePath may be a filesystem path OR a content:// URI (published download).
         val sourcePath = call.argument<String>("sourcePath")
         val displayName = call.argument<String>("displayName")
         val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
@@ -1398,9 +1689,12 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
-            result.error("missing_file", "Completed file not found: $sourcePath", null)
+        if (!sourceRefExists(sourcePath)) {
+            result.error(
+                "missing_file",
+                "Completed file not found (private copy may have been removed after publish): $sourcePath",
+                null,
+            )
             return
         }
 
@@ -1456,8 +1750,7 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
+        if (!sourceRefExists(sourcePath)) {
             result.error("missing_file", "Source file not found: $sourcePath", null)
             return
         }
@@ -1465,8 +1758,8 @@ class MainActivity : FlutterActivity() {
         try {
             val uri = Uri.parse(exportUri)
             contentResolver.openOutputStream(uri)?.use { output ->
-                FileInputStream(source).use { input -> input.copyTo(output) }
-            }
+                openReadableSource(sourcePath).use { input -> input.copyTo(output) }
+            } ?: throw IllegalStateException("Could not open export destination.")
             result.success(true)
         } catch (error: Exception) {
             result.error("write_failed", error.message, null)
@@ -1495,8 +1788,7 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val source = File(sourcePath)
-        if (!source.exists() || !source.isFile) {
+        if (!sourceRefExists(sourcePath)) {
             result.error("missing_file", "Source file not found: $sourcePath", null)
             return
         }
@@ -1511,8 +1803,8 @@ class MainActivity : FlutterActivity() {
                 return
             }
             contentResolver.openOutputStream(newFileUri)?.use { output ->
-                FileInputStream(source).use { input -> input.copyTo(output) }
-            }
+                openReadableSource(sourcePath).use { input -> input.copyTo(output) }
+            } ?: throw IllegalStateException("Could not open document output stream.")
             result.success(true)
         } catch (error: Exception) {
             result.error("write_failed", error.message, null)

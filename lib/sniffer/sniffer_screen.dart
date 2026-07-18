@@ -29,6 +29,7 @@ import 'controllers/library_controller.dart';
 import 'controllers/media_catch_controller.dart';
 import 'controllers/sniff_intake_controller.dart';
 import 'controllers/tab_lifecycle_controller.dart';
+import 'controllers/tab_callback_binder.dart';
 import 'controllers/tab_manager.dart';
 import 'idm_backup_parser.dart';
 import 'browser_search.dart';
@@ -53,6 +54,16 @@ import 'package:aurora_downloader/ui/widgets/dock_order_store.dart';
 import 'actions/autofill_action.dart';
 import 'actions/context_menu_action.dart';
 import 'actions/translate_action.dart';
+import 'capture_sort.dart';
+import 'enqueue_download.dart';
+import 'filename_utils.dart';
+import 'hls_variant_fetcher.dart';
+import 'library_transfer.dart';
+import 'playback_quality.dart';
+import 'sheets/duplicate_download_dialog.dart';
+import 'sheets/favorite_dialogs.dart';
+import 'sheets/phishing_warning_dialog.dart';
+import 'sheets/browser_menu_sheet.dart';
 import 'sheets/favorites_sheet.dart';
 import 'sheets/group_actions_sheet.dart' show showGroupActionsSheet, GroupActionsCallbacks;
 import 'sheets/history_sheet.dart';
@@ -61,247 +72,21 @@ import 'sheets/media_info_sheet.dart';
 import 'sheets/media_preview_sheet.dart';
 import 'sheets/saved_pages_sheet.dart';
 import 'sheets/sniffed_media_sheet.dart';
+import 'sheets/strict_redirect_prompt.dart';
 import 'sheets/tabs_sheet.dart';
+import 'sniffer_formatters.dart';
 import 'models/tab_group.dart' show TabGroup;
+import 'widgets/capture_widgets.dart';
 import 'widgets/draggable_tab_card.dart' show DraggableTabCard, TabListDropSlot;
-import 'widgets/floating_video_button.dart';
+import 'widgets/floating_player_overlay.dart';
 import 'widgets/group_drop_zone.dart' show GroupDropZone;
+import 'widgets/find_in_page_bar.dart';
+import 'widgets/picker_cancel_chip.dart';
 import 'widgets/tab_grid_view.dart' show TabGridView;
+import 'widgets/add_queue_dialog.dart' show showAddQueueDialog;
+import 'widgets/address_suggestion_panel.dart';
+import 'widgets/tab_strip.dart';
 import 'tab_groups/tab_group_palette.dart' show TabGroupPalette;
-part 'widgets/capture_widgets.dart';
-part 'widgets/add_queue_dialog.dart';
-part 'widgets/folder_selector.dart';
-part 'widgets/rename_file_dialog.dart';
-
-/// Predefined User-Agent profiles keyed by [DownloadSettings.userAgentProfile].
-const _uaProfiles = <String, String>{
-  'mobile':
-      'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-  'desktop_chrome':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'desktop_firefox':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) '
-      'Gecko/20100101 Firefox/127.0',
-  'safari':
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 '
-      '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-};
-
-/// Human-readable label for each profile key.
-const _uaProfileLabels = <String, String>{
-  'mobile': 'Mobile Chrome',
-  'desktop_chrome': 'Desktop Chrome',
-  'desktop_firefox': 'Desktop Firefox',
-  'safari': 'Safari (macOS)',
-};
-
-const _snifferDownloadUserAgent =
-    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
-    '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
-
-String _cleanUserAgent(String? ua) {
-  if (ua == null) return _snifferDownloadUserAgent;
-  return ua
-      .replaceAll(RegExp(r';\s*wv', caseSensitive: false), '')
-      .replaceAll(RegExp(r'\bwv\b', caseSensitive: false), '')
-      .replaceAll(RegExp(r'Version/4\.0\s*', caseSensitive: false), '');
-}
-
-/// Returns the User-Agent string for a given profile key, falling back
-/// to the mobile Chrome UA for unknown keys.
-String _uaForProfile(String profile) =>
-    _uaProfiles[profile] ?? _snifferDownloadUserAgent;
-
-/// Returns the User-Agent to use for downloading [targetUrl].
-///
-/// For surrit.com and any host behind Cloudflare's WAF, the raw WebView
-/// User-Agent (containing `; wv` and `Version/4.0`) MUST be preserved so
-/// that the `cf_clearance` cookie (cryptographically bound to the exact
-/// UA that earned it) remains valid.  Using a cleaned UA with the same
-/// `cf_clearance` cookie triggers 403 from Cloudflare.
-///
-/// For all other hosts returns the cleaned UA to avoid CDN throttling
-/// that some servers apply to WebView/`wv` signatures.
-String _downloadUserAgent(String targetUrl, BrowserTab tab) {
-  final raw = tab.userAgent;
-  if (raw == null || raw.isEmpty) return _snifferDownloadUserAgent;
-  if (targetUrl.toLowerCase().contains('surrit.com')) {
-    return raw; // Must match the UA that earned Cloudflare clearance.
-  }
-  return _cleanUserAgent(raw);
-}
-
-Map<String, String> _normalizeHeadersForUrl(
-  Map<String, String> headers,
-  String targetUrl, {
-  String? currentUrl,
-  String? addressText,
-  String? sourcePageUrl,
-}) {
-  final targetLower = targetUrl.toLowerCase();
-  if (targetLower.contains('surrit.com')) {
-    String? refererKey;
-    for (final key in headers.keys) {
-      if (key.toLowerCase() == 'referer') {
-        refererKey = key;
-        break;
-      }
-    }
-
-    String? currentReferer = refererKey != null ? headers[refererKey] : null;
-
-    // 1. Always fix missav.com -> missav.ws domain migration if present.
-    if (currentReferer != null &&
-        currentReferer.toLowerCase().contains('missav.com')) {
-      currentReferer = currentReferer.replaceAll(
-        RegExp(r'missav\.com', caseSensitive: false),
-        'missav.ws',
-      );
-      if (refererKey != null) {
-        headers.remove(refererKey);
-      }
-      headers['Referer'] = currentReferer;
-      _ensureOriginHeader(headers, currentReferer);
-      return headers;
-    }
-
-    // 2. If the referer is already set to a surrit.com URL and the target is
-    //    also surrit.com, keep the same-origin referer.  surrit.com's CDN
-    //    needs the surrit.com iframe page URL as referer — replacing it with
-    //    missav.ws causes 403.
-    if (currentReferer != null &&
-        currentReferer.toLowerCase().contains('surrit.com')) {
-      _ensureOriginHeader(headers, currentReferer);
-      return headers;
-    }
-
-    // 3. No referer (or empty) — build a fallback.
-    if (currentReferer == null || currentReferer.isEmpty) {
-      final candidate = _firstNonEmpty([
-        sourcePageUrl,
-        currentUrl,
-        addressText,
-      ]);
-      if (candidate != null &&
-          !candidate.toLowerCase().contains('surrit.com')) {
-        currentReferer = candidate;
-      } else {
-        // When the target is surrit.com, use the target URL's own origin
-        // (scheme + host) as the referer.  surrit.com's CDN rejects
-        // missav.ws and any non-surrit.com referer; it also rejects
-        // requests with no referer at all (403 / "blocked").
-        final targetUri = Uri.tryParse(targetUrl);
-        if (targetUri != null && targetUri.host.isNotEmpty) {
-          currentReferer = '${targetUri.scheme}://${targetUri.host}/';
-        } else {
-          currentReferer = 'https://missav.ws/';
-        }
-      }
-    }
-
-    if (!currentReferer.startsWith('http://') &&
-        !currentReferer.startsWith('https://')) {
-      // Same fallback logic: prefer the target origin over the hard-coded
-      // missav.ws default when the URL provides a valid host.
-      final targetUri = Uri.tryParse(targetUrl);
-      if (targetUri != null && targetUri.host.isNotEmpty) {
-        currentReferer = '${targetUri.scheme}://${targetUri.host}/';
-      } else {
-        currentReferer = 'https://missav.ws/';
-      }
-    }
-
-    if (refererKey != null) {
-      headers.remove(refererKey);
-    }
-    headers['Referer'] = currentReferer;
-    _ensureOriginHeader(headers, currentReferer);
-  }
-  return headers;
-}
-
-/// If the [headers] map does not already contain an `Origin` header, add one
-/// derived from [referer] (scheme + host).  Some CDNs require Origin for
-/// cross-origin playlist requests.
-void _ensureOriginHeader(Map<String, String> headers, String referer) {
-  if (_hasHeader(headers, 'Origin')) return;
-  final uri = Uri.tryParse(referer);
-  if (uri != null && uri.host.isNotEmpty && uri.scheme.isNotEmpty) {
-    headers['Origin'] = '${uri.scheme}://${uri.host}';
-  }
-}
-
-Map<String, String> _buildSniffedDownloadHeaders({
-  required BrowserTab tab,
-  required SniffedMedia media,
-  required Map<String, String> cookieHeaders,
-  String? currentUrl,
-}) {
-  final headers = <String, String>{
-    'User-Agent': _downloadUserAgent(media.url, tab),
-  };
-  _mergeHeaders(headers, tab.controller.currentHeaders);
-  _mergeHeaders(headers, sanitizeSniffedMediaHeaders(media.headers));
-
-  if (!_hasHeader(headers, 'Referer')) {
-    final referer = _firstNonEmpty([
-      media.sourcePageUrl,
-      currentUrl,
-      tab.addressController.text,
-    ]);
-    if (referer != null) {
-      headers['Referer'] = referer;
-    }
-  }
-
-  _mergeHeaders(headers, cookieHeaders);
-
-  // Re-add Authorization header from the sniff-time cache (it was sanitized
-  // out of media.headers for security, but we captured it in authHeaderCache).
-  final cachedAuth = tab.authHeaderCache[media.url];
-  if (cachedAuth != null &&
-      cachedAuth.isNotEmpty &&
-      !_hasHeader(headers, 'Authorization')) {
-    headers['Authorization'] = cachedAuth;
-  }
-
-  _normalizeHeadersForUrl(
-    headers,
-    media.url,
-    currentUrl: currentUrl,
-    addressText: tab.addressController.text,
-    sourcePageUrl: media.sourcePageUrl,
-  );
-
-  return headers;
-}
-
-void _mergeHeaders(Map<String, String> target, Map<String, String> source) {
-  for (final entry in source.entries) {
-    target.removeWhere(
-      (key, _) => key.toLowerCase() == entry.key.toLowerCase(),
-    );
-    target[entry.key] = entry.value;
-  }
-}
-
-bool _hasHeader(Map<String, String> headers, String name) {
-  return headers.keys.any((key) => key.toLowerCase() == name.toLowerCase());
-}
-
-String? _firstNonEmpty(Iterable<String?> values) {
-  for (final value in values) {
-    final trimmed = value?.trim();
-    if (trimmed != null && trimmed.isNotEmpty) {
-      return trimmed;
-    }
-  }
-  return null;
-}
-
-enum _RedirectPromptAction { foreground, background, currentTab, ignore }
 
 /// Filter options for the rich catch sheet segmented control are defined
 /// in `sheets/sniffed_media_sheet.dart` (re-declared so the file is
@@ -365,7 +150,7 @@ class SnifferScreen extends StatefulWidget {
 
 class _SnifferScreenState extends State<SnifferScreen>
     with WidgetsBindingObserver
-    implements TabLifecycleHost {
+    implements TabLifecycleHost, TabCallbackHost {
   late final DownloadQueue _downloadQueue;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -394,6 +179,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// Initialized in `initState` after [_tabManager] and
   /// [_sniffIntakeController] are available.
   late final TabLifecycleController _tabLifecycleController;
+
+  /// Wires all WebView callbacks (navigation, sniffing, download, play,
+  /// JS channels) onto a [BrowserTab].  Replaces the old in-State
+  /// `_setupTabCallbacks` body.  Initialized in `initState`.
+  late final TabCallbackBinder _tabCallbackBinder;
 
   bool get _addressExpanded => _addressBarController.addressExpanded;
   set _addressExpanded(bool v) => _addressBarController.addressExpanded = v;
@@ -567,10 +357,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       onSniffedCountChanged: widget.onSniffedCountChanged == null
           ? null
           : (count) => widget.onSniffedCountChanged!(count ?? 0),
-      uaForProfile: _uaForProfile,
+      uaForProfile: uaForProfile,
       downloadUserAgent: downloadUserAgent,
       baseRequestHeaders: _baseRequestHeaders,
-      normalizeHeadersForUrl: _normalizeHeadersForUrl,
+      normalizeHeadersForUrl: normalizeHeadersForUrl,
       firstNonEmpty: firstNonEmpty,
     );
     _tabLifecycleController = TabLifecycleController(
@@ -582,6 +372,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       injectedController: widget.controller,
       debugControllerFactory: widget.debugControllerFactory,
       injectedSnifferEngine: widget.snifferEngine,
+    );
+    _tabCallbackBinder = TabCallbackBinder(
+      host: this,
+      sniffIntakeController: _sniffIntakeController,
     );
     widget.controller?.setOnOpenUrlRequest(_handleExternalOpenUrl);
     widget.controller?.setOnOpenUrlInNewTab(_handleExternalOpenUrl);
@@ -655,13 +449,13 @@ class _SnifferScreenState extends State<SnifferScreen>
       _desktopMode = widget.settings.desktopMode;
       if (_desktopMode) {
         for (final tab in _tabs) {
-          tab.controller.setUserAgent(_uaForProfile('desktop_chrome'));
+          tab.controller.setUserAgent(uaForProfile('desktop_chrome'));
         }
       }
     }
     if (oldWidget.settings.userAgentProfile !=
         widget.settings.userAgentProfile) {
-      final ua = _uaForProfile(widget.settings.userAgentProfile);
+      final ua = uaForProfile(widget.settings.userAgentProfile);
       for (final tab in _tabs) {
         tab.controller.setUserAgent(ua);
       }
@@ -874,7 +668,8 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   @override
-  String uaForProfile(String profile) => _uaForProfile(profile);
+  String uaForProfile(String profile) =>
+      uaProfiles[profile] ?? snifferMobileUserAgent;
 
   @override
   Future<void> loadUrlWithHostSettings(
@@ -916,7 +711,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   void showSnack(String message) => _showSnack(message);
 
   @override
-  String titleForUrl(String url) => _titleForUrl(url);
+  String titleForUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri != null && uri.host.isNotEmpty) return uri.host;
+    return url.isEmpty ? 'Page' : url;
+  }
 
   @override
   void startVideoPoll(BrowserTab tab) => _startVideoPoll(tab);
@@ -1274,594 +1073,33 @@ class _SnifferScreenState extends State<SnifferScreen>
       _libraryController.save(newLibrary);
 
   Future<void> _exportLibrary() async {
-    bool exportFavorites = true;
-    bool exportHistory = true;
-    bool exportSavedPages = true;
-    bool exportQueue = true;
-    bool exportSettings = true;
-    bool exportTabs = true;
-
-    await showModalBottomSheet<void>(
+    await LibraryTransfer.exportWithUi(
       context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.file_upload_outlined,
-                            color: context.ac.accentFrost,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Export your data',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: context.ac.textPrimary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Favorites',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          '${_library.favorites.length} favorites, ${_library.folders.length} folders',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportFavorites,
-                        onChanged: (val) =>
-                            setModalState(() => exportFavorites = val),
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Web History',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          '${_library.history.length} history entries',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportHistory,
-                        onChanged: (val) =>
-                            setModalState(() => exportHistory = val),
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Saved Pages',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          '${_library.savedPages.length} offline pages',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportSavedPages,
-                        onChanged: (val) =>
-                            setModalState(() => exportSavedPages = val),
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Download History',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          '${_downloadQueue.allTasks.length} tasks',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportQueue,
-                        onChanged: (val) =>
-                            setModalState(() => exportQueue = val),
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'App Settings',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          'Toggles, concurrent limits, search engine defaults',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportSettings,
-                        onChanged: (val) =>
-                            setModalState(() => exportSettings = val),
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Open Tabs',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        subtitle: Text(
-                          '${_tabs.length} open tab(s)',
-                          style: TextStyle(color: context.ac.textSecondary),
-                        ),
-                        value: exportTabs,
-                        onChanged: (val) =>
-                            setModalState(() => exportTabs = val),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: Text(
-                              'Cancel',
-                              style: TextStyle(color: context.ac.textSecondary),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                            key: const Key('confirm_export_button'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: context.ac.accentFrost,
-                              foregroundColor: context.ac.surfaceField,
-                            ),
-                          onPressed:
-                              (!exportFavorites &&
-                                  !exportHistory &&
-                                  !exportSavedPages &&
-                                  !exportQueue &&
-                                  !exportSettings &&
-                                  !exportTabs)
-                              ? null
-                              : () {
-                                  Navigator.pop(ctx);
-                                  unawaited(
-                                    _performExport(
-                                      exportFavorites: exportFavorites,
-                                      exportHistory: exportHistory,
-                                      exportSavedPages: exportSavedPages,
-                                      exportQueue: exportQueue,
-                                      exportSettings: exportSettings,
-                                      exportTabs: exportTabs,
-                                    ),
-                                  );
-                                },
-                          child: const Text('Export'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      library: _library,
+      libraryStore: widget.libraryStore,
+      downloadQueue: _downloadQueue,
+      settings: widget.settings,
+      tabs: _tabs,
+      activeTabIndex: _activeTabIndex,
+      showSnack: _showSnack,
     );
   }
 
-  Future<void> _performExport({
-    required bool exportFavorites,
-    required bool exportHistory,
-    required bool exportSavedPages,
-    required bool exportQueue,
-    required bool exportSettings,
-    required bool exportTabs,
-  }) async {
-    try {
-      final List<Map<String, dynamic>>? downloadQueueJson = exportQueue
-          ? _downloadQueue.allTasks.map((t) => t.toJson()).toList()
-          : null;
-      final Map<String, dynamic>? settingsJson = exportSettings
-          ? widget.settings.toJson()
-          : null;
-      final List<Map<String, dynamic>>? tabsJson = exportTabs
-          ? _tabs.asMap().entries.map((e) => {
-                'id': e.value.id,
-                'url': e.value.addressController.text.trim(),
-                'title': e.value.title,
-                'active': e.key == _activeTabIndex,
-              }).toList()
-          : null;
-
-      final file = await widget.libraryStore.exportToFile(
-        exportFavorites: exportFavorites,
-        exportHistory: exportHistory,
-        exportSavedPages: exportSavedPages,
-        downloadQueueJson: downloadQueueJson,
-        settingsJson: settingsJson,
-        tabsJson: tabsJson,
-      );
-      await PublicDownloadsService.shareFile(file.path);
-    } catch (error) {
-      _showSnack('Export failed: $error');
-    }
-  }
-
   Future<void> _importLibrary() async {
-    try {
-      // Ensure download paths are resolved before import processes queue tasks
-      if (_baseDir == null) {
-        await _initPaths();
-      }
-
-      final filePath = await PublicDownloadsService.pickImportFile();
-      if (filePath == null) return;
-
-      final Map<String, dynamic> decoded;
-      if (filePath.toLowerCase().endsWith('.1dmbak')) {
-        decoded = await IdmBackupParser.parse(filePath);
-      } else {
-        decoded = await widget.libraryStore.readImportMap(filePath);
-      }
-
-      final hasFavorites =
-          decoded.containsKey('favorites') &&
-          (decoded['favorites'] is List) &&
-          (decoded['favorites'] as List).isNotEmpty;
-      final hasHistory =
-          decoded.containsKey('history') &&
-          (decoded['history'] is List) &&
-          (decoded['history'] as List).isNotEmpty;
-      final hasSavedPages =
-          decoded.containsKey('savedPages') &&
-          (decoded['savedPages'] is List) &&
-          (decoded['savedPages'] as List).isNotEmpty;
-      final hasQueue =
-          decoded.containsKey('downloadQueue') &&
-          (decoded['downloadQueue'] is List) &&
-          (decoded['downloadQueue'] as List).isNotEmpty;
-      final hasSettings = decoded.containsKey('settings');
-
-      final isLegacy =
-          decoded.containsKey('favorites') ||
-          decoded.containsKey('history') ||
-          decoded.containsKey('savedPages') ||
-          (!decoded.containsKey('settings') &&
-              !decoded.containsKey('downloadQueue') &&
-              decoded.isNotEmpty &&
-              !decoded.containsKey('favorites') &&
-              !decoded.containsKey('history') &&
-              !decoded.containsKey('savedPages'));
-
-      bool importFavorites = hasFavorites || isLegacy;
-      bool importHistory = hasHistory || isLegacy;
-      bool importSavedPages = hasSavedPages || isLegacy;
-      bool importQueue = hasQueue;
-      bool importSettings = hasSettings;
-
-      if (!hasFavorites && !isLegacy) importFavorites = false;
-      if (!hasHistory && !isLegacy) importHistory = false;
-      if (!hasSavedPages && !isLegacy) importSavedPages = false;
-
-      bool proceed = false;
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: (ctx) {
-          return StatefulBuilder(
-            builder: (context, setModalState) {
-              return SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.file_download_outlined,
-                            color: context.ac.accentFrost,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Import your data',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: context.ac.textPrimary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Favorites / Bookmarks',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        value: importFavorites,
-                        onChanged: (hasFavorites || isLegacy)
-                            ? (val) =>
-                                  setModalState(() => importFavorites = val)
-                            : null,
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Web History',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        value: importHistory,
-                        onChanged: (hasHistory || isLegacy)
-                            ? (val) => setModalState(() => importHistory = val)
-                            : null,
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Saved Pages',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        value: importSavedPages,
-                        onChanged: (hasSavedPages || isLegacy)
-                            ? (val) =>
-                                  setModalState(() => importSavedPages = val)
-                            : null,
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'Download History (Queue)',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        value: importQueue,
-                        onChanged: hasQueue
-                            ? (val) => setModalState(() => importQueue = val)
-                            : null,
-                      ),
-                      SwitchListTile(
-                        activeColor: context.ac.accentFrost,
-                        title: Text(
-                          'App Settings',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                        value: importSettings,
-                        onChanged: hasSettings
-                            ? (val) => setModalState(() => importSettings = val)
-                            : null,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: Text(
-                              'Cancel',
-                              style: TextStyle(color: context.ac.textSecondary),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: context.ac.accentFrost,
-                              foregroundColor: context.ac.surfaceField,
-                            ),
-                            onPressed:
-                                (!importFavorites &&
-                                    !importHistory &&
-                                    !importSavedPages &&
-                                    !importQueue &&
-                                    !importSettings)
-                                ? null
-                                : () {
-                                    proceed = true;
-                                    Navigator.pop(ctx);
-                                  },
-                            child: const Text('Import'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      );
-
-      if (!proceed) return;
-
-      int importedFavoritesCount = 0;
-      int importedHistoryCount = 0;
-      int importedSavedPagesCount = 0;
-      int importedQueueCount = 0;
-      bool importedSettings = false;
-
-      BrowserLibrary updatedLibrary = _library;
-
-      // 1. App Settings
-      if (importSettings && decoded.containsKey('settings')) {
-        final settingsMap = decoded['settings'];
-        if (settingsMap is Map) {
-          final imported = DownloadSettings.fromJson(
-            Map<String, dynamic>.from(settingsMap),
-          );
-          widget.onSettingsChanged?.call(imported);
-          importedSettings = true;
-        }
-      }
-
-      // 2. Download Queue
-      if (importQueue && decoded.containsKey('downloadQueue')) {
-        final queueList = decoded['downloadQueue'];
-        if (queueList is List) {
-          for (final item in queueList) {
-            if (item is! Map) continue;
-            try {
-              final taskMap = Map<String, dynamic>.from(item);
-
-              // Dynamic re-basing of savePath to the current base directory
-              String savePath = taskMap['savePath'] as String? ?? '';
-              final normalized = savePath.replaceAll('\\', '/');
-              final completedIndex = normalized.lastIndexOf('/completed/');
-              if (completedIndex != -1) {
-                final relativePart = normalized.substring(
-                  completedIndex + '/completed/'.length,
-                );
-                taskMap['savePath'] =
-                    '$_baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}${relativePart.replaceAll('/', Platform.pathSeparator)}';
-              } else if (savePath.startsWith('completed/') ||
-                  savePath.startsWith('completed\\')) {
-                final relativePart = savePath.substring('completed/'.length);
-                taskMap['savePath'] =
-                    '$_baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}${relativePart.replaceAll('/', Platform.pathSeparator).replaceAll('\\', Platform.pathSeparator)}';
-              } else {
-                final filename = p.basename(savePath);
-                taskMap['savePath'] =
-                    '$_baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$filename';
-              }
-
-              // Dynamic re-basing of tempDir to the current base temp directory
-              String tempDir = taskMap['tempDir'] as String? ?? '';
-              final normalizedTemp = tempDir.replaceAll('\\', '/');
-              final tempIndex = normalizedTemp.lastIndexOf('/temp_');
-              if (tempIndex != -1) {
-                final relativePart = normalizedTemp.substring(tempIndex);
-                taskMap['tempDir'] = '$_baseTemp$relativePart';
-              } else {
-                taskMap['tempDir'] =
-                    '$_baseTemp${Platform.pathSeparator}temp_${DateTime.now().millisecondsSinceEpoch}_$importedQueueCount';
-              }
-
-              final task = DownloadTask.fromJson(taskMap);
-              _downloadQueue.addTask(task);
-              importedQueueCount++;
-            } catch (_) {}
-          }
-        }
-      }
-
-      // 3. Browser Library - Favorites / Folders
-      if (importFavorites && decoded.containsKey('favorites')) {
-        final importedFolders = decoded.containsKey('folders')
-            ? (decoded['folders'] as List? ?? const [])
-                  .whereType<Map>()
-                  .map(
-                    (item) => BookmarkFolder.fromJson(
-                      Map<String, dynamic>.from(item),
-                    ),
-                  )
-                  .toList()
-            : _library.folders;
-        final known = {for (final folder in importedFolders) folder.id};
-        final importedFavorites = (decoded['favorites'] as List? ?? const [])
-            .whereType<Map>()
-            .map(
-              (item) =>
-                  BrowserFavorite.fromJson(Map<String, dynamic>.from(item)),
-            )
-            .map((favorite) {
-              if (favorite.folderId != null &&
-                  !known.contains(favorite.folderId)) {
-                return favorite.copyWith(clearFolder: true);
-              }
-              return favorite;
-            })
-            .toList();
-
-        updatedLibrary = updatedLibrary.copyWith(
-          favorites: importedFavorites,
-          folders: importedFolders,
-        );
-        importedFavoritesCount = importedFavorites.length;
-      }
-
-      // 4. Browser Library - History
-      if (importHistory && decoded.containsKey('history')) {
-        final importedHistory = (decoded['history'] as List? ?? const [])
-            .whereType<Map>()
-            .map(
-              (item) =>
-                  BrowserHistoryEntry.fromJson(Map<String, dynamic>.from(item)),
-            )
-            .toList();
-        updatedLibrary = updatedLibrary.copyWith(history: importedHistory);
-        importedHistoryCount = importedHistory.length;
-      }
-
-      // 5. Browser Library - Saved Pages
-      if (importSavedPages && decoded.containsKey('savedPages')) {
-        final importedSavedPages = (decoded['savedPages'] as List? ?? const [])
-            .whereType<Map>()
-            .map((item) => SavedPage.fromJson(Map<String, dynamic>.from(item)))
-            .toList();
-        updatedLibrary = updatedLibrary.copyWith(
-          savedPages: importedSavedPages,
-        );
-        importedSavedPagesCount = importedSavedPages.length;
-      }
-
-      if (importFavorites || importHistory || importSavedPages) {
-        if (!decoded.containsKey('favorites') &&
-            !decoded.containsKey('history') &&
-            !decoded.containsKey('savedPages')) {
-          final legacyLib = BrowserLibrary.fromJson(decoded);
-          List<BrowserFavorite>? favs;
-          List<BookmarkFolder>? folders;
-          List<BrowserHistoryEntry>? hist;
-          List<SavedPage>? saved;
-
-          if (importFavorites) {
-            favs = legacyLib.favorites;
-            folders = legacyLib.folders;
-            importedFavoritesCount = legacyLib.favorites.length;
-          }
-          if (importHistory) {
-            hist = legacyLib.history;
-            importedHistoryCount = legacyLib.history.length;
-          }
-          if (importSavedPages) {
-            saved = legacyLib.savedPages;
-            importedSavedPagesCount = legacyLib.savedPages.length;
-          }
-
-          updatedLibrary = updatedLibrary.copyWith(
-            favorites: favs,
-            folders: folders,
-            history: hist,
-            savedPages: saved,
-          );
-        }
-        await _saveLibrary(updatedLibrary);
-      }
-
-      final List<String> summary = [];
-      if (importedFavoritesCount > 0)
-        summary.add('$importedFavoritesCount favorites');
-      if (importedHistoryCount > 0)
-        summary.add('$importedHistoryCount history entries');
-      if (importedSavedPagesCount > 0)
-        summary.add('$importedSavedPagesCount saved pages');
-      if (importedQueueCount > 0)
-        summary.add('$importedQueueCount download tasks');
-      if (importedSettings) summary.add('app settings');
-
-      if (summary.isEmpty) {
-        _showSnack('Import completed (no new items found).');
-      } else {
-        _showSnack('Imported: ${summary.join(", ")}.');
-      }
-    } catch (error, stack) {
-      debugPrint('[ImportLibrary] $error\n$stack');
-      _showSnack('Import failed: $error');
+    final message = await LibraryTransfer.importWithUi(
+      context: context,
+      library: _library,
+      libraryStore: widget.libraryStore,
+      downloadQueue: _downloadQueue,
+      baseDir: _baseDir,
+      baseTemp: _baseTemp,
+      ensurePaths: _initPaths,
+      saveLibrary: _saveLibrary,
+      onSettingsChanged: widget.onSettingsChanged,
+      showSnack: _showSnack,
+    );
+    if (message != null && mounted) {
+      _showSnack(message);
     }
   }
 
@@ -1880,7 +1118,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
     if (!mounted) return;
     setState(() {
-      tab.title = _cleanTitle(title, url);
+      tab.title = cleanTitle(title, url);
       tab.currentUrl = url;
       if (url != null && url.isNotEmpty) {
         _addressExpanded = false;
@@ -1890,7 +1128,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         url != null &&
         url.isNotEmpty &&
         !url.startsWith('file:')) {
-      await _recordHistory(url, tab.title ?? _titleForUrl(url));
+      await _recordHistory(url, tab.title ?? titleForUrl(url));
     }
   }
 
@@ -2091,460 +1329,84 @@ class _SnifferScreenState extends State<SnifferScreen>
     await _saveLibrary(_library.copyWith(history: history));
   }
 
-  void _setupTabCallbacks(BrowserTab tab) {
-    // Drive smart address suggestions while the user types.
-    tab.attachAddressListener(_onAddressChanged);
-    tab.controller.setOnUrlChanged((url) {
-      if (!mounted) return;
-      final changed =
-          tab.currentUrl != url || tab.addressController.text != url;
-      if (!changed) return;
-      // Writing the URL into the controller would re-fire suggestion
-      // refresh during navigation — only update when the bar is collapsed.
-      tab.addressController.text = url;
-      tab.currentUrl = url;
-      _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
-      _updateTabNavState(tab);
-      if (mounted && tab == _activeTab) _debouncedNavSetState();
-    });
-    tab.controller.setOnPageStarted((url) {
-      if (!mounted) return;
-      tab.isLoading = true;
-      tab.progress = 0;
-      if (tab == _activeTab) {
-        _progressNotifier.value = 0;
-      }
-      _lastScrollY = 0.0;
-      if (!_barsVisible) {
-        _barsVisible = true;
-      }
-      _fetchedIframeSrcs.clear();
-      AuroraLog.instance.info(
-        'Page started: $url',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
-      tab.authHeaderCache.clear();
-      final navHost = Uri.tryParse(url)?.host;
-      if (navHost != null) {
-        _sniffIntakeController.clearCookieCacheForHost(navHost);
-      }
-      // Play: site-level hard-off as soon as main-frame navigation starts.
-      final hardOff = RestrictedMediaPolicy.shouldHardOffSniffing(url);
-      tab.sniffingEnabled = !hardOff;
-      if (!hardOff) {
-        tab.complianceNoticeShown = false;
-      } else {
-        tab.videoPollTimer?.cancel();
-        tab.videoPollTimer = null;
-        tab.snifferEngine.purgeRestrictedMedia();
-      }
-      // Only clear the media cache when navigating to a genuinely different
-      // page. The authority is the last *fully-loaded* main-frame URL
-      // (`committedMainFrameUrl`, updated on onPageFinished), NOT the raw
-      // onLoadStart url. Invisible JS navigations (ad insertion, analytics
-      // `location.href` reassignments) and SPA `pushState` route changes
-      // fire onLoadStart but never reach onPageFinished, so they keep the
-      // previous committed URL and the cache is preserved. Same-URL reloads
-      // also keep the cache. `_isDifferentPage` is an AND-guard against
-      // WebView versions where onPageFinished timing is unreliable.
-      final previousUrl = tab.committedMainFrameUrl;
-      if (url != tab.committedMainFrameUrl &&
-          _isDifferentPage(tab.currentUrl, url)) {
-        AuroraLog.instance.debug(
-          'Navigation: clearing media cache ($previousUrl -> $url)',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
-        tab.snifferEngine.clearCache();
-        if (tab == _activeTab) {
-          _latestVideoMedia = null;
-          _videoFloatRect = null;
-          // New page → allow the float button again.
-          _floatingPlayerDismissedForUrl = null;
-        }
-      } else {
-        AuroraLog.instance.debug(
-          'Same-page navigation ($url) — keeping media cache '
-          '(${tab.snifferEngine.detectedMedia.length} items)',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
-      }
-      if (tab.sniffingEnabled) {
-        _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
-      }
-      _updateTabNavState(tab);
-      // Debounce setState — onPageStarted may fire for background tabs too.
-      if (tab == _activeTab) {
-        _debouncedNavSetState();
-      }
-    });
-    tab.controller.setOnPageFinished((url) {
-      if (!mounted) return;
-      tab.isLoading = false;
-      tab.progress = 0;
-      // Record the last fully-loaded main-frame URL. This is the authority
-      // used by setOnPageStarted to decide cache clearing — invisible JS
-      // navigations never reach here, so they keep the previous value.
-      tab.committedMainFrameUrl = url;
-      _debouncedNavSetState();
-      AuroraLog.instance.info(
-        'Page finished: $url',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
-      // Play: re-affirm site-level hard-off after main frame commits.
-      final hardOff = RestrictedMediaPolicy.shouldHardOffSniffing(url);
-      tab.sniffingEnabled = !hardOff;
-      if (hardOff) {
-        tab.snifferEngine.purgeRestrictedMedia();
-        tab.videoPollTimer?.cancel();
-        tab.videoPollTimer = null;
-        if (tab == _activeTab && !tab.complianceNoticeShown) {
-          tab.complianceNoticeShown = true;
-          AuroraSnackbar.show(
-            context,
-            RestrictedMediaPolicy.pageNoticeRestricted,
-          );
-        }
-      } else {
-        tab.complianceNoticeShown = false;
-      }
-      if (tab.sniffingEnabled) {
-        _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
-      }
-      _updateTabNavState(tab);
-      unawaited(_refreshPageInfo(tab, recordHistory: true));
-      unawaited(_applyCosmeticRules(tab));
-      unawaited(_saveTabs());
-      _startVideoPoll(tab);
-      _applyZoomForPage(tab, url);
-      unawaited(_applyDarkModeForPage(tab, url));
-      // Re-apply after guard/page scripts so the flag survives reinjection.
-      unawaited(
-        tab.controller.setReplaceSitePlayer(widget.settings.replaceSitePlayer),
-      );
-    });
-    tab.controller.setOnProgressChanged((progress) {
-      if (!mounted) return;
-      tab.progress = progress;
-      if (tab == _activeTab) {
-        _progressNotifier.value = progress;
-      }
-    });
-    tab.controller.setOnScrollPositionChange((x, y) {
-      if (tab == _activeTab) {
-        _onScroll(x, y);
-      }
-    });
-    tab.controller.setOnRecreated(() {
-      final url = tab.currentUrl ?? tab.addressController.text;
-      if (url.isNotEmpty && url != 'about:blank') {
-        unawaited(
-          _loadUrlWithHostSettings(tab, Uri.parse(url), addToHistory: false),
-        );
-      }
-    });
-    // Synchronous nav-state callback — fires whenever the controller's
-    // historyIndex changes, so the toolbar back/forward buttons update
-    // instantly without an async round-trip to the WebView.
-    tab.controller.setOnNavStateChanged(() {
-      if (!mounted) return;
-      final prevBack = tab.canGoBack;
-      final prevForward = tab.canGoForward;
-      tab.canGoBack = tab.controller.historyIndex > 0;
-      tab.canGoForward =
-          tab.controller.historyIndex < tab.controller.historyUrls.length - 1;
-      if (tab.canGoBack != prevBack || tab.canGoForward != prevForward) {
-        if (mounted) setState(() {});
-      }
-    });
-    tab.controller.setOnStrictRedirectDetected((event) {
-      _handleNativeStrictRedirect(tab, event);
-    });
-    tab.controller.addJavaScriptChannel(
-      'MediaSnifferChannel',
-      onMessageReceived: (message) {
-        final url = message.trim();
-        _sniffIntakeController.sniffBrowserUrl(
-          tab,
-          url,
-          sourcePageUrl: tab.addressController.text,
-        );
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'MediaSniffer',
-      onMessageReceived: (message) {
-        final url = message.trim();
-        _sniffIntakeController.sniffBrowserUrl(
-          tab,
-          url,
-          sourcePageUrl: tab.addressController.text,
-        );
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'AdBlockerChannel',
-      onMessageReceived: (message) {
-        if (message == 'popup_blocked' &&
-            mounted &&
-            widget.settings.popupBlockingEnabled) {
-          tab.controller.incrementBlockedPopups();
-          if (mounted) setState(() {});
-        }
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'PopupBlockerChannel',
-      onMessageReceived: (message) {
-        _handlePopupEvent(tab, message);
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'InvisibleRedirectChannel',
-      onMessageReceived: (message) {
-        _handleInvisibleRedirect(tab, message);
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'ElementPickerChannel',
-      onMessageReceived: (message) {
-        unawaited(_handlePickedElement(tab, message));
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'LinkContextChannel',
-      onMessageReceived: (message) {
-        _showElementContextMenu(message);
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'AuroraPlayChannel',
-      onMessageReceived: (message) {
-        if (tab != _activeTab) return;
-        unawaited(_handleAuroraPlayRequest(message));
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'VideoFloatChannel',
-      onMessageReceived: (message) {
-        if (tab != _activeTab) return;
-        _handleVideoFloatMessage(message);
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'MediaMetaChannel',
-      onMessageReceived: (message) {
-        final capturedTab = tab;
-        final pageUrl = capturedTab.addressController.text;
-        _decodeJsInBackground(message).then((data) {
-          if (data == null || !mounted) return;
-          final src = data['src'] as String?;
-          if (src != null && src.isNotEmpty) {
-            _sniffIntakeController.sniffBrowserUrl(
-              capturedTab,
-              src,
-              sourcePageUrl: pageUrl,
-            );
-          }
-        });
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'MediaSnifferDataChannel',
-      onMessageReceived: (message) {
-        final capturedTab = tab;
-        final pageUrl = capturedTab.addressController.text;
-        _decodeJsInBackground(message).then((data) {
-          if (data == null || !mounted) return;
-          final url = data['url'] as String?;
-          final ct = data['contentType'] as String?;
-          final clStr = data['contentLength'] as String?;
-          final cl = (clStr != null && clStr.isNotEmpty)
-              ? int.tryParse(clStr)
-              : null;
-          if (url != null && url.isNotEmpty) {
-            _sniffIntakeController.sniffBrowserUrl(
-              capturedTab,
-              url,
-              sourcePageUrl: pageUrl,
-              contentType: ct,
-              contentLength: cl,
-            );
-          }
-        });
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'PageMetaChannel',
-      onMessageReceived: (message) {
-        final capturedTab = tab;
-        _decodeJsInBackground(message).then((data) {
-          if (data == null || !mounted) return;
-          final ogTitle = data['ogTitle'] as String?;
-          final twitterTitle = data['twitterTitle'] as String?;
-          final h1Title = data['h1Title'] as String?;
-          final ldName = data['ldName'] as String?;
-          final docTitle = data['title'] as String? ?? '';
-          // Prefer the longest usable source. Playwright study of MissAV:
-          // document.title is truncated (~55 chars); og:title / h1 / twitter
-          // hold the full descriptive name (~273 chars).
-          final resolvedTitle = FilenameService.pickBestTitle([
-                ogTitle,
-                twitterTitle,
-                h1Title,
-                ldName,
-                docTitle,
-              ]) ??
-              '';
-          capturedTab.pageMeta = PageMeta(
-            title: resolvedTitle,
-            videoWidth: int.tryParse((data['ogVideoWidth'] as String?) ?? ''),
-            videoHeight: int.tryParse((data['ogVideoHeight'] as String?) ?? ''),
-            structuredName: ldName,
-          );
-          // Backfill (or upgrade truncated) pageTitle on already-sniffed
-          // media so downloads get the full title instead of URL slug /
-          // short document.title.
-          if (resolvedTitle.trim().isNotEmpty) {
-            final title = resolvedTitle.trim();
-            final media = capturedTab.snifferEngine.detectedMedia;
-            for (var i = 0; i < media.length; i++) {
-              final m = media[i];
-              final existing = m.pageTitle?.trim() ?? '';
-              if (existing.isEmpty || existing.length + 20 < title.length) {
-                media[i] = m.copyWith(pageTitle: title);
-              }
-            }
-          }
-          if (mounted) setState(() {});
-        });
-      },
-    );
-    tab.controller.addJavaScriptChannel(
-      'IframeSrcChannel',
-      onMessageReceived: (message) {
-        final url = message.trim();
-        if (url.isNotEmpty) {
-          _sniffIframeContent(tab, url);
-        }
-      },
-    );
+  void _setupTabCallbacks(BrowserTab tab) => _tabCallbackBinder.attach(tab);
 
-    tab.controller.addJavaScriptChannel(
-      'HlsPlaylistChannel',
-      onMessageReceived: (message) {
-        final capturedTab = tab;
-        _decodeJsInBackground(message)
-            .then((data) {
-              if (data == null || !mounted) return;
-              final url = data['url'] as String?;
-              final body = data['body'] as String?;
-              if (url != null &&
-                  body != null &&
-                  url.isNotEmpty &&
-                  body.isNotEmpty) {
-                capturedTab.hlsPlaylistCache[url] = body;
-                AuroraLog.instance.debug(
-                  'HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${capturedTab.hlsPlaylistCache.length})',
-                  category: LogCategory.sniffer,
-                  screen: LogScreen.browser,
-                  eventType: LogEventType.sniff,
-                );
-              }
-            })
-            .catchError((e) {
-              AuroraLog.instance.error(
-                'HlsPlaylistChannel error: $e',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
-            });
-      },
-    );
-    tab.controller.setOnIframeMediaDetected((url) {
-      _sniffIntakeController.sniffBrowserUrl(
-        tab,
-        url,
-        sourcePageUrl: tab.addressController.text,
-      );
-    });
-    // Capture native HLS playlist bodies (when the page uses Android WebView's
-    // built-in HLS player, browser_guard.js can't see the request). Store the
-    // body in the per-tab cache so the downloader uses the real playlist.
-    tab.controller.setOnHlsPlaylistIntercepted((url, body) async {
-      tab.hlsPlaylistCache[url] = body;
-      AuroraLog.instance.debug(
-        'Captured native HLS playlist body for $url (${body.length} chars)',
-        category: LogCategory.hls,
-        screen: LogScreen.browser,
-        eventType: LogEventType.network,
-      );
-    });
-    tab.controller.setOnDownloadStartRequest((url, suggestedFilename) async {
-      // Always sniff the URL to capture browser context (cookies,
-      // Referer, User-Agent), even when auto-downloading or prompting.
-      await _sniffIntakeController.sniffWithLiveHeaders(
-        tab,
-        url,
-        sourcePageUrl: tab.addressController.text,
-      );
+  // ---- TabCallbackHost implementation (forwarding to private methods) ----
+  // markNeedsBuild, updateTabNavState, showSnack, startVideoPoll are
+  // already public via TabLifecycleHost — no forwarding needed.
 
-      if (!mounted) return;
+  void debouncedNavSetState() => _debouncedNavSetState();
+  void onScroll(double x, double y) => _onScroll(x, y);
 
-      switch (widget.settings.downloadLinkBehavior) {
-        case DownloadLinkBehavior.capture:
-          // Default: sniff and show a snackbar so the user opens the
-          // capture sheet to review and add to queue.
-          _showSnack(
-            suggestedFilename != null
-                ? 'Captured $suggestedFilename — open the capture tray to add it to the queue.'
-                : 'URL captured — open the capture tray to add it to the queue.',
-          );
-        case DownloadLinkBehavior.autoDownload:
-          // Add directly to the download queue without prompting.
-          await _enqueueDirectDownload(tab, url, suggestedFilename);
-        case DownloadLinkBehavior.ask:
-          // Show a dialog asking what to do.
-          _showDownloadBehaviorPrompt(tab, url, suggestedFilename);
-        case DownloadLinkBehavior.block:
-          // Silently ignore — no snack, no queue entry.
-          break;
-      }
+  ValueNotifier<int> get progressNotifier => _progressNotifier;
+  VoidCallback get onAddressChanged => _onAddressChanged;
+  bool isDifferentPage(String? a, String? b) =>
+      _isDifferentPage(a ?? '', b ?? '');
 
-      _sniffIntakeController.scheduleMediaRebuild();
-      _sniffIntakeController.scheduleMediaSave(tab);
-    });
+  // Mutable bookkeeping
+  double get lastScrollY => _lastScrollY;
+  set lastScrollY(double v) => _lastScrollY = v;
+  bool get barsVisible => _barsVisible;
+  set barsVisible(bool v) => _barsVisible = v;
+  Set<String> get fetchedIframeSrcs => _tabManager.fetchedIframeSrcs;
+  SniffedMedia? get latestVideoMedia => _latestVideoMedia;
+  set latestVideoMedia(SniffedMedia? v) => _latestVideoMedia = v;
+  Rect? get videoFloatRect => _videoFloatRect;
+  set videoFloatRect(Rect? v) => _videoFloatRect = v;
+  String? get floatingPlayerDismissedForUrl => _floatingPlayerDismissedForUrl;
+  set floatingPlayerDismissedForUrl(String? v) => _floatingPlayerDismissedForUrl = v;
 
-    // Track best video candidate for the floating play button and for
-    // blob/MSE fallback when auto-replace is enabled — active tab only.
-    tab.mediaSubscription?.cancel();
-    tab.mediaSubscription = tab.snifferEngine.onMediaDetected.listen((media) {
-      if (!mounted) return;
-      if (media.type != MediaType.video && media.type != MediaType.playlist) {
-        return;
-      }
-      if (tab != _activeTab) return;
-      if (!_mediaBelongsToActiveTab(media)) return;
-      if (_shouldReplaceVideo(media)) {
-        final prevUrl = _latestVideoMedia?.url;
-        _latestVideoMedia = media;
-        // Rebuild so the float button appears once a stream is known.
-        if (prevUrl != media.url &&
-            !widget.settings.replaceSitePlayer &&
-            mounted) {
-          setState(() {});
-        }
-      }
-    });
+  // Popup / redirect / picker
+  void handleNativeStrictRedirect(BrowserTab tab, Object event) =>
+      _handleNativeStrictRedirect(tab, event as dynamic);
+  void handlePopupEvent(BrowserTab tab, String message) =>
+      _handlePopupEvent(tab, message);
+  void handleInvisibleRedirect(BrowserTab tab, String message) =>
+      _handleInvisibleRedirect(tab, message);
+  Future<void> handlePickedElement(BrowserTab tab, String message) =>
+      _handlePickedElement(tab, message);
+
+  // NB: showLinkContextMenu delegates to the private _showElementContextMenu
+  // which internally calls the external showElementContextMenu from
+  // context_menu_action.dart.  Avoids name shadowing.
+  void showLinkContextMenu(String message) =>
+      _showElementContextMenu(message);
+
+  // Player / float
+  Future<void> handleAuroraPlayRequest(String message) =>
+      _handleAuroraPlayRequest(message);
+  void handleVideoFloatMessage(String message) =>
+      _handleVideoFloatMessage(message);
+  void showComplianceNotice() {
+    AuroraSnackbar.show(context, RestrictedMediaPolicy.pageNoticeRestricted);
   }
+
+  // JS / sniffing
+  Future<Map?> decodeJsInBackground(String message) =>
+      _decodeJsInBackground(message);
+  void sniffIframeContent(BrowserTab tab, String url) =>
+      _sniffIframeContent(tab, url);
+
+  // Download — avoid shadowing external functions from enqueue_download.dart
+  Future<void> handleEnqueueDownload(
+    BrowserTab tab,
+    String url,
+    String? suggestedFilename,
+  ) => _enqueueDirectDownload(tab, url, suggestedFilename);
+  void handleDownloadPrompt(
+    BrowserTab tab,
+    String url,
+    String? suggestedFilename,
+  ) => _showDownloadBehaviorPrompt(tab, url, suggestedFilename);
+
+  // Page lifecycle (some already from TabLifecycleHost)
+  Future<void> saveTabs() => _saveTabs();
+
+  // Media / playback
+  bool mediaBelongsToActiveTab(SniffedMedia media) =>
+      _mediaBelongsToActiveTab(media);
+  bool shouldReplaceVideo(SniffedMedia incoming) =>
+      _shouldReplaceVideo(incoming);
 
   /// Drop any cached float/auto-replace media that is not from the active
   /// tab, then re-pick the best stream from that tab's sniffer only.
@@ -2881,47 +1743,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   Future<bool?> _showPhishingWarning(Uri uri, SafeBrowsingResult result) {
-    return showDialog<bool>(
+    return showPhishingWarningDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber, color: Colors.redAccent),
-            SizedBox(width: 8),
-            Text('Phishing suspected'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(uri.toString()),
-            const SizedBox(height: 8),
-            Text(
-              result.reason ?? 'This site is flagged as unsafe. Only open it if you are sure it is legitimate.',
-              style: const TextStyle(fontSize: 12),
-            ),
-            if (result.source != null)
-              Text(
-                'Source: ${result.source}',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: ctx.ac.textSecondary,
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Stay safe'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Continue anyway'),
-          ),
-        ],
-      ),
+      uri: uri,
+      result: result,
     );
   }
 
@@ -3131,78 +1956,22 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (!mounted) return;
       final sourceHost = Uri.tryParse(sourcePageUrl ?? '')?.host;
       final targetHost = uri.host.isNotEmpty ? uri.host : url;
-      final decision = await showDialog<_RedirectPromptAction>(
+      final decision = await showStrictRedirectPromptDialog(
         context: context,
-        barrierDismissible: true,
-        builder: (ctx) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.block, color: Colors.redAccent),
-              const SizedBox(width: 8),
-              Expanded(child: Text(title)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                targetHost,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              if (sourceHost != null && sourceHost.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'From $sourceHost',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                method,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(_RedirectPromptAction.ignore),
-              child: const Text('Ignore'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(_RedirectPromptAction.background),
-              child: const Text('Background'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(_RedirectPromptAction.currentTab),
-              child: const Text('Current tab'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(_RedirectPromptAction.foreground),
-              child: const Text('New page'),
-            ),
-          ],
-        ),
+        title: title,
+        targetHost: targetHost,
+        method: method,
+        sourceHost: sourceHost,
       );
       if (!mounted || !_tabs.contains(tab)) return;
       switch (decision) {
-        case _RedirectPromptAction.foreground:
+        case RedirectPromptAction.foreground:
           _tabLifecycleController.openNewTab(
             url: url,
             insertAtIndex: _activeTabIndex + 1,
           );
           break;
-        case _RedirectPromptAction.background:
+        case RedirectPromptAction.background:
           _tabLifecycleController.openNewTab(
             url: url,
             switchToTab: false,
@@ -3211,13 +1980,13 @@ class _SnifferScreenState extends State<SnifferScreen>
           );
           _showSnack('Opened in background: $targetHost');
           break;
-        case _RedirectPromptAction.currentTab:
+        case RedirectPromptAction.currentTab:
           // Explicit allow so the invisible-redirect / ad-nav gate does not
           // re-prompt the same destination after the user confirmed.
           unawaited(tab.controller.allowNextCrossOriginNavigation(url));
           unawaited(_loadUrlWithHostSettings(tab, uri));
           break;
-        case _RedirectPromptAction.ignore:
+        case RedirectPromptAction.ignore:
         case null:
           _showSnack('Ignored redirect to $targetHost');
           break;
@@ -3361,183 +2130,23 @@ class _SnifferScreenState extends State<SnifferScreen>
     return 'New Tab';
   }
 
-  static const double _suggestionRowHeight = 52.0;
-
   Widget _buildSuggestionPanel({required bool allowScroll}) {
-    return ListView.builder(
-      key: const Key('address_suggestion_panel'),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: _addressSuggestions.length,
-      // Only scroll when content exceeds the max panel height; otherwise
-      // the panel shrinks to fit and feels like a native typeahead list.
-      physics: allowScroll
-          ? const ClampingScrollPhysics()
-          : const NeverScrollableScrollPhysics(),
-      itemBuilder: (context, i) {
-        final suggestion = _addressSuggestions[i];
-        final icon = switch (suggestion.kind) {
-          AddressSuggestionKind.favorite => Icons.star_rounded,
-          AddressSuggestionKind.history => Icons.history_rounded,
-          AddressSuggestionKind.search => Icons.search_rounded,
-        };
-        final subtitle = switch (suggestion.kind) {
-          AddressSuggestionKind.search =>
-            widget.settings.searchEngine.name,
-          AddressSuggestionKind.favorite ||
-          AddressSuggestionKind.history =>
-            () {
-              final host = Uri.tryParse(suggestion.url)?.host;
-              return (host != null && host.isNotEmpty) ? host : suggestion.url;
-            }(),
-        };
-        return InkWell(
-          onTap: () => _acceptSuggestion(suggestion),
-          child: Container(
-            height: _suggestionRowHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: context.ac.surfaceElevated,
-                  width: 0.5,
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 18, color: context.ac.accentFrost),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        suggestion.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: context.ac.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.ac.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    return AddressSuggestionPanel(
+      suggestions: _addressSuggestions,
+      onAccept: _acceptSuggestion,
+      searchEngineName: widget.settings.searchEngine.name,
+      allowScroll: allowScroll,
     );
   }
 
   Widget _buildTabStrip() {
-    final ac = context.ac;
-    final activeColor = _privateMode
-        ? ac.accentPurple
-        : ac.accentFrost;
-    return Container(
-      key: const Key('browser_tab_strip'),
-      height: 34,
-      color: ac.dockSurface,
-      child: Row(
-        children: [
-          if (_privateMode)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: Center(
-                child: Icon(
-                  Icons.visibility_off_outlined,
-                  size: 12,
-                  color: ac.accentPurple,
-                ),
-              ),
-            ),
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _tabs.length,
-              itemBuilder: (_, i) {
-                final tab = _tabs[i];
-                final isActive = i == _activeTabIndex;
-                return GestureDetector(
-                  onTap: () => _switchToActiveTab(i),
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 120),
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 4,
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isActive
-                          ? activeColor.withOpacity(0.15)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            TabManager.tabLabel(tab),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isActive
-                                  ? activeColor
-                                  : ac.textSecondary,
-                            ),
-                          ),
-                        ),
-                        if (_tabs.length > 1)
-                          GestureDetector(
-                            key: Key('browser_tab_close_$i'),
-                            onTap: () => _tabLifecycleController.closeTab(i),
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 4),
-                                child: Icon(
-                                  Icons.close,
-                                  size: 12,
-                                  color: ac.textSecondary,
-                                ),
-                              ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.add,
-              size: 16,
-              color: ac.textSecondary,
-            ),
-            onPressed: () => _tabLifecycleController.openNewTab(),
-            tooltip: 'New tab',
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            padding: EdgeInsets.zero,
-          ),
-        ],
-      ),
+    return TabStrip(
+      tabs: _tabs,
+      activeIndex: _activeTabIndex,
+      isPrivateMode: _privateMode,
+      onSwitch: _switchToActiveTab,
+      onClose: (i) => _tabLifecycleController.closeTab(i),
+      onNewTab: () => _tabLifecycleController.openNewTab(),
     );
   }
 
@@ -3555,7 +2164,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     final maxSuggestionH = screenH * 0.65;
     final rawSuggestionH = _addressSuggestions.isEmpty
         ? 0.0
-        : _addressSuggestions.length * _suggestionRowHeight + 8.0;
+        : _addressSuggestions.length * AddressSuggestionPanel.rowHeight + 8.0;
     final suggestionHeight = rawSuggestionH.clamp(0.0, maxSuggestionH);
     final suggestionNeedsScroll = rawSuggestionH > maxSuggestionH + 0.5;
 
@@ -3956,7 +2565,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       left: 0,
       right: 0,
       child: Center(
-        child: _PickerCancelChip(
+        child: PickerCancelChip(
           key: const Key('cancel_picker_button'),
           onCancel: () => _cancelElementPicker(),
         ),
@@ -3991,7 +2600,7 @@ class _SnifferScreenState extends State<SnifferScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: context.ac.borderStrong),
           ),
-          child: _BrowserDock(
+          child: BrowserDock(
             tab: tab,
             onSniffer: _showSniffedMediaSheet,
             onDownload: () => widget.onOpenQueue?.call(),
@@ -4164,60 +2773,16 @@ class _SnifferScreenState extends State<SnifferScreen>
   String _addressLabel() => _addressBarController.addressLabel(_activeTab);
 
   Widget _buildFindBar() {
-    return SizedBox(
-      height: 54.0,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: context.ac.overlaySurface,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: context.ac.borderStrong),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _findController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Find in page',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixText: _findMatchCount > 0
-                          ? '${_findCurrentMatch + 1}/$_findMatchCount'
-                          : null,
-                    ),
-                    onChanged: (value) {
-                      _activeTab.controller.findAllAsync(value);
-                    },
-                    onSubmitted: (value) {
-                      _findNext(true);
-                    },
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Previous',
-                  icon: const Icon(Icons.keyboard_arrow_up),
-                  onPressed: () => _findNext(false),
-                ),
-                IconButton(
-                  tooltip: 'Next',
-                  icon: const Icon(Icons.keyboard_arrow_down),
-                  onPressed: () => _findNext(true),
-                ),
-                IconButton(
-                  tooltip: 'Close',
-                  icon: const Icon(Icons.close),
-                  onPressed: _dismissFind,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return FindInPageBar(
+      controller: _findController,
+      matchCount: _findMatchCount,
+      currentMatch: _findCurrentMatch,
+      onQueryChanged: (value) {
+        _activeTab.controller.findAllAsync(value);
+      },
+      onFindNext: () => _findNext(true),
+      onFindPrevious: () => _findNext(false),
+      onClose: _dismissFind,
     );
   }
 
@@ -4431,14 +2996,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     String name, {
     int maxLength = FilenameService.defaultMaxFileNameBytes,
   }) {
-    return FilenameService.truncate(name, maxBytes: maxLength);
+    return truncateFilename(name, maxLength: maxLength);
   }
 
   static String truncateFilename(
     String name, {
     int maxLength = FilenameService.defaultMaxFileNameBytes,
   }) {
-    return FilenameService.truncate(name, maxBytes: maxLength);
+    return truncateFilename(name, maxLength: maxLength);
   }
 
   String _downloadFilenameFor(String? label, String targetUrl) {
@@ -4468,7 +3033,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       return;
     }
 
-    final title = _cleanTitle(await tab.controller.pageTitle(), url);
+    final title = cleanTitle(await tab.controller.pageTitle(), url);
     final selection = await _promptFavoriteFolder();
     if (selection == null) return;
     final favorite = BrowserFavorite(
@@ -4493,120 +3058,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   Future<FavoriteSelection?> _promptFavoriteFolder() async {
-    final folders = List<BookmarkFolder>.from(_library.folders);
-    String? folderId;
-    final tagsController = TextEditingController();
-    final newFolderController = TextEditingController();
-    final result = await showDialog<FavoriteSelection>(
+    return showPromptFavoriteFolderDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Add to favorites'),
-          content: StatefulBuilder(
-            builder: (ctx, setLocal) {
-              return SizedBox(
-                width: 320,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text('Folder', style: TextStyle(fontSize: 12)),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<String?>(
-                      value: folderId,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: 'Unsorted',
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('Unsorted'),
-                        ),
-                        for (final folder in folders)
-                          DropdownMenuItem<String?>(
-                            value: folder.id,
-                            child: Text(folder.name),
-                          ),
-                      ],
-                      onChanged: (value) => setLocal(() => folderId = value),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: newFolderController,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: 'Create new folder',
-                        prefixIcon: Icon(Icons.create_new_folder_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    TextButton.icon(
-                      onPressed: () {
-                        final name = newFolderController.text.trim();
-                        if (name.isEmpty) return;
-                        final newFolder = BookmarkFolder(
-                          id: DateTime.now().microsecondsSinceEpoch.toString(),
-                          name: name,
-                          createdAt: DateTime.now(),
-                        );
-                        folders.add(newFolder);
-                        folderId = newFolder.id;
-                        newFolderController.clear();
-                        setLocal(() {});
-                      },
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Add folder'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: tagsController,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: 'Tags (comma separated)',
-                        prefixIcon: Icon(Icons.label_outline),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final tags = tagsController.text
-                    .split(',')
-                    .map((tag) => tag.trim())
-                    .where((tag) => tag.isNotEmpty)
-                    .toList(growable: false);
-                Navigator.of(ctx).pop(
-                  FavoriteSelection(
-                    folderId: folderId,
-                    folderName: folderId == null
-                        ? null
-                        : folders
-                              .where((folder) => folder.id == folderId)
-                              .map((folder) => folder.name)
-                              .firstOrNull,
-                    tags: tags,
-                    updatedFolders: folders,
-                  ),
-                );
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      folders: _library.folders,
     );
-    tagsController.dispose();
-    newFolderController.dispose();
-    return result;
   }
 
   Future<void> _saveCurrentPage() async {
@@ -4615,7 +3070,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (url == null || url.isEmpty || url.startsWith('file:')) return;
     setState(() => _isSavingPage = true);
     try {
-      final title = _cleanTitle(await tab.controller.pageTitle(), url);
+      final title = cleanTitle(await tab.controller.pageTitle(), url);
       final result = await tab.controller.evaluateJavaScript(
         'document.documentElement.outerHTML',
       );
@@ -4670,10 +3125,10 @@ class _SnifferScreenState extends State<SnifferScreen>
     final mapped = widget.settings.siteUserAgents[host.toLowerCase()];
     if (mapped != null && mapped.isNotEmpty) return mapped;
     // If desktopMode is true (legacy setting) use desktop Chrome UA.
-    if (_desktopMode) return _uaForProfile('desktop_chrome');
+    if (_desktopMode) return uaForProfile('desktop_chrome');
     // Otherwise, respect the full profile when there is no per-site override.
     final profile = widget.settings.userAgentProfile;
-    if (profile != 'mobile') return _uaForProfile(profile);
+    if (profile != 'mobile') return uaForProfile(profile);
     return null;
   }
 
@@ -4726,8 +3181,8 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// overrides.
   Future<void> _showUserAgentSelector() async {
     final current = widget.settings.userAgentProfile;
-    final profiles = _uaProfiles.keys.toList();
-    final labels = profiles.map((k) => _uaProfileLabels[k] ?? k).toList();
+    final profiles = uaProfiles.keys.toList();
+    final labels = profiles.map((k) => uaProfileLabels[k] ?? k).toList();
 
     final result = await showDialog<String>(
       context: context,
@@ -4775,14 +3230,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
 
     // Apply the new UA to all tabs immediately
-    final ua = _uaForProfile(result);
+    final ua = uaForProfile(result);
     for (final tab in _tabs) {
       await tab.controller.setUserAgent(ua);
     }
     if (_activeTab.addressController.text.isNotEmpty) {
       await _activeTab.controller.reload();
     }
-    _showSnack('UA switched to ${_uaProfileLabels[result] ?? result}.');
+    _showSnack('UA switched to ${uaProfileLabels[result] ?? result}.');
   }
 
   Future<void> _editSiteUserAgent(String currentUrl) async {
@@ -4884,91 +3339,13 @@ class _SnifferScreenState extends State<SnifferScreen>
   );
 
   Future<BrowserLibrary?> _editFavoriteFolder(BrowserFavorite favorite) async {
-    final folders = List<BookmarkFolder>.from(_library.folders);
-    String? folderId = favorite.folderId;
-    final tagsController = TextEditingController(
-      text: favorite.tags.join(', '),
-    );
-    final saved = await showDialog<bool>(
+    final edit = await showEditFavoriteDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit favorite'),
-        content: StatefulBuilder(
-          builder: (ctx, setLocal) => SizedBox(
-            width: 320,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Folder', style: TextStyle(fontSize: 12)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String?>(
-                  value: folderId,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Unsorted',
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Unsorted'),
-                    ),
-                    for (final folder in folders)
-                      DropdownMenuItem<String?>(
-                        value: folder.id,
-                        child: Text(folder.name),
-                      ),
-                  ],
-                  onChanged: (value) => setLocal(() => folderId = value),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: tagsController,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Tags (comma separated)',
-                    prefixIcon: Icon(Icons.label_outline),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      favorite: favorite,
+      folders: _library.folders,
     );
-    if (saved != true) {
-      tagsController.dispose();
-      return null;
-    }
-    final tags = tagsController.text
-        .split(',')
-        .map((tag) => tag.trim())
-        .where((tag) => tag.isNotEmpty)
-        .toList(growable: false);
-    tagsController.dispose();
-    final updatedLib = _library.copyWith(
-      favorites: _library.favorites
-          .map(
-            (fav) => fav.id == favorite.id
-                ? fav.copyWith(
-                    folderId: folderId,
-                    clearFolder: folderId == null,
-                    tags: tags,
-                  )
-                : fav,
-          )
-          .toList(growable: false),
-    );
+    if (edit == null) return null;
+    final updatedLib = applyFavoriteEdit(_library, favorite, edit);
     await _saveLibrary(updatedLib);
     return updatedLib;
   }
@@ -4984,223 +3361,102 @@ class _SnifferScreenState extends State<SnifferScreen>
   );
 
   void _showBrowserMenuSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      useSafeArea: true,
-      backgroundColor: context.ac.overlay,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        final settings = widget.settings;
-        final host = Uri.tryParse(_activeTab.currentUrl ?? '')?.host ?? '';
-        final isAllowlisted = host.isNotEmpty && settings.adblockAllowlist.contains(host);
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Browser Tools',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: ctx.ac.textPrimary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Blocked popups: ${_activeTab.controller.blockedPopupsCount}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: ctx.ac.textSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1.1,
-                    children: [
-                      _buildMenuItem(
-                        icon: Icons.star_rounded,
-                        label: 'Favorites',
-                        color: ctx.ac.accentAmber,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _showFavoritesSheet();
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.offline_pin_rounded,
-                        label: 'Saved Pages',
-                        color: Colors.green,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _showSavedPagesSheet();
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.save_alt_rounded,
-                        label: 'Save Page',
-                        color: Colors.green,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(_saveCurrentPage());
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.history_rounded,
-                        label: 'History',
-                        color: Colors.blue,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _showHistorySheet();
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.find_in_page_rounded,
-                        label: 'Find in Page',
-                        color: Colors.purple,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          setState(() => _findVisible = true);
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.assignment_ind_rounded,
-                        label: 'Autofill',
-                        color: Colors.teal,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(_showAutofillMenu());
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.chrome_reader_mode_rounded,
-                        label: 'Reader Mode',
-                        color: Colors.orange,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(_showReaderMode());
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.ads_click,
-                        label: 'Block Element',
-                        color: Colors.redAccent,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(_startElementPicker());
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.undo,
-                        label: 'Reset Blocks',
-                        color: ctx.ac.textSecondary,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _resetPageElementBlocks();
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: !settings.adblockEnabled
-                            ? Icons.shield
-                            : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
-                        label: !settings.adblockEnabled
-                            ? 'Adblock: Off'
-                            : (isAllowlisted ? 'Ads Allowed' : 'Adblock: On'),
-                        color: !settings.adblockEnabled
-                            ? Colors.redAccent
-                            : (isAllowlisted ? ctx.ac.textSecondary : Colors.green),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _showAdblockPopup(_activeTab);
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.refresh_rounded,
-                        label: 'Re-scan',
-                        color: Colors.cyanAccent,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(_rescanPageMedia());
-                        },
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.cookie_rounded,
-                        label: 'Clear Cookies',
-                        color: Colors.redAccent,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          unawaited(
-                            _activeTab.controller.currentUrl().then((url) {
-                              if (url != null && url.isNotEmpty) {
-                                unawaited(_clearDataForSite(url));
-                              }
-                            }),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMenuItem({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.white.withOpacity(0.05),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: context.ac.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+    final settings = widget.settings;
+    final host = Uri.tryParse(_activeTab.currentUrl ?? '')?.host ?? '';
+    final isAllowlisted =
+        host.isNotEmpty && settings.adblockAllowlist.contains(host);
+    final ac = context.ac;
+    showBrowserMenuSheet(
+      context,
+      blockedPopupsCount: _activeTab.controller.blockedPopupsCount,
+      actions: [
+        BrowserMenuAction(
+          icon: Icons.star_rounded,
+          label: 'Favorites',
+          color: ac.accentAmber,
+          onTap: _showFavoritesSheet,
         ),
-      ),
+        BrowserMenuAction(
+          icon: Icons.offline_pin_rounded,
+          label: 'Saved Pages',
+          color: Colors.green,
+          onTap: _showSavedPagesSheet,
+        ),
+        BrowserMenuAction(
+          icon: Icons.save_alt_rounded,
+          label: 'Save Page',
+          color: Colors.green,
+          onTap: () => unawaited(_saveCurrentPage()),
+        ),
+        BrowserMenuAction(
+          icon: Icons.history_rounded,
+          label: 'History',
+          color: Colors.blue,
+          onTap: _showHistorySheet,
+        ),
+        BrowserMenuAction(
+          icon: Icons.find_in_page_rounded,
+          label: 'Find in Page',
+          color: Colors.purple,
+          onTap: () => setState(() => _findVisible = true),
+        ),
+        BrowserMenuAction(
+          icon: Icons.assignment_ind_rounded,
+          label: 'Autofill',
+          color: Colors.teal,
+          onTap: () => unawaited(_showAutofillMenu()),
+        ),
+        BrowserMenuAction(
+          icon: Icons.chrome_reader_mode_rounded,
+          label: 'Reader Mode',
+          color: Colors.orange,
+          onTap: () => unawaited(_showReaderMode()),
+        ),
+        BrowserMenuAction(
+          icon: Icons.ads_click,
+          label: 'Block Element',
+          color: Colors.redAccent,
+          onTap: () => unawaited(_startElementPicker()),
+        ),
+        BrowserMenuAction(
+          icon: Icons.undo,
+          label: 'Reset Blocks',
+          color: ac.textSecondary,
+          onTap: _resetPageElementBlocks,
+        ),
+        BrowserMenuAction(
+          icon: !settings.adblockEnabled
+              ? Icons.shield
+              : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
+          label: !settings.adblockEnabled
+              ? 'Adblock: Off'
+              : (isAllowlisted ? 'Ads Allowed' : 'Adblock: On'),
+          color: !settings.adblockEnabled
+              ? Colors.redAccent
+              : (isAllowlisted ? ac.textSecondary : Colors.green),
+          onTap: () => _showAdblockPopup(_activeTab),
+        ),
+        BrowserMenuAction(
+          icon: Icons.refresh_rounded,
+          label: 'Re-scan',
+          color: Colors.cyanAccent,
+          onTap: () => unawaited(_rescanPageMedia()),
+        ),
+        BrowserMenuAction(
+          icon: Icons.cookie_rounded,
+          label: 'Clear Cookies',
+          color: Colors.redAccent,
+          onTap: () {
+            unawaited(
+              _activeTab.controller.currentUrl().then((url) {
+                if (url != null && url.isNotEmpty) {
+                  unawaited(_clearDataForSite(url));
+                }
+              }),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -5240,22 +3496,114 @@ class _SnifferScreenState extends State<SnifferScreen>
     onDelete: onDelete,
   );
 
-  /// Opens the Aurora player, showing a quality picker if the detected
-  /// video is an HLS master playlist with variants.
-  Future<void> _openVideoPlayer(SniffedMedia media) async {
-    if (media.url.contains('.m3u8') || media.url.contains('mpegurl')) {
-      // Check for enriched variants from the same master.
-      final variants = _activeTab.snifferEngine.detectedMedia
-          .where((m) => m.masterUrl == media.url && m.type == MediaType.video)
+  /// Opens the Aurora player with CDN-aware cookies/headers. When multiple
+  /// HLS variants are available (from the enricher, capture group, or a live
+  /// master fetch), they are passed into the player for an in-UI quality picker.
+  Future<void> _openVideoPlayer(
+    SniffedMedia media, {
+    List<SniffedMedia> groupVariants = const [],
+  }) async {
+    final qualities = await _resolvePlaybackQualities(
+      media,
+      groupVariants: groupVariants,
+    );
+    final start = pickStartQuality(media, qualities);
+    if (!mounted) return;
+    await _showMediaPreview(start, qualityVariants: qualities);
+  }
+
+  /// Collects alternate renditions for [media]: capture-group siblings,
+  /// enricher siblings, then a live master-playlist fetch (same path as
+  /// the download dialog).
+  Future<List<SniffedMedia>> _resolvePlaybackQualities(
+    SniffedMedia media, {
+    List<SniffedMedia> groupVariants = const [],
+  }) async {
+    final detected = _activeTab.snifferEngine.detectedMedia;
+    final lower = media.url.toLowerCase();
+    final looksHls =
+        lower.contains('.m3u8') || lower.contains('mpegurl') || isPlaylistPathHint(
+          Uri.tryParse(media.url)?.path.toLowerCase() ?? '',
+        );
+
+    // Capture-group siblings (progressive multi-quality rows).
+    final fromGroup = groupVariants
+        .where(
+          (m) =>
+              m.type == MediaType.video ||
+              m.type == MediaType.playlist ||
+              m.type == MediaType.audio,
+        )
+        .toList();
+    if (fromGroup.length >= 2) {
+      return sortQualityMedia(fromGroup);
+    }
+
+    List<SniffedMedia> fromDetected(String master) {
+      return detected
+          .where(
+            (m) =>
+                m.masterUrl == master &&
+                (m.type == MediaType.video ||
+                    m.type == MediaType.playlist ||
+                    m.type == MediaType.audio),
+          )
           .toList();
-      if (variants.isNotEmpty) {
-        final selected = await _showHlsQualityPicker(context, variants);
-        if (selected == null || !mounted) return;
-        await _showMediaPreview(selected);
-        return;
+    }
+
+    // Case 1: [media] is a variant — gather siblings under the same master.
+    final masterUrl = media.masterUrl;
+    if (masterUrl != null && masterUrl.isNotEmpty) {
+      final siblings = fromDetected(masterUrl);
+      if (siblings.length >= 2) {
+        return sortQualityMedia(siblings);
       }
     }
-    await _showMediaPreview(media);
+
+    // Case 2: [media] is the master — children already expanded by enricher.
+    final children = fromDetected(media.url);
+    if (children.length >= 2) {
+      return sortQualityMedia(children);
+    }
+
+    // Case 3: Live-fetch the master (or this URL) for variants. Reuses the
+    // download-dialog path (cache → Dart HTTP → WebView JS → native).
+    if (looksHls || (masterUrl != null && masterUrl.isNotEmpty)) {
+      final candidates = <String>[
+        if (masterUrl != null && masterUrl.isNotEmpty) masterUrl,
+        media.url,
+        ...children.map((c) => c.masterUrl).whereType<String>(),
+        ...fromGroup.map((c) => c.masterUrl).whereType<String>(),
+      ];
+      final seen = <String>{};
+      for (final candidate in candidates) {
+        if (!seen.add(candidate)) continue;
+        final fetched = await _fetchMasterPlaylistVariants(candidate);
+        if (fetched.isEmpty) continue;
+        final master = masterUrl ?? candidate;
+        return sortQualityMedia(
+          fetched
+              .map(
+                (v) => v.copyWith(
+                  masterUrl: master,
+                  sourcePageUrl: media.sourcePageUrl ?? v.sourcePageUrl,
+                  pageTitle: media.pageTitle ?? v.pageTitle,
+                ),
+              )
+              .toList(),
+        );
+      }
+    }
+
+    // Merge sparse sources (group + children + media) when ≥2 unique URLs.
+    final sparse = <SniffedMedia>[media, ...fromGroup, ...children];
+    if (masterUrl != null) {
+      sparse.addAll(fromDetected(masterUrl));
+    }
+    final sorted = sortQualityMedia(sparse);
+    if (sorted.length >= 2) return sorted;
+
+    return const [];
   }
 
   /// Updates the floating button position from [VideoFloatChannel] (JS).
@@ -5340,18 +3688,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// Positions [FloatingVideoButton] on the largest video rect from JS, or
   /// falls back to the lower-right of the WebView (above the bottom strip).
   Widget _buildFloatingPlayerOverlay(double toolbarHeight) {
-    final media = _videoForActiveTabPlayback();
-    String? subtitle;
-    if (media != null) {
-      final h = media.height;
-      if (h != null && h > 0) {
-        subtitle = '${h}p';
-      } else if (media.url.toLowerCase().contains('.m3u8')) {
-        subtitle = 'HLS';
-      }
-    }
-
-    final button = FloatingVideoButton(
+    return buildFloatingPlayerOverlay(
+      toolbarHeight: toolbarHeight,
+      media: _videoForActiveTabPlayback(),
+      videoFloatRect: _videoFloatRect,
       onTap: () => unawaited(_openFloatingPlayer()),
       onDismiss: () {
         final pageUrl = _activeTab.addressController.text.trim();
@@ -5360,28 +3700,6 @@ class _SnifferScreenState extends State<SnifferScreen>
               pageUrl.isEmpty ? '__dismissed__' : pageUrl;
         });
       },
-      subtitle: subtitle,
-    );
-
-    final rect = _videoFloatRect;
-    if (rect != null && rect.width >= 80 && rect.height >= 45) {
-      // Park on the video's top-right corner (IDM-like), inset slightly.
-      const size = 48.0;
-      final left = (rect.right - size - 10).clamp(8.0, double.infinity);
-      final top = (rect.top + 10).clamp(toolbarHeight + 4, double.infinity);
-      return Positioned(
-        left: left,
-        top: top,
-        child: button,
-      );
-    }
-
-    // No video box yet — still show when we have sniffed media (blob/MSE
-    // pages often hide real <video> geometry until play).
-    return Positioned(
-      right: 14,
-      bottom: toolbarHeight + 18,
-      child: button,
     );
   }
 
@@ -5512,118 +3830,38 @@ class _SnifferScreenState extends State<SnifferScreen>
     return items.first;
   }
 
-  /// Shows a bottom sheet listing HLS variant qualities. Returns the selected
-  /// variant, or `null` if the user cancels.
-  Future<SniffedMedia?> _showHlsQualityPicker(
-    BuildContext context,
-    List<SniffedMedia> variants,
-  ) async {
-    final sorted = List<SniffedMedia>.from(variants)
-      ..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
-
-    return showModalBottomSheet<SniffedMedia>(
-      context: context,
-      backgroundColor: context.ac.surfacePanel,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'Select quality',
-                    style: TextStyle(
-                      color: ctx.ac.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                ...sorted.map((variant) {
-                  final resolution = variant.width != null && variant.height != null
-                      ? '${variant.height}p'
-                      : 'Auto';
-                  final bandwidth = variant.bandwidth != null
-                      ? ' (${_formatBandwidth(variant.bandwidth!)})'
-                      : '';
-                  return ListTile(
-                    leading: Icon(Icons.high_quality_rounded,
-                        color: ctx.ac.accentFrost, size: 20),
-                    title: Text(
-                      '$resolution$bandwidth',
-                      style: TextStyle(color: ctx.ac.textPrimary),
-                    ),
-                    subtitle: variant.name.isNotEmpty
-                        ? Text(
-                            variant.name,
-                            style: TextStyle(
-                                color: ctx.ac.textSecondary, fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          )
-                        : null,
-                    onTap: () => Navigator.pop(ctx, variant),
-                  );
-                }),
-                if (sorted.length != variants.length)
-                  ListTile(
-                    leading: Icon(Icons.link_rounded,
-                        color: ctx.ac.textSecondary, size: 20),
-                    title: Text(
-                      'Master playlist',
-                      style: TextStyle(color: ctx.ac.textSecondary),
-                    ),
-                    onTap: () => Navigator.pop(ctx, variants.firstWhere(
-                      (v) => v.masterUrl == null,
-                      orElse: () => variants.first,
-                    )),
-                  ),
-              ],
+  Future<void> _showMediaPreview(
+    SniffedMedia media, {
+    List<SniffedMedia> qualityVariants = const [],
+  }) =>
+      showMediaPreview(
+        context,
+        media,
+        activeTab: _activeTab,
+        isMounted: mounted,
+        getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+        getPlaybackCookies: ({required String mediaUrl, String? pageUrl}) =>
+            _sniffIntakeController.getPlaybackCookies(
+              mediaUrl: mediaUrl,
+              pageUrl: pageUrl,
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  static String _formatBandwidth(int bps) {
-    if (bps >= 1_000_000) return '${(bps / 1_000_000).toStringAsFixed(1)} Mbps';
-    if (bps >= 1_000) return '${(bps / 1_000).toStringAsFixed(0)} Kbps';
-    return '$bps bps';
-  }
-
-  Future<void> _showMediaPreview(SniffedMedia media) => showMediaPreview(
-    context,
-    media,
-    activeTab: _activeTab,
-    isMounted: mounted,
-    getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
-    getPlaybackCookies: ({required String mediaUrl, String? pageUrl}) =>
-        _sniffIntakeController.getPlaybackCookies(
-          mediaUrl: mediaUrl,
-          pageUrl: pageUrl,
-        ),
-    buildSniffedDownloadHeaders:
-        ({
-          required BrowserTab tab,
-          required SniffedMedia media,
-          required Map<String, String> cookieHeaders,
-          String? currentUrl,
-        }) => _buildSniffedDownloadHeaders(
-          tab: tab,
-          media: media,
-          cookieHeaders: cookieHeaders,
-          currentUrl: currentUrl,
-        ),
-    refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
-    onAddToQueue: (m) async => _showAddQueueDialog(context, m),
-  );
+        buildSniffedDownloadHeaders:
+            ({
+              required BrowserTab tab,
+              required SniffedMedia media,
+              required Map<String, String> cookieHeaders,
+              String? currentUrl,
+            }) =>
+                buildSniffedDownloadHeaders(
+                  tab: tab,
+                  media: media,
+                  cookieHeaders: cookieHeaders,
+                  currentUrl: currentUrl,
+                ),
+        refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
+        onAddToQueue: (m) async => _showAddQueueDialog(context, m),
+        qualityVariants: qualityVariants,
+      );
 
   Future<String> _refreshM3u8IfNeeded(
     String url,
@@ -5689,179 +3927,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// EXT-X-STREAM-INF attributes. Returns an empty list if the URL is not an
   /// .m3u8 master playlist or if the fetch/parse fails.
   Future<List<SniffedMedia>> _fetchMasterPlaylistVariants(String url) async {
-    final uri = Uri.tryParse(url);
-    final path = uri?.path.toLowerCase() ?? '';
-    if (uri == null || (!path.endsWith('.m3u8') && !isPlaylistPathHint(path))) {
-      return [];
-    }
-
-    // 0th attempt: browser-captured playlist body (no Cloudflare, exact body).
-    final cached = _activeTab.hlsPlaylistCache[url];
-    if (cached != null && cached.isNotEmpty) {
-      try {
-        final playlist = HlsPlaylistParser.parse(cached, uri);
-        if (playlist.isMaster && playlist.variants.isNotEmpty) {
-          AuroraLog.instance.debug(
-            'Using cached playlist body for $url '
-            '(${playlist.variants.length} variants)',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
-          return playlist.variants.map((v) {
-            int? w;
-            int? h;
-            if (v.resolution != null) {
-              final m = RegExp(r'^(\d+)x(\d+)$').firstMatch(v.resolution!);
-              if (m != null) {
-                w = int.tryParse(m.group(1)!);
-                h = int.tryParse(m.group(2)!);
-              }
-            }
-            final resLabel = h != null ? '${h}p ' : '';
-            return SniffedMedia(
-              url: v.uri.toString(),
-              name: '$resLabel${MediaSnifferEngine.bandwidthLabel(v.bandwidth)}'.trim(),
-              type: MediaType.video,
-              bandwidth: v.bandwidth,
-              width: w,
-              height: h,
-            );
-          }).toList();
-        }
-      } catch (_) {}
-    }
-
-    // Build auth headers similar to _buildSniffedDownloadHeaders.
-    final headers = <String, String>{
-      'User-Agent': _downloadUserAgent(url, _activeTab),
-    };
-    try {
-      final cookies = await _sniffIntakeController.getCookiesForUrl(url);
-      headers.addAll(cookies);
-    } catch (_) {}
-    if (!_hasHeader(headers, 'Referer')) {
-      final pageUrl = _activeTab.addressController.text;
-      if (pageUrl.isNotEmpty) headers['Referer'] = pageUrl;
-    }
-    _normalizeHeadersForUrl(
-      headers,
+    return HlsVariantFetcher.fetch(
       url,
-      currentUrl: await _activeTab.controller.currentUrl(),
-      addressText: _activeTab.addressController.text,
+      tab: _activeTab,
+      sniffIntakeController: _sniffIntakeController,
+      doNotTrackEnabled: widget.settings.doNotTrackEnabled,
     );
-    headers.addAll(_baseRequestHeaders());
-
-    try {
-      var response = await http
-          .get(uri, headers: headers)
-          .timeout(const Duration(seconds: 15));
-
-      // If Dart HTTP client hits Cloudflare WAF (403 / block page), try
-      // fetching through the WebView's JavaScript engine (which has the
-      // full browser context with Cloudflare clearance cookies), then fall
-      // back to Android's native HttpURLConnection.
-      if (response.statusCode != 200) {
-        AuroraLog.instance.debug(
-          '_fetchMasterPlaylistVariants Dart client returned '
-          '${response.statusCode}, trying WebView JS fetch…',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
-        // 1st fallback: WebView playlist-body fetch (same as sniffer enricher).
-        String? jsBody;
-        try {
-          jsBody = await _activeTab.controller.fetchPlaylistBodyViaJavaScript(
-            url,
-          );
-        } catch (e) {
-          AuroraLog.instance.error(
-            'JS fetch error: $e',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.error,
-          );
-        }
-        if (jsBody != null && jsBody.isNotEmpty) {
-          response = http.Response(
-            jsBody,
-            200,
-            request: http.Request('GET', uri),
-          );
-          AuroraLog.instance.debug(
-            'WebView JS fetch succeeded for variant fetch',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
-        } else {
-          AuroraLog.instance.debug(
-            'WebView JS fetch failed, trying native Android HTTP…',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
-          // 2nd fallback: Android native HttpURLConnection
-          try {
-            final nativeResult = await NetworkBindingService.fetchUrl(
-              url,
-              headers: headers,
-            );
-            if (nativeResult != null) {
-              final sc = nativeResult['statusCode'] as int? ?? 0;
-              final body = nativeResult['body'] as String? ?? '';
-              if (sc >= 200 && sc < 300 && body.isNotEmpty) {
-                response = http.Response(
-                  body,
-                  sc,
-                  request: http.Request('GET', uri),
-                );
-                AuroraLog.instance.debug(
-                  'Native fallback succeeded for variant fetch '
-                  '(status $sc)',
-                  category: LogCategory.sniffer,
-                  screen: LogScreen.browser,
-                  eventType: LogEventType.sniff,
-                );
-              }
-            }
-          } catch (e) {
-            AuroraLog.instance.error(
-              'Native fallback error: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
-          }
-        }
-      }
-
-      if (response.statusCode != 200) return [];
-      final playlist = HlsPlaylistParser.parse(response.body, uri);
-      if (!playlist.isMaster || playlist.variants.isEmpty) return [];
-      return playlist.variants.map((v) {
-        int? w;
-        int? h;
-        if (v.resolution != null) {
-          final m = RegExp(r'^(\d+)x(\d+)$').firstMatch(v.resolution!);
-          if (m != null) {
-            w = int.tryParse(m.group(1)!);
-            h = int.tryParse(m.group(2)!);
-          }
-        }
-        return SniffedMedia(
-          url: v.uri.toString(),
-          name: MediaSnifferEngine.bandwidthLabel(v.bandwidth),
-          type: MediaType.video,
-          bandwidth: v.bandwidth,
-          width: w,
-          height: h,
-        );
-      }).toList();
-    } catch (_) {
-      return [];
-    }
   }
 
   /// Asks the webview to re-evaluate the page's media sources and returns the
@@ -5906,22 +3977,8 @@ class _SnifferScreenState extends State<SnifferScreen>
       showMediaInfoSheet(
         context,
         item,
-        formatSize: (int bytes, {bool isEstimated = false}) =>
-            _formatSize(bytes, isEstimated: isEstimated),
+        formatSize: formatByteSize,
       );
-
-  String _formatSize(int bytes, {bool isEstimated = false}) {
-    if (bytes <= 0) return 'Unknown';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = 0;
-    double size = bytes.toDouble();
-    while (size >= 1024 && i < suffixes.length - 1) {
-      size /= 1024;
-      i++;
-    }
-    final formatted = '${size.toStringAsFixed(1)} ${suffixes[i]}';
-    return isEstimated ? '$formatted (est.)' : formatted;
-  }
 
   void _showSniffedMediaSheet() => showSniffedMediaSheet(
     context,
@@ -5932,7 +3989,10 @@ class _SnifferScreenState extends State<SnifferScreen>
     isMounted: mounted,
     onChanged: () => setState(() {}),
     sortMedia: _sortedMedia,
-    onPreview: (media) => _showMediaPreview(media),
+    // Same CDN-aware open path as the floating / replace-site player
+    // (cookies + headers + quality resolution).
+    onPreview: (media, {List<SniffedMedia> variants = const []}) =>
+        unawaited(_openVideoPlayer(media, groupVariants: variants)),
     onInfo: (ctx, item) => _showMediaInfoSheet(ctx, item),
     onAddToQueue: (ctx, media, {List<SniffedMedia> variants = const []}) async =>
         _showAddQueueDialog(ctx, media, variants: variants),
@@ -5945,145 +4005,21 @@ class _SnifferScreenState extends State<SnifferScreen>
     BrowserTab tab,
     String url,
     String? suggestedFilename,
-  ) async {
-    final media = tab.snifferEngine.detectedMedia
-        .where((m) => m.url == url)
-        .lastOrNull;
-    final currentUrl = await tab.controller.currentUrl() ?? '';
-
-    // Determine the filename, preferring the extension from the URL path
-    // over the server-suggested one (many servers send a generic .bin).
-    final urlExt = extensionFromUrlPath(url);
-    String suggestedName;
-    if (suggestedFilename != null) {
-      if (urlExt.isNotEmpty) {
-        // Strip any extension from the suggested name and reapply the
-        // URL path extension, which is more likely to be correct.
-        final base = suggestedFilename.replaceAll(RegExp(r'\.[^.]+$'), '');
-        suggestedName = '$base$urlExt';
-      } else {
-        suggestedName = suggestedFilename;
-      }
-    } else {
-      // No suggested filename — derive one from the URL or sniffed media.
-      final parsed = Uri.tryParse(url);
-      final nameFromUrl = parsed != null
-          ? parsed.path
-                .split('/')
-                .lastWhere((s) => s.isNotEmpty, orElse: () => '')
-          : url.split('/').last;
-      suggestedName = _buildSuggestedFilename(
-        media?.name ?? (nameFromUrl.isNotEmpty ? nameFromUrl : 'download'),
-        mediaUrl: url,
-        media: media,
-      );
-    }
-    if (suggestedName.isEmpty) return;
-
-    // Build download headers from the sniffed context.
-    final cookieHeaders = await _sniffIntakeController.getCookiesForUrl(url);
-    final headerMap = <String, String>{
-      'User-Agent': _downloadUserAgent(url, tab),
-    };
-    _mergeHeaders(headerMap, tab.controller.currentHeaders);
-    if (media != null) {
-      _mergeHeaders(headerMap, sanitizeSniffedMediaHeaders(media.headers));
-    }
-    if (!_hasHeader(headerMap, 'Referer')) {
-      final ref = _firstNonEmpty([
-        media?.sourcePageUrl,
-        currentUrl,
-        tab.addressController.text,
-      ]);
-      if (ref != null) headerMap['Referer'] = ref;
-    }
-    _mergeHeaders(headerMap, cookieHeaders);
-    // Re-add Authorization header from the sniff-time cache.
-    final cachedAuth = tab.authHeaderCache[url];
-    if (cachedAuth != null &&
-        cachedAuth.isNotEmpty &&
-        !_hasHeader(headerMap, 'Authorization')) {
-      headerMap['Authorization'] = cachedAuth;
-    }
-
-    _normalizeHeadersForUrl(
-      headerMap,
-      url,
-      currentUrl: currentUrl,
-      addressText: tab.addressController.text,
-      sourcePageUrl: media?.sourcePageUrl,
-    );
-
-    // When the URL has no path extension, probe the server for a real
-    // filename and Content-Type (the WebView often sends a generic .bin).
-    String? resolvedContentType;
-    if (urlExt.isEmpty) {
-      final resolved = await resolveFilename(
-        url: url,
-        headers: headerMap,
-        suggestedFilename: suggestedFilename,
-      );
-      if (resolved.name.isNotEmpty) {
-        suggestedName = resolved.name;
-      }
-      resolvedContentType = resolved.contentType;
-    }
-
-    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
-    final saveDir = '$_baseDir${Platform.pathSeparator}completed';
-    final task = DownloadTask(
-      id: taskId,
+  ) {
+    return enqueueDirectDownload(
+      context: context,
+      tab: tab,
       url: url,
-      sourcePageUrl: media?.sourcePageUrl ?? currentUrl,
-      savePath: '$saveDir${Platform.pathSeparator}$suggestedName',
-      tempDir: '$_baseTemp${Platform.pathSeparator}temp_$taskId',
-      priority: DownloadPriority.medium,
-      contentType: resolvedContentType ?? media?.contentType,
-      headers: headerMap,
-      totalBytes: media?.contentLengthBytes ?? -1,
+      suggestedFilename: suggestedFilename,
+      downloadQueue: _downloadQueue,
+      settings: widget.settings,
+      baseDir: _baseDir,
+      baseTemp: _baseTemp,
+      getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+      reloadForFreshUrl: _reloadForFreshUrl,
+      showSnack: _showSnack,
+      isMounted: () => mounted,
     );
-    // Wire up the WebView JS fetch bridge for HLS / Cloudflare.
-    // Use playlist-body path (sniffer-grade), not generic fetchViaJavaScript.
-    task.fetchViaWebView = (fetchUrl, {Map<String, String>? headers}) =>
-        tab.controller.fetchPlaylistBodyViaJavaScript(fetchUrl);
-    task.hlsPlaylistCache =
-        (cacheUrl) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
-    task.fetchBinaryViaWebView = (binaryUrl) =>
-        tab.controller.fetchBinaryViaJavaScript(binaryUrl);
-    task.cookieProvider = (url) => tab.controller.getCookiesForDomain(url: url);
-    task.onTokenExpired = ({bool forceReload = false}) => _reloadForFreshUrl(
-      tab,
-      media?.sourcePageUrl ?? currentUrl,
-      forceReload: forceReload,
-    );
-
-    // Check for duplicates — exact URL match OR same filename on same source page
-    // (different-quality variants of the same video).
-    bool force = false;
-    if (_downloadQueue.urlExists(url) ||
-        _downloadQueue.samePageFilenameExists(
-          suggestedName,
-          media?.sourcePageUrl ?? currentUrl,
-        )) {
-      final choice = await _showDuplicatePrompt(context, suggestedName);
-      if (choice == DuplicateChoice.skip) return;
-      if (choice == DuplicateChoice.updateExisting) {
-        final existing = _downloadQueue.getTaskByUrl(url);
-        if (existing != null) {
-          await _downloadQueue.updateTaskFromDonor(existing.id, task);
-          if (mounted) {
-            _showSnack('Done — Link updated. Download will retry.');
-          }
-          return;
-        }
-      }
-      force = true;
-    }
-    _downloadQueue.addTask(task, force: force);
-
-    if (mounted) {
-      _showSnack('Started downloading $suggestedName');
-    }
   }
 
   /// Shows a dialog when the user clicks a download link in [ask] mode.
@@ -6092,34 +4028,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     String url,
     String? suggestedFilename,
   ) {
-    final name = suggestedFilename ?? url.split('/').last;
-    showDialog<void>(
+    showDownloadBehaviorPrompt(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Start download?'),
-        content: Text(name.isNotEmpty ? 'File: $name' : 'URL: $url'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              // Add to queue (ask once).
-              unawaited(_enqueueDirectDownload(tab, url, suggestedFilename));
-            },
-            child: const Text('Download'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              // Block this specific download silently.
-            },
-            child: const Text('Skip'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
+      tab: tab,
+      url: url,
+      suggestedFilename: suggestedFilename,
+      onDownload: (t, u, s) => _enqueueDirectDownload(t, u, s),
     );
   }
 
@@ -6160,29 +4074,24 @@ class _SnifferScreenState extends State<SnifferScreen>
 
     if (!context.mounted) return false;
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return _AddQueueDialogContent(
-          media: media,
-          variants: variants,
-          tab: tab,
-          currentUrl: currentUrl,
-          suggestedName: suggestedName,
-          baseDir: _baseDir,
-          baseTemp: _baseTemp,
-          getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
-          downloadQueue: _downloadQueue,
-          fetchMasterPlaylistVariants: _fetchMasterPlaylistVariants,
-          onTokenExpired: ({bool forceReload = false}) => _reloadForFreshUrl(
-            tab,
-            media.sourcePageUrl,
-            forceReload: forceReload,
-          ),
-        );
-      },
+    return showAddQueueDialog(
+      context,
+      media: media,
+      variants: variants,
+      tab: tab,
+      currentUrl: currentUrl,
+      suggestedName: suggestedName,
+      baseDir: _baseDir,
+      baseTemp: _baseTemp,
+      getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+      downloadQueue: _downloadQueue,
+      fetchMasterPlaylistVariants: _fetchMasterPlaylistVariants,
+      onTokenExpired: ({bool forceReload = false}) => _reloadForFreshUrl(
+        tab,
+        media.sourcePageUrl,
+        forceReload: forceReload,
+      ),
     );
-    return result ?? false;
   }
 
   String _buildSuggestedFilename(
@@ -6190,155 +4099,23 @@ class _SnifferScreenState extends State<SnifferScreen>
     String? mediaUrl,
     SniffedMedia? media,
   }) {
-    final metaTitle = _activeTab.pageMeta.title.trim();
-    final structured = _activeTab.pageMeta.structuredName?.trim() ?? '';
-    final tabTitle = _activeTab.title?.trim() ?? '';
-    // pickBestTitle prefers the longest usable descriptive title (and
-    // titles that look like product codes such as LULU-172).
-    final bestTitle = FilenameService.pickBestTitle([
-      metaTitle,
-      structured,
-      tabTitle,
-      media?.pageTitle,
-    ]);
-
-    // Prefer capture-analyzer quality when available (resolution / bandwidth).
-    String? explicitQuality;
-    if (media != null) {
-      final h = media.height;
-      final w = media.width;
-      if (h != null || w != null) {
-        explicitQuality = FilenameService.qualityLabelFrom(
-          height: h,
-          width: w,
-          bandwidth: media.bandwidth,
-        );
-        if (explicitQuality != null) explicitQuality = '${explicitQuality}p';
-      }
-    }
-
-    return FilenameService.buildSuggestedFilename(
+    return buildSuggestedFilenameForTab(
+      tab: _activeTab,
       mediaName: mediaName,
       mediaUrl: mediaUrl,
-      pageTitle: bestTitle,
-      mediaPageTitle: media?.pageTitle,
-      structuredName: structured.isNotEmpty ? structured : null,
-      sourcePageUrl: media?.sourcePageUrl ??
-          _activeTab.addressController.text,
-      width: media?.width,
-      height: media?.height,
-      bandwidth: media?.bandwidth,
-      explicitQuality: explicitQuality,
-      includeQualitySuffix: widget.settings.includeQualitySuffix,
-      defaultMp4ForVideoHosts:
-          mediaUrl != null && isVideoHostingUrl(mediaUrl),
-      isPlaylist: media?.type == MediaType.playlist,
+      media: media,
+      settings: widget.settings,
     );
   }
 
   List<SniffedMedia> _sortedMedia(List<SniffedMedia> media) {
-    final list = [...media];
-    switch (widget.settings.sniffedMediaSort) {
-      case SniffedMediaSort.newest:
-        list.sort((a, b) => b.sniffedAt.compareTo(a.sniffedAt));
-        break;
-      case SniffedMediaSort.name:
-        list.sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-        );
-        break;
-      case SniffedMediaSort.type:
-        list.sort((a, b) => a.type.name.compareTo(b.type.name));
-        break;
-      case SniffedMediaSort.size:
-        list.sort(
-          (a, b) => (b.contentLengthBytes ?? -1).compareTo(
-            a.contentLengthBytes ?? -1,
-          ),
-        );
-        break;
-      case SniffedMediaSort.duration:
-        list.sort(
-          (a, b) => (b.duration?.inMilliseconds ?? -1).compareTo(
-            a.duration?.inMilliseconds ?? -1,
-          ),
-        );
-        break;
-    }
-    return list;
+    return sortSniffedMedia(media, widget.settings.sniffedMediaSort);
   }
 
   bool _isCurrentPageFavorited() {
     final url = _activeTab.addressController.text.trim();
     return url.isNotEmpty &&
         _library.favorites.any((favorite) => favorite.url == url);
-  }
-
-  String _metadataLabel(SniffedMedia item) {
-    final parts = <String>[];
-    switch (widget.settings.sniffedMediaDisplayMode) {
-      case SniffedMediaDisplayMode.size:
-        parts.add(_sizeLabel(
-          item.contentLengthBytes,
-          isEstimated: item.isSizeEstimated,
-        ));
-        break;
-      case SniffedMediaDisplayMode.duration:
-        parts.add(_durationLabel(item.duration));
-        break;
-      case SniffedMediaDisplayMode.both:
-        parts.add(_sizeLabel(
-          item.contentLengthBytes,
-          isEstimated: item.isSizeEstimated,
-        ));
-        parts.add(_durationLabel(item.duration));
-        break;
-    }
-    if (item.contentType != null) parts.add(item.contentType!);
-    if (item.sourcePageUrl != null && item.sourcePageUrl!.isNotEmpty) {
-      parts.add(item.sourcePageUrl!);
-    }
-    parts.add(item.url);
-    return parts.where((part) => part.isNotEmpty).join(' | ');
-  }
-
-  String _sizeLabel(int? bytes, {bool isEstimated = false}) {
-    if (bytes == null || bytes < 0) return '';
-    final suffix = isEstimated ? ' (est.)' : '';
-    if (bytes < 1024) return '$bytes B$suffix';
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB$suffix';
-    }
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB$suffix';
-  }
-
-  String _durationLabel(Duration? duration) {
-    if (duration == null || duration == Duration.zero) return '';
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
-  }
-
-  int _totalKnownBytes(List<SniffedMedia> media) {
-    return media.fold<int>(
-      0,
-      (total, item) => total + (item.contentLengthBytes ?? 0),
-    );
-  }
-
-  IconData _mediaIcon(MediaType type) {
-    return switch (type) {
-      MediaType.video => Icons.movie,
-      MediaType.audio => Icons.audiotrack,
-      MediaType.image => Icons.image,
-      MediaType.document => Icons.description,
-      MediaType.archive => Icons.archive,
-      MediaType.torrent => Icons.hub,
-      MediaType.subtitle => Icons.subtitles,
-      MediaType.executable => Icons.insert_drive_file,
-      MediaType.playlist => Icons.queue_music,
-    };
   }
 
   /// Decodes a JSON string off the UI isolate via the persistent worker pool.
@@ -6366,18 +4143,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// as download filenames — fall back to the URL-derived name instead.
   static bool _isErrorPageTitle(String title) {
     return FilenameService.isUnusableTitle(title);
-  }
-
-  String _cleanTitle(String? title, String? url) {
-    final trimmed = title?.trim();
-    if (trimmed != null && trimmed.isNotEmpty) return trimmed;
-    return _titleForUrl(url ?? '');
-  }
-
-  String _titleForUrl(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri != null && uri.host.isNotEmpty) return uri.host;
-    return url.isEmpty ? 'Page' : url;
   }
 
   String _normalizeJsString(Object? value) {
@@ -6675,113 +4440,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<DuplicateChoice> _showDuplicatePrompt(
     BuildContext context,
     String filename,
-  ) async {
-    final result = await showDialog<DuplicateChoice>(
+  ) {
+    return showDuplicateDownloadDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Already in Queue'),
-          content: const Text(
-            'This download link has already been added to your queue.\n\n'
-            'The URL may have changed (token refresh). Update the existing download with the new link, or create a separate one.',
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
-              child: const Text('Create New'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
-              child: const Text('Update Existing'),
-            ),
-          ],
-        );
-      },
-    );
-    return result ?? DuplicateChoice.skip;
-  }
-}
-
-/// Cancel picker floating chip with a 30-second countdown ring.
-class _PickerCancelChip extends StatefulWidget {
-  final VoidCallback onCancel;
-
-  const _PickerCancelChip({super.key, required this.onCancel});
-
-  @override
-  State<_PickerCancelChip> createState() => _PickerCancelChipState();
-}
-
-class _PickerCancelChipState extends State<_PickerCancelChip>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 30),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return SizedBox(
-          width: 100,
-          height: 56,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(3),
-                child: CircularProgressIndicator(
-                  value: 1.0 - _controller.value,
-                  strokeWidth: 3.0,
-                  color: context.ac.accentFrost,
-                  backgroundColor: context.ac.surfaceElevated,
-                ),
-              ),
-              Material(
-                color: context.ac.overlaySurface,
-                elevation: 8,
-                borderRadius: BorderRadius.circular(20),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: widget.onCancel,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.close, size: 18, color: context.ac.textPrimary),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Cancel',
-                          style: TextStyle(color: context.ac.textPrimary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      filename: filename,
     );
   }
 }

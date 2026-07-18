@@ -98,7 +98,7 @@ class DownloadCard extends StatelessWidget {
     this.onResniffManual,
     this.onOpenUrlInBrowser,
     this.onShare,
-    this.onExport,
+    this.onRedownload,
     this.onShowProperties,
     this.selectionMode = false,
     this.selected = false,
@@ -119,7 +119,8 @@ class DownloadCard extends StatelessWidget {
   final Future<void> Function(DownloadTask task)? onResniffManual;
   final void Function(String url)? onOpenUrlInBrowser;
   final Future<void> Function(DownloadTask task)? onShare;
-  final Future<void> Function(DownloadTask task)? onExport;
+  /// Start a fresh download of the same URL (new queue entry).
+  final Future<void> Function(DownloadTask task)? onRedownload;
   final VoidCallback? onShowProperties;
 
   final bool selectionMode;
@@ -776,42 +777,58 @@ class DownloadCard extends StatelessWidget {
     }
 
     // ── Overflow menu items ──────────────────────────────────────
+    //   Share…            = system share sheet (file already auto-saved
+    //                       to public Downloads — no separate "export")
+    //   Redownload        = new queue entry for the same URL
+    //   Refresh link      = auto probe / token refresh (not for completed)
+    //   Re-sniff on page  = open source + capture mode
+    //   Open source page  = open only (completed, or when re-sniff N/A)
     final popupItems = <PopupMenuEntry<String>>[];
+    final isCompleted = task.state == DownloadState.completed;
+    final isActive = task.state == DownloadState.downloading ||
+        task.state == DownloadState.merging;
+    final hasSource = task.sourcePageUrl != null &&
+        task.sourcePageUrl!.trim().isNotEmpty;
+    final isMagnet = task.url.startsWith('magnet:');
+    final isBlob = task.url.startsWith('blob:');
 
-    // Open (completed tasks)
-    if (task.state == DownloadState.completed) {
+    // Open file (completed) — same as primary; kept for menu discoverability.
+    if (isCompleted) {
       popupItems.add(
         PopupMenuItem(
           value: 'open',
-          child: _popupRow(Icons.open_in_new, ac.statusSuccess, 'Open'),
+          child: _popupRow(Icons.play_circle_outline, ac.statusSuccess, 'Open'),
         ),
       );
     }
 
-    // Share (completed tasks)
-    if (task.state == DownloadState.completed && onShare != null) {
+    // Share via the system sheet (file is already in Downloads after publish).
+    if (isCompleted && onShare != null) {
       popupItems.add(
         PopupMenuItem(
           value: 'share',
-          child: _popupRow(Icons.share_outlined, ac.accentFrost, 'Share'),
+          child: _popupRow(Icons.share_outlined, ac.accentFrost, 'Share…'),
         ),
       );
     }
 
-    // Export (completed tasks)
-    if (task.state == DownloadState.completed && onExport != null) {
+    // Redownload — fresh queue entry (not the same as Retry of a partial).
+    if (onRedownload != null && !isActive && !isMagnet && !isBlob) {
       popupItems.add(
         PopupMenuItem(
-          value: 'export',
-          child: _popupRow(Icons.file_download_outlined, ac.accentFrost, 'Export'),
+          value: 'redownload',
+          child: _popupRow(
+            Icons.download_for_offline_outlined,
+            ac.accentFrost,
+            'Redownload',
+          ),
         ),
       );
     }
 
-    // Force merge
-    if (task.state != DownloadState.completed &&
-        task.state != DownloadState.downloading &&
-        task.state != DownloadState.merging &&
+    // Force merge (partial / interrupted only)
+    if (!isCompleted &&
+        !isActive &&
         onForceMerge != null) {
       popupItems.add(
         PopupMenuItem(
@@ -821,49 +838,63 @@ class DownloadCard extends StatelessWidget {
       );
     }
 
-    // Resniff auto
-    if (onResniffAuto != null &&
-        !task.url.startsWith('magnet:') &&
-        !task.url.startsWith('blob:')) {
+    // Link recovery — hide for completed (file already finished).
+    if (!isCompleted &&
+        !isActive &&
+        onResniffAuto != null &&
+        !isMagnet &&
+        !isBlob) {
       popupItems.add(
         PopupMenuItem(
           value: 'resniff_auto',
           child: _popupRow(
-              Icons.find_replace_rounded, ac.accentFrost, 'Refresh link'),
+            Icons.find_replace_rounded,
+            ac.accentFrost,
+            'Refresh link',
+          ),
         ),
       );
     }
 
-    // Resniff manual
-    if (onResniffManual != null &&
-        (task.sourcePageUrl != null || !task.url.startsWith('magnet:'))) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'resniff_manual',
-          child: _popupRow(Icons.open_in_browser_rounded,
-              ac.accentPurple, 'Scan in browser'),
-        ),
-      );
-    }
-
-    // Open source page
-    if (task.sourcePageUrl != null && onOpenUrlInBrowser != null) {
-      popupItems.add(
-        PopupMenuItem(
-          value: 'open_source',
-          child:
-              _popupRow(Icons.open_in_new, ac.accentPurple, 'View source page'),
-        ),
-      );
+    // One browser action only:
+    //  • Incomplete + source → "Re-sniff on page" (opens + resniff mode)
+    //  • Otherwise + source → "Open source page" (open only)
+    // Avoids "Scan in browser" + "View source page" side-by-side.
+    if (hasSource) {
+      if (!isCompleted && !isActive && onResniffManual != null) {
+        popupItems.add(
+          PopupMenuItem(
+            value: 'resniff_manual',
+            child: _popupRow(
+              Icons.open_in_browser_rounded,
+              ac.accentPurple,
+              'Re-sniff on page',
+            ),
+          ),
+        );
+      } else if (onOpenUrlInBrowser != null) {
+        popupItems.add(
+          PopupMenuItem(
+            value: 'open_source',
+            child: _popupRow(
+              Icons.public_outlined,
+              ac.accentPurple,
+              'Open source page',
+            ),
+          ),
+        );
+      }
     }
 
     // Delete / Cancel
-    final isCompleted = task.state == DownloadState.completed;
     popupItems.add(
       PopupMenuItem(
         value: 'delete',
-        child: _popupRow(Icons.delete_outline, ac.statusError,
-            isCompleted ? 'Remove' : 'Cancel'),
+        child: _popupRow(
+          Icons.delete_outline,
+          ac.statusError,
+          isCompleted ? 'Remove' : 'Cancel',
+        ),
       ),
     );
 
@@ -917,8 +948,8 @@ class DownloadCard extends StatelessWidget {
                         onOpenDownload(task);
                       case 'share':
                         onShare?.call(task);
-                      case 'export':
-                        onExport?.call(task);
+                      case 'redownload':
+                        onRedownload?.call(task);
                       case 'force_merge':
                         onForceMerge?.call();
                       case 'open_source':

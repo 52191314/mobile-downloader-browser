@@ -1,5 +1,8 @@
 import 'dart:io';
+import 'dart:isolate';
+
 import 'package:crypto/crypto.dart';
+
 import 'models.dart';
 
 /// Result of a partial merge pass over downloaded chunk files.
@@ -82,8 +85,13 @@ class FileCombiner {
       await sink.close();
     }
 
-    final hash = await sha256.bind(destination.openRead()).first;
-    return hash.toString();
+    // Hash on a background isolate so large-file SHA-256 does not stall
+    // the UI isolate during multi-chunk merges.
+    final path = destination.path;
+    return Isolate.run(() async {
+      final digest = await sha256.bind(File(path).openRead()).first;
+      return digest.toString();
+    });
   }
 
   /// Combines chunk files in order, **skipping** any chunk that does not

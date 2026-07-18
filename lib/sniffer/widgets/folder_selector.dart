@@ -1,5 +1,10 @@
-part of '../sniffer_screen.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+
+/// Dropdown that lets the user pick an existing subfolder under
+/// `baseDir/completed`, or create a new one.
 class FolderSelector extends StatefulWidget {
   final String? baseDir;
   final ValueChanged<String?> onChanged;

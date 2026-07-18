@@ -64,7 +64,10 @@ void showSniffedMediaSheet(
   required bool isMounted,
   required VoidCallback onChanged,
   required List<SniffedMedia> Function(List<SniffedMedia> media) sortMedia,
-  required void Function(SniffedMedia media) onPreview,
+  required void Function(
+    SniffedMedia media, {
+    List<SniffedMedia> variants,
+  }) onPreview,
   required void Function(BuildContext context, SniffedMedia item) onInfo,
   required Future<bool> Function(
     BuildContext context,
@@ -131,7 +134,10 @@ class _CaptureSheetScaffold extends StatefulWidget {
   final DownloadSettings settings;
   final ValueChanged<DownloadSettings>? onSettingsChanged;
   final List<SniffedMedia> Function(List<SniffedMedia> media) sortMedia;
-  final void Function(SniffedMedia media) onPreview;
+  final void Function(
+    SniffedMedia media, {
+    List<SniffedMedia> variants,
+  }) onPreview;
   final void Function(BuildContext context, SniffedMedia item) onInfo;
   final Future<bool> Function(
     BuildContext context,
@@ -416,7 +422,14 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                               onPreview: canPreview
                                   ? () {
                                       Navigator.of(context).pop();
-                                      widget.onPreview(item);
+                                      // Pass sibling candidates so the player
+                                      // quality picker covers the whole group.
+                                      widget.onPreview(
+                                        item,
+                                        variants: group.candidates
+                                            .map((c) => c.media)
+                                            .toList(growable: false),
+                                      );
                                     }
                                   : null,
                               onInfo: () =>
