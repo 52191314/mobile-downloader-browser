@@ -524,6 +524,7 @@ class DownloadSettings {
   final DownloadLinkBehavior downloadLinkBehavior;
   final bool trackerBlockingEnabled;
   final List<String> adblockAllowlist;
+  final List<String> customVideoHosts;
   final DarkModePreference darkModePreference;
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
@@ -611,6 +612,7 @@ class DownloadSettings {
     this.downloadLinkBehavior = DownloadLinkBehavior.capture,
     this.trackerBlockingEnabled = false,
     this.adblockAllowlist = const [],
+    this.customVideoHosts = const [],
     this.darkModePreference = DarkModePreference.system,
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
@@ -699,6 +701,7 @@ class DownloadSettings {
     DownloadLinkBehavior? downloadLinkBehavior,
     bool? trackerBlockingEnabled,
     List<String>? adblockAllowlist,
+    List<String>? customVideoHosts,
     DarkModePreference? darkModePreference,
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
@@ -791,6 +794,7 @@ class DownloadSettings {
       trackerBlockingEnabled:
           trackerBlockingEnabled ?? this.trackerBlockingEnabled,
       adblockAllowlist: adblockAllowlist ?? this.adblockAllowlist,
+      customVideoHosts: customVideoHosts ?? this.customVideoHosts,
       darkModePreference: darkModePreference ?? this.darkModePreference,
       translateTargetLang:
           translateTargetLang ?? this.translateTargetLang,
@@ -836,8 +840,9 @@ class DownloadSettings {
       'doNotTrackEnabled': doNotTrackEnabled,
       'downloadLinkBehavior': downloadLinkBehavior.name,
     'trackerBlockingEnabled': trackerBlockingEnabled,
-    'adblockAllowlist': adblockAllowlist,
-    'darkModePreference': darkModePreference.name,
+      'adblockAllowlist': adblockAllowlist,
+      'customVideoHosts': customVideoHosts,
+      'darkModePreference': darkModePreference.name,
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
     'siteUserAgents': siteUserAgents,
@@ -939,6 +944,8 @@ class DownloadSettings {
           defaults.trackerBlockingEnabled,
       adblockAllowlist: (json['adblockAllowlist'] as List?)
           ?.cast<String>() ?? defaults.adblockAllowlist,
+      customVideoHosts: (json['customVideoHosts'] as List?)
+          ?.cast<String>() ?? defaults.customVideoHosts,
       darkModePreference: DarkModePreference.values.byName(
         json['darkModePreference'] as String? ??
             defaults.darkModePreference.name,
