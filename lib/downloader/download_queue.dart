@@ -43,6 +43,12 @@ final class _ScoredTask {
 }
 
 class DownloadQueue {
+  /// Engine hard ceilings. The app never lets the user pick above these, and
+  /// the engine clamps defensively. Tier-aware UI caps (free 3/8, pro 16/32,
+  /// ultra 64/64) live in [ProFeatures] and are applied in the app shell.
+  static const int engineHardMaxConcurrent = 64;
+  static const int engineHardMaxChunks = 64;
+
   final Map<String, DownloadTask> _tasks = {};
   final Map<String, BaseDownloader> _splitters = {};
   final Map<String, StreamSubscription<DownloadTask>> _downloaderSubscriptions =
@@ -56,6 +62,10 @@ class DownloadQueue {
   final bool enablePreemption;
   final bool useNativeTorrentEngine;
   int numChunksPerTask;
+
+  /// HLS concurrent-segment cap (Key Decision: free/pro 8, ultra 16). Set via
+  /// [configure] from the tier-aware [ProFeatures.hlsSegmentCapFor].
+  int hlsSegmentCap = 8;
   final http.Client? httpClient;
   late http.Client _client;
   final bool _ownsClient;
@@ -219,6 +229,7 @@ class DownloadQueue {
   void configure({
     int? maxConcurrentDownloads,
     int? numChunksPerTask,
+    int? hlsSegmentCap,
     CompletedDownloadPublisher? completedDownloadPublisher,
     bool? autoClassifyEnabled,
     bool? remuxTsToMp4,
@@ -231,10 +242,15 @@ class DownloadQueue {
     int? minBytesBeforeFullRetry,
   }) {
     if (maxConcurrentDownloads != null) {
-      this.maxConcurrentDownloads = maxConcurrentDownloads.clamp(1, 12).toInt();
+      this.maxConcurrentDownloads =
+          maxConcurrentDownloads.clamp(1, engineHardMaxConcurrent).toInt();
     }
     if (numChunksPerTask != null) {
-      this.numChunksPerTask = numChunksPerTask.clamp(1, 16).toInt();
+      this.numChunksPerTask =
+          numChunksPerTask.clamp(1, engineHardMaxChunks).toInt();
+    }
+    if (hlsSegmentCap != null) {
+      this.hlsSegmentCap = hlsSegmentCap.clamp(1, engineHardMaxChunks).toInt();
     }
     if (completedDownloadPublisher != null) {
       this.completedDownloadPublisher = completedDownloadPublisher;
@@ -884,7 +900,7 @@ class DownloadQueue {
       downloader = HlsDownloader(
         task: task,
         client: _client,
-        maxConcurrentSegments: math.min(numChunksPerTask, 8),
+        maxConcurrentSegments: math.min(numChunksPerTask, hlsSegmentCap),
         remuxTsToMp4: remuxTsToMp4,
         speedLimiter: speedLimiter,
       );

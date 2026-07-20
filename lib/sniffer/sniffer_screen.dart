@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
+import '../premium/pro_features.dart';
 import '../downloader/headless_webview_fetcher.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
@@ -339,7 +340,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       activeTabGetter: () => _activeTab,
       onSettingsChanged: widget.onSettingsChanged,
       showSnack: _showSnack,
-      maxRules: isPro ? null : 10,
+      maxRules: isPro ? null : ProFeatures.maxFreeCosmeticRules,
     );
     _libraryController = LibraryController(libraryStore: widget.libraryStore)
       ..onLibraryChanged = () {

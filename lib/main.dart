@@ -298,6 +298,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _loadSettingsFuture = _loadSettings();
     unawaited(_initNotifications());
     proUpsellBilling = _playBilling;
+    proUpsellEntitlement = _proEntitlement;
     unawaited(_playBilling.init());
     _downloadQueue.onRestrictedMediaBlocked = (message) {
       if (mounted) _showSnack(message);
@@ -1280,7 +1281,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   void _applySettings(DownloadSettings settings) {
-    final isPro = _proEntitlement.isPro;
+    final tier = _proEntitlement.tier;
 
     // Keep public publish root in sync with Settings → Download Defaults.
     final dest = DownloadSettings.normalizeDownloadDestination(
@@ -1291,15 +1292,17 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     unawaited(_autoBackupService.configure(settings));
     _downloadQueue.wifiOnly = settings.wifiOnly;
+    // Dual clamp order: userSetting → tierMax → engineHardMax.
+    final effectiveConcurrent = settings.maxConcurrentDownloads
+        .clamp(1, ProFeatures.maxConcurrentFor(tier))
+        .clamp(1, DownloadQueue.engineHardMaxConcurrent);
+    final effectiveChunks = settings.chunksPerTask
+        .clamp(1, ProFeatures.chunksFor(tier))
+        .clamp(1, DownloadQueue.engineHardMaxChunks);
     _downloadQueue.configure(
-      maxConcurrentDownloads: settings.maxConcurrentDownloads.clamp(
-        1,
-        isPro ? ProFeatures.maxConcurrentPro : ProFeatures.maxConcurrentFree,
-      ),
-      numChunksPerTask: settings.chunksPerTask.clamp(
-        1,
-        isPro ? ProFeatures.chunksPerTaskPro : ProFeatures.chunksPerTaskFree,
-      ),
+      maxConcurrentDownloads: effectiveConcurrent,
+      numChunksPerTask: effectiveChunks,
+      hlsSegmentCap: ProFeatures.hlsSegmentCapFor(tier),
       completedDownloadPublisher: _publicDownloadsService,
       autoClassifyEnabled: settings.autoClassifyEnabled,
       remuxTsToMp4: settings.remuxTsToMp4,
@@ -1326,7 +1329,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       ),
     );
     // Apply proxy settings (Pro only; free users get no proxy).
-    if (isPro) {
+    if (tier.isAtLeastPro) {
       _downloadQueue.applyProxySettings(
         settings.proxyType,
         settings.proxyHost,

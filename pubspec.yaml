@@ -1,5 +1,5 @@
 name: aurora_downloader
-description: "Android download manager with segmented HTTP, media sniffing, BitTorrent, Google Drive sync, and Nordic dark UI."
+description: "Android download manager with segmented HTTP, media sniffing, BitTorrent, and Nordic dark UI."
 # SPDX: GPL-3.0-only — see LICENSE. libtorrent_flutter is also GPL-3.0.
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.4.2+26
+version: 2.4.4+28
 
 environment:
   sdk: ^3.8.1
@@ -55,6 +55,7 @@ dependencies:
   qr_flutter: ^4.1.0
   animations: ^2.0.11
   in_app_purchase: ^3.2.1
+  in_app_purchase_android: ^0.5.1
 
 dev_dependencies:
   flutter_test:

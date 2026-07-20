@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../premium/pro_features.dart';
 import '../models/browser_tab.dart';
 import '../models/closed_tab_snapshot.dart';
 import '../models/tab_group.dart';
@@ -24,8 +25,8 @@ class TabManager {
   static const int maxRecentlyClosed = 12;
   static const int maxTabs = 20;
 
-  /// Maximum tab groups for free users.
-  static const int maxFreeTabGroups = 1;
+  /// Maximum tab groups for free users (single-sourced from [ProFeatures]).
+  static const int maxFreeTabGroups = ProFeatures.maxFreeTabGroups;
 
   /// Persistent tab groups, ordered by [TabGroup.sortOrder] ascending.
   /// Tabs reference groups by case-insensitive name through
