@@ -23,6 +23,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -208,6 +209,25 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "extractAudio" -> extractAudio(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Sensitive screens (vault): FLAG_SECURE blocks screenshots / recents.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/secure_window")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setSecure" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        runOnUiThread {
+                            if (enabled) {
+                                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            } else {
+                                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            }
+                            result.success(null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -752,16 +772,28 @@ class MainActivity : FlutterActivity() {
 
     private fun pickImportFile(result: MethodChannel.Result) {
         pendingImportResult = result
+        // Do NOT set EXTRA_MIME_TYPES. Many DocumentsUI builds treat that list as an
+        // exclusive allow-list, and `*/*` inside it is ignored — so unknown extensions
+        // like `.1dmbak` (often application/zip or untyped) never appear. type=*/*
+        // alone lets the user pick any file; the Dart side validates the content.
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/octet-stream", "application/zip"))
         }
         try {
             startActivityForResult(intent, PICK_IMPORT_FILE)
         } catch (error: ActivityNotFoundException) {
-            result.error("no_activity", "No file picker available.", null)
-            pendingImportResult = null
+            // Fallback: some OEM builds only register GET_CONTENT for broad picks.
+            try {
+                val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }
+                startActivityForResult(fallback, PICK_IMPORT_FILE)
+            } catch (error2: ActivityNotFoundException) {
+                result.error("no_activity", "No file picker available.", null)
+                pendingImportResult = null
+            }
         }
     }
 
@@ -1609,10 +1641,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** Matches manual exports (`aurora_backup_<ts>.json`) and auto snapshots (`aurora_backup.json`). */
+    private fun isAuroraBackupFileName(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        val lower = name.lowercase()
+        if (!lower.endsWith(".json")) return false
+        return lower == "aurora_backup.json" ||
+            lower.startsWith("aurora_backup_") ||
+            lower.startsWith("aurora_auto_backup_")
+    }
+
     private fun listBackupFiles(call: MethodCall, result: MethodChannel.Result) {
-        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader/Backups/"
+        val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader/Backup/"
         val list = mutableListOf<Map<String, Any>>()
-        
+        val pathPrefix = relativePath.replace('\\', '/').trimEnd('/')
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = applicationContext.contentResolver
             val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
@@ -1620,32 +1663,44 @@ class MainActivity : FlutterActivity() {
                 MediaStore.MediaColumns._ID,
                 MediaStore.MediaColumns.DISPLAY_NAME,
                 MediaStore.MediaColumns.SIZE,
-                MediaStore.MediaColumns.DATE_MODIFIED
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.RELATIVE_PATH
             )
             val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("${relativePath.trimEnd('/')}%")
-            
+            val selectionArgs = arrayOf("$pathPrefix%")
+
             try {
                 resolver.query(uri, projection, selection, selectionArgs, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                     val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
                     val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-                    
+                    val relCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+
                     while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol)
-                        if (name.startsWith("aurora_backup_") || name.startsWith("aurora_auto_backup_")) {
-                            val size = cursor.getLong(sizeCol)
-                            val date = cursor.getLong(dateCol) * 1000
-                            val contentUri = ContentUris.withAppendedId(uri, id)
-                            list.add(mapOf(
-                                "uri" to contentUri.toString(),
-                                "displayName" to name,
-                                "size" to size,
-                                "dateModified" to date
-                            ))
+                        if (!isAuroraBackupFileName(name)) continue
+                        val id = cursor.getLong(idCol)
+                        val size = cursor.getLong(sizeCol)
+                        val date = cursor.getLong(dateCol) * 1000
+                        val rel = cursor.getString(relCol) ?: ""
+                        val contentUri = ContentUris.withAppendedId(uri, id)
+                        // Prefer auto when the MediaStore path is under Auto Backup/
+                        // (consolidated file is always named aurora_backup.json).
+                        val kind = when {
+                            rel.contains("/Auto Backup", ignoreCase = true) ||
+                                rel.contains("Auto Backup/", ignoreCase = true) -> "auto"
+                            name.lowercase().startsWith("aurora_auto_backup_") -> "auto"
+                            else -> "manual"
                         }
+                        list.add(mapOf(
+                            "uri" to contentUri.toString(),
+                            "displayName" to name,
+                            "size" to size,
+                            "dateModified" to date,
+                            "kind" to kind,
+                            "relativePath" to rel
+                        ))
                     }
                 }
                 result.success(list)
@@ -1653,23 +1708,31 @@ class MainActivity : FlutterActivity() {
                 result.error("query_failed", e.message, null)
             }
         } else {
+            // Pre-Q: map MediaStore-style relative path under public Downloads.
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val destDir = File(downloadsDir, "Aurora Downloader/Backups")
+            val underDownloads = if (pathPrefix.startsWith("Download/")) {
+                pathPrefix.removePrefix("Download/")
+            } else {
+                pathPrefix
+            }
+            val destDir = File(downloadsDir, underDownloads)
             if (destDir.exists()) {
-                val files = destDir.listFiles()
-                if (files != null) {
-                    files.sortByDescending { it.lastModified() }
-                    for (file in files) {
-                        if (file.isFile && (file.name.startsWith("aurora_backup_") || file.name.startsWith("aurora_auto_backup_"))) {
-                            list.add(mapOf(
-                                "uri" to Uri.fromFile(file).toString(),
-                                "displayName" to file.name,
-                                "size" to file.length(),
-                                "dateModified" to file.lastModified()
-                            ))
-                        }
+                destDir.walkTopDown()
+                    .filter { it.isFile && isAuroraBackupFileName(it.name) }
+                    .sortedByDescending { it.lastModified() }
+                    .forEach { file ->
+                        val kind = if (file.path.contains("${File.separator}Auto Backup") ||
+                            file.name.lowercase().startsWith("aurora_auto_backup_")
+                        ) "auto" else "manual"
+                        list.add(mapOf(
+                            "uri" to Uri.fromFile(file).toString(),
+                            "displayName" to file.name,
+                            "size" to file.length(),
+                            "dateModified" to file.lastModified(),
+                            "kind" to kind,
+                            "relativePath" to underDownloads
+                        ))
                     }
-                }
             }
             result.success(list)
         }

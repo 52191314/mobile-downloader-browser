@@ -1,20 +1,20 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../platform/secure_window.dart';
 import '../../premium/phase2_caps.dart';
 import '../../premium/pro_entitlement.dart';
-import '../../premium/pro_features.dart';
-import '../../premium/pro_upsell_sheet.dart';
 import '../../premium/vault_service.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 
 /// Vault UI — lists encrypted vault files with lock/unlock, export, and delete.
 ///
-/// Applies [SystemUiOverlay.lock] via `FLAG_SECURE` to block screenshots.
+/// Applies Android [FLAG_SECURE] while this page is open to block screenshots
+/// and recent-app previews (including recovery-key display).
 class VaultPage extends StatefulWidget {
   final VaultService vault;
   final EntitlementTier tier;
@@ -40,19 +40,31 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _applyFlagSecure();
+    unawaited(SecureWindow.setSecure(true));
     _initVault();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(SecureWindow.setSecure(false));
+    widget.vault.lock();
     super.dispose();
   }
 
-  void _applyFlagSecure() {
-    // FLAG_SECURE is applied at the window level.
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      // Drop session key when backgrounded; user re-auths on return.
+      widget.vault.lock();
+      if (mounted && _unlocked) {
+        setState(() {
+          _unlocked = false;
+          _entries = [];
+        });
+      }
+    }
   }
 
   Future<void> _initVault() async {
@@ -97,7 +109,9 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
 
   Future<void> _export(VaultEntry entry) async {
     final docs = await getApplicationDocumentsDirectory();
-    final dest = '${docs.path}/${entry.name}';
+    final safe = VaultService.sanitizeVaultName(entry.name) ?? 'export.vault';
+    // Export as .bin so we never write a path-controlled name with separators.
+    final dest = p.join(docs.path, 'vault_export', '$safe.bin');
     final ok = await widget.vault.export(entry.name, dest, authed: true);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

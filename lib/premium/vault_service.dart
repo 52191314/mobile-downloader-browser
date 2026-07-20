@@ -1,15 +1,22 @@
-/// P7 Private Vault — Keystore-backed AES-128-CBC vault for downloaded files.
+/// P7 Private Vault — Keystore-backed AES-GCM vault for downloaded files.
+///
+/// Security notes:
+/// - Keys live in [FlutterSecureStorage] (Android Keystore-backed when available).
+/// - File format v1: `0x01 | 12-byte nonce | AES-GCM ciphertext+tag`.
+/// - Legacy CBC blobs (no version byte) can still be decrypted for export.
+/// - Auth **fails closed** when the device has no PIN/biometric.
+/// - [vaultName] is always basename-sanitized to block path traversal.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'phase2_caps.dart';
@@ -17,6 +24,9 @@ import 'pro_entitlement.dart';
 
 /// How long an unlocked session lasts before biometric is required again.
 const Duration _kUnlockDuration = Duration(minutes: 5);
+
+/// Vault file format version for AES-GCM.
+const int _kVaultFormatGcm = 0x01;
 
 /// P7 Private Vault. Instantiate once and reuse.
 class VaultService {
@@ -44,11 +54,11 @@ class VaultService {
     final existingKey = await _secureStorage.read(key: _keyAesKey);
     if (existingKey != null) return true;
 
-    final keyBytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
+    final keyBytes =
+        List<int>.generate(32, (_) => Random.secure().nextInt(256));
     final keyBase64 = base64Url.encode(keyBytes);
     await _secureStorage.write(key: _keyAesKey, value: keyBase64);
     _lastRecoveryKey = keyBase64;
-    debugPrint('[Vault] Initialized');
     return true;
   }
 
@@ -68,33 +78,44 @@ class VaultService {
   // Biometric gate
   // ---------------------------------------------------------------------------
 
-  /// Returns true if biometric passes or session is still unlocked.
+  /// Returns true if biometric/device credential passes or session is still
+  /// unlocked.
+  ///
+  /// **Fails closed** when the device has no PIN/pattern/biometric — vault
+  /// must not open on open emulators / unsecured devices.
   Future<bool> authenticate({required String reason}) async {
     if (_sessionKey != null &&
         _unlockedAt != null &&
         DateTime.now().difference(_unlockedAt!) < _kUnlockDuration) {
       return true;
     }
+
+    final deviceSupported = await _localAuth.isDeviceSupported();
     final canCheck = await _localAuth.canCheckBiometrics;
-    if (!canCheck) {
-      final canAuth = await _localAuth.isDeviceSupported();
-      if (!canAuth) {
-        debugPrint('[Vault] No auth available — proceeding.');
-        return true;
+    if (!deviceSupported && !canCheck) {
+      if (kDebugMode) {
+        debugPrint('[Vault] No device credential — fail closed');
       }
+      return false;
     }
-    final didAuth = await _localAuth.authenticate(
-      localizedReason: reason,
-      options: const AuthenticationOptions(
-        stickyAuth: true,
-        biometricOnly: false,
-      ),
-    );
-    if (didAuth) {
-      _unlockedAt = DateTime.now();
-      await _loadSessionKey();
+
+    try {
+      final didAuth = await _localAuth.authenticate(
+        localizedReason: reason,
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false, // allow PIN/pattern fallback
+        ),
+      );
+      if (didAuth) {
+        _unlockedAt = DateTime.now();
+        await _loadSessionKey();
+      }
+      return didAuth;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Vault] authenticate failed: $e');
+      return false;
     }
-    return didAuth;
   }
 
   Future<void> _loadSessionKey() async {
@@ -120,33 +141,47 @@ class VaultService {
     return dir;
   }
 
+  /// Reject path traversal; only allow a single path segment filename.
+  static String? sanitizeVaultName(String vaultName) {
+    final raw = vaultName.trim();
+    // Reject any path-like input before basename (basename would hide `../`).
+    if (raw.isEmpty ||
+        raw.contains('/') ||
+        raw.contains('\\') ||
+        raw.contains('\x00') ||
+        raw.contains('..')) {
+      return null;
+    }
+    if (raw == '.' || raw == '..') return null;
+    if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(raw)) return null;
+    return raw;
+  }
+
   // ---------------------------------------------------------------------------
   // Inventory
   // ---------------------------------------------------------------------------
 
-  /// Number of vault files (excluding dotfiles like .nomedia).
   Future<int> fileCount() async {
     final dir = await vaultDir;
     try {
       return dir.listSync().whereType<File>().where((f) {
-        return !f.uri.pathSegments.last.startsWith('.');
+        return !p.basename(f.path).startsWith('.');
       }).length;
     } catch (_) {
       return 0;
     }
   }
 
-  /// True if vault can accept a new file for [tier].
   Future<bool> canAccept(EntitlementTier tier) async {
     final count = await fileCount();
     return Phase2Caps.vaultInventoryOk(count, tier);
   }
 
   // ---------------------------------------------------------------------------
-  // Store (import into vault)
+  // Store (import into vault) — AES-GCM
   // ---------------------------------------------------------------------------
 
-  /// Moves [source] into the vault with AES-128-CBC encryption.
+  /// Encrypts [source] into the vault with AES-256-GCM.
   /// Returns vault filename on success, null on failure.
   Future<String?> store(File source, {EntitlementTier? tier}) async {
     final effectiveTier = tier ?? EntitlementTier.free;
@@ -160,14 +195,19 @@ class VaultService {
     final key = _sessionKey;
     if (key == null) return null;
 
-    final iv = enc.IV.fromSecureRandom(16);
-    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-    final encrypted = encrypter.encryptBytes(sourceBytes, iv: iv);
+    final nonce = enc.IV.fromSecureRandom(12);
+    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
+    final encrypted = encrypter.encryptBytes(sourceBytes, iv: nonce);
 
     final vaultName = '${DateTime.now().millisecondsSinceEpoch}.vault';
-    final dest = File('${dir.path}/$vaultName');
-    final outBytes = Uint8List.fromList([...iv.bytes, ...encrypted.bytes]);
-    await dest.writeAsBytes(outBytes);
+    final dest = File(p.join(dir.path, vaultName));
+    // v1: version | nonce(12) | ciphertext+tag
+    final outBytes = Uint8List.fromList([
+      _kVaultFormatGcm,
+      ...nonce.bytes,
+      ...encrypted.bytes,
+    ]);
+    await dest.writeAsBytes(outBytes, flush: true);
     return vaultName;
   }
 
@@ -176,48 +216,86 @@ class VaultService {
   // ---------------------------------------------------------------------------
 
   /// Decrypts [vaultName] and writes to [destination].
-  /// Returns true on success.
-  Future<bool> export(String vaultName, String destination,
-      {bool authed = false}) async {
+  Future<bool> export(
+    String vaultName,
+    String destination, {
+    bool authed = false,
+  }) async {
     if (!authed && !await authenticate(reason: 'Export file from vault')) {
       return false;
     }
+    final safeName = sanitizeVaultName(vaultName);
+    if (safeName == null) return false;
+
     final dir = await vaultDir;
-    final src = File('${dir.path}/$vaultName');
+    final src = File(p.join(dir.path, safeName));
+    // Ensure resolved path stays under vault dir.
+    final vaultRoot = await dir.resolveSymbolicLinks();
+    final resolved = src.existsSync()
+        ? await src.resolveSymbolicLinks()
+        : src.path;
+    if (!resolved.startsWith(vaultRoot)) return false;
     if (!await src.exists()) return false;
 
     final key = _sessionKey;
     if (key == null) return false;
 
-    final encryptedBytes = await src.readAsBytes();
-    if (encryptedBytes.length < 16) return false;
-
-    final iv = enc.IV(Uint8List.fromList(encryptedBytes.take(16).toList()));
-    final ciphertext = Uint8List.fromList(encryptedBytes.skip(16).toList());
-
-    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-    final decrypted = encrypter.decryptBytes(enc.Encrypted(ciphertext), iv: iv);
+    final blob = await src.readAsBytes();
+    final plain = _decryptBlob(key, blob);
+    if (plain == null) return false;
 
     final dest = File(destination);
-    await dest.writeAsBytes(decrypted);
+    await dest.parent.create(recursive: true);
+    await dest.writeAsBytes(plain, flush: true);
     return true;
   }
 
+  /// Decrypts vault blob (GCM v1 or legacy CBC).
+  Uint8List? _decryptBlob(enc.Key key, Uint8List blob) {
+    try {
+      if (blob.isEmpty) return null;
+
+      // New format: 0x01 | nonce(12) | ct+tag
+      if (blob[0] == _kVaultFormatGcm && blob.length > 13) {
+        final nonce = enc.IV(Uint8List.sublistView(blob, 1, 13));
+        final ct = Uint8List.sublistView(blob, 13);
+        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
+        final decrypted =
+            encrypter.decryptBytes(enc.Encrypted(ct), iv: nonce);
+        return Uint8List.fromList(decrypted);
+      }
+
+      // Legacy CBC: IV(16) | ciphertext (no auth)
+      if (blob.length > 16) {
+        final iv = enc.IV(Uint8List.sublistView(blob, 0, 16));
+        final ct = Uint8List.sublistView(blob, 16);
+        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+        final decrypted =
+            encrypter.decryptBytes(enc.Encrypted(ct), iv: iv);
+        return Uint8List.fromList(decrypted);
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Vault] decrypt failed: $e');
+    }
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
-  // Delete
+  // Delete / list
   // ---------------------------------------------------------------------------
 
   Future<bool> delete(String vaultName) async {
+    final safeName = sanitizeVaultName(vaultName);
+    if (safeName == null) return false;
     final dir = await vaultDir;
-    final file = File('${dir.path}/$vaultName');
-    if (!await file.exists()) return false;
+    final file = File(p.join(dir.path, safeName));
+    final vaultRoot = await dir.resolveSymbolicLinks();
+    if (!file.existsSync()) return false;
+    final resolved = await file.resolveSymbolicLinks();
+    if (!resolved.startsWith(vaultRoot)) return false;
     await file.delete();
     return true;
   }
-
-  // ---------------------------------------------------------------------------
-  // List
-  // ---------------------------------------------------------------------------
 
   Future<List<VaultEntry>> list({bool authed = false}) async {
     if (!authed && !await authenticate(reason: 'List vault files')) {
@@ -225,22 +303,18 @@ class VaultService {
     }
     final dir = await vaultDir;
     final files = dir.listSync().whereType<File>().where((f) {
-      return !f.uri.pathSegments.last.startsWith('.');
+      return !p.basename(f.path).startsWith('.');
     });
     return files.map((f) {
       final stat = f.statSync();
       return VaultEntry(
-        name: f.uri.pathSegments.last,
+        name: p.basename(f.path),
         size: stat.size,
         modified: stat.modified,
       );
     }).toList()
       ..sort((a, b) => b.modified.compareTo(a.modified));
   }
-
-  // ---------------------------------------------------------------------------
-  // Lock
-  // ---------------------------------------------------------------------------
 
   void lock() {
     _sessionKey = null;
