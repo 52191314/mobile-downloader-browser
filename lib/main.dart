@@ -378,6 +378,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         if (!mounted) return;
         _selectTab(0);
       };
+      _notificationService.isProCallback = () => _proEntitlement.isPro;
 
       await _notificationService.initialize();
       _notificationService.listenTo(

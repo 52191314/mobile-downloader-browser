@@ -2,8 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../../downloader/downloader.dart';
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_features.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import '../notifications/aurora_snackbar.dart';
@@ -1133,6 +1137,16 @@ class _QueuePageState extends State<QueuePage> {
         contentPadding: EdgeInsets.zero,
       ),
     ));
+    // P12 duplicateFinder: Pro+ can scan the queue for duplicate URLs/names.
+    items.add(const PopupMenuItem(
+      value: 'find_duplicates',
+      child: ListTile(
+        leading: Icon(Icons.content_copy_rounded, size: 20),
+        title: Text('Find duplicates'),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+      ),
+    ));
     return items;
   }
 
@@ -1220,6 +1234,9 @@ class _QueuePageState extends State<QueuePage> {
           }
         }
         break;
+      case 'find_duplicates':
+        _findDuplicates(filteredTasks);
+        break;
     }
   }
 
@@ -1232,6 +1249,78 @@ class _QueuePageState extends State<QueuePage> {
 
   void _exitSelectionMode() =>
       setState(() { _selectionMode = false; _selectedIds.clear(); });
+
+  /// P12 duplicateFinder: scans all tasks (from [widget.queue]) for duplicate
+  /// URLs and similar filenames.  Gated behind Pro — free users see an upsell.
+  /// Shows results in a dialog.
+  Future<void> _findDuplicates(List<DownloadTask> filtered) async {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    if (!ProFeatures.allows(ProFeature.duplicateFinder, tier)) {
+      showProUpsell(context, ProFeature.duplicateFinder);
+      return;
+    }
+
+    // Collect all tasks (not just filtered) for a complete scan.
+    final all = widget.queue.allTasks;
+    final urlMap = <String, List<DownloadTask>>{};
+    final nameMap = <String, List<DownloadTask>>{};
+
+    for (final task in all) {
+      urlMap.putIfAbsent(task.url, () => []).add(task);
+      final name = p.basename(task.savePath);
+      nameMap.putIfAbsent(name, () => []).add(task);
+    }
+
+    final duplicates = <String>[];
+    for (final entry in urlMap.entries) {
+      if (entry.value.length > 1) {
+        duplicates.add(
+          'Same URL (${entry.value.length}x): ${entry.key}',
+        );
+      }
+    }
+    for (final entry in nameMap.entries) {
+      if (entry.value.length > 1) {
+        final tasks = entry.value;
+        // Only report if they have different URLs (same name+URL is already
+        // reported above).
+        if (tasks.map((t) => t.url).toSet().length > 1) {
+          duplicates.add(
+            'Same filename (${tasks.length}x): ${entry.key}',
+          );
+        }
+      }
+    }
+
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          duplicates.isEmpty ? 'No duplicates found' : 'Duplicates found',
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: duplicates.isEmpty
+              ? const Text('All tasks in the queue have unique URLs.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: duplicates.length,
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(duplicates[i]),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 
   List<Widget> _buildSelectionActions(List<DownloadTask> selectedTasks) {
     final hasActive = selectedTasks.any(

@@ -7,16 +7,45 @@ void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadNotification] $context: $error');
 }
 
+String _formatByteSize(double bytes) {
+  if (bytes <= 0) return '0 B';
+  const suffixes = ['B', 'KB', 'MB', 'GB'];
+  var i = 0;
+  var size = bytes;
+  while (size >= 1024 && i < suffixes.length - 1) {
+    size /= 1024;
+    i++;
+  }
+  return '${size.toStringAsFixed(1)} ${suffixes[i]}';
+}
+
+String _formatEta(double bytesRemaining, double speedBytesPerSec) {
+  if (speedBytesPerSec <= 0 || bytesRemaining <= 0) return '';
+  final seconds = (bytesRemaining / speedBytesPerSec).round();
+  if (seconds < 60) return '${seconds}s';
+  if (seconds < 3600) return '${seconds ~/ 60}m ${seconds % 60}s';
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  return '${h}h ${m}m';
+}
+
 /// System notifications for download progress / completion / failure, with
 /// action buttons that map onto [DownloadQueue] controls.
 ///
 /// Actions use [AndroidNotificationAction.showsUserInterface] so they always
 /// land on the main isolate (where the queue lives). Tapping the notification
 /// body opens the Queue tab.
+///
+/// **P10 richNotifications:** When [isProCallback] returns true, progress
+/// notifications include download speed and ETA. Completed notifications
+/// gain an "Extract Audio" action (P5 integration).
 class DownloadNotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   final Set<String> _activeLiveNotificationIds = {};
+
+  /// P10: Pro gate for rich notification body (speed/ETA).
+  bool Function()? isProCallback;
 
   static const String _channelId = 'aurora_download_progress';
   static const String _channelName = 'Download progress';
@@ -33,6 +62,7 @@ class DownloadNotificationService {
   static const String actionCancel = 'cancel';
   static const String actionRetry = 'retry';
   static const String actionOpen = 'open';
+  static const String actionExtractAudio = 'extract_audio';
 
   /// Host wires these to [DownloadQueue] / open-file handlers.
   void Function(String taskId)? onPause;
@@ -43,6 +73,9 @@ class DownloadNotificationService {
 
   /// Fired when the user taps the notification body (not an action button).
   void Function(String taskId)? onNotificationTap;
+
+  /// P5 integration: user tapped "Extract Audio" on a completed download.
+  void Function(String taskId)? onExtractAudio;
 
   StreamSubscription<DownloadTask>? _subscription;
   StreamSubscription<String>? _removedSubscription;
@@ -147,6 +180,8 @@ class DownloadNotificationService {
           onRetry?.call(taskId);
         case actionOpen:
           onOpen?.call(taskId);
+        case actionExtractAudio:
+          onExtractAudio?.call(taskId);
         default:
           // Unknown action — treat like a body tap.
           onNotificationTap?.call(taskId);
@@ -186,10 +221,14 @@ class DownloadNotificationService {
     final progress = _progressPercent(task);
     final filename = _shortName(task.savePath);
 
+    // P10: Pro+ gets speed/ETA in notification body.
+    final isRich = isProCallback != null && isProCallback!();
+    final body = isRich ? _richProgressBody(task, filename) : filename;
+
     _plugin.show(
       id,
       'Downloading $progress%',
-      filename,
+      body,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
@@ -308,6 +347,27 @@ class DownloadNotificationService {
   void _showCompletedNotification(DownloadTask task) {
     final id = _notificationIdFor(task.id);
     final filename = _shortName(task.savePath);
+    final isRich = isProCallback != null && isProCallback!();
+
+    final actions = <AndroidNotificationAction>[
+      const AndroidNotificationAction(
+        actionOpen,
+        'Open',
+        showsUserInterface: true,
+        cancelNotification: true,
+      ),
+    ];
+    // P5 integration: Pro+ gets a "Convert to audio" action on completed
+    // downloads. The actual transform is delegated via onExtractAudio.
+    if (isRich) {
+      actions.add(const AndroidNotificationAction(
+        actionExtractAudio,
+        'Extract Audio',
+        showsUserInterface: true,
+        cancelNotification: false,
+      ));
+    }
+
     _plugin.show(
       id,
       'Done',
@@ -320,14 +380,7 @@ class DownloadNotificationService {
           priority: Priority.high,
           showWhen: true,
           autoCancel: true,
-          actions: const <AndroidNotificationAction>[
-            AndroidNotificationAction(
-              actionOpen,
-              'Open',
-              showsUserInterface: true,
-              cancelNotification: true,
-            ),
-          ],
+          actions: actions,
         ),
       ),
       payload: task.id,
@@ -363,6 +416,17 @@ class DownloadNotificationService {
       payload: task.id,
     );
     _activeLiveNotificationIds.remove(task.id);
+  }
+
+  /// P10: builds rich body with speed and ETA for [task].
+  String _richProgressBody(DownloadTask task, String filename) {
+    final speedLabel = _formatByteSize(task.speed);
+    if (speedLabel == '0 B') return filename;
+    final remaining = task.totalBytes - task.downloadedBytes;
+    final eta = _formatEta(remaining.toDouble(), task.speed);
+    return eta.isNotEmpty
+        ? '$filename · $speedLabel/s · ETA $eta'
+        : '$filename · $speedLabel/s';
   }
 
   /// Same 0–100 as Queue: [DownloadTask.progressPercent]
