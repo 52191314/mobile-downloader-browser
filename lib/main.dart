@@ -34,6 +34,9 @@ import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
 import 'premium/play_billing_service.dart';
 import 'premium/pro_upsell_sheet.dart';
+import 'premium/turbo_policy.dart';
+import 'premium/send_to_pc_sheet.dart';
+import 'sniffer/token_refresh_service.dart';
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
 
@@ -716,6 +719,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onResniffAuto: _resniffAuto,
                             onResniffManual: _resniffManual,
                             onShareDownload: _shareDownload,
+                            onSendToPc: _sendToPc,
                             onRedownload: _redownloadTask,
                             onOpenBrowser: () => _selectTab(1),
                           ),
@@ -991,35 +995,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   /// a dialog asking the user whether to update or create a new download.
   Future<void> _resniffAuto(DownloadTask task) async {
     try {
-      final sourcePage = task.sourcePageUrl;
-      if (sourcePage != null && sourcePage.isNotEmpty) {
-        // Open the source page in a real browser tab (same path as
-        // "Scan in browser" / "View source page"). Loading via
-        // `_browserController.loadRequest` only hits the shared first-tab
-        // controller, which is often not the active WebView — so the
-        // Browser screen appeared without the source page.
-        _openUrlInBrowserAfterTabReady(sourcePage);
-        // Let the page JS kick off player/playlist requests before probing.
-        await Future<void>.delayed(const Duration(seconds: 3));
-      }
-
-      // Try the HLS playlist refresh path first (handles token expiry).
-      String? freshUrl = await _browserController.fetchFreshPlaylistUrl(
-        task.url,
-      );
-      // Fall back to a head-fetch through the WebView's JS context.
+      // P4: use the headless TokenRefreshService instead of opening a visible
+      // browser tab. The user never sees the source page load; revival runs in
+      // a background WebView. Manual refresh stays free for everyone.
+      String? freshUrl = await TokenRefreshService.refresh(task);
       if (freshUrl == null || freshUrl == task.url) {
-        final headers = await _browserController.fetchHeadersViaJavaScript(
-          task.url,
-        );
-        // The URL itself hasn't changed; nothing to update.
-        if (headers == null || headers.isEmpty) {
-          if (mounted) {
-            _showSnack('Link is still valid. No update needed.');
-          }
-          return;
+        if (mounted) {
+          _showSnack('Link is still valid. No update needed.');
         }
-        freshUrl = task.url;
+        return;
       }
 
       // If the fresh URL is the same, nothing to do.
@@ -1293,12 +1277,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     unawaited(_autoBackupService.configure(settings));
     _downloadQueue.wifiOnly = settings.wifiOnly;
     // Dual clamp order: userSetting → tierMax → engineHardMax.
-    final effectiveConcurrent = settings.maxConcurrentDownloads
-        .clamp(1, ProFeatures.maxConcurrentFor(tier))
-        .clamp(1, DownloadQueue.engineHardMaxConcurrent);
-    final effectiveChunks = settings.chunksPerTask
-        .clamp(1, ProFeatures.chunksFor(tier))
-        .clamp(1, DownloadQueue.engineHardMaxChunks);
+    final tierClampedConcurrent = settings.maxConcurrentDownloads
+        .clamp(1, ProFeatures.maxConcurrentFor(tier));
+    final tierClampedChunks = settings.chunksPerTask
+        .clamp(1, ProFeatures.chunksFor(tier));
+    // P3 Turbo: Pro+ with turboEngine active drives the engine to the tier
+    // maximum instead of the (possibly conservative) user setting.
+    final effectiveConcurrent = TurboPolicy.resolveConcurrent(
+      tierClampedConcurrent,
+      tier,
+    ).clamp(1, DownloadQueue.engineHardMaxConcurrent);
+    final effectiveChunks = TurboPolicy.resolveChunks(
+      tierClampedChunks,
+      tier,
+    ).clamp(1, DownloadQueue.engineHardMaxChunks);
     _downloadQueue.configure(
       maxConcurrentDownloads: effectiveConcurrent,
       numChunksPerTask: effectiveChunks,
@@ -1472,7 +1464,32 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       // Still on private disk (not published yet) — share via native path.
       await PublicDownloadsService.shareFile(source, mimeType: mime);
     } catch (error) {
-      _showSnack('Couldn\u2019t share the file. $error');
+      _showSnack('Couldn’t share the file. $error');
+    }
+  }
+
+  /// P6 — Send the completed download to a PC over the local network.
+  Future<void> _sendToPc(DownloadTask task) async {
+    try {
+      final source = await _resolvedCompletedSource(task);
+      if (source == null || !source.startsWith('/')) {
+        if (!mounted) return;
+        _showSnack(
+          'Couldn’t send — the file isn’t available locally yet.',
+        );
+        return;
+      }
+      final tier = _proEntitlement.tier;
+      final ctx = context;
+      if (!mounted) return;
+      await SendToPcSheet.show(
+        ctx,
+        filePaths: [source],
+        tier: tier,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Couldn’t start Send to PC. $error');
     }
   }
 

@@ -6,6 +6,10 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/premium/pro_entitlement.dart';
+import 'package:aurora_downloader/premium/pro_features.dart';
+import 'package:aurora_downloader/premium/pro_upsell_sheet.dart';
+import 'package:aurora_downloader/premium/upsell_controller.dart';
 import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_batch_bar.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_empty_state.dart';
@@ -183,9 +187,29 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
 
   Future<void> _runBatchDownload(List<CaptureGroup> selected) async {
     if (selected.isEmpty) return;
+
+    // P1 — Cap free batch capture. Pro+ get unlimited batch; free users get a
+    // soft first-`freeBatchCaptureItems` enqueue + an upsell (never a hard
+    // stop of the whole action). See plan §Free-cap product rules.
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    List<CaptureGroup> toEnqueue = selected;
+    if (!ProFeatures.allows(ProFeature.batchCapture, tier) &&
+        selected.length > ProFeatures.freeBatchCaptureItems) {
+      toEnqueue = selected.take(ProFeatures.freeBatchCaptureItems).toList();
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            widget.parentContext,
+            feature: ProFeature.batchCapture,
+            userTier: tier,
+          ),
+        );
+      }
+    }
+
     final nav = Navigator.of(context);
     nav.pop();
-    for (final group in selected) {
+    for (final group in toEnqueue) {
       if (!widget.parentContext.mounted) break;
       final ok = await widget.onAddToQueue(
         widget.parentContext,

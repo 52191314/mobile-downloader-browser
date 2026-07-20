@@ -11,6 +11,7 @@ import 'models/browser_tab.dart';
 import 'models/sniffed_media.dart';
 import 'sheets/duplicate_download_dialog.dart';
 import 'sniffer_url_utils.dart';
+import 'token_refresh_service.dart';
 
 /// Builds a user-facing suggested filename for a captured media item.
 String buildSuggestedFilenameForTab({
@@ -98,12 +99,6 @@ Future<void> enqueueDirectDownload({
   required String? baseDir,
   required String? baseTemp,
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
-  required Future<String?> Function(
-    BrowserTab tab,
-    String? sourcePageUrl, {
-    bool forceReload,
-  })
-  reloadForFreshUrl,
   required void Function(String message) showSnack,
   required bool Function() isMounted,
 }) async {
@@ -194,10 +189,9 @@ Future<void> enqueueDirectDownload({
       tab.controller.fetchBinaryViaJavaScript(binaryUrl);
   task.cookieProvider = (cookieUrl) =>
       tab.controller.getCookiesForDomain(url: cookieUrl);
-  task.onTokenExpired = ({bool forceReload = false}) => reloadForFreshUrl(
-    tab,
-    media?.sourcePageUrl ?? currentUrl,
-    forceReload: forceReload,
+  task.onTokenExpired = TokenRefreshService.gatedClosure(
+    task,
+    ({bool forceReload = false}) => TokenRefreshService.refresh(task),
   );
 
   var force = false;

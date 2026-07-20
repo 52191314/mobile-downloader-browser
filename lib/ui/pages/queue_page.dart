@@ -63,6 +63,7 @@ class QueuePage extends StatefulWidget {
   final Future<void> Function(DownloadTask task)? onResniffAuto;
   final Future<void> Function(DownloadTask task)? onResniffManual;
   final Future<void> Function(DownloadTask task) onShareDownload;
+  final Future<void> Function(DownloadTask task)? onSendToPc;
   final Future<void> Function(DownloadTask task)? onRedownload;
   final VoidCallback? onOpenBrowser;
 
@@ -82,6 +83,7 @@ class QueuePage extends StatefulWidget {
     this.onResniffAuto,
     this.onResniffManual,
     required this.onShareDownload,
+    this.onSendToPc,
     this.onRedownload,
     this.onOpenBrowser,
   });
@@ -1515,6 +1517,7 @@ class _QueuePageState extends State<QueuePage> {
       onResniffManual: widget.onResniffManual,
       onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
       onShare: widget.onShareDownload,
+      onSendToPc: widget.onSendToPc,
       onRedownload: widget.onRedownload,
       enableSwipe: !_selectionMode && !isMerging,
       selectionMode: _selectionMode,

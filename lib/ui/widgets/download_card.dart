@@ -98,6 +98,7 @@ class DownloadCard extends StatelessWidget {
     this.onResniffManual,
     this.onOpenUrlInBrowser,
     this.onShare,
+    this.onSendToPc,
     this.onRedownload,
     this.onShowProperties,
     this.selectionMode = false,
@@ -119,6 +120,8 @@ class DownloadCard extends StatelessWidget {
   final Future<void> Function(DownloadTask task)? onResniffManual;
   final void Function(String url)? onOpenUrlInBrowser;
   final Future<void> Function(DownloadTask task)? onShare;
+  /// Send the completed file to a PC over the local network (P6).
+  final Future<void> Function(DownloadTask task)? onSendToPc;
   /// Start a fresh download of the same URL (new queue entry).
   final Future<void> Function(DownloadTask task)? onRedownload;
   final VoidCallback? onShowProperties;
@@ -812,6 +815,20 @@ class DownloadCard extends StatelessWidget {
       );
     }
 
+    // Send to PC over LAN (P6) — completed files only.
+    if (isCompleted && onSendToPc != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'send_to_pc',
+          child: _popupRow(
+            Icons.computer_outlined,
+            ac.accentFrost,
+            'Send to PC…',
+          ),
+        ),
+      );
+    }
+
     // Redownload — fresh queue entry (not the same as Retry of a partial).
     if (onRedownload != null && !isActive && !isMagnet && !isBlob) {
       popupItems.add(
@@ -948,6 +965,8 @@ class DownloadCard extends StatelessWidget {
                         onOpenDownload(task);
                       case 'share':
                         onShare?.call(task);
+                      case 'send_to_pc':
+                        onSendToPc?.call(task);
                       case 'redownload':
                         onRedownload?.call(task);
                       case 'force_merge':

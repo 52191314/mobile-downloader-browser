@@ -58,6 +58,8 @@ import 'actions/translate_action.dart';
 import 'capture_sort.dart';
 import 'enqueue_download.dart';
 import 'filename_utils.dart';
+import 'headless_resniffer.dart';
+import 'token_refresh_service.dart';
 import 'hls_variant_fetcher.dart';
 import 'library_transfer.dart';
 import 'playback_quality.dart';
@@ -2858,8 +2860,6 @@ class _SnifferScreenState extends State<SnifferScreen>
         downloadQueue: _downloadQueue,
         showDuplicatePrompt: _showDuplicatePrompt,
         showSnack: _showSnack,
-        reloadForFreshUrl: (tab, sourcePageUrl, {bool forceReload = false}) =>
-            _reloadForFreshUrl(tab, sourcePageUrl, forceReload: forceReload),
         isMounted: mounted,
       );
 
@@ -2882,8 +2882,10 @@ class _SnifferScreenState extends State<SnifferScreen>
         (cacheUrl) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
     task.cookieProvider =
         (url) => tab.controller.getCookiesForDomain(url: url);
-    task.onTokenExpired = ({bool forceReload = false}) =>
-        _reloadForFreshUrl(tab, sourcePage, forceReload: forceReload);
+    task.onTokenExpired = TokenRefreshService.gatedClosure(
+      task,
+      ({bool forceReload = false}) => TokenRefreshService.refresh(task),
+    );
   }
 
   /// Prefer a tab whose address matches the task's source page host.

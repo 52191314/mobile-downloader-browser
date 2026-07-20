@@ -21,6 +21,7 @@ import 'package:aurora_downloader/platform/public_downloads_service.dart';
 import 'package:aurora_downloader/sniffer/hls_playlist_cache_lookup.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/sniffer_url_utils.dart';
+import 'package:aurora_downloader/sniffer/token_refresh_service.dart';
 
 /// Trims a JSON-decoded value to a non-empty string, or returns `null`.
 String? _contextString(Object? value) {
@@ -370,11 +371,6 @@ Future<void> addContextTargetToQueue(
   required Future<DuplicateChoice> Function(BuildContext context, String filename)
       showDuplicatePrompt,
   required void Function(String message) showSnack,
-  required Future<String?> Function(
-    BrowserTab tab,
-    String? sourcePageUrl, {
-    bool forceReload,
-  }) reloadForFreshUrl,
   required bool isMounted,
 }) async {
   try {
@@ -415,8 +411,10 @@ Future<void> addContextTargetToQueue(
           '${baseTemp ?? '.'}${Platform.pathSeparator}temp_${DateTime.now().millisecondsSinceEpoch}',
       headers: taskHeaders,
     );
-    task.onTokenExpired = ({bool forceReload = false}) =>
-        reloadForFreshUrl(tab, curUrl, forceReload: forceReload);
+    task.onTokenExpired = TokenRefreshService.gatedClosure(
+      task,
+      ({bool forceReload = false}) => TokenRefreshService.refresh(task),
+    );
     task.fetchViaWebView = (url, {headers}) =>
         tab.controller.fetchPlaylistBodyViaJavaScript(url);
     task.hlsPlaylistCache =
