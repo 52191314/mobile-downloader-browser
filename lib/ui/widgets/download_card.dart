@@ -429,16 +429,6 @@ class DownloadCard extends StatelessWidget {
               color: color,
             ),
             const SizedBox(width: 8),
-            // Left edge status indicator
-            Container(
-              width: 3,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(12)),
-              ),
-            ),
-            const SizedBox(width: 8),
             // Text block
             Expanded(
               child: Padding(

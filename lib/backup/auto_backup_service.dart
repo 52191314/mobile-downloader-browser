@@ -145,11 +145,14 @@ class AutoBackupService {
         }
       }
 
-      final temp = File('${tempDir.path}/aurora_bak_aurora_backup.json');
+      // Unique display name so MediaStore listing and Local Backups scan can
+      // distinguish snapshots (still recognized by isAuroraBackupFileName).
+      final displayName = 'aurora_auto_backup_$timestamp.json';
+      final temp = File('${tempDir.path}/aurora_bak_$displayName');
       await temp.writeAsString(jsonEncode(consolidatedMap));
       final ok = await PublicDownloadsService.backupFileToDownloads(
         sourcePath: temp.path,
-        displayName: 'aurora_backup.json',
+        displayName: displayName,
         relativePath: '$autoBackupRootRelative/$timestamp',
       );
       await temp.delete();
@@ -157,7 +160,7 @@ class AutoBackupService {
       if (!ok) {
         return const AutoBackupResult(
           success: false,
-          message: "Couldn't write aurora_backup.json. Free up storage and try again.",
+          message: "Couldn't write the auto-backup file. Free up storage and try again.",
         );
       }
 
@@ -198,10 +201,19 @@ class AutoBackupService {
     if (matching.isEmpty) return 0;
 
     final supportDir = await getApplicationSupportDirectory();
-    final hasConsolidated = matching.any((f) => f.name == 'aurora_backup.json');
-
-    if (hasConsolidated) {
-      final file = matching.firstWhere((f) => f.name == 'aurora_backup.json');
+    // Prefer consolidated snapshot JSON (new auto names or legacy fixed name).
+    AutoBackupFile? consolidated;
+    for (final f in matching) {
+      final n = f.name.toLowerCase();
+      if (n == 'aurora_backup.json' ||
+          n.startsWith('aurora_auto_backup_') ||
+          n.startsWith('aurora_backup_')) {
+        consolidated = f;
+        break;
+      }
+    }
+    if (consolidated != null) {
+      final file = consolidated;
       final tempDir = await getTemporaryDirectory();
       final tempDest = File('${tempDir.path}/aurora_restore_consolidated.json');
       final ok = await PublicDownloadsService.restoreBackupFile(
