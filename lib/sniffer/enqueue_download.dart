@@ -6,6 +6,7 @@ import '../downloader/downloader.dart';
 import '../downloader/filename_service.dart';
 import '../downloader/url_filename_resolver.dart';
 import '../settings/download_settings.dart';
+import 'controllers/site_profile_runtime.dart';
 import 'hls_playlist_cache_lookup.dart';
 import 'models/browser_tab.dart';
 import 'models/sniffed_media.dart';
@@ -168,7 +169,28 @@ Future<void> enqueueDirectDownload({
   }
 
   final taskId = DateTime.now().millisecondsSinceEpoch.toString();
-  final saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}completed';
+  var saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}completed';
+
+  // --- Site profile overrides (download folder + custom headers) ---
+  // Match on source page host when available so download rules follow the
+  // browsing site, not a CDN host for the media URL.
+  final profiles = await loadProfiles();
+  final profileMatchUrl = firstNonEmpty([
+        media?.sourcePageUrl,
+        currentUrl,
+        tab.addressController.text,
+        url,
+      ]) ??
+      url;
+  final enqueueOverride = enqueueOverrideFor(profileMatchUrl, profiles);
+  if (enqueueOverride?.downloadFolder != null) {
+    saveDir = enqueueOverride!.downloadFolder!;
+  }
+  if (enqueueOverride?.customHeaders != null &&
+      enqueueOverride!.customHeaders!.isNotEmpty) {
+    mergeHeaders(headerMap, enqueueOverride.customHeaders!);
+  }
+
   final task = DownloadTask(
     id: taskId,
     url: url,
