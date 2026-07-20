@@ -204,6 +204,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final ProEntitlement _proEntitlement = ProEntitlement();
+
+  /// Last clipboard text we prompted for (clipboardCatch dedup).
+  String? _lastCheckedClipboard;
   late final PlayBillingService _playBilling =
       PlayBillingService(_proEntitlement);
   final PublicDownloadsService _publicDownloadsService =
@@ -634,6 +637,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       if (_currentTabIndex == 1) {
         unawaited(_browserController.resumeActiveWebView());
       }
+      // P9 clipboardCatch: Pro+ auto-prompt on resume if clipboard holds a
+      // downloadable URL.
+      unawaited(_checkClipboardForUrl());
     } else if (state == AppLifecycleState.detached) {
       debugPrint('[AuroraHome] App detached — process likely being killed');
       AuroraLog.instance.warn(
@@ -807,6 +813,52 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  /// Checks the system clipboard on app resume for a downloadable URL and
+  /// offers to add it to the queue (P9 clipboardCatch — Pro+ only).
+  Future<void> _checkClipboardForUrl() async {
+    // Gate: Pro+ only; free never sees clipboard listener.
+    if (!ProFeatures.allows(
+          ProFeature.clipboardCatch,
+          proUpsellEntitlement?.tier ?? EntitlementTier.free,
+        )) {
+      return;
+    }
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text;
+      if (text == null || text.isEmpty) return;
+      // Avoid re-prompting for unchanged clipboard content.
+      if (text == _lastCheckedClipboard) return;
+      _lastCheckedClipboard = text;
+
+      // Quick-validate: must be an http(s) URL.
+      final uri = Uri.tryParse(text.trim());
+      if (uri == null || !uri.hasScheme || !uri.hasAuthority) return;
+      if (uri.scheme != 'http' && uri.scheme != 'https') return;
+
+      // Skip blocked/restricted URLs.
+      if (RestrictedMediaPolicy.isBlocked(mediaUrl: text)) return;
+
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text('Link found in clipboard. Add to queue?'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'Add',
+            onPressed: () {
+              _urlController.text = text;
+              unawaited(_addDownloadFromUrl());
+            },
+          ),
+        ),
+      );
+    } catch (_) {
+      // Clipboard read may fail on some platforms — silently ignore.
+    }
   }
 
   Future<void> _addDownloadFromUrl() async {

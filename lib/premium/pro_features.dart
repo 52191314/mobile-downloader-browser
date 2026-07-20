@@ -213,6 +213,32 @@ class ProFeatures {
   /// Private vault: free inventory item cap.
   static const int freeVaultItems = 25;
 
+  // -- Pure helpers for free-taste cap decisions (mirror batch pattern) --
+
+  /// Returns `true` if a batch of [selectedCount] items is within free limits
+  /// for batch capture (stateless — no persistence needed).
+  static bool freeBatchAllows(int selectedCount) =>
+      selectedCount <= freeBatchCaptureItems;
+
+  /// Returns how many items to enqueue when a free user selects [selectedCount]
+  /// items for batch download (soft first-N: enqueue N, upsell beyond).
+  static int freeBatchEnqueueCount(int selectedCount) =>
+      selectedCount < freeBatchCaptureItems
+          ? selectedCount
+          : freeBatchCaptureItems;
+
+  /// Returns `true` if a grab action of [episodeCount] episodes is within free
+  /// limits for series grab (stateless — no per-series lifetime persistence).
+  static bool freeSeriesGrabAllows(int episodeCount) =>
+      episodeCount <= freeSeriesGrabEpisodes;
+
+  /// Returns how many episodes to enqueue when a free user triggers a grab
+  /// action of [episodeCount] episodes (soft first-N).
+  static int freeSeriesGrabEnqueueCount(int episodeCount) =>
+      episodeCount < freeSeriesGrabEpisodes
+          ? episodeCount
+          : freeSeriesGrabEpisodes;
+
   // -------------------------------------------------------------------------
   // Minimum tier per feature
   // -------------------------------------------------------------------------
