@@ -36,6 +36,7 @@ import 'premium/play_billing_service.dart';
 import 'premium/pro_upsell_sheet.dart';
 import 'premium/turbo_policy.dart';
 import 'premium/send_to_pc_sheet.dart';
+import 'premium/audio_extract_platform.dart';
 import 'premium/phase2_caps.dart';
 import 'premium/vault_service.dart';
 import 'ui/pages/vault_page.dart';
@@ -383,6 +384,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         _selectTab(0);
       };
       _notificationService.isProCallback = () => _proEntitlement.isPro;
+      _notificationService.onExtractAudio = (taskId) {
+        final task = _downloadQueue.getTask(taskId);
+        if (task == null) return;
+        final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+        unawaited(AudioExtractPlatform.extract(task: task, tier: tier));
+      };
 
       await _notificationService.initialize();
       _notificationService.listenTo(

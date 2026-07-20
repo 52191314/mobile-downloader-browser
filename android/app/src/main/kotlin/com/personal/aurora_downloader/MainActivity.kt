@@ -200,6 +200,78 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+
+        // P5 audioExtract: Media3 Transformer bridge.
+        // Extracts the audio track from a video file using Android's hardware-
+        // accelerated Media3 Transformer, producing an AAC audio file.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/audio_extract")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "extractAudio" -> extractAudio(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * P5 audioExtract: Uses Media3 Transformer to extract audio from a video
+     * file and save as AAC.
+     *
+     * Arguments:
+     *   - inputPath: String — full path to the source video file
+     *   - outputPath: String — full path for the output audio file
+     *
+     * Returns the output path on success, or an error on failure.
+     */
+    private fun extractAudio(call: MethodCall, result: MethodChannel.Result) {
+        val inputPath = call.argument<String>("inputPath") ?: ""
+        val outputPath = call.argument<String>("outputPath") ?: ""
+        if (inputPath.isBlank() || outputPath.isBlank()) {
+            result.error("bad_args", "inputPath and outputPath are required", null)
+            return
+        }
+
+        try {
+            val inputFile = File(inputPath)
+            if (!inputFile.exists()) {
+                result.error("file_not_found", "Input file not found: $inputPath", null)
+                return
+            }
+
+            val outputFile = File(outputPath)
+            // Ensure parent directory exists.
+            outputFile.parentFile?.mkdirs()
+
+            val transformer = androidx.media3.transformer.Transformer.Builder(this)
+                .setOutputMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
+                .build()
+
+            val mediaItem = androidx.media3.common.MediaItem.fromUri(Uri.fromFile(inputFile))
+
+            transformer.addListener(object : androidx.media3.transformer.Transformer.Listener {
+                override fun onCompleted(
+                    transformer: androidx.media3.transformer.Transformer,
+                    mediaItem: androidx.media3.common.MediaItem
+                ) {
+                    Log.d(TAG, "Audio extract completed: $outputPath")
+                    result.success(outputPath)
+                }
+
+                override fun onError(
+                    transformer: androidx.media3.transformer.Transformer,
+                    mediaItem: androidx.media3.common.MediaItem,
+                    error: androidx.media3.transformer.TransformerException
+                ) {
+                    Log.e(TAG, "Audio extract failed: ${error.message}", error)
+                    result.error("extract_failed", error.message, null)
+                }
+            })
+
+            transformer.start(mediaItem, outputPath)
+        } catch (e: Exception) {
+            Log.e(TAG, "Audio extract exception", e)
+            result.error("extract_error", e.message, null)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
