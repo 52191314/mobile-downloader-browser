@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/aurora_palette.dart';
-import 'free_cap_store.dart';
+import 'free_taste.dart';
 import 'lan_file_server.dart';
 import 'pro_entitlement.dart';
 import 'pro_features.dart';
@@ -10,10 +10,10 @@ import 'upsell_controller.dart';
 
 /// Bottom sheet for the P6 "Send to PC" feature.
 ///
-/// Resolves the completed file(s), enforces the free daily cap
-/// ([FreeCapKind.sendToPc], 20/day), starts [LanFileServer], and shows the
-/// per-file LAN share links. Pro+ users are unlimited. Free users who hit the
-/// daily cap see an upsell instead of the links.
+/// Resolves the completed file(s), enforces free taste via [FreeTaste]
+/// (20 files/day), starts [LanFileServer], and shows per-file LAN share links.
+/// Pro+ users are unlimited. Free quota is consumed **only after** the server
+/// starts successfully so failed Wi-Fi/bind attempts do not burn taste.
 class SendToPcSheet extends StatefulWidget {
   const SendToPcSheet({
     super.key,
@@ -33,14 +33,18 @@ class SendToPcSheet extends StatefulWidget {
     if (filePaths.isEmpty) return false;
     final ent = proUpsellEntitlement;
     final effectiveTier = ent?.tier ?? tier;
+    final isUnlimited =
+        ProFeatures.allows(ProFeature.sendToPc, effectiveTier);
 
-    // Free users consume a daily cap unit per file shared.
-    if (!ProFeatures.allows(ProFeature.sendToPc, effectiveTier)) {
-      final ok = await FreeCapStore.tryConsume(
-        FreeCapKind.sendToPc,
+    // Peek free capacity first (do not consume yet).
+    if (!isUnlimited) {
+      final peek = await FreeTaste.evaluate(
+        feature: ProFeature.sendToPc,
+        tier: effectiveTier,
         n: filePaths.length,
+        consume: false,
       );
-      if (!ok) {
+      if (!peek.allowed) {
         if (context.mounted) {
           await UpsellController.show(
             context,
@@ -53,18 +57,53 @@ class SendToPcSheet extends StatefulWidget {
     }
 
     if (!context.mounted) return false;
+
+    // Server re-checks tier + free-taste peek and path allowlist.
+    final started =
+        await LanFileServer.start(filePaths, tier: effectiveTier);
+    if (!started) {
+      if (context.mounted) {
+        _showStartError(context);
+      }
+      return false;
+    }
+
+    // Consume only after a successful start.
+    if (!isUnlimited) {
+      await FreeTaste.evaluate(
+        feature: ProFeature.sendToPc,
+        tier: effectiveTier,
+        n: filePaths.length,
+        consume: true,
+      );
+    }
+
+    if (!context.mounted) return false;
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,
       backgroundColor: context.ac.surfacePanel,
-      builder: (ctx) => SendToPcSheet(filePaths: filePaths, tier: effectiveTier),
+      builder: (ctx) =>
+          SendToPcSheet(filePaths: filePaths, tier: effectiveTier),
     );
     return true;
   }
 
   @override
   State<SendToPcSheet> createState() => _SendToPcSheetState();
+
+  /// Shows a snackbar when the server fails to start (e.g. Wi-Fi unavailable,
+  /// bind failure). Does NOT mention Pro since permission was already granted.
+  static void _showStartError(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Could not start LAN server. Make sure you are connected to Wi-Fi.',
+        ),
+      ),
+    );
+  }
 }
 
 class _SendToPcSheetState extends State<SendToPcSheet> {
@@ -80,18 +119,19 @@ class _SendToPcSheetState extends State<SendToPcSheet> {
   }
 
   Future<void> _start() async {
-    final started = await LanFileServer.start(widget.filePaths);
-    if (!started) {
+    // Server was already started by [SendToPcSheet.show] before the sheet
+    // opened. Just collect the links.
+    final base = LanFileServer.baseUrl;
+    if (base == null) {
       if (mounted) {
         setState(() {
           _starting = false;
-          _error = 'Could not start the LAN server. Make sure you are on '
-              'Wi-Fi and Aurora Pro is active.';
+          _error = 'Could not start the LAN server. '
+              'Make sure you are connected to Wi-Fi.';
         });
       }
       return;
     }
-    final base = LanFileServer.baseUrl;
     final links = <String, String>{};
     for (final path in widget.filePaths) {
       final url = LanFileServer.issueToken(path);
@@ -147,8 +187,9 @@ class _SendToPcSheetState extends State<SendToPcSheet> {
             Text(_error!, style: TextStyle(color: ac.statusError))
           else ...[
             Text(
-              'Open these links on a PC connected to the same Wi-Fi '
-              'network. Links stop after 10 minutes of inactivity.',
+              'Open these links on a PC on the same Wi-Fi. Each link works '
+              'once. Sharing stops after 10 minutes idle or 15 minutes max. '
+              'Traffic is plain HTTP on your LAN only.',
               style: TextStyle(color: ac.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 12),

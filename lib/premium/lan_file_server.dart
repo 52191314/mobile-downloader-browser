@@ -5,90 +5,112 @@ import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
-
-import 'pro_features.dart';
-import 'pro_upsell_sheet.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 // ignore: implementation_imports
 import 'package:aurora_downloader/platform/download_foreground_service.dart';
 
-/// Send-to-PC LAN file server (P6).
+import 'free_taste.dart';
+import 'pro_entitlement.dart';
+import 'pro_features.dart';
+
+/// Send-to-PC LAN file server (P6) — hardened.
 ///
-/// Ships a completed download (or a user-picked file) to another device on
-/// the same Wi-Fi network over a **tokenized, allowlist-only** HTTP server.
-///
-/// Security model (normative — see plan §P6):
-/// - Binds `InternetAddress.anyIPv4` **only when Wi-Fi is active**; refuses to
-///   start on cellular.
+/// Security model:
+/// - Binds the **LAN IPv4 address only** (not 0.0.0.0) when Wi-Fi is active.
 /// - Single route: `GET /d/{token}/{safeFileName}`.
-/// - Each token maps to exactly ONE allowlisted absolute file path. A request
-///   for token A can never read file B.
-/// - Path traversal (`..`) is rejected; the resolved realpath is verified to
-///   be under the allowlisted root.
-/// - Cleartext HTTP on LAN only (documented risk; no TLS).
-/// - Idle timeout (10 min with no request) stops the server.
-/// - Max 4 concurrent connections; 30 req/min/IP rate limit.
-/// - Default OFF. Gated by [ProFeature.sendToPc] (free: 20 files/day).
-/// - MUST NOT mount Automation API / queue routes.
+/// - Tokens map 1:1 to allowlisted absolute paths under known download roots.
+/// - Tokens are **single-use** and the whole share session has an absolute TTL.
+/// - Files are **streamed** (no full-file RAM load).
+/// - Cleartext HTTP on LAN only (documented risk).
+/// - Re-checks entitlement / free-taste inside [start] (no `permitted` footgun).
 class LanFileServer {
   LanFileServer._();
 
   static const int defaultPort = 17890;
   static const Duration idleTimeout = Duration(minutes: 10);
+  static const Duration absoluteTtl = Duration(minutes: 15);
   static const int maxConcurrent = 4;
   static const int rateLimitPerMinute = 30;
 
   static HttpServer? _server;
   static String? _lanIpAddress;
-  static final Map<String, String> _tokenToPath = {};
+  static final Map<String, _ShareEntry> _tokenToPath = {};
   static final Map<String, int> _ipRequestCounts = {};
   static final Set<HttpRequest> _active = {};
   static Timer? _idleTimer;
+  static Timer? _absoluteTimer;
   static DateTime? _lastRequestAt;
+  static DateTime? _startedAt;
   static final Random _rng = Random.secure();
+  static List<String> _allowedRoots = const [];
 
-  /// Whether the server is currently running.
   static bool get isRunning => _server != null;
 
-  /// Local base URL (e.g. `http://192.168.x.x:17890`) or null when stopped.
   static String? get baseUrl {
     if (_server == null || _lanIpAddress == null) return null;
     return 'http://$_lanIpAddress:$defaultPort';
   }
 
-  /// Issues a single-use-per-file token scoped to [filePath]. Returns the
-  /// full shareable URL, or null if the server is not running.
-  ///
-  /// [filePath] must exist and be a regular file. The token is 32 bytes of
-  /// crypto-random, URL-safe base64 (~43 chars).
+  /// Absolute share deadline (wall clock), if running.
+  static DateTime? get expiresAt {
+    final started = _startedAt;
+    if (started == null) return null;
+    return started.add(absoluteTtl);
+  }
+
+  /// Issues a **single-use** token scoped to [filePath].
   static String? issueToken(String filePath) {
     if (_server == null) return null;
-    final file = File(filePath);
-    if (!file.existsSync()) return null;
+    final resolved = _resolveAllowedPath(filePath);
+    if (resolved == null) return null;
     final token = _randomToken();
-    _tokenToPath[token] = file.resolveSymbolicLinksSyncSafe();
-    final safeName = Uri.encodeComponent(file.uri.pathSegments.last);
+    _tokenToPath[token] = _ShareEntry(path: resolved);
+    final safeName = Uri.encodeComponent(p.basename(resolved));
     return '${baseUrl!}/d/$token/$safeName';
   }
 
-  /// Starts the server. [files] are the initial allowlisted file paths
-  /// (completed downloads the user chose to share). Returns true on success.
+  /// Starts the server for [files] if [tier] may use Send-to-PC free taste
+  /// or Pro+. Returns true on success.
   ///
-  /// Refuses to start unless on Wi-Fi (never on cellular) and the entitlement
-  /// allows [ProFeature.sendToPc].
-  static Future<bool> start(List<String> files) async {
+  /// Free daily quota is **not** consumed here — the caller must consume after
+  /// a successful start (peek is done inside for a fail-closed check).
+  static Future<bool> start(
+    List<String> files, {
+    required EntitlementTier tier,
+  }) async {
     if (_server != null) return true;
-    if (!await _onWifi()) return false;
-    final ent = proUpsellEntitlement;
-    if (ent == null || !ProFeatures.allows(ProFeature.sendToPc, ent.tier)) {
-      return false;
+    if (files.isEmpty) return false;
+
+    // Entitlement re-check (do not trust a bare permitted flag).
+    final unlimited = ProFeatures.allows(ProFeature.sendToPc, tier);
+    if (!unlimited) {
+      final peek = await FreeTaste.evaluate(
+        feature: ProFeature.sendToPc,
+        tier: tier,
+        n: files.length,
+        consume: false,
+      );
+      if (!peek.allowed) return false;
     }
+
+    if (!await _onWifi()) return false;
     final ip = await _lanIp();
     if (ip == null) return false;
     _lanIpAddress = ip;
 
+    _allowedRoots = await _computeAllowedRoots();
+    final allowedFiles = <String>[];
+    for (final f in files) {
+      final resolved = _resolveAllowedPath(f);
+      if (resolved != null) allowedFiles.add(resolved);
+    }
+    if (allowedFiles.isEmpty) return false;
+
     try {
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, defaultPort);
+      // Bind only the LAN address — not anyIPv4.
+      _server = await HttpServer.bind(InternetAddress(ip), defaultPort);
     } catch (e) {
       _lanIpAddress = null;
       if (kDebugMode) debugPrint('[LanFileServer] bind failed: $e');
@@ -97,19 +119,11 @@ class LanFileServer {
 
     _tokenToPath.clear();
     _ipRequestCounts.clear();
-    for (final f in files) {
-      final file = File(f);
-      if (file.existsSync()) {
-        _tokenToPath[_randomToken()] = file.resolveSymbolicLinksSyncSafe();
-      }
-    }
-
     _lastRequestAt = DateTime.now();
+    _startedAt = DateTime.now();
     _armIdleTimer();
-    // Best-effort foreground keep-alive so the OS does not kill the process
-    // mid-transfer. Native FGS notification text is owned by
-    // DownloadForegroundService; a dedicated "Aurora file sharing on" notice
-    // is a follow-up native change.
+    _armAbsoluteTimer();
+
     unawaited(DownloadForegroundService.start(count: 1));
 
     _server!.listen(_handleRequest, onError: (e) {
@@ -118,15 +132,18 @@ class LanFileServer {
     return true;
   }
 
-  /// Stops the server, clears tokens, and stops the foreground keep-alive.
   static Future<void> stop() async {
     _idleTimer?.cancel();
     _idleTimer = null;
+    _absoluteTimer?.cancel();
+    _absoluteTimer = null;
     final server = _server;
     _server = null;
     _lanIpAddress = null;
+    _startedAt = null;
     _tokenToPath.clear();
     _ipRequestCounts.clear();
+    _allowedRoots = const [];
     for (final req in _active) {
       try {
         req.response.close();
@@ -145,6 +162,15 @@ class LanFileServer {
     _lastRequestAt = DateTime.now();
     _armIdleTimer();
 
+    // Absolute TTL enforced on every request.
+    final started = _startedAt;
+    if (started != null &&
+        DateTime.now().difference(started) >= absoluteTtl) {
+      _respond(req, HttpStatus.gone, 'Share expired');
+      unawaited(stop());
+      return;
+    }
+
     final clientIp = req.connectionInfo?.remoteAddress.address ?? '';
     if (!_rateOk(clientIp)) {
       _respond(req, HttpStatus.tooManyRequests, 'Rate limited');
@@ -161,15 +187,21 @@ class LanFileServer {
     }
 
     final segments = req.uri.pathSegments;
-    // /d/{token}/{safeFileName}
     if (segments.length < 3) {
       _respond(req, HttpStatus.notFound, 'Not found');
       return;
     }
     final token = segments[1];
-    final allowedPath = _tokenToPath[token];
+    final entry = _tokenToPath.remove(token); // single-use
+    if (entry == null) {
+      _respond(req, HttpStatus.forbidden, 'Invalid or used token');
+      return;
+    }
+
+    // Re-validate path still under roots (TOCTOU).
+    final allowedPath = _resolveAllowedPath(entry.path);
     if (allowedPath == null) {
-      _respond(req, HttpStatus.forbidden, 'Invalid token');
+      _respond(req, HttpStatus.forbidden, 'Path not allowed');
       return;
     }
 
@@ -181,20 +213,31 @@ class LanFileServer {
 
     try {
       _active.add(req);
-      final bytes = await file.readAsBytes();
-      final name = Uri.decodeComponent(segments.last);
+      final name = _safeContentFilename(segments.last);
+      final length = await file.length();
       req.response
         ..statusCode = HttpStatus.ok
         ..headers.contentType = ContentType.binary
-        ..headers.set('Content-Disposition', 'attachment; filename="$name"')
-        ..headers.contentLength = bytes.length;
-      await req.response.addStream(Stream.value(bytes));
+        ..headers.set(
+          'Content-Disposition',
+          'attachment; filename="$name"',
+        )
+        ..headers.contentLength = length;
+      await req.response.addStream(file.openRead());
       await req.response.close();
     } catch (e) {
+      // Token already consumed; do not re-issue.
       _respond(req, HttpStatus.internalServerError, 'Read failed');
     } finally {
       _active.remove(req);
     }
+  }
+
+  static String _safeContentFilename(String raw) {
+    var name = Uri.decodeComponent(raw);
+    name = p.basename(name).replaceAll(RegExp(r'[\r\n"]'), '_');
+    if (name.isEmpty) name = 'download';
+    return name;
   }
 
   static void _respond(HttpRequest req, int code, String body) {
@@ -210,12 +253,17 @@ class LanFileServer {
 
   static bool _rateOk(String ip) {
     final now = DateTime.now();
-    final minuteKey = '${now.year}-${now.month}-${now.day}-${now.hour}-${now.minute}';
+    final minuteKey =
+        '${now.year}-${now.month}-${now.day}-${now.hour}-${now.minute}';
     final key = '$ip@$minuteKey';
     final count = (_ipRequestCounts[key] ?? 0) + 1;
     _ipRequestCounts[key] = count;
-    // Drop stale minute buckets lazily.
-    if (_ipRequestCounts.length > 256) _ipRequestCounts.clear();
+    // Evict only old minutes, do not wipe all limits.
+    if (_ipRequestCounts.length > 256) {
+      final prefix =
+          '${now.year}-${now.month}-${now.day}-${now.hour}-${now.minute}';
+      _ipRequestCounts.removeWhere((k, _) => !k.endsWith(prefix));
+    }
     return count <= rateLimitPerMinute;
   }
 
@@ -229,6 +277,13 @@ class LanFileServer {
     });
   }
 
+  static void _armAbsoluteTimer() {
+    _absoluteTimer?.cancel();
+    _absoluteTimer = Timer(absoluteTtl, () {
+      unawaited(stop());
+    });
+  }
+
   static String _randomToken() {
     final bytes = List<int>.generate(32, (_) => _rng.nextInt(256));
     return base64Url.encode(bytes);
@@ -237,8 +292,6 @@ class LanFileServer {
   static Future<bool> _onWifi() async {
     try {
       final result = await Connectivity().checkConnectivity();
-      // Only Wi-Fi is permitted; cellular / none / ethernet are rejected.
-      // connectivity_plus returns a List<ConnectivityResult>.
       return result.contains(ConnectivityResult.wifi);
     } catch (_) {
       return false;
@@ -248,12 +301,13 @@ class LanFileServer {
   static Future<String?> _lanIp() async {
     try {
       for (final iface in await NetworkInterface.list()) {
-        if (iface.name.toLowerCase().contains('wlan') ||
-            iface.name.toLowerCase().contains('wi') ||
-            iface.name.toLowerCase().contains('eth')) {
+        final n = iface.name.toLowerCase();
+        if (n.contains('wlan') ||
+            n.contains('wi') ||
+            n.contains('eth') ||
+            n.contains('en')) {
           for (final addr in iface.addresses) {
-            if (addr.type == InternetAddressType.IPv4 &&
-                !addr.isLoopback) {
+            if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
               return addr.address;
             }
           }
@@ -262,16 +316,51 @@ class LanFileServer {
     } catch (_) {}
     return null;
   }
+
+  static Future<List<String>> _computeAllowedRoots() async {
+    final roots = <String>[];
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      roots.add(await Directory(docs.path).resolveSymbolicLinks());
+      final completed = Directory(p.join(docs.path, 'completed'));
+      if (await completed.exists()) {
+        roots.add(await completed.resolveSymbolicLinks());
+      }
+    } catch (_) {}
+    try {
+      final support = await getApplicationSupportDirectory();
+      roots.add(await Directory(support.path).resolveSymbolicLinks());
+    } catch (_) {}
+    try {
+      final tmp = await getTemporaryDirectory();
+      roots.add(await Directory(tmp.path).resolveSymbolicLinks());
+    } catch (_) {}
+    return roots;
+  }
+
+  /// Returns resolved absolute path if file exists and is under an allowed root.
+  static String? _resolveAllowedPath(String filePath) {
+    try {
+      final file = File(filePath);
+      if (!file.existsSync()) return null;
+      final resolved = file.resolveSymbolicLinksSync();
+      final normalized = p.normalize(resolved);
+      for (final root in _allowedRoots) {
+        final r = p.normalize(root);
+        if (normalized == r ||
+            normalized.startsWith(r.endsWith(p.separator) ? r : '$r${p.separator}')) {
+          return normalized;
+        }
+      }
+      // Also allow exact path if roots not yet loaded but file is under docs
+      // (issueToken after start always has roots).
+      if (_allowedRoots.isEmpty) return null;
+    } catch (_) {}
+    return null;
+  }
 }
 
-/// Extension to resolve a path safely even when symlinks are involved,
-/// returning the original string on any failure (caller validates existence).
-extension _SafeResolve on File {
-  String resolveSymbolicLinksSyncSafe() {
-    try {
-      return resolveSymbolicLinksSync();
-    } catch (_) {
-      return path;
-    }
-  }
+class _ShareEntry {
+  final String path;
+  _ShareEntry({required this.path});
 }
