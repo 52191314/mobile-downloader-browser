@@ -8,15 +8,6 @@ import 'build_channel.dart';
 import 'local_funnel_store.dart';
 import 'pro_entitlement.dart';
 
-/// One-time Play product that unlocks Aurora Pro.
-const String kAuroraProProductId = 'aurora_pro_unlock';
-
-/// One-time Play product that unlocks Aurora Ultra (full price).
-const String kAuroraUltraProductId = 'aurora_ultra_unlock';
-
-/// One-time Play product that upgrades an existing Pro owner to Ultra.
-const String kAuroraUltraUpgradeProductId = 'aurora_ultra_upgrade';
-
 /// Optional hook for local funnel analytics (wired by PR-04b). Kept as a
 /// static callback so PR-03 has no hard dependency on [LocalFunnelStore].
 void Function(String event, {Map<String, dynamic>? props})? auroraFunnelRecorder =

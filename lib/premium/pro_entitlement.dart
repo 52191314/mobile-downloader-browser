@@ -133,7 +133,9 @@ class ProEntitlement extends ChangeNotifier {
     required bool reconcileSucceeded,
   }) =>
       _enqueueWrite(() async {
-        final previous = _ownedProductIds;
+        final previousOwned = _ownedProductIds;
+        final previousTier = _tier;
+        final previousSource = _source;
         _ownedProductIds = {...ownedProductIds};
         _tier = maxTierForOwned(_ownedProductIds);
         if (reconcileSucceeded) {
@@ -143,9 +145,9 @@ class ProEntitlement extends ChangeNotifier {
         _source = _ownedProductIds.isEmpty ? EntitlementSource.none : source;
         // Upgrade-only arbitrage is surfaced by the caller via the returned
         // flag; here we just persist + notify on change.
-        final changed = !_setEquals(previous, _ownedProductIds) ||
-            _tier != _tier ||
-            _source != _source;
+        final changed = !_setEquals(previousOwned, _ownedProductIds) ||
+            previousTier != _tier ||
+            previousSource != _source;
         await ProEntitlementStore.write(
           tier: _tier,
           source: _source,
@@ -164,14 +166,16 @@ class ProEntitlement extends ChangeNotifier {
     EntitlementSource source = EntitlementSource.play,
   }) =>
       _enqueueWrite(() async {
-        final previous = _ownedProductIds;
+        final previousOwned = _ownedProductIds;
+        final previousTier = _tier;
+        final previousSource = _source;
         _ownedProductIds = {..._ownedProductIds, productId};
         _tier = maxTierForOwned(_ownedProductIds);
         _source = source;
         // Do NOT set lastReconcileOk / lastReconcileAt here.
-        final changed = !_setEquals(previous, _ownedProductIds) ||
-            _tier != _tier ||
-            _source != _source;
+        final changed = !_setEquals(previousOwned, _ownedProductIds) ||
+            previousTier != _tier ||
+            previousSource != _source;
         await ProEntitlementStore.write(
           tier: _tier,
           source: _source,
