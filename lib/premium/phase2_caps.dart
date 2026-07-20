@@ -1,16 +1,14 @@
-/// Phase 2 feature cap stubs — gate + cap wiring for deferred Pro features
-/// that need non-trivial native implementation (Media3, Keystore, WebDAV).
+/// Phase 2 feature cap stubs — gate + cap wiring for deferred Pro features.
 ///
 /// Each method here is the "cap boundary" call site: gated by
 /// [ProFeatures.allows], consumes from [FreeCapStore] or checks the
-/// filesystem-level inventory cap, and delegates the actual feature work
-/// to a TODO callback.  Callers get a single `canProceed` boolean so they
-/// can decide UI flow (enqueue, show upsell, or snack refusal).
+/// filesystem-level inventory cap.  Callers get a single `canProceed` boolean
+/// so they can decide UI flow (enqueue, show upsell, or snack refusal).
 ///
 /// Design:
 ///   - Pure gate+cap logic only — no Flutter/UI imports.
 ///   - All methods accept the current [EntitlementTier] explicitly.
-///   - Native-heavy work is marked `// TODO(P5): Media3 Transformer`.
+///   - Audio extraction is implemented via [AudioExtractPlatform].
 ///   - Features without concrete product rules (webdavBackup, duplicateFinder,
 ///     themePack, richNotifications) only have their gate checked via
 ///     [ProFeatures.allows] at their future call site; no stub needed here.
@@ -19,6 +17,7 @@ library;
 import 'dart:io';
 
 import 'free_cap_store.dart';
+import 'free_taste.dart';
 import 'pro_entitlement.dart';
 import 'pro_features.dart';
 import 'pro_upsell_sheet.dart';
@@ -35,8 +34,7 @@ class Phase2Caps {
   // P5 — Audio Extract (Media3 Transformer)
   // ---------------------------------------------------------------------------
   // Product rule: free 3 conversions/day via FreeCapStore; Pro+ unlimited.
-  // Implementation tracked as TODO(P5): add Media3 Transformer pipeline.
-  // Expected hook: after completed video download → "Extract audio" action.
+  // Implementation: see AudioExtractPlatform (platform channel → Media3).
 
   /// Attempts to consume one audio-extract slot for [tier].
   ///
@@ -44,20 +42,8 @@ class Phase2Caps {
   /// (free, if remaining > 0). Returns `false` when the free daily limit is
   /// exhausted.
   ///
-  /// Caller should gate the UI action with [ProFeatures.allows] first, then
-  /// call this before starting the actual transform.
-  ///
-  /// ```dart
-  /// if (!ProFeatures.allows(ProFeature.audioExtract, tier)) {
-  ///   // show upsell
-  ///   return;
-  /// }
-  /// if (!await Phase2Caps.tryConsumeAudioExtract(tier)) {
-  ///   // show "Daily limit reached" snack
-  ///   return;
-  /// }
-  /// // TODO(P5): start Media3 Transformer pipeline
-  /// ```
+  /// Prefer [FreeTaste.evaluate] in new code. This method is kept for
+  /// backward compatibility with existing call sites.
   static Future<bool> tryConsumeAudioExtract(EntitlementTier tier) async {
     if (tier.isAtLeastPro) return true; // Pro+ unlimited
     return FreeCapStore.tryConsume(FreeCapKind.audioExtract);
@@ -67,8 +53,6 @@ class Phase2Caps {
   // P7 — Private Vault (Keystore + filesystem inventory)
   // ---------------------------------------------------------------------------
   // Product rule: free ≤25 files in vault dir; delete frees slot.
-  // Implementation tracked as TODO(P7): add Keystore key storage, local_auth
-  // biometric unlock, recovery key UX, FLAG_SECURE vault UI.
   // Vault dir: <app-support>/vault/ + .nomedia file.
 
   /// Maximum inventory items for free users.

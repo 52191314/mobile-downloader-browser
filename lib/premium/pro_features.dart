@@ -97,7 +97,8 @@ enum ProFeature {
   /// unlimited such actions. Pro+: unlimited.
   batchCapture,
 
-  /// Pro turbo adaptive engine policy. Free: fixed policy (no adaptive).
+  /// Pro turbo: uses tier-max concurrency/chunks automatically.
+  /// Free: fixed policy from user settings. Host-adaptive tuning is future work.
   turboEngine,
 
   /// Dead-link auto revival. Free: manual refresh only. Pro+: auto on.
@@ -185,15 +186,15 @@ class ProFeatures {
   // -- Adblock limits --
 
   /// Maximum number of enabled remote filter lists for free users.
-  static const int freeFilterListSlots = 2;
+  static const int freeFilterListSlots = 3;
 
   // -- Tab group limits --
 
-  static const int maxFreeTabGroups = 1;
+  static const int maxFreeTabGroups = 3;
 
   // -- Cosmetic rule limits --
 
-  static const int maxFreeCosmeticRules = 10;
+  static const int maxFreeCosmeticRules = 25;
 
   // -- Free taste caps (Phase 1/2) --
 
@@ -334,7 +335,7 @@ class ProFeatures {
       case ProFeature.batchCapture:
         return 'Batch / Grab All capture';
       case ProFeature.turboEngine:
-        return 'Turbo adaptive engine';
+        return 'Turbo maximum performance';
       case ProFeature.deadLinkRevival:
         return 'Auto dead-link revival';
       case ProFeature.sendToPc:

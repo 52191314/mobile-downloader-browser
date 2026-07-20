@@ -5,9 +5,11 @@ import 'package:aurora_downloader/premium/pro_features.dart';
 ///
 /// Free users get a **fixed** concurrency/chunk policy derived from their
 /// Settings sliders (clamped to the free tier cap). Pro+ users with
-/// [ProFeature.turboEngine] unlocked get an **adaptive** policy that drives
-/// the engine toward the tier maximum — useful on fast Wi-Fi where the
-/// user's conservative slider would otherwise leave bandwidth on the table.
+/// [ProFeature.turboEngine] unlocked use the tier's maximum concurrency and
+/// chunk count automatically, which maximizes throughput on fast connections.
+///
+/// Future: host-adaptive v1 will track per-host throughput and step between
+/// tier-min and tier-max dynamically, rather than always pinning to max.
 ///
 /// The policy never exceeds the engine hard ceilings
 /// ([DownloadQueue.engineHardMaxConcurrent] / [DownloadQueue.engineHardMaxChunks])

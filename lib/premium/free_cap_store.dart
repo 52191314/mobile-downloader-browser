@@ -51,18 +51,32 @@ class FreeCapStore {
 
   /// Loads (once) and rolls over the day if needed. Serialised via a mutex so
   /// concurrent callers do not double-read or double-reset.
+  ///
+  /// When path_provider is unavailable (unit tests / missing plugin), falls
+  /// back to an in-memory cache for the process lifetime.
   static Future<void> ensureDay() async {
     if (_loaded) return;
     if (_loadMutex != null) return _loadMutex!.future;
     _loadMutex = Completer<void>();
     try {
-      final f = await _file();
-      if (await f.exists()) {
-        try {
-          final decoded = jsonDecode(await f.readAsString());
-          if (decoded is Map<String, dynamic>) _cache.addAll(decoded);
-        } catch (_) {
-          _cache.clear();
+      try {
+        final f = await _file();
+        if (await f.exists()) {
+          try {
+            final decoded = jsonDecode(await f.readAsString());
+            if (decoded is Map<String, dynamic>) {
+              _cache
+                ..clear()
+                ..addAll(decoded);
+            }
+          } catch (_) {
+            _cache.clear();
+          }
+        }
+      } catch (e) {
+        // MissingPluginException / IO — keep memory-only cache.
+        if (kDebugMode) {
+          debugPrint('[FreeCapStore] load skipped (memory-only): $e');
         }
       }
       final today = await _today();
@@ -76,6 +90,15 @@ class FreeCapStore {
     } finally {
       _loadMutex!.complete();
     }
+  }
+
+  /// Test-only: reset in-memory state between unit tests.
+  @visibleForTesting
+  static void debugReset() {
+    _cache.clear();
+    _loaded = false;
+    _loadMutex = null;
+    _writeMutex = null;
   }
 
   /// Remaining count for [kind] today (0 when limit reached).
