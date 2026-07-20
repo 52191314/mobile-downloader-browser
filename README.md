@@ -7,7 +7,7 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 | | |
 |---|---|
 | **Platform** | Android only (API 24+) |
-| **Version** | 2.4.0+23 |
+| **Version** | 2.4.4+28 |
 | **License** | [GPL-3.0](LICENSE) |
 | **Repo** | [github.com/52191314/Aurora-Downloader](https://github.com/52191314/Aurora-Downloader) |
 
