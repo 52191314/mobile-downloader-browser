@@ -36,6 +36,7 @@ import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
 import '../../premium/vault_service.dart';
 import 'vault_page.dart';
+import 'webdav_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final DriveSyncService driveSyncService;
@@ -327,6 +328,20 @@ class _SettingsPageState extends State<SettingsPage> {
                     return;
                   }
                   _openPage(_buildVaultPage());
+                },
+              ),
+              _NavItem(
+                icon: Icons.cloud_outlined,
+                title: 'WebDAV Backup',
+                subtitle: isPro
+                    ? 'Remote backup to your server'
+                    : 'Cloud backup — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.webdavBackup);
+                    return;
+                  }
+                  _openPage(const WebdavSettingsPage());
                 },
               ),
             ]),
