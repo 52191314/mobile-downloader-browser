@@ -34,6 +34,8 @@ import '../widgets/dock_order_store.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
+import '../../premium/vault_service.dart';
+import 'vault_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final DriveSyncService driveSyncService;
@@ -49,6 +51,7 @@ class SettingsPage extends StatefulWidget {
   final AutoBackupService autoBackupService;
   final ProEntitlement proEntitlement;
   final PlayBillingService? playBilling;
+  final VaultService vaultService;
 
   const SettingsPage({
     super.key,
@@ -65,6 +68,7 @@ class SettingsPage extends StatefulWidget {
     required this.autoBackupService,
     required this.proEntitlement,
     this.playBilling,
+    required this.vaultService,
   });
 
   @override
@@ -310,6 +314,20 @@ class _SettingsPageState extends State<SettingsPage> {
                     ? 'Premium features unlocked'
                     : 'Unlock premium features',
                 onTap: () => _openPage(_buildProPage()),
+              ),
+              _NavItem(
+                icon: Icons.shield_outlined,
+                title: 'Private Vault',
+                subtitle: isPro
+                    ? 'Encrypted file storage'
+                    : 'Secure private storage — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.privateVault);
+                    return;
+                  }
+                  _openPage(_buildVaultPage());
+                },
               ),
             ]),
             const SizedBox(height: 18),
@@ -2070,6 +2088,13 @@ class _SettingsPageState extends State<SettingsPage> {
               color: context.ac.accentFrost,
               fontFamily: 'JetBrainsMono')),
     ]);
+  }
+
+  Widget _buildVaultPage() {
+    return VaultPage(
+      vault: widget.vaultService,
+      tier: widget.proEntitlement.tier,
+    );
   }
 
   Widget _buildBackupPage() {

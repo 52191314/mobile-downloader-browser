@@ -36,6 +36,9 @@ import 'premium/play_billing_service.dart';
 import 'premium/pro_upsell_sheet.dart';
 import 'premium/turbo_policy.dart';
 import 'premium/send_to_pc_sheet.dart';
+import 'premium/phase2_caps.dart';
+import 'premium/vault_service.dart';
+import 'ui/pages/vault_page.dart';
 import 'sniffer/token_refresh_service.dart';
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
@@ -211,6 +214,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       PlayBillingService(_proEntitlement);
   final PublicDownloadsService _publicDownloadsService =
       PublicDownloadsService();
+  final VaultService _vaultService = VaultService();
   final DownloadNotificationService _notificationService =
       DownloadNotificationService();
   late final AutoBackupService _autoBackupService = AutoBackupService(
@@ -727,6 +731,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             onResniffManual: _resniffManual,
                             onShareDownload: _shareDownload,
                             onSendToPc: _sendToPc,
+                            onMoveToVault: _moveToVault,
                             onRedownload: _redownloadTask,
                             onOpenBrowser: () => _selectTab(1),
                           ),
@@ -781,6 +786,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                             autoBackupService: _autoBackupService,
                             proEntitlement: _proEntitlement,
                             playBilling: _playBilling,
+                            vaultService: _vaultService,
                             speedLimitKbps: _speedLimitKbps,
                             onSpeedLimitChanged: (value) {
                               setState(() => _speedLimitKbps = value);
@@ -1553,6 +1559,30 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   void _showSnack(String message) {
     if (!mounted) return;
     AuroraSnackbar.show(context, message);
+  }
+
+  Future<void> _moveToVault(DownloadTask task) async {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    if (!ProFeatures.allows(ProFeature.privateVault, tier)) {
+      showProUpsell(context, ProFeature.privateVault);
+      return;
+    }
+    if (!await _vaultService.canAccept(tier)) {
+      _showSnack(
+        'Vault is full (max ${Phase2Caps.maxFreeVaultItems} for free). '
+        'Delete items or upgrade to Pro+.',
+      );
+      return;
+    }
+    final file = File(task.savePath);
+    if (!await file.exists()) {
+      _showSnack('File not found: ${task.savePath}');
+      return;
+    }
+    final vaultName = await _vaultService.store(file, tier: tier);
+    if (vaultName != null) {
+      _showSnack('Moved to vault.');
+    }
   }
 
   /// Builds browser-like HTTP headers for a user-pasted URL so the HLS

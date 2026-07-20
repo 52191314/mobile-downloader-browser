@@ -1,0 +1,337 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../../premium/phase2_caps.dart';
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_features.dart';
+import '../../premium/pro_upsell_sheet.dart';
+import '../../premium/vault_service.dart';
+import '../../theme/aurora_palette.dart';
+import '../../theme/aurora_tokens.dart';
+
+/// Vault UI — lists encrypted vault files with lock/unlock, export, and delete.
+///
+/// Applies [SystemUiOverlay.lock] via `FLAG_SECURE` to block screenshots.
+class VaultPage extends StatefulWidget {
+  final VaultService vault;
+  final EntitlementTier tier;
+
+  const VaultPage({
+    super.key,
+    required this.vault,
+    required this.tier,
+  });
+
+  @override
+  State<VaultPage> createState() => _VaultPageState();
+}
+
+class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
+  List<VaultEntry> _entries = [];
+  bool _loading = true;
+  bool _unlocked = false;
+  String? _recoveryKey;
+  int _fileCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _applyFlagSecure();
+    _initVault();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _applyFlagSecure() {
+    // FLAG_SECURE is applied at the window level.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
+
+  Future<void> _initVault() async {
+    final ready = await widget.vault.ensureInitialized();
+    if (!mounted) return;
+
+    if (ready && !await widget.vault.recoveryKeyShown) {
+      _recoveryKey = widget.vault.recoveryKey;
+    }
+
+    _unlocked = await widget.vault.authenticate(reason: 'Unlock vault');
+    if (!mounted) return;
+    if (_unlocked) {
+      await _loadEntries();
+    } else {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadEntries() async {
+    setState(() => _loading = true);
+    _entries = await widget.vault.list(authed: true);
+    _fileCount = await widget.vault.fileCount();
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _lock() async {
+    widget.vault.lock();
+    setState(() {
+      _unlocked = false;
+      _entries = [];
+    });
+  }
+
+  Future<void> _unlock() async {
+    final ok = await widget.vault.authenticate(reason: 'Unlock vault');
+    if (ok) {
+      setState(() => _unlocked = true);
+      await _loadEntries();
+    }
+  }
+
+  Future<void> _export(VaultEntry entry) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dest = '${docs.path}/${entry.name}';
+    final ok = await widget.vault.export(entry.name, dest, authed: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Exported to $dest' : 'Export failed'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _delete(VaultEntry entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete from vault?'),
+        content: Text('Permanently delete ${entry.name}?\n'
+            'This cannot be undone without the recovery key.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await widget.vault.delete(entry.name);
+      await _loadEntries();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+
+    return Scaffold(
+      backgroundColor: ac.surfaceField,
+      appBar: AppBar(
+        title: const Text('Private Vault'),
+        backgroundColor: ac.surfacePanel,
+        actions: [
+          if (_unlocked)
+            IconButton(
+              icon: const Icon(Icons.lock_outline),
+              tooltip: 'Lock vault',
+              onPressed: _lock,
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.lock_open),
+              tooltip: 'Unlock vault',
+              onPressed: _unlock,
+            ),
+        ],
+      ),
+      body: _buildBody(ac),
+    );
+  }
+
+  Widget _buildBody(AColors AC) {
+    // First-time recovery key.
+    if (_recoveryKey != null) {
+      return _buildRecoveryBanner(AC);
+    }
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (!_unlocked) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock, size: 64, color: AC.textSecondary),
+            const SizedBox(height: 16),
+            Text('Vault is locked',
+                style: TextStyle(
+                    color: AC.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Authenticate to view vault files',
+                style: TextStyle(color: AC.textSecondary, fontSize: 14)),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _unlock,
+              icon: const Icon(Icons.fingerprint),
+              label: const Text('Unlock'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_entries.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.shield_outlined, size: 64, color: AC.textSecondary),
+            const SizedBox(height: 16),
+            Text('Vault is empty',
+                style: TextStyle(
+                    color: AC.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Move downloaded files here to keep them private',
+                style: TextStyle(color: AC.textSecondary, fontSize: 14)),
+            const SizedBox(height: 8),
+            Text('$_fileCount / ${Phase2Caps.maxFreeVaultItems} items',
+                style: TextStyle(
+                    color: AC.accentFrost,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // Inventory counter
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Text('$_fileCount items',
+                  style: TextStyle(color: AC.textSecondary, fontSize: 13)),
+              const Spacer(),
+              if (!widget.tier.isAtLeastPro)
+                Text('Max ${Phase2Caps.maxFreeVaultItems} (free)',
+                    style: TextStyle(
+                        color: AC.accentAmber, fontSize: 12)),
+            ],
+          ),
+        ),
+        // File list
+        Expanded(
+          child: ListView.builder(
+            itemCount: _entries.length,
+            itemBuilder: (context, i) {
+              final entry = _entries[i];
+              return ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(entry.name,
+                    style: TextStyle(color: AC.textPrimary, fontSize: 14)),
+                subtitle: Text(
+                  '${_formatSize(entry.size)} · ${_formatDate(entry.modified)}',
+                  style: TextStyle(color: AC.textSecondary, fontSize: 12),
+                ),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'export':
+                        _export(entry);
+                      case 'delete':
+                        _delete(entry);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                        value: 'export',
+                        child: Text('Export / Decrypt')),
+                    const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete')),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecoveryBanner(AColors AC) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.warning_amber_rounded,
+              size: 48, color: AC.accentAmber),
+          const SizedBox(height: 16),
+          const Text(
+            'Vault Recovery Key',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'This is your ONLY recovery key. If you lose it, vault files '
+            'cannot be recovered. Write it down and keep it safe.\n\n'
+            'No one at Aurora can recover this key for you.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AC.surfacePanel,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: SelectableText(
+              _recoveryKey!,
+              style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              widget.vault.markRecoveryKeyShown();
+              setState(() => _recoveryKey = null);
+              _unlock();
+            },
+            child: const Text('I\'ve saved my recovery key'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String _formatDate(DateTime dt) {
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
+        '${dt.day.toString().padLeft(2, '0')}';
+  }
+}

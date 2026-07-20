@@ -99,6 +99,7 @@ class DownloadCard extends StatelessWidget {
     this.onOpenUrlInBrowser,
     this.onShare,
     this.onSendToPc,
+    this.onMoveToVault,
     this.onRedownload,
     this.onShowProperties,
     this.selectionMode = false,
@@ -122,6 +123,8 @@ class DownloadCard extends StatelessWidget {
   final Future<void> Function(DownloadTask task)? onShare;
   /// Send the completed file to a PC over the local network (P6).
   final Future<void> Function(DownloadTask task)? onSendToPc;
+  /// Move to Private Vault (P7).
+  final Future<void> Function(DownloadTask task)? onMoveToVault;
   /// Start a fresh download of the same URL (new queue entry).
   final Future<void> Function(DownloadTask task)? onRedownload;
   final VoidCallback? onShowProperties;
@@ -829,6 +832,20 @@ class DownloadCard extends StatelessWidget {
       );
     }
 
+    // Move to Private Vault (P7) — completed files only.
+    if (isCompleted && onMoveToVault != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'move_to_vault',
+          child: _popupRow(
+            Icons.shield_outlined,
+            ac.accentPurple,
+            'Move to Vault…',
+          ),
+        ),
+      );
+    }
+
     // Redownload — fresh queue entry (not the same as Retry of a partial).
     if (onRedownload != null && !isActive && !isMagnet && !isBlob) {
       popupItems.add(
@@ -967,6 +984,8 @@ class DownloadCard extends StatelessWidget {
                         onShare?.call(task);
                       case 'send_to_pc':
                         onSendToPc?.call(task);
+                      case 'move_to_vault':
+                        onMoveToVault?.call(task);
                       case 'redownload':
                         onRedownload?.call(task);
                       case 'force_merge':
