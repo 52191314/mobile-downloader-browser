@@ -55,13 +55,20 @@ class _WebdavSettingsPageState extends State<WebdavSettingsPage> {
   }
 
   Future<void> _save() async {
-    await WebdavBackupService.saveSettings(
-      WebdavSettings(
-        url: _urlController.text.trim(),
-        username: _usernameController.text.trim(),
-        password: _passwordController.text,
-      ),
+    final settings = WebdavSettings(
+      url: _urlController.text.trim(),
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
     );
+    final urlErr = validateWebdavUrl(settings.url);
+    if (urlErr != null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(urlErr)),
+      );
+      return;
+    }
+    await WebdavBackupService.saveSettings(settings);
   }
 
   Future<void> _test() async {
