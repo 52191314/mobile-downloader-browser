@@ -28,6 +28,7 @@ import 'controllers/address_bar_controller.dart';
 import 'controllers/element_picker_controller.dart';
 import 'controllers/library_controller.dart';
 import 'controllers/media_catch_controller.dart';
+import 'controllers/site_profile_runtime.dart';
 import 'controllers/sniff_intake_controller.dart';
 import 'controllers/tab_lifecycle_controller.dart';
 import 'controllers/tab_callback_binder.dart';
@@ -280,7 +281,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// Increased from 5 to 10 on 2026-07-07 to reduce eviction frequency,
   /// keeping more tabs' back-forward caches alive so back/forward navigation
   /// stays instant (matching Chrome/Firefox mobile behavior).
-  static const int _maxLiveWebViews = 10;
+  static const int _maxLiveWebViews = 4;
 
   /// LRU activation order — most recently activated tab ID is at the front.
   /// Used to decide which tabs to evict when `_builtWebViewTabIds.length`
@@ -448,6 +449,10 @@ class _SnifferScreenState extends State<SnifferScreen>
         widget.settings.adblockAllowlist) {
       _updateAllTabAdblockAllowlist();
     }
+    if (oldWidget.settings.customVideoHosts !=
+        widget.settings.customVideoHosts) {
+      _updateAllTabCustomVideoHosts();
+    }
     if (oldWidget.settings.desktopMode != widget.settings.desktopMode) {
       _desktopMode = widget.settings.desktopMode;
       if (_desktopMode) {
@@ -519,6 +524,16 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
   }
 
+  /// Pushes custom video hosts to every tab controller so the extensionless
+  /// URL probe (G1) also checks user-configured domains. Called when
+  /// [widget.settings.customVideoHosts] changes.
+  void _updateAllTabCustomVideoHosts() {
+    final hosts = widget.settings.customVideoHosts;
+    for (final tab in _tabs) {
+      tab.controller.updateCustomVideoHosts(hosts);
+    }
+  }
+
   Future<void> _configureTabAdblock(BrowserTab tab) async {
     await tab.controller.configureAdBlock(
       enabled: widget.settings.adblockEnabled,
@@ -528,6 +543,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       cosmeticRules: widget.settings.manualCosmeticRules,
     );
     tab.controller.updateAdblockAllowlist(widget.settings.adblockAllowlist);
+    tab.controller.updateCustomVideoHosts(widget.settings.customVideoHosts);
     await tab.controller.setInvisibleRedirectBlocking(
       widget.settings.invisibleRedirectBlockingEnabled,
     );
@@ -565,6 +581,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     _tabActivationOrder.remove(activeId);
     _tabActivationOrder.insert(0, activeId);
     _evictStaleTabs();
+    _updateBuiltTabIds();
     _progressNotifier.value = _activeTab.progress;
     setState(() {});
   }
@@ -628,6 +645,23 @@ class _SnifferScreenState extends State<SnifferScreen>
         }
       } catch (_) {}
     }());
+  }
+
+  /// Ensures the active tab (and any preview-built tab) is in
+  /// [_builtWebViewTabIds]. Called from tab-switch and lifecycle paths
+  /// instead of mutating the set inside [build].
+  void _updateBuiltTabIds() {
+    if (_tabs.isEmpty) return;
+    // Always keep the active tab built when tabs are loaded.
+    if (_tabsLoaded || _activeTab.controller is! SnifferWebViewControllerImpl) {
+      _builtWebViewTabIds.add(_activeTab.id);
+    }
+    // During cold-start restore (before _tabsLoaded), keep the set empty so
+    // the default blank tab's native WebView is never created (it will be
+    // immediately disposed when saved tabs restore).
+    if (!_tabsLoaded && _activeTab.controller is SnifferWebViewControllerImpl) {
+      _builtWebViewTabIds.clear();
+    }
   }
 
   /// Evict the least-recently-used tabs' native WebViews when the number
@@ -739,6 +773,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   void markTabsLoaded() {
     if (!_tabsLoaded) {
       _tabsLoaded = true;
+      _updateBuiltTabIds();
       AuroraLog.instance.info(
         'markTabsLoaded: tabs=${_tabs.length} '
         'flushing ${_pendingOpenUrlsAfterTabsLoaded.length} '
@@ -1716,10 +1751,45 @@ class _SnifferScreenState extends State<SnifferScreen>
         },
       );
     }
-    final ua = _effectiveUserAgentFor(host);
+    // --- Site profile overrides (take precedence over global settings) ---
+    final profiles = await loadProfiles();
+    final profileOverride = navOverrideFor(uri.toString(), profiles);
+
+    // UA: profile > per-site map > desktop mode > global profile
+    String? ua;
+    if (profileOverride?.userAgent != null) {
+      ua = uaForProfile(profileOverride!.userAgent!);
+    } else if (profileOverride?.desktopMode == true) {
+      // Profile forces desktop → use desktop Chrome UA.
+      ua = uaForProfile('desktop_chrome');
+    } else if (profileOverride?.desktopMode == false) {
+      // Profile forces mobile → reset to mobile (null means default).
+      ua = null;
+    } else {
+      ua = _effectiveUserAgentFor(host);
+    }
     if (ua != null) {
       await tab.controller.setUserAgent(ua);
     }
+
+    // Adblock: profile override toggles per-tab.
+    if (profileOverride?.adblockEnabled != null) {
+      await tab.controller.configureAdBlock(
+        enabled: profileOverride!.adblockEnabled!,
+        filterSources: widget.settings.adblockFilterSources,
+        manualRules: widget.settings.manualAdBlockRules,
+      );
+    }
+
+    // Site-player replace: profile override > global setting.
+    final replacePlayer = profileOverride?.replaceSitePlayer ??
+        widget.settings.replaceSitePlayer;
+    try {
+      await tab.controller.setReplaceSitePlayer(replacePlayer);
+    } catch (_) {
+      // Best-effort; some WebView backends may not support this yet.
+    }
+
     final headers = <String, String>{
       ..._baseRequestHeaders(),
       if (extraHeaders != null) ...extraHeaders,
@@ -2465,14 +2535,9 @@ class _SnifferScreenState extends State<SnifferScreen>
               // so widget tests see their expected content.
               // For real WebViews, defer until _tabsLoaded so the default blank tab
               // never triggers an expensive native WebView creation.
-              final isRealWebView =
-                  t.controller is SnifferWebViewControllerImpl;
-              if (isActive && (_tabsLoaded || !isRealWebView)) {
-                _builtWebViewTabIds.add(t.id);
-              }
-              if (!_tabsLoaded && isRealWebView) {
-                _builtWebViewTabIds.clear();
-              }
+              // _builtWebViewTabIds is maintained by _updateBuiltTabIds()
+              // called from _switchToActiveTab, _loadTabsAndMedia, and
+              // lifecycle methods — not mutated inside build().
               final shouldBuild = _builtWebViewTabIds.contains(t.id);
               // Seed first paint from address bar / committed URL so external
               // opens (Queue source page) navigate even if loadRequest races.
@@ -2489,22 +2554,24 @@ class _SnifferScreenState extends State<SnifferScreen>
                 return null;
               }();
               return Positioned.fill(
-                child: Offstage(
-                  offstage: !isActive,
-                  child: shouldBuild
-                      ? BrowserWidget(
-                          key: ValueKey(t.id),
-                          controller: t.controller,
-                          initialUrl: seedUrl,
-                          onSwipeForward: () {
-                            // Forward navigation via right-edge swipe.
-                            // No debounce needed — there is only one forward
-                            // detector (the right-edge GestureDetector) now.
-                            unawaited(t.controller.goForward());
-                          },
-                          onRefresh: () => t.controller.reload(),
-                        )
-                      : const SizedBox.shrink(),
+                child: RepaintBoundary(
+                  child: Offstage(
+                    offstage: !isActive,
+                    child: shouldBuild
+                        ? BrowserWidget(
+                            key: ValueKey(t.id),
+                            controller: t.controller,
+                            initialUrl: seedUrl,
+                            onSwipeForward: () {
+                              // Forward navigation via right-edge swipe.
+                              // No debounce needed — there is only one forward
+                              // detector (the right-edge GestureDetector) now.
+                              unawaited(t.controller.goForward());
+                            },
+                            onRefresh: () => t.controller.reload(),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ),
               );
             }).toList(),
@@ -2919,19 +2986,21 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (fromCurrent != null) return fromCurrent;
     }
 
-    // Strategy 2: Reload the page, give JS time to run, then query the DOM
+    // Strategy 2: Headless page resniff — navigates to the source page in
+    // an invisible WebView, queries its DOM for a fresh playlist URL, and
+    // disposes itself.  Never touches the user's visible tab.
     final srcUrl = sourcePageUrl ?? tab.addressController.text;
-    if (!srcUrl.startsWith('http')) return null;
-    await tab.controller.loadRequest(Uri.parse(srcUrl));
-
-    // Give the page time to load and execute the JS that sets video src
-    await Future.delayed(const Duration(seconds: 3));
-
-    final fromReloaded = await _queryHlsFromPage(tab);
-    if (fromReloaded != null) return fromReloaded;
+    if (srcUrl.startsWith('http')) {
+      final resniffer = HeadlessPageResniffer();
+      final fromHeadless = await resniffer.resniff(
+        srcUrl,
+        mustMatchPathOf: tab.currentUrl,
+      );
+      if (fromHeadless != null) return fromHeadless;
+    }
 
     // Strategy 3: Wait for the sniffer's MediaSnifferDataChannel handler
-    // (in case the page's JS sets the src after a longer delay)
+    // (in case the page's JS sets the src after a longer delay).
     try {
       final media = await tab.snifferEngine.onMediaDetected
           .firstWhere((m) =>
@@ -2947,43 +3016,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   Future<String?> _queryHlsFromPage(BrowserTab tab) async {
     try {
-      final result = await tab.controller.evaluateJavaScript('''
-        (() => {
-          function findHls(root) {
-            if (!root || !root.querySelectorAll) return '';
-            const sources = root.querySelectorAll('source[src]');
-            for (const s of sources) {
-              const src = s.src || s.getAttribute('src') || '';
-              if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
-            }
-            const medias = root.querySelectorAll('video, audio');
-            for (const m of medias) {
-              const src = m.currentSrc || m.src || '';
-              if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
-            }
-            const scripts = root.querySelectorAll('script');
-            for (const sc of scripts) {
-              const text = sc.textContent || '';
-              const match = text.match(/https?:\\/\\/[^"\\\\s]+\\.m3u8[^"\\\\s]*/);
-              if (match) {
-                const u = match[0];
-                if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) return u;
-              }
-            }
-            return '';
-          }
-          let url = findHls(document);
-          if (url) return url;
-          const iframes = document.querySelectorAll('iframe');
-          for (const iframe of iframes) {
-            try {
-              url = findHls(iframe.contentDocument);
-              if (url) return url;
-            } catch (e) {}
-          }
-          return '';
-        })()
-      ''');
+      final result = await tab.controller.evaluateJavaScript(kHlsDomQueryJs);
       if (result is String &&
           result.isNotEmpty &&
           result.contains('.m3u8') &&
@@ -3793,44 +3826,87 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   /// Picks the best sniffed video/playlist for the **active tab only**.
   /// Does not fall back to another tab's cached stream.
+  /// Uses decorate–sort–undecorate to avoid calling Uri.tryParse inside the
+  /// sort comparator (which would run O(n·log n) parses instead of O(n)).
   SniffedMedia? _bestDetectedVideoForPlayback() {
     final pageUrl =
         (_activeTab.currentUrl ?? _activeTab.addressController.text).trim();
     final pageHost = Uri.tryParse(pageUrl)?.host.toLowerCase() ?? '';
 
+    // W1: Build candidate list — prefer video/playlist candidates first;
+    // only include audio when no video or playlist exists (prevents the
+    // custom player from silently opening an audio-only DASH track).
+    final hasVideoOrPlaylist = _activeTab.snifferEngine.detectedMedia.any(
+      (m) => m.type == MediaType.video || m.type == MediaType.playlist,
+    );
     final items = _activeTab.snifferEngine.detectedMedia
         .where(
           (m) =>
               m.type == MediaType.video ||
               m.type == MediaType.playlist ||
-              m.type == MediaType.audio,
+              (!hasVideoOrPlaylist && m.type == MediaType.audio),
         )
         .toList();
     if (items.isEmpty) return null;
 
-    items.sort((a, b) {
-      int score(SniffedMedia m) {
-        var s = 0;
-        final u = m.url.toLowerCase();
-        if (u.contains('.m3u8') || u.contains('mpegurl')) s += 100;
-        if (m.type == MediaType.video) s += 20;
-        if (m.type == MediaType.playlist) s += 40;
-        if ((m.contentLengthBytes ?? 0) > 0) {
-          s += ((m.contentLengthBytes! / (1024 * 1024)).clamp(0, 50)).toInt();
-        }
-        if (m.height != null && m.height! >= 720) s += 10;
-        // Prefer streams tied to this page's host over random CDNs from ads.
-        final src = (m.sourcePageUrl ?? '').trim();
-        if (pageHost.isNotEmpty && src.isNotEmpty) {
-          final sh = Uri.tryParse(src)?.host.toLowerCase() ?? '';
-          if (sh == pageHost) s += 50;
-        }
-        return s;
+    // Precompute scores once (decorate), sort, then undecorate.
+    final scored = items.map((m) {
+      var s = 0;
+      final u = m.url.toLowerCase();
+
+      // Type bonus
+      if (u.contains('.m3u8') || u.contains('mpegurl')) s += 100;
+      if (m.type == MediaType.video) s += 20;
+      if (m.type == MediaType.playlist) s += 40;
+
+      // Size bonus (capped at 50 MB equivalent)
+      if ((m.contentLengthBytes ?? 0) > 0) {
+        s += ((m.contentLengthBytes! / (1024 * 1024)).clamp(0, 50)).toInt();
       }
 
-      return score(b).compareTo(score(a));
-    });
-    return items.first;
+      // Resolution bonus
+      if (m.height != null && m.height! >= 720) s += 10;
+
+      // W3: Bandwidth sanity — reward reasonable bitrates, penalise
+      // absurd resolution-per-bitrate (e.g. 4K@500kbps).
+      final bw = m.bandwidth;
+      if (bw != null && bw > 0) {
+        s += (bw / 1e6).clamp(0, 20).round(); // up to +20
+        if (m.height != null) {
+          if (m.height! >= 2160 && bw < 5e6) s -= 40;
+          if (m.height! >= 1080 && bw < 2e6) s -= 20;
+        }
+      }
+
+      // W2: Codec-awareness — prefer h264 over AV1 on Android.
+      final codec = (m.videoCodec ?? '').toLowerCase();
+      if (codec.contains('avc1') || codec.contains('h264')) s += 30;
+      else if (codec.contains('hev1') ||
+          codec.contains('hvc1') ||
+          codec.contains('h265')) s += 15;
+      else if (codec.contains('vp09') || codec.contains('vp9')) s += 10;
+      else if (codec.contains('av01') || codec.contains('av1')) s += 5;
+      final aCodec = (m.audioCodec ?? '').toLowerCase();
+      if (aCodec.contains('mp4a') || aCodec.contains('aac')) s += 10;
+      else if (aCodec.contains('mp3')) s += 8;
+      else if (aCodec.contains('opus')) s += 5;
+
+      // W5: Live streams penalised for file-download context
+      // (they are infinite; player can still open them, but rank lower).
+      if (m.isLive == true) s -= 25;
+
+      // Page-host match bonus
+      final src = (m.sourcePageUrl ?? '').trim();
+      if (pageHost.isNotEmpty && src.isNotEmpty) {
+        final sh = Uri.tryParse(src)?.host.toLowerCase() ?? '';
+        if (sh == pageHost) s += 50;
+      }
+
+      return _ScoredMedia(media: m, score: s);
+    }).toList();
+
+    scored.sort((a, b) => b.score.compareTo(a.score));
+    return scored.first.media;
   }
 
   Future<void> _showMediaPreview(
@@ -4019,7 +4095,6 @@ class _SnifferScreenState extends State<SnifferScreen>
       baseDir: _baseDir,
       baseTemp: _baseTemp,
       getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
-      reloadForFreshUrl: _reloadForFreshUrl,
       showSnack: _showSnack,
       isMounted: () => mounted,
     );
@@ -4449,4 +4524,13 @@ class _SnifferScreenState extends State<SnifferScreen>
       filename: filename,
     );
   }
+}
+
+/// Pair of a sniffed media item with its precomputed playback score.
+/// Used by [_SnifferScreenState._bestDetectedVideoForPlayback] for
+/// decorate–sort–undecorate sorting.
+final class _ScoredMedia {
+  final SniffedMedia media;
+  final int score;
+  const _ScoredMedia({required this.media, required this.score});
 }

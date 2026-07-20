@@ -22,9 +22,11 @@ import '../../settings/download_settings.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../premium/premium_flags.dart';
 import '../../premium/play_billing_service.dart';
 import '../../premium/build_channel.dart';
 import '../../sniffer/media_sniffer_engine.dart';
+import '../../sniffer/controllers/site_profile_runtime.dart';
 import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
@@ -294,12 +296,13 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 18),
             _buildSectionTitle('Data & account'),
             _buildNavGroup([
-              _NavItem(
-                icon: Icons.cloud_outlined,
-                title: 'Google Drive',
-                subtitle: 'Upcoming — cloud sync & backup',
-                onTap: () => _openPage(_buildDrivePage()),
-              ),
+              if (kDriveSyncEnabled)
+                _NavItem(
+                  icon: Icons.cloud_outlined,
+                  title: 'Google Drive',
+                  subtitle: 'Upcoming — cloud sync & backup',
+                  onTap: () => _openPage(_buildDrivePage()),
+                ),
               _NavItem(
                 icon: Icons.backup_rounded,
                 title: 'Backup',
@@ -351,7 +354,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.info_outline_rounded,
                 title: 'About',
-                subtitle: 'v1.1.9 · diagnostics · battery',
+                subtitle: 'v2.4.4 · diagnostics · battery',
                 onTap: () => _openPage(_buildAboutPage()),
               ),
             ]),
@@ -529,8 +532,37 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(
-                icon: Icons.download_rounded, title: 'Download Defaults'),
+            Builder(builder: (context) {
+              final tier = widget.proEntitlement.tier;
+              final maxConcurrent = ProFeatures.maxConcurrentFor(tier);
+              final maxChunks = ProFeatures.chunksFor(tier);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Max concurrent downloads'),
+                  _slider(local.maxConcurrentDownloads.toDouble(), 1,
+                      maxConcurrent.toDouble(), maxConcurrent - 1,
+                      '${local.maxConcurrentDownloads}', (v) {
+                    setLocal(() => local = local.copyWith(
+                        maxConcurrentDownloads: v.round()));
+                    _update(local);
+                  }),
+                  const SizedBox(height: 16),
+                  _label('Chunks per download'),
+                  _slider(local.chunksPerTask.toDouble(), 1, maxChunks.toDouble(),
+                      maxChunks - 1, '${local.chunksPerTask}', (v) {
+                    setLocal(() =>
+                        local = local.copyWith(chunksPerTask: v.round()));
+                    _update(local);
+                  }),
+                  const SizedBox(height: 16),
+                ],
+              );
+            }),
+            const ListTile(
+                leading: Icon(Icons.download_rounded),
+                title: Text('Download Defaults'),
+                contentPadding: EdgeInsets.zero),
             const SizedBox(height: 8),
             Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _label('Destination (under Downloads)'),
@@ -545,22 +577,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   _update(local);
                 },
               ),
-              const SizedBox(height: 16),
-              _label('Max concurrent downloads'),
-              _slider(local.maxConcurrentDownloads.toDouble(), 1, 12, 11,
-                  '${local.maxConcurrentDownloads}',
-                  (v) {
-                    setLocal(() => local = local.copyWith(maxConcurrentDownloads: v.round()));
-                    _update(local);
-                  }),
-              const SizedBox(height: 16),
-              _label('Chunks per download'),
-              _slider(local.chunksPerTask.toDouble(), 1, 32, 31,
-                  '${local.chunksPerTask}',
-                  (v) {
-                    setLocal(() => local = local.copyWith(chunksPerTask: v.round()));
-                    _update(local);
-                  }),
               const SizedBox(height: 16),
               SwitchListTile(
                   title: const Text('Auto-retry failed downloads'),
@@ -880,7 +896,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          final isPro = widget.proEntitlement.isPro;
+          final isPro = widget.proEntitlement.isPro;
+          final tier = widget.proEntitlement.tier;
                           final totalCount = local.adblockFilterSources.length;
                           if (!isPro &&
                               totalCount > ProFeatures.freeFilterListSlots) {
@@ -1135,6 +1152,46 @@ class _SettingsPageState extends State<SettingsPage> {
                 );
               }).toList(),
             )),
+            const SizedBox(height: 16),
+            PanelHeader(icon: Icons.language_rounded, title: 'Extra Video Hosts'),
+            const SizedBox(height: 8),
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Additional domains that serve video files. '
+                    'One host per line (e.g. `example.com`). '
+                    'URLs from these hosts are probed for video content.',
+                    style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: TextEditingController(
+                      text: _settings.customVideoHosts.join('\n'),
+                    )..selection = TextSelection.collapsed(offset: 0),
+                    maxLines: 4,
+                    minLines: 2,
+                    style: const TextStyle(fontSize: 13, fontFamily: 'JetBrainsMono'),
+                    decoration: InputDecoration(
+                      hintText: 'cdn.example.com\nvideo.host.org',
+                      contentPadding: const EdgeInsets.all(8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      final hosts = value
+                          .split(RegExp(r'[\n\r,]+'))
+                          .map((h) => h.trim())
+                          .where((h) => h.isNotEmpty)
+                          .toList();
+                      _update(_settings.copyWith(customVideoHosts: hosts));
+                    },
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1719,9 +1776,10 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Downloader',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.1.9', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v2.4.4', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
-              Text('Android download manager with segmented downloads, streaming video, torrents, in-browser media detection, and Google Drive sync.',
+              Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.'
+                  '${kDriveSyncEnabled ? ' Google Drive sync available.' : ''}',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 24),
               Text('Built with Flutter and the Nord color palette.',
@@ -1770,6 +1828,7 @@ class _SettingsPageState extends State<SettingsPage> {
         listenable: widget.proEntitlement,
         builder: (context, _) {
           final isPro = widget.proEntitlement.isPro;
+          final tier = widget.proEntitlement.tier;
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -1830,7 +1889,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               Panel(
                 child: Column(
-                  children: _buildFeatureRows(isPro),
+                  children: _buildFeatureRows(tier),
                 ),
               ),
 
@@ -1851,7 +1910,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         'Treat this device as Pro (resets on restart)'),
                     value: widget.proEntitlement.isPro,
                     onChanged: (val) {
-                      widget.proEntitlement.setDebugPro(val);
+                      widget.proEntitlement.setDebugTier(
+                        val ? EntitlementTier.pro : null,
+                      );
                     },
                     contentPadding: EdgeInsets.zero,
                   ),
@@ -1868,8 +1929,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     icon: const Icon(Icons.shopping_cart_outlined, size: 18),
                     label: Text(
                       BuildChannel.isPlay
-                          ? (widget.playBilling?.localizedPrice != null
-                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedPrice}'
+                          ? (widget.playBilling?.localizedProPrice != null
+                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedProPrice}'
                               : 'Get Aurora Pro')
                           : 'Get Aurora Pro on Google Play',
                     ),
@@ -1954,7 +2015,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  List<Widget> _buildFeatureRows(bool isPro) {
+  List<Widget> _buildFeatureRows(EntitlementTier tier) {
     final features = [
       (ProFeature.extraFilterLists, 'Extra filter lists', '2 free'),
       (ProFeature.trackerPack, 'Tracker blocking pack', 'Pro only'),
@@ -1967,7 +2028,8 @@ class _SettingsPageState extends State<SettingsPage> {
       (ProFeature.autoHostGroups, 'Auto-host groups', 'Pro only'),
       (ProFeature.unlimitedCosmeticRules, 'Cosmetic rules',
           '${ProFeatures.maxFreeCosmeticRules} free / unlimited Pro'),
-      (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
+      if (kDriveSyncEnabled)
+        (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
       (ProFeature.scheduledAutoBackup, 'Scheduled auto-backup', 'Pro only'),
       (ProFeature.proxy, 'HTTP/SOCKS5 proxy', 'Pro only'),
       (ProFeature.wifiOnly, 'Wi‑Fi only & advanced stall', 'Pro only'),
@@ -1977,7 +2039,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final widgets = <Widget>[];
     for (int i = 0; i < features.length; i++) {
       final (feature, name, detail) = features[i];
-      final allowed = ProFeatures.allows(feature, isPro);
+      final allowed = ProFeatures.allows(feature, tier);
       widgets.add(
         ListTile(
           leading: Icon(
@@ -2334,28 +2396,45 @@ class _BackupPageState extends State<BackupPage> {
       final root = DownloadSettings.mediaStoreRelativeFromDisplay(
         widget.settings.downloadDestination,
       );
-      // Primary + legacy roots so old backups remain restorable.
-      final primary = await PublicDownloadsService.listBackupFiles(
-        relativePath: '$root/Backup',
-      );
-      final legacyDefault = await PublicDownloadsService.listBackupFiles(
-        relativePath: 'Download/Aurora Downloader/Backup',
-      );
-      final legacyOldName = await PublicDownloadsService.listBackupFiles(
-        relativePath: 'Download/Aurora Downloads/Backups',
-      );
+      // Manual exports land in …/Backup; scheduled/one-shot auto in …/Auto Backup.
+      // Also scan legacy roots so old installs remain restorable.
+      final roots = <String>{
+        '$root/Backup',
+        '$root/Auto Backup',
+        'Download/Aurora Downloader/Backup',
+        'Download/Aurora Downloader/Auto Backup',
+        'Download/Aurora Downloads/Backups',
+        'Download/Aurora Downloads/Backup',
+      };
       final seen = <String>{};
       final files = <Map<String, dynamic>>[];
-      for (final item in [...primary, ...legacyDefault, ...legacyOldName]) {
-        final key = (item['uri'] ?? item['displayName'] ?? item).toString();
-        if (seen.add(key)) files.add(item);
+      for (final relativePath in roots) {
+        final items = await PublicDownloadsService.listBackupFiles(
+          relativePath: relativePath,
+        );
+        for (final item in items) {
+          final key = (item['uri'] ?? item['displayName'] ?? item).toString();
+          if (seen.add(key)) files.add(item);
+        }
       }
+      files.sort((a, b) {
+        final da = (a['dateModified'] as num?)?.toInt() ?? 0;
+        final db = (b['dateModified'] as num?)?.toInt() ?? 0;
+        return db.compareTo(da);
+      });
       if (mounted) {
         setState(() {
           _localBackups = files;
         });
       }
-    } catch (_) {}
+    } catch (e, s) {
+      debugPrint('[BackupPage] _loadLocalBackups failed: $e\n$s');
+      if (mounted) {
+        setState(() {
+          _localBackups = [];
+        });
+      }
+    }
   }
 
   void _showSnack(String message) {
@@ -3012,7 +3091,8 @@ class _BackupPageState extends State<BackupPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Restore bookmarks, history, settings, or downloads from a backup file.',
+                          'Pick an Aurora backup (.json) or a 1DM export (.1dmbak). '
+                          'In the system picker, choose “All files” / browse storage if the file is hidden.',
                           style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                         ),
                         const SizedBox(height: 16),
@@ -3029,14 +3109,15 @@ class _BackupPageState extends State<BackupPage> {
                   const SizedBox(height: 8),
                   Panel(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           activeColor: context.ac.accentFrost,
                           title: Text('Enable auto backup', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            'Aurora saves your data to your Downloads folder automatically.',
+                            'Aurora periodically saves a full snapshot under Downloads → Auto Backup. '
+                            'Restore any snapshot from Local Backups below.',
                             style: TextStyle(fontSize: 11, color: context.ac.textSecondary),
                           ),
                           value: widget.settings.autoBackupEnabled,
@@ -3083,38 +3164,20 @@ class _BackupPageState extends State<BackupPage> {
                               : null,
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.save_rounded, size: 16),
-                                label: const Text('Back up now', style: TextStyle(fontSize: 12)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: context.ac.accentFrost,
-                                  foregroundColor: context.ac.surfaceField,
-                                ),
-                                onPressed: () async {
-                                  final result = await widget.autoBackupService.performBackup();
-                                  _showSnack(result.message);
-                                  await _loadLocalBackups();
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.restore_rounded, size: 16),
-                                label: const Text('Restore', style: TextStyle(fontSize: 12)),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: context.ac.accentFrost,
-                                  side: BorderSide(color: context.ac.accentFrost),
-                                ),
-                                onPressed: () async {
-                                  await _showRestoreDialog();
-                                },
-                              ),
-                            ),
-                          ],
+                        // One-tap full snapshot. Selective export is above; restore
+                        // lives only on Local Backups rows (no duplicate Restore button).
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.save_rounded, size: 16),
+                          label: const Text('Back up now', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.ac.accentFrost,
+                            foregroundColor: context.ac.surfaceField,
+                          ),
+                          onPressed: () async {
+                            final result = await widget.autoBackupService.performBackup();
+                            _showSnack(result.message);
+                            await _loadLocalBackups();
+                          },
                         ),
                       ],
                     ),
@@ -3157,7 +3220,8 @@ class _BackupPageState extends State<BackupPage> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'No backups found yet. Export one first from the panel above.',
+                              'No backups found yet. Use Export above, or Back up now, then tap Scan.',
+                              textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
                                 color: context.ac.textSecondary,
@@ -3171,7 +3235,11 @@ class _BackupPageState extends State<BackupPage> {
                     Column(
                       children: _localBackups.map((item) {
                         final name = item['displayName'] as String? ?? 'backup.json';
-                        final isAuto = name.startsWith('aurora_auto_backup_');
+                        final kind = (item['kind'] as String?)?.toLowerCase();
+                        final rel = (item['relativePath'] as String?) ?? '';
+                        final isAuto = kind == 'auto' ||
+                            name.startsWith('aurora_auto_backup_') ||
+                            rel.contains('Auto Backup');
                         final timestamp = item['dateModified'] as int? ?? 0;
                         final formattedTime = timestamp > 0 ? _formatDateTime(timestamp) : 'Unknown Date';
                         final size = item['size'] as int? ?? 0;
@@ -3211,6 +3279,7 @@ class _BackupPageState extends State<BackupPage> {
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.settings_backup_restore_rounded, size: 18, color: Colors.green),
+                                  tooltip: 'Restore',
                                   onPressed: () => _importLocalBackup(uri),
                                 ),
                                 IconButton(
@@ -3229,65 +3298,6 @@ class _BackupPageState extends State<BackupPage> {
     );
   }
 
-  Future<void> _showRestoreDialog() async {
-    final backups = await widget.autoBackupService.listBackups();
-    if (!mounted) return;
-    if (backups.isEmpty) {
-      _showSnack('No backups found.');
-      return;
-    }
-    // Group files by snapshot timestamp.
-    final byTimestamp = <String, List<AutoBackupFile>>{};
-    for (final file in backups) {
-      byTimestamp.putIfAbsent(file.timestamp, () => []).add(file);
-    }
-    final timestamps = byTimestamp.keys.toList()
-      ..sort((a, b) => b.compareTo(a)); // newest first
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Restore from backup'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: timestamps.length,
-            itemBuilder: (_, index) {
-              final ts = timestamps[index];
-              final count = byTimestamp[ts]!.length;
-              return ListTile(
-                title: Text(ts.replaceAll('_', ' ')),
-                subtitle: Text(count == 1
-                    ? '1 consolidated backup file'
-                    : '$count files'),
-                onTap: () async {
-                  Navigator.of(dialogContext).pop();
-                  final restored =
-                      await widget.autoBackupService.restoreBackup(ts);
-                  if (mounted) {
-                    setState(() {});
-                    _showSnack(restored > 0
-                        ? 'Done \u2014 restored $restored files. Restart the app to apply.'
-                        : 'Couldn\'t restore backup. It may be corrupted. Try a different snapshot.');
-                    await _loadLocalBackups();
-                  }
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _pad(int n) => n.toString().padLeft(2, '0');
 }
 
 class BatteryOptimizationTile extends StatefulWidget {
@@ -4009,6 +4019,8 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
 
   Future<void> _save() async {
     await _store.save(_profiles);
+    // Ensure navigation/enqueue pick up CRUD immediately (not next restart).
+    invalidateCache();
   }
 
   void _addProfile() {
