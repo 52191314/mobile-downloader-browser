@@ -1364,6 +1364,11 @@ class DownloadSplitter implements BaseDownloader {
       reconnectAttempt++;
       _reconnectAttempts = reconnectAttempt;
 
+      // Early pause check before any delay or network I/O.
+      if (_isPaused || _stallDetected) {
+        throw StateError('Download paused/stalled during reconnect');
+      }
+
       // Re-read disk bytes from what was actually written.
       if (await chunkFile.exists()) {
         currentDiskBytes = await chunkFile.length();
@@ -1377,12 +1382,15 @@ class DownloadSplitter implements BaseDownloader {
       );
 
       // Exponential backoff: 200ms, 400ms, 800ms, 1.6s, 3.2s
-      await Future<void>.delayed(Duration(
-        milliseconds: (200 * (1 << (reconnectAttempt - 1))).clamp(200, 4000),
-      ));
-
-      if (_isPaused || _stallDetected) {
-        throw StateError('Download paused/stalled during reconnect');
+      // Check pause every 100ms so pause never waits more than ~100ms.
+      final totalDelay = (200 * (1 << (reconnectAttempt - 1))).clamp(200, 4000);
+      var waited = 0;
+      while (waited < totalDelay) {
+        if (_isPaused || _stallDetected) {
+          throw StateError('Download paused/stalled during reconnect');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        waited += 100;
       }
 
       // Re-open the HTTP connection with updated Range.

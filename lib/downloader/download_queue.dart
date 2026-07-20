@@ -119,6 +119,10 @@ class DownloadQueue {
   /// Created on first [scheduleTask] call; cancelled in [dispose].
   Timer? _scheduleTimer;
 
+  /// Throttles syncForegroundService calls so the method-channel is not
+  /// flooded with start/stop/update calls during high-throughput downloads.
+  Timer? _lastFgSyncTimer;
+
   /// True while the Android foreground service is active, so we avoid
   /// redundant start/stop calls.
   bool _fgServiceActive = false;
@@ -184,7 +188,7 @@ class DownloadQueue {
     final inner = HttpClient()
       ..maxConnectionsPerHost = 64
       ..connectionTimeout = const Duration(seconds: 15)
-      ..idleTimeout = const Duration(seconds: 90);
+      ..idleTimeout = const Duration(seconds: 15);
 
     if (proxyType != ProxyType.none && proxyHost.isNotEmpty) {
       inner.findProxy = (uri) {
@@ -367,10 +371,13 @@ class DownloadQueue {
       return;
     }
     _autoRetryAttempts.remove(task.id);
-    if (!force) {
+    if (!force && !_isLoading) {
       // Duplicate prevention: skip if a task with the same URL is already
       // in the queue (idle, downloading, or paused). Completed/failed tasks
       // don't block re-downloading the same URL.
+      // Guard with !_isLoading so the O(n) scan per task does not compound
+      // to O(n²) during queue-file restore (the persisted file is
+      // authoritative and should never contain duplicates).
       final normalizedUrl = _normalizeUrl(task.url);
       final existing = _tasks.values.where(
         (t) =>
@@ -887,6 +894,7 @@ class DownloadQueue {
   void _ensureSplitter(DownloadTask task) {
     if (_splitters.containsKey(task.id)) return;
     if (task.state == DownloadState.completed) return;
+    if (task.state == DownloadState.paused) return; // defer until resumed
     if (task.url.startsWith('blob:')) return;
 
     BaseDownloader downloader;
@@ -1950,7 +1958,16 @@ class DownloadQueue {
   /// the current [activeTasks] count.  Called on state transitions and
   /// periodically via [emitTask].  Public so the host widget can force
   /// a sync on lifecycle events (e.g. app backgrounding).
+  ///
+  /// Throttled with a 1s coalescing timer so that high-throughput segment
+  /// downloads (200+ state changes per second) don't flood the method
+  /// channel with redundant start/stop/update invocations.
   void syncForegroundService() {
+    _lastFgSyncTimer?.cancel();
+    _lastFgSyncTimer = Timer(const Duration(milliseconds: 200), _syncFgNow);
+  }
+
+  void _syncFgNow() {
     if (_activeTasks.isNotEmpty && !_fgServiceActive) {
       _fgServiceActive = true;
       unawaited(DownloadForegroundService.start(count: _activeTasks.length));

@@ -531,7 +531,7 @@ class TorrentDownloader implements BaseDownloader {
       await parent.create(recursive: true);
     }
 
-    final raf = await file.open(mode: FileMode.append);
+    final raf = await file.open(mode: FileMode.write);
     try {
       await raf.setPosition(offset);
       await raf.writeFrom(segment);
