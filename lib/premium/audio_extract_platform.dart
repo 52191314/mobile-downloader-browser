@@ -8,9 +8,9 @@ library;
 import 'package:flutter/services.dart';
 
 import '../downloader/models.dart';
-import 'free_cap_store.dart';
-import 'phase2_caps.dart';
+import 'free_taste.dart';
 import 'pro_entitlement.dart';
+import 'pro_features.dart';
 
 /// Platform channel name matching [MainActivity] in Kotlin.
 const _channelName = 'aurora_downloader/audio_extract';
@@ -58,8 +58,8 @@ class AudioExtractPlatform {
 
   /// Attempts to extract audio from [task]'s saved video file.
   ///
-  /// Gates via [ProFeature.audioExtract], consumes [FreeCapStore] for free
-  /// users (3/day), and calls the platform channel.
+  /// Free taste via [FreeTaste] (3/day); Pro+ unlimited. Daily quota is
+  /// consumed only after the platform channel returns success.
   ///
   /// [tier] defaults to free if not provided.
   static Future<AudioExtractResult> extract({
@@ -68,19 +68,22 @@ class AudioExtractPlatform {
   }) async {
     final effectiveTier = tier ?? EntitlementTier.free;
 
-    // Gate check.
-    if (!effectiveTier.isAtLeastPro &&
-        !await FreeCapStore.tryConsume(FreeCapKind.audioExtract)) {
+    // Peek free capacity first (do not consume on transform failure).
+    final peek = await FreeTaste.evaluate(
+      feature: ProFeature.audioExtract,
+      tier: effectiveTier,
+      n: 1,
+      consume: false,
+    );
+    if (!peek.allowed) {
       return const AudioExtractDenied();
     }
 
-    // Determine input and output paths.
     final inputPath = task.savePath;
     if (inputPath.isEmpty) {
       return const AudioExtractFailure('No file path.');
     }
 
-    // Replace extension with .mp3 or .aac.
     final dot = inputPath.lastIndexOf('.');
     final outputPath =
         dot > 0 ? '${inputPath.substring(0, dot)}.aac' : '$inputPath.aac';
@@ -91,6 +94,15 @@ class AudioExtractPlatform {
         'outputPath': outputPath,
       });
       if (result != null) {
+        // Consume only after a successful transform.
+        if (!ProFeatures.allows(ProFeature.audioExtract, effectiveTier)) {
+          await FreeTaste.evaluate(
+            feature: ProFeature.audioExtract,
+            tier: effectiveTier,
+            n: 1,
+            consume: true,
+          );
+        }
         return AudioExtractSuccess(result);
       }
       return const AudioExtractFailure('No result returned.');
