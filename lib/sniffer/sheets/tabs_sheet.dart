@@ -32,6 +32,10 @@ void showTabsSheet(
   bool Function(String name)? isGroupExpanded,
   void Function(String name)? onToggleGroup,
 }) {
+  // Persist grid/list across StatefulBuilder rebuilds (must not re-init
+  // inside the builder, or the toggle always snaps back to list).
+  var isGrid = false;
+
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -54,7 +58,14 @@ void showTabsSheet(
               )
               .toList();
 
-          bool isGrid = false;
+          // Always rebuild the sheet after expand/collapse so headers and
+          // member lists update immediately (not only after grid/list toggle).
+          void toggleGroupAndRebuild(String name) {
+            setTabsState(() {
+              onToggleGroup?.call(name);
+            });
+          }
+
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -130,7 +141,7 @@ void showTabsSheet(
                             onGroupLongPress: onGroupLongPress,
                             colorIndexForGroup: colorIndexForGroup,
                             isGroupExpanded: isGroupExpanded,
-                            onToggleGroup: onToggleGroup,
+                            onToggleGroup: toggleGroupAndRebuild,
                           )
                         : _buildListView(
                             ctx,
@@ -147,7 +158,7 @@ void showTabsSheet(
                             onGroupLongPress: onGroupLongPress,
                             colorIndexForGroup: colorIndexForGroup,
                             isGroupExpanded: isGroupExpanded,
-                            onToggleGroup: onToggleGroup,
+                            onToggleGroup: toggleGroupAndRebuild,
                           ),
                   ),
                 ],

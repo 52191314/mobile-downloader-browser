@@ -270,12 +270,33 @@ const Set<String> _playlistPathHints = {
   '/dash/',
 };
 
+/// Secondary path hints that may indicate video content but are too generic
+/// to classify directly (e.g. `/media/`, `/video/`).  These are used by the
+/// extensionless URL probe (G1) as triggers for a content-type HEAD probe
+/// rather than being treated as direct playlist classifiers.  Empty by
+/// default; populated when G1 probes are active.
+const Set<String> _secondaryMediaPathHints = {
+  '/media/',
+  '/video/',
+  '/stream/',
+  '/cdn/',
+};
+
 /// Returns true if [url] contains a known disguised-playlist path hint.
 /// Case-insensitive. Used by classification, enrichment, capture analysis,
 /// download routing, and the WebView resource guard.
 bool isPlaylistPathHint(String url) {
   final low = url.toLowerCase();
   return _playlistPathHints.any((h) => low.contains(h));
+}
+
+/// Returns true if [url] contains a secondary media path hint such as
+/// `/media/`, `/video/`, `/stream/`, or `/cdn/`.  These are used by the
+/// extensionless URL probe (G1) as triggers for a content-type HEAD probe
+/// rather than being treated as direct playlist classifiers.
+bool isSecondaryMediaPathHint(String url) {
+  final low = url.toLowerCase();
+  return _secondaryMediaPathHints.any((h) => low.contains(h));
 }
 
 /// Known video-hosting CDN domains that serve video through redirect chains
@@ -318,16 +339,77 @@ const Set<String> _knownVideoHosts = {
 /// Returns true if [url] points to a known video-hosting CDN that serves
 /// video through redirect chains or iframe embeds. Used by `onLoadResource`
 /// to capture video URLs that don't have a standard media extension.
-bool isVideoHostingUrl(String url) {
+///
+/// [extraHosts] can be used to extend the built-in set with user-configured
+/// domains from the app settings (G2 placeholder).
+bool isVideoHostingUrl(String url, {Set<String>? extraHosts}) {
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) return false;
   final host = uri.host.toLowerCase();
-  // Check exact host match first, then check if host ends with a known
-  // video host (handles subdomains like cdn.doodstream.com).
+  // Check built-in known hosts.
   for (final known in _knownVideoHosts) {
     if (host == known || host.endsWith('.$known')) return true;
   }
+  // Check user-configured custom hosts.
+  if (extraHosts != null) {
+    for (final known in extraHosts) {
+      if (host == known.toLowerCase() || host.endsWith('.$known')) return true;
+    }
+  }
   return false;
+}
+
+/// Shared DOM-query JavaScript used by both [HeadlessPageResniffer] and
+/// [_SnifferScreenState._queryHlsFromPage] to find the first .m3u8 URL on
+/// a page. Extracted so the headless path (P1) and the visible-tab path
+/// share one source of truth.
+const String kHlsDomQueryJs = r'''
+(() => {
+  function findHls(root) {
+    if (!root || !root.querySelectorAll) return '';
+    const sources = root.querySelectorAll('source[src]');
+    for (const s of sources) {
+      const src = s.src || s.getAttribute('src') || '';
+      if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
+    }
+    const medias = root.querySelectorAll('video, audio');
+    for (const m of medias) {
+      const src = m.currentSrc || m.src || '';
+      if (src && src.indexOf('.m3u8') !== -1 && src.indexOf('ping.m3u8') === -1 && src.indexOf('/ping') === -1) return src;
+    }
+    const scripts = root.querySelectorAll('script');
+    for (const sc of scripts) {
+      const text = sc.textContent || '';
+      const match = text.match(/https?:\/\/[^"\\s]+\.m3u8[^"\\s]*/);
+      if (match) {
+        const u = match[0];
+        if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) return u;
+      }
+    }
+    return '';
+  }
+  let url = findHls(document);
+  if (url) return url;
+  const iframes = document.querySelectorAll('iframe');
+  for (const iframe of iframes) {
+    try {
+      url = findHls(iframe.contentDocument);
+      if (url) return url;
+    } catch (e) {}
+  }
+  return '';
+})()
+''';
+
+/// Normalises a URL for comparison by stripping query parameters.
+/// Used when comparing a refreshed token URL against the stale one.
+String normalizeUrlForCompare(String url) {
+  try {
+    final uri = Uri.parse(url);
+    return uri.replace(queryParameters: {}).toString();
+  } catch (_) {
+    return url;
+  }
 }
 
 /// Returns the standard base request headers for media downloads.

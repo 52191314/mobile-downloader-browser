@@ -164,10 +164,13 @@ class MediaSnifferEngine implements MediaEnricherHost {
         return true;
       }
       // Numbered .ts inside a stream/CDN path is almost certainly a segment.
+      // Tightened (G3): match only when the number sits in a segment-like
+      // position (e.g. `/seq-123.ts` or `/123.ts` after `/hls/`).  Bare
+      // paths like `/clips/fun.ts` on a video host are kept.
       if ((path.contains('/hls/') ||
               path.contains('/stream/') ||
               path.contains('/cdn/')) &&
-          RegExp(r'/\d+\.ts$').hasMatch(path)) {
+          RegExp(r'/(\d+|[a-z]+-\d+)\.ts$').hasMatch(path)) {
         return true;
       }
     }
@@ -437,6 +440,19 @@ class MediaSnifferEngine implements MediaEnricherHost {
       cache.detectedMedia.add(item);
       _mediaDetectedController.add(item);
       cache.mediaChangedController.add(item);
+
+      // G6: When a playlist (.m3u8/.mpd) is confirmed, remove any blob:
+      // entries sharing the same source page — they're just a proxy for
+      // the same stream and clutter the capture tray.  (If no playlist
+      // exists, keep the blob entry — it's the only hint.)
+      if ((type == MediaType.playlist || type == MediaType.video) &&
+          sourcePageUrl != null &&
+          sourcePageUrl.isNotEmpty) {
+        cache.detectedMedia.removeWhere((m) =>
+            m.url.startsWith('blob:') &&
+            m.sourcePageUrl == sourcePageUrl);
+      }
+
       // Eager-enrich only downloadable-priority types so thumbnail/doc
       // floods do not trigger HEAD/Range storms mid page-load. Images,
       // documents, archives, etc. stay listed in the capture UI.

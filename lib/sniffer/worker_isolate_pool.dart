@@ -32,6 +32,12 @@ class WorkerIsolatePool {
   bool _initialized = false;
   bool _disposed = false;
 
+  /// Ensures the worker pool is initialised (spawns all workers if needed).
+  /// Safe to call multiple times — only the first call spawns workers.
+  /// Call from [main] to prewarm the pool so the first [execute] does not
+  /// stall on isolate creation.
+  Future<void> ensureInitialized() => _ensureInitialized();
+
   /// Sends a request of [type] with [params] to the least-busy worker and
   /// returns its result. Throws [StateError] if the pool is disposed.
   Future<dynamic> execute(String type, Map<String, dynamic> params) {

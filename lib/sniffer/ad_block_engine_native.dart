@@ -151,8 +151,37 @@ class AdBlockEngine {
   final List<ScriptletRule> scriptletRules;
   final List<CssInjectionRule> cssInjectionRules;
   final List<AdblockSourceStatus> sourceStatuses;
-  final AdBlockNativeEngine? _nativeEngine;
+  AdBlockNativeEngine? _nativeEngine;
+  bool _nativeEngineInitialized = false;
   final String? rawRulesText;
+
+  /// Lazily initialises the native engine on first blocking call.
+  /// Deferring the FFI loadRules out of the constructor moves ~10-50 ms
+  /// of synchronous work out of cold-start initState into the first
+  /// request interception, which happens well after the first frame.
+  AdBlockNativeEngine? _lazyNativeEngine() {
+    if (!_nativeEngineInitialized) {
+      _nativeEngineInitialized = true;
+      if (_nativeEngine == null && _bindings != null && enabled) {
+        _nativeEngine = AdBlockNativeEngine(_bindings!);
+        try {
+          _nativeEngine!.loadRules(
+            rawRulesText ??
+                serializeRules(
+                  rules,
+                  cosmeticRules: cosmeticRules,
+                  scriptletRules: scriptletRules,
+                  cssInjectionRules: cssInjectionRules,
+                ),
+          );
+        } catch (_) {
+          // Native engine may fail to load rules on some devices
+          // (e.g. incomplete .so extraction). Fall through to Dart-side.
+        }
+      }
+    }
+    return _nativeEngine;
+  }
 
   static final Map<String, Future<AdBlockEngine>> _engineCache = {};
   final LinkedHashMap<String, bool> _blockCache = LinkedHashMap<String, bool>();
@@ -166,23 +195,10 @@ class AdBlockEngine {
     this.cssInjectionRules = const [],
     this.sourceStatuses = const [],
     this.rawRulesText,
-  }) : _nativeEngine = (_bindings != null && enabled)
-           ? AdBlockNativeEngine(_bindings!)
-           : null {
-    final nativeEngine = _nativeEngine;
-    if (nativeEngine != null) {
-      if (rawRulesText != null) {
-        nativeEngine.loadRules(rawRulesText!);
-      } else {
-        final rulesText = serializeRules(
-          rules,
-          cosmeticRules: cosmeticRules,
-          scriptletRules: scriptletRules,
-          cssInjectionRules: cssInjectionRules,
-        );
-        nativeEngine.loadRules(rulesText);
-      }
-    }
+  }) : _nativeEngine = null /* created lazily in shouldBlockUrl */ {
+    // Native engine creation + loadRules is deferred to the first
+    // shouldBlockUrl call so that cold-start initState (which calls
+    // sharedBuiltIn) does not block the first frame with FFI overhead.
   }
 
   static String _computeCacheKey({
@@ -545,7 +561,7 @@ class AdBlockEngine {
     }
 
     bool result = false;
-    final nativeEngine = _nativeEngine;
+    final nativeEngine = _lazyNativeEngine();
     if (nativeEngine != null) {
       result = nativeEngine.shouldBlockUrlEx(
         rawUrl,
