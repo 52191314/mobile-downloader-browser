@@ -2,15 +2,18 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../downloader/download_rules.dart';
 import '../downloader/downloader.dart';
 import '../downloader/filename_service.dart';
 import '../downloader/url_filename_resolver.dart';
 import '../settings/download_settings.dart';
+import 'controllers/site_profile_runtime.dart';
 import 'hls_playlist_cache_lookup.dart';
 import 'models/browser_tab.dart';
 import 'models/sniffed_media.dart';
 import 'sheets/duplicate_download_dialog.dart';
 import 'sniffer_url_utils.dart';
+import 'token_refresh_service.dart';
 
 /// Builds a user-facing suggested filename for a captured media item.
 String buildSuggestedFilenameForTab({
@@ -98,14 +101,11 @@ Future<void> enqueueDirectDownload({
   required String? baseDir,
   required String? baseTemp,
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
-  required Future<String?> Function(
-    BrowserTab tab,
-    String? sourcePageUrl, {
-    bool forceReload,
-  })
-  reloadForFreshUrl,
   required void Function(String message) showSnack,
   required bool Function() isMounted,
+  DownloadRuleEngine? ruleEngine,
+  String? pageHost,
+  String? mediaTypeForRule,
 }) async {
   final media = tab.snifferEngine.detectedMedia
       .where((m) => m.url == url)
@@ -173,7 +173,45 @@ Future<void> enqueueDirectDownload({
   }
 
   final taskId = DateTime.now().millisecondsSinceEpoch.toString();
-  final saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}completed';
+  var saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}completed';
+
+  // --- Site profile overrides (download folder + custom headers) ---
+  // Match on source page host when available so download rules follow the
+  // browsing site, not a CDN host for the media URL.
+  final profiles = await loadProfiles();
+  final profileMatchUrl = firstNonEmpty([
+        media?.sourcePageUrl,
+        currentUrl,
+        tab.addressController.text,
+        url,
+      ]) ??
+      url;
+  final enqueueOverride = enqueueOverrideFor(profileMatchUrl, profiles);
+  if (enqueueOverride?.downloadFolder != null) {
+    saveDir = enqueueOverride!.downloadFolder!;
+  }
+  if (enqueueOverride?.customHeaders != null &&
+      enqueueOverride!.customHeaders!.isNotEmpty) {
+    mergeHeaders(headerMap, enqueueOverride.customHeaders!);
+  }
+
+  // --- Download Rules Engine (rename, destination, constraints) ---
+  DownloadRule? matchedRule;
+  if (ruleEngine != null) {
+    matchedRule = ruleEngine.matchRule(
+      url,
+      mediaType: mediaTypeForRule,
+      pageHost: pageHost,
+    );
+    if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
+      suggestedName = ruleEngine.applyRename(matchedRule!, suggestedName);
+    }
+    final ruleDest = ruleEngine.getDestinationFolder(matchedRule);
+    if (ruleDest != null && ruleDest.isNotEmpty) {
+      saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}$ruleDest';
+    }
+  }
+
   final task = DownloadTask(
     id: taskId,
     url: url,
@@ -194,10 +232,9 @@ Future<void> enqueueDirectDownload({
       tab.controller.fetchBinaryViaJavaScript(binaryUrl);
   task.cookieProvider = (cookieUrl) =>
       tab.controller.getCookiesForDomain(url: cookieUrl);
-  task.onTokenExpired = ({bool forceReload = false}) => reloadForFreshUrl(
-    tab,
-    media?.sourcePageUrl ?? currentUrl,
-    forceReload: forceReload,
+  task.onTokenExpired = TokenRefreshService.gatedClosure(
+    task,
+    ({bool forceReload = false}) => TokenRefreshService.refresh(task),
   );
 
   var force = false;
@@ -225,6 +262,27 @@ Future<void> enqueueDirectDownload({
     force = true;
   }
   downloadQueue.addTask(task, force: force);
+
+  // Apply rule time window constraint
+  if (matchedRule != null) {
+    final now = DateTime.now();
+    if (matchedRule.timeWindowStartHour != null && matchedRule.timeWindowEndHour != null) {
+      final currentHour = now.hour;
+      final startH = matchedRule.timeWindowStartHour!;
+      final endH = matchedRule.timeWindowEndHour!;
+      final inWindow = startH <= endH
+          ? (currentHour >= startH && currentHour < endH)
+          : (currentHour >= startH || currentHour < endH);
+      if (!inWindow) {
+        var schedDate = DateTime(now.year, now.month, now.day, startH);
+        if (schedDate.isBefore(now)) {
+          schedDate = schedDate.add(const Duration(days: 1));
+        }
+        downloadQueue.scheduleTask(task, schedDate);
+        return;
+      }
+    }
+  }
 
   if (isMounted()) {
     showSnack('Started downloading $suggestedName');

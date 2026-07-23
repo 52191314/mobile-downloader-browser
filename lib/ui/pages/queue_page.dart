@@ -1,15 +1,23 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../../downloader/downloader.dart';
+import '../../premium/ffmpeg/ffmpeg_module_loader.dart';
+import '../../premium/ffmpeg/ffmpeg_service.dart';
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_features.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/download_card.dart';
 import '../widgets/empty_queue.dart';
 import '../widgets/settings_formatters.dart';
+import 'ffmpeg_studio_page.dart';
 
 /// Describes a state-filter chip option in the queue page.
 /// [states] is `null` to show all tasks; otherwise only tasks whose
@@ -63,8 +71,12 @@ class QueuePage extends StatefulWidget {
   final Future<void> Function(DownloadTask task)? onResniffAuto;
   final Future<void> Function(DownloadTask task)? onResniffManual;
   final Future<void> Function(DownloadTask task) onShareDownload;
+  final Future<void> Function(DownloadTask task)? onSendToPc;
+  final Future<void> Function(DownloadTask task)? onMoveToVault;
   final Future<void> Function(DownloadTask task)? onRedownload;
+  final Future<void> Function(DownloadTask task)? onOpenFfmpegStudio;
   final VoidCallback? onOpenBrowser;
+  final GlobalKey? urlInputKey;
 
   const QueuePage({
     super.key,
@@ -82,8 +94,12 @@ class QueuePage extends StatefulWidget {
     this.onResniffAuto,
     this.onResniffManual,
     required this.onShareDownload,
+    this.onSendToPc,
+    this.onMoveToVault,
     this.onRedownload,
+    this.onOpenFfmpegStudio,
     this.onOpenBrowser,
+    this.urlInputKey,
   });
 
   @override
@@ -704,6 +720,7 @@ class _QueuePageState extends State<QueuePage> {
       behavior: HitTestBehavior.translucent,
       onTap: () => _urlFocusNode.requestFocus(),
       child: Card(
+        key: widget.urlInputKey,
         color: ac.glassSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -773,6 +790,15 @@ class _QueuePageState extends State<QueuePage> {
               const SizedBox(width: 4),
               SizedBox(
                 height: 40,
+                child: IconButton(
+                  tooltip: 'Schedule download',
+                  icon: Icon(Icons.schedule, size: 20, color: ac.accentFrost),
+                  onPressed: () => _scheduleDownloadFromUrlInput(context),
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                height: 40,
                 child: IconButton.filled(
                   tooltip: 'Add download',
                   onPressed: widget.onAddDownload,
@@ -793,6 +819,51 @@ class _QueuePageState extends State<QueuePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _scheduleDownloadFromUrlInput(BuildContext context) async {
+    final rawUrl = widget.urlController.text.trim();
+    if (rawUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a URL to schedule.')),
+      );
+      return;
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(hours: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (picked == null || !context.mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(picked),
+    );
+    if (time == null || !context.mounted) return;
+    final startAt = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      time.hour,
+      time.minute,
+    );
+    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+    final task = DownloadTask(
+      id: taskId,
+      url: rawUrl,
+      savePath: rawUrl.split('/').last.isNotEmpty
+          ? rawUrl.split('/').last
+          : 'download',
+      tempDir: 'temp_$taskId',
+    );
+    widget.queue.scheduleTask(task, startAt);
+    widget.urlController.clear();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download scheduled.')),
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1131,6 +1202,16 @@ class _QueuePageState extends State<QueuePage> {
         contentPadding: EdgeInsets.zero,
       ),
     ));
+    // P12 duplicateFinder: Pro+ can scan the queue for duplicate URLs/names.
+    items.add(const PopupMenuItem(
+      value: 'find_duplicates',
+      child: ListTile(
+        leading: Icon(Icons.content_copy_rounded, size: 20),
+        title: Text('Find duplicates'),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+      ),
+    ));
     return items;
   }
 
@@ -1218,6 +1299,9 @@ class _QueuePageState extends State<QueuePage> {
           }
         }
         break;
+      case 'find_duplicates':
+        _findDuplicates(filteredTasks);
+        break;
     }
   }
 
@@ -1230,6 +1314,78 @@ class _QueuePageState extends State<QueuePage> {
 
   void _exitSelectionMode() =>
       setState(() { _selectionMode = false; _selectedIds.clear(); });
+
+  /// P12 duplicateFinder: scans all tasks (from [widget.queue]) for duplicate
+  /// URLs and similar filenames.  Gated behind Pro — free users see an upsell.
+  /// Shows results in a dialog.
+  Future<void> _findDuplicates(List<DownloadTask> filtered) async {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    if (!ProFeatures.allows(ProFeature.duplicateFinder, tier)) {
+      showProUpsell(context, ProFeature.duplicateFinder);
+      return;
+    }
+
+    // Collect all tasks (not just filtered) for a complete scan.
+    final all = widget.queue.allTasks;
+    final urlMap = <String, List<DownloadTask>>{};
+    final nameMap = <String, List<DownloadTask>>{};
+
+    for (final task in all) {
+      urlMap.putIfAbsent(task.url, () => []).add(task);
+      final name = p.basename(task.savePath);
+      nameMap.putIfAbsent(name, () => []).add(task);
+    }
+
+    final duplicates = <String>[];
+    for (final entry in urlMap.entries) {
+      if (entry.value.length > 1) {
+        duplicates.add(
+          'Same URL (${entry.value.length}x): ${entry.key}',
+        );
+      }
+    }
+    for (final entry in nameMap.entries) {
+      if (entry.value.length > 1) {
+        final tasks = entry.value;
+        // Only report if they have different URLs (same name+URL is already
+        // reported above).
+        if (tasks.map((t) => t.url).toSet().length > 1) {
+          duplicates.add(
+            'Same filename (${tasks.length}x): ${entry.key}',
+          );
+        }
+      }
+    }
+
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          duplicates.isEmpty ? 'No duplicates found' : 'Duplicates found',
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: duplicates.isEmpty
+              ? const Text('All tasks in the queue have unique URLs.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: duplicates.length,
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(duplicates[i]),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 
   List<Widget> _buildSelectionActions(List<DownloadTask> selectedTasks) {
     final hasActive = selectedTasks.any(
@@ -1515,7 +1671,18 @@ class _QueuePageState extends State<QueuePage> {
       onResniffManual: widget.onResniffManual,
       onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
       onShare: widget.onShareDownload,
+      onSendToPc: widget.onSendToPc,
+      onMoveToVault: widget.onMoveToVault,
       onRedownload: widget.onRedownload,
+      onOpenFfmpegStudio: widget.onOpenFfmpegStudio ?? _openFfmpegStudioForTask,
+      onSchedule: (t, startAt) {
+        widget.queue.scheduleTask(t, startAt);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Scheduled ${t.savePath.split('/').last} for start.')),
+          );
+        }
+      },
       enableSwipe: !_selectionMode && !isMerging,
       selectionMode: _selectionMode,
       selected: _selectedIds.contains(task.id),
@@ -1527,6 +1694,124 @@ class _QueuePageState extends State<QueuePage> {
         }
       }),
     );
+  }
+
+  Future<void> _openFfmpegStudioForTask(DownloadTask task) async {
+    final path = task.savePath;
+    if (path.isEmpty || !File(path).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File path is missing or file does not exist.')),
+      );
+      return;
+    }
+
+    // Ensure the FFmpeg on-demand module is installed (Play) or ready (GitHub).
+    final loader = FeatureModuleLoader.instance;
+    final moduleReady = await _ensureFfmpegModule(context, loader);
+    if (!moduleReady) return;
+
+    final name = path.replaceAll('\\', '/').split('/').last;
+    final item = FfmpegStudioItem(
+      id: task.id,
+      name: name,
+      filePath: path,
+      fileSizeBytes: task.totalBytes,
+    );
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FfmpegStudioPage(
+          ffmpegService: FfmpegService(),
+          proEntitlement: proUpsellEntitlement ?? ProEntitlement(),
+          items: [item],
+        ),
+      ),
+    );
+  }
+
+  /// Checks FFmpeg module availability and prompts Play install if needed.
+  /// Returns `true` if the module is ready (or fat APK).
+  Future<bool> _ensureFfmpegModule(
+    BuildContext context,
+    FeatureModuleLoader loader,
+  ) async {
+    final status = loader.statusFor('ffmpeg');
+    if (status == FeatureModuleStatus.ready ||
+        status == FeatureModuleStatus.notNeeded) {
+      return true;
+    }
+
+    if (status == FeatureModuleStatus.downloading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg module is already downloading…')),
+      );
+      return false;
+    }
+
+    // Show confirmation dialog before triggering the download.
+    if (!context.mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download FFmpeg tools?'),
+        content: Text(
+          'FFmpeg media tools are not included in the base app on this '
+          'distribution channel.\n\n'
+          'A one-time download of ~10 MB is required. '
+          'Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    if (!context.mounted) return false;
+
+    // Trigger install.
+    final ok = await loader.ensureInstalled('ffmpeg');
+    if (!context.mounted) return false;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg tools ready.')),
+      );
+      return true;
+    }
+
+    // Show failure + retry.
+    final retry = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download failed'),
+        content: const Text(
+          'Could not download the FFmpeg module. '
+          'Check your network connection and try again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+    if (retry == true && context.mounted) {
+      return _ensureFfmpegModule(context, loader);
+    }
+    return false;
   }
 
   String _fileName(String path) {

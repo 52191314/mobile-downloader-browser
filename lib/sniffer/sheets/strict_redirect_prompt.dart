@@ -3,76 +3,86 @@ import 'package:flutter/material.dart';
 /// User choice from the blocked-redirect confirmation dialog.
 enum RedirectPromptAction { foreground, background, currentTab, ignore }
 
-/// Shows the strict / invisible-redirect prompt.
+/// Queued redirect prompt for a background browser tab.
+///
+/// Shown only when that tab becomes active again (tab-aware UX).
+class PendingStrictRedirectPrompt {
+  final Uri uri;
+  final String title;
+  final String method;
+  final String? sourcePageUrl;
+  final String promptKey;
+
+  const PendingStrictRedirectPrompt({
+    required this.uri,
+    required this.title,
+    required this.method,
+    required this.promptKey,
+    this.sourcePageUrl,
+  });
+}
+
+/// Compact blocked-redirect / popup prompt.
 ///
 /// Returns the chosen [RedirectPromptAction], or `null` if dismissed.
+///
+/// Shown only while the *source* tab is active ("This tab" = that tab).
 Future<RedirectPromptAction?> showStrictRedirectPromptDialog({
   required BuildContext context,
   required String title,
   required String targetHost,
-  required String method,
   String? sourceHost,
 }) {
+  final isPopup = title.toLowerCase().contains('popup');
+  final shortTitle = isPopup ? 'Popup blocked' : 'Redirect blocked';
+  final subtitle = (sourceHost != null &&
+          sourceHost.isNotEmpty &&
+          sourceHost != targetHost)
+      ? '$targetHost · from $sourceHost'
+      : targetHost;
+
   return showDialog<RedirectPromptAction>(
     context: context,
     barrierDismissible: true,
-    builder: (ctx) => AlertDialog(
-      title: Row(
-        children: [
-          const Icon(Icons.block, color: Colors.redAccent),
-          const SizedBox(width: 8),
-          Expanded(child: Text(title)),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            targetHost,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+    builder: (ctx) {
+      final theme = Theme.of(ctx);
+      return AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+        buttonPadding: const EdgeInsets.symmetric(horizontal: 8),
+        title: Text(shortTitle, style: theme.textTheme.titleMedium),
+        content: Text(
+          subtitle,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          if (sourceHost != null && sourceHost.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'From $sourceHost',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            method,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RedirectPromptAction.ignore),
+            child: const Text('Ignore'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RedirectPromptAction.background),
+            child: const Text('Background'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RedirectPromptAction.currentTab),
+            child: const Text('Here'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RedirectPromptAction.foreground),
+            child: const Text('New tab'),
           ),
         ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(RedirectPromptAction.ignore),
-          child: const Text('Ignore'),
-        ),
-        TextButton(
-          onPressed: () =>
-              Navigator.of(ctx).pop(RedirectPromptAction.background),
-          child: const Text('Background'),
-        ),
-        TextButton(
-          onPressed: () =>
-              Navigator.of(ctx).pop(RedirectPromptAction.currentTab),
-          child: const Text('Current tab'),
-        ),
-        FilledButton(
-          onPressed: () =>
-              Navigator.of(ctx).pop(RedirectPromptAction.foreground),
-          child: const Text('New page'),
-        ),
-      ],
-    ),
+      );
+    },
   );
 }

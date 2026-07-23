@@ -10,8 +10,16 @@ import '../models/site_profile.dart';
 /// - `example.com` matches `example.com` exactly (no subdomains).
 /// - Literal IP addresses and non-HTTP URLs return `null`.
 SiteProfile? findMatchingProfile(String url, List<SiteProfile> profiles) {
-  final host = Uri.tryParse(url)?.host;
+  final uri = Uri.tryParse(url);
+  final host = uri?.host;
   if (host == null || host.isEmpty) return null;
+
+  // Reject literal IP addresses and non-HTTP(S) URLs.
+  if (_isIpAddress(host) ||
+      (uri!.scheme != 'http' && uri.scheme != 'https')) {
+    return null;
+  }
+
   for (final profile in profiles) {
     if (!profile.enabled) continue;
     if (_hostMatches(host, profile.hostPattern)) return profile;
@@ -37,4 +45,14 @@ bool _hostMatches(String host, String pattern) {
   }
 
   return trimmedHost == trimmedPattern;
+}
+
+/// Returns `true` if [host] is a literal IPv4 or IPv6 address.
+bool _isIpAddress(String host) {
+  // IPv4: four dot-separated decimal octets.
+  final ipv4 = RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$');
+  if (ipv4.hasMatch(host)) return true;
+  // IPv6: contains colons (simple heuristic).
+  if (host.contains(':')) return true;
+  return false;
 }

@@ -1904,14 +1904,14 @@ class HlsDownloader implements BaseDownloader {
 
             sink.add(chunk);
             bytesDownloadedInThisAttempt += chunk.length;
-            task.downloadedBytes += chunk.length;
-            // Do NOT raise totalBytes to match downloadedBytes mid-stream.
-            // That made the queue total "climb" with every concurrent chunk
-            // (e.g. capture ~981MB → queue 2.8GB+). Progress may briefly
-            // exceed 100% until refine/completion corrects total.
+            // Do NOT mutate task.downloadedBytes mid-stream — concurrent
+            // segment workers share the same task, and an error rollback
+            // (was `task.downloadedBytes -= …`) would subtract bytes that
+            // another worker legitimately added. Commit the total once after
+            // the stream succeeds instead.
           }
         } catch (e) {
-          task.downloadedBytes -= bytesDownloadedInThisAttempt;
+          // Error rollback removed intentionally — see comment above.
           rethrow;
         } finally {
           await sink.close();
@@ -1926,6 +1926,9 @@ class HlsDownloader implements BaseDownloader {
           // not .part, so this segment will be re-downloaded).
           return partFile;
         }
+        // Commit downloaded bytes atomically after stream + decrypt success,
+        // so concurrent workers never see a negative or backward jump.
+        task.downloadedBytes += bytesDownloadedInThisAttempt;
         _consecutiveSegmentFailures = 0; // Circuit breaker reset on success
 
         final keyBytes = _encryptionKeyBytes;
@@ -2103,11 +2106,11 @@ class HlsDownloader implements BaseDownloader {
     final sink = destination.openWrite();
     var totalMerged = 0;
     try {
-      for (final file in files) {
+      for (int i = 0; i < files.length; i++) {
         if (_isPaused) break;
-        final length = await file.length();
+        final length = segmentLengths[i]; // reuse pre-fetched stat
         if (length == 0) continue;
-        await sink.addStream(file.openRead());
+        await sink.addStream(files[i].openRead());
         totalMerged += length;
       }
     } finally {

@@ -7,13 +7,14 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/hls_models.dart';
-import '../platform/network_binding_service.dart';
 import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'adblock_injector.dart';
 import 'browser_guard_installer.dart';
+import 'external_scheme.dart';
 import 'sniffer_url_utils.dart';
 import 'webview_fetch_delegate.dart';
+import 'worker_isolate_pool.dart';
 
 class StrictRedirectEvent {
   final String url;
@@ -82,7 +83,10 @@ abstract interface class SnifferBrowserController {
 
   /// Resume this WebView's render pipeline and ensure process timers run.
   /// Always ends with resumeTimers so a prior global pause cannot stick.
-  Future<void> resumeWebView();
+  /// When [checkAlive] is true (default), probes the renderer and reloads
+  /// if it was killed by Android (common under memory pressure with many
+  /// background tabs).
+  Future<void> resumeWebView({bool checkAlive = true});
 
   /// Suspend this WebView's rendering pipeline (Android-only, per-WebView).
   /// Unlike a global timer pause, this does NOT call pauseTimers()
@@ -114,6 +118,13 @@ abstract interface class SnifferBrowserController {
   /// playback to Aurora's in-app player instead.
   Future<void> setReplaceSitePlayer(bool enabled);
 
+  /// Enable or disable WebView incognito (private browsing) mode.
+  /// When on, cookies/cache/history for this WebView are not persisted.
+  Future<void> setIncognito(bool incognito);
+
+  /// Whether incognito (private browsing) mode is active.
+  bool get isIncognito;
+
   /// Briefly block main-frame cross-origin navigations after play intercept
   /// so ad-on-play redirects cannot steal the tab.
   void armPlayNavigationSuppress([Duration duration]);
@@ -125,6 +136,7 @@ abstract interface class SnifferBrowserController {
   int get blockedRequestCount;
   List<String> get adblockAllowlist;
   void updateAdblockAllowlist(List<String> allowlist);
+  void updateCustomVideoHosts(List<String> hosts);
   bool shouldBlockUrl(
     String url, {
     String sourceHost = '',
@@ -308,6 +320,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   /// and main-frame navigations.
   List<String> _adblockAllowlist = const [];
   Set<String> _adblockAllowlistSet = const {};
+  Set<String> _customVideoHostsSet = const {};
   String? _lastAdBlockConfigSignature;
   Future<void>? _adBlockConfigFuture;
   int _adBlockConfigGeneration = 0;
@@ -322,6 +335,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Timer? _loadResourceTimer;
   final Set<String> _pendingResourceUrls = {};
   static const int _maxPendingResourceUrls = 80;
+
+  // G1: Extensionless URL probe budget — reset on each new page navigation.
+  int _extensionlessProbeCount = 0;
+  final Set<String> _extensionlessNegativeCache = {};
 
   /// Debounces the force-reinstall of browser guards so that
   /// [onLoadStop] and [onUpdateVisitedHistory] (which fire back-to-back
@@ -483,6 +500,22 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
   }
 
+  bool _isIncognito = false;
+
+  @override
+  bool get isIncognito => _isIncognito;
+
+  /// Sets incognito (private browsing) mode on the WebView.
+  /// When enabled, the WebView doesn't persist cookies, cache, or history.
+  @override
+  Future<void> setIncognito(bool incognito) async {
+    _isIncognito = incognito;
+    await _ready.future;
+    await _controller?.setSettings(
+      settings: InAppWebViewSettings(incognito: incognito),
+    );
+  }
+
   /// Block main-frame cross-origin navigations for a short window after
   /// Aurora intercepts site `play()` (ad-on-play pattern).
   @override
@@ -590,7 +623,12 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   @override
   void updateAdblockAllowlist(List<String> allowlist) {
     _adblockAllowlist = List<String>.unmodifiable(allowlist);
-    _adblockAllowlistSet = Set<String>.unmodifiable(allowlist);
+    _adblockAllowlistSet = allowlist.toSet();
+  }
+
+  @override
+  void updateCustomVideoHosts(List<String> hosts) {
+    _customVideoHostsSet = hosts.map((h) => h.trim().toLowerCase()).toSet();
   }
 
   @override
@@ -723,17 +761,11 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         mediaUrl: reqUrl,
         sourcePageUrl: _currentUrl,
       );
-      if (!hardOff && !urlBlocked) {
-        final lowUrl = reqUrl.toLowerCase();
-        final isHls =
-            lowUrl.contains('.m3u8') ||
-            isPlaylistPathHint(lowUrl) ||
-            (request.headers?['Accept']?.toLowerCase().contains('mpegurl') ??
-                false);
-        if (isHls) {
-          unawaited(_captureHlsPlaylistBody(reqUrl));
-        }
-      }
+      // HLS body capture removed — JS channel (browser_guard.js) fills
+      // hlsPlaylistCache on every playlist fetch with live cookies, and the
+      // enricher's 4-tier ladder (cache → WebView JS → Dart HTTP → headless)
+      // handles everything else. The old native _captureHlsPlaylistBody had
+      // no cookies and added a redundant GET for every m3u8.
     }
 
     if (!_adBlockerEnabled) return null;
@@ -794,39 +826,35 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     return null; // allow
   }
 
-  /// Fetches the m3u8 body for a native HLS playlist request via native HTTP
-  /// (with browser cookies) and forwards it to the registered
-  /// [_onHlsPlaylistIntercepted] callback. Runs asynchronously so it never
-  /// blocks the WebView's own request. Failures are silently ignored — the
-  /// downloader will fall back to its existing playlist-fetch ladder.
-  Future<void> _captureHlsPlaylistBody(String url) async {
+  /// G1: Probes an extensionless URL with a HEAD request to check for a
+  /// video/audio content-type. Caches negative results per page to avoid
+  /// re-probing the same URL. Budgeted to max 5 probes per page load.
+  Future<void> _probeExtensionlessUrl(String url) async {
+    if (_extensionlessNegativeCache.contains(url)) return;
     try {
-      final uri = Uri.tryParse(url);
-      final origin = uri != null ? '${uri.scheme}://${uri.host}' : '';
-      final result = await NetworkBindingService.fetchUrl(
-        url,
-        headers: {
+      final result = await WorkerIsolatePool.instance.execute('probe', {
+        'method': 'HEAD',
+        'url': url,
+        'headers': <String, String>{
           'User-Agent':
               'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-          'Referer': '$origin/',
-          'Origin': origin,
-          'Accept': '*/*',
         },
-      );
-      if (result == null) return;
-      final body = result['body'] as String?;
-      final status = result['statusCode'] as int? ?? 0;
-      if (body != null &&
-          body.isNotEmpty &&
-          status >= 200 &&
-          status < 300 &&
-          body.trim().startsWith('#EXTM3U') &&
-          _onHlsPlaylistIntercepted != null) {
-        await _onHlsPlaylistIntercepted!(url, body);
+        'timeoutSeconds': 3,
+        'onlySuccess': true,
+      });
+      if (result is Map) {
+        final ct = (result['contentType'] as String? ?? '').toLowerCase();
+        if (ct.contains('video/') ||
+            ct.contains('audio/') ||
+            ct.contains('mpegurl') ||
+            ct.contains('dash+xml')) {
+          _onIframeMediaDetected?.call(url);
+          return;
+        }
       }
-    } catch (_) {
-      // Ignore — fallback ladder handles missing playlist bodies.
-    }
+    } catch (_) {}
+    // Cache negative result so we don't re-probe the same URL on this page.
+    _extensionlessNegativeCache.add(url);
   }
 
   String _inferRequestType(String url, String method) {
@@ -865,6 +893,9 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _pendingResourceUrls.clear();
     _loadResourceTimer?.cancel();
     _loadResourceTimer = null;
+    // Reset G1 extensionless probe budget on page navigation.
+    _extensionlessProbeCount = 0;
+    _extensionlessNegativeCache.clear();
     if (urlStr.isNotEmpty) {
       _setCurrentUrl(urlStr);
     }
@@ -889,6 +920,14 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _scheduleGuardReinstall();
     if (url != null) {
       final urlStr = url.toString();
+      // For same-host navigations (SPA pushState), clear stale headers so
+      // the next media capture reads fresh auth/cookie headers for the
+      // current route instead of the original page's headers.
+      final newUri = Uri.tryParse(urlStr);
+      if (newUri != null && _currentUri != null &&
+          newUri.host.toLowerCase() == _currentUri!.host.toLowerCase()) {
+        _currentHeaders = {};
+      }
       _setCurrentUrl(urlStr);
       // Track real navigations in our persistent history stack. Reloads don't
       // push a new entry.
@@ -931,6 +970,23 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     final url = action.request.url?.toString() ?? '';
     final pageUri = _currentUri;
     final requestUri = Uri.tryParse(url);
+
+    // External / custom schemes: never load inside the WebView.
+    // Main-frame only — subresources with exotic schemes are just cancelled.
+    if (url.isNotEmpty &&
+        requestUri != null &&
+        isExternalAppUri(requestUri)) {
+      if (action.isForMainFrame) {
+        unawaited(
+          handleExternalAppUri(
+            requestUri,
+            onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+          ),
+        );
+      }
+      return NavigationActionPolicy.CANCEL;
+    }
+
     final sourceHost = _currentHost;
     final requestType = action.isForMainFrame ? 'document' : 'subdocument';
     bool isThirdParty = false;
@@ -1026,6 +1082,33 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     return NavigationActionPolicy.ALLOW;
   }
 
+  /// Safety net when WebView still surfaces [ERR_UNKNOWN_URL_SCHEME]
+  /// (e.g. rare loads that skip shouldOverride).
+  void onReceivedErrorCallback(
+    WebResourceRequest request,
+    WebResourceError error,
+  ) {
+    final url = request.url.toString();
+    if (url.isEmpty || request.isForMainFrame != true) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !isExternalAppUri(uri)) return;
+
+    final desc = error.description.toLowerCase();
+    final typeName = error.type.toString().toLowerCase();
+    final looksUnknownScheme = desc.contains('unknown_url_scheme') ||
+        desc.contains('err_unknown_url_scheme') ||
+        typeName.contains('unsupported_scheme') ||
+        typeName.contains('unknown_url_scheme');
+    if (!looksUnknownScheme) return;
+
+    unawaited(
+      handleExternalAppUri(
+        uri,
+        onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+      ),
+    );
+  }
+
   /// Called by InAppWebView onDownloadStartRequest when the WebView detects
   /// a file download (e.g. <a download>, Content-Disposition: attachment).
   /// Routes the download URL to the sniffer so it appears in the FAB drawer.
@@ -1109,19 +1192,38 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
         matches = true;
       }
     }
-    // NOTE: fetch/xhr initiators WITHOUT extensions are NOT matched.
-    // This filters out 99% of the junk (ad trackers, analytics, JSON configs).
+    // G1: Extensionless URL probe — when a URL has no recognised media
+    // extension but comes from a known video host or matches a secondary
+    // path hint (/media/, /video/, /stream/, /cdn/), do a single HEAD
+    // content-type probe.  Budgeted to max 5 probes per page load with
+    // a per-page negative cache.
+    if (!matches) {
+      final hasHostMatch = isVideoHostingUrl(url, extraHosts: _customVideoHostsSet);
+      final hasSecondaryHint = isSecondaryMediaPathHint(lowUrl);
+      if ((hasHostMatch || hasSecondaryHint) &&
+          _extensionlessProbeCount < 5 &&
+          !_extensionlessNegativeCache.contains(url)) {
+        _extensionlessProbeCount++;
+        unawaited(_probeExtensionlessUrl(url));
+      }
+    }
 
     if (!matches) return;
 
-    // Throttle: batch matching URLs and flush at MOST every 2000ms,
+    // Throttle: batch matching URLs and flush every 500ms,
     // with a hard cap of 20 URLs per flush to prevent platform channel saturation.
+    // Playlist URLs (.m3u8, .mpd) are flushed immediately so the user sees
+    // them in the FAB without waiting for the next batch tick.
+    if (url.contains('.m3u8') || url.contains('.mpd')) {
+      _onIframeMediaDetected?.call(url);
+      return;
+    }
     if (!_pendingResourceUrls.contains(url) &&
         _pendingResourceUrls.length >= _maxPendingResourceUrls) {
       _pendingResourceUrls.remove(_pendingResourceUrls.first);
     }
     _pendingResourceUrls.add(url);
-    _loadResourceTimer ??= Timer.periodic(const Duration(milliseconds: 2000), (
+    _loadResourceTimer ??= Timer.periodic(const Duration(milliseconds: 500), (
       _,
     ) {
       if (_pendingResourceUrls.isEmpty) {
@@ -1159,6 +1261,15 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (urlStr.isEmpty) {
       debugPrint(
         '[BrowserController] loadRequest called with empty URI — ignoring',
+      );
+      return;
+    }
+    // Address bar / context menu / redirect "open here" can request tg:,
+    // magnet:, etc. Never push those into Chromium.
+    if (isExternalAppUri(uri)) {
+      await handleExternalAppUri(
+        uri,
+        onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
       );
       return;
     }
@@ -1463,33 +1574,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
   @override
   Future<void> resumeActiveWebView() async {
-    try {
-      await _controller?.resumeTimers();
-    } catch (_) {}
-    if (Platform.isAndroid) {
-      try {
-        await _controller?.android.resume();
-      } catch (_) {}
-    }
-    // Check if the WebView is still alive after resuming.  If the renderer
-    // was killed by Android, reload the current page so the user doesn't
-    // see a blank screen.
-    try {
-      final url = await _controller?.getUrl();
-      if (url != null && url.toString().isNotEmpty) {
-        // Verify the WebView can evaluate JS — if this throws, the renderer
-        // is dead and we need to reload.
-        await _controller?.evaluateJavascript(source: '1');
-      }
-    } catch (_) {
-      // Renderer was killed — reload the page.
-      try {
-        final url = await _controller?.getUrl();
-        if (url != null && url.toString().isNotEmpty) {
-          await _controller?.loadUrl(urlRequest: URLRequest(url: url));
-        }
-      } catch (_) {}
-    }
+    await resumeWebView(checkAlive: true);
   }
 
   @override
@@ -1515,7 +1600,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   @override
-  Future<void> resumeWebView() async {
+  Future<void> resumeWebView({bool checkAlive = true}) async {
     // Always re-enable process timers first so a stuck global pause cannot
     // leave the active tab with a frozen compositor.
     try {
@@ -1525,6 +1610,26 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       try {
         await _controller?.android.resume();
       } catch (_) {}
+    }
+    // Liveness probe: when Android has killed the background renderer
+    // (common under memory pressure with 4+ live WebViews), the surface
+    // shows frozen/stale pixels.  Probe with evaluateJavascript and reload
+    // if the renderer is gone.
+    if (checkAlive) {
+      try {
+        final url = await _controller?.getUrl();
+        if (url != null && url.toString().isNotEmpty) {
+          await _controller?.evaluateJavascript(source: '1');
+        }
+      } catch (_) {
+        // Renderer was killed — reload.
+        try {
+          final url = await _controller?.getUrl();
+          if (url != null && url.toString().isNotEmpty) {
+            await _controller?.loadUrl(urlRequest: URLRequest(url: url));
+          }
+        } catch (_) {}
+      }
     }
   }
 
@@ -1962,6 +2067,12 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> setReplaceSitePlayer(bool enabled) async {}
 
   @override
+  Future<void> setIncognito(bool incognito) async {}
+
+  @override
+  bool get isIncognito => false;
+
+  @override
   int get blockedRequestCount => 0;
 
   @override
@@ -1969,6 +2080,9 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   void updateAdblockAllowlist(List<String> allowlist) {}
+
+  @override
+  void updateCustomVideoHosts(List<String> hosts) {}
 
   @override
   Future<WebResourceResponse?> shouldInterceptRequestCallback(
@@ -2218,7 +2332,7 @@ class MockBrowserController implements SnifferBrowserController {
   Future<void> pauseWebView() async {}
 
   @override
-  Future<void> resumeWebView() async {}
+  Future<void> resumeWebView({bool checkAlive = true}) async {}
 
   @override
   Future<void> suspendTab() async {}

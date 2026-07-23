@@ -43,6 +43,12 @@ final class _ScoredTask {
 }
 
 class DownloadQueue {
+  /// Engine hard ceilings. The app never lets the user pick above these, and
+  /// the engine clamps defensively. Tier-aware UI caps (free 3/8, pro 16/32,
+  /// ultra 64/64) live in [ProFeatures] and are applied in the app shell.
+  static const int engineHardMaxConcurrent = 64;
+  static const int engineHardMaxChunks = 64;
+
   final Map<String, DownloadTask> _tasks = {};
   final Map<String, BaseDownloader> _splitters = {};
   final Map<String, StreamSubscription<DownloadTask>> _downloaderSubscriptions =
@@ -56,6 +62,10 @@ class DownloadQueue {
   final bool enablePreemption;
   final bool useNativeTorrentEngine;
   int numChunksPerTask;
+
+  /// HLS concurrent-segment cap (Key Decision: free/pro 8, ultra 16). Set via
+  /// [configure] from the tier-aware [ProFeatures.hlsSegmentCapFor].
+  int hlsSegmentCap = 8;
   final http.Client? httpClient;
   late http.Client _client;
   final bool _ownsClient;
@@ -108,6 +118,10 @@ class DownloadQueue {
   /// Periodic timer that checks whether any scheduled tasks should start.
   /// Created on first [scheduleTask] call; cancelled in [dispose].
   Timer? _scheduleTimer;
+
+  /// Throttles syncForegroundService calls so the method-channel is not
+  /// flooded with start/stop/update calls during high-throughput downloads.
+  Timer? _lastFgSyncTimer;
 
   /// True while the Android foreground service is active, so we avoid
   /// redundant start/stop calls.
@@ -174,7 +188,7 @@ class DownloadQueue {
     final inner = HttpClient()
       ..maxConnectionsPerHost = 64
       ..connectionTimeout = const Duration(seconds: 15)
-      ..idleTimeout = const Duration(seconds: 90);
+      ..idleTimeout = const Duration(seconds: 15);
 
     if (proxyType != ProxyType.none && proxyHost.isNotEmpty) {
       inner.findProxy = (uri) {
@@ -219,6 +233,7 @@ class DownloadQueue {
   void configure({
     int? maxConcurrentDownloads,
     int? numChunksPerTask,
+    int? hlsSegmentCap,
     CompletedDownloadPublisher? completedDownloadPublisher,
     bool? autoClassifyEnabled,
     bool? remuxTsToMp4,
@@ -231,10 +246,15 @@ class DownloadQueue {
     int? minBytesBeforeFullRetry,
   }) {
     if (maxConcurrentDownloads != null) {
-      this.maxConcurrentDownloads = maxConcurrentDownloads.clamp(1, 12).toInt();
+      this.maxConcurrentDownloads =
+          maxConcurrentDownloads.clamp(1, engineHardMaxConcurrent).toInt();
     }
     if (numChunksPerTask != null) {
-      this.numChunksPerTask = numChunksPerTask.clamp(1, 16).toInt();
+      this.numChunksPerTask =
+          numChunksPerTask.clamp(1, engineHardMaxChunks).toInt();
+    }
+    if (hlsSegmentCap != null) {
+      this.hlsSegmentCap = hlsSegmentCap.clamp(1, engineHardMaxChunks).toInt();
     }
     if (completedDownloadPublisher != null) {
       this.completedDownloadPublisher = completedDownloadPublisher;
@@ -351,10 +371,13 @@ class DownloadQueue {
       return;
     }
     _autoRetryAttempts.remove(task.id);
-    if (!force) {
+    if (!force && !_isLoading) {
       // Duplicate prevention: skip if a task with the same URL is already
       // in the queue (idle, downloading, or paused). Completed/failed tasks
       // don't block re-downloading the same URL.
+      // Guard with !_isLoading so the O(n) scan per task does not compound
+      // to O(n²) during queue-file restore (the persisted file is
+      // authoritative and should never contain duplicates).
       final normalizedUrl = _normalizeUrl(task.url);
       final existing = _tasks.values.where(
         (t) =>
@@ -871,6 +894,7 @@ class DownloadQueue {
   void _ensureSplitter(DownloadTask task) {
     if (_splitters.containsKey(task.id)) return;
     if (task.state == DownloadState.completed) return;
+    if (task.state == DownloadState.paused) return; // defer until resumed
     if (task.url.startsWith('blob:')) return;
 
     BaseDownloader downloader;
@@ -884,7 +908,7 @@ class DownloadQueue {
       downloader = HlsDownloader(
         task: task,
         client: _client,
-        maxConcurrentSegments: math.min(numChunksPerTask, 8),
+        maxConcurrentSegments: math.min(numChunksPerTask, hlsSegmentCap),
         remuxTsToMp4: remuxTsToMp4,
         speedLimiter: speedLimiter,
       );
@@ -1934,7 +1958,16 @@ class DownloadQueue {
   /// the current [activeTasks] count.  Called on state transitions and
   /// periodically via [emitTask].  Public so the host widget can force
   /// a sync on lifecycle events (e.g. app backgrounding).
+  ///
+  /// Throttled with a 1s coalescing timer so that high-throughput segment
+  /// downloads (200+ state changes per second) don't flood the method
+  /// channel with redundant start/stop/update invocations.
   void syncForegroundService() {
+    _lastFgSyncTimer?.cancel();
+    _lastFgSyncTimer = Timer(const Duration(milliseconds: 200), _syncFgNow);
+  }
+
+  void _syncFgNow() {
     if (_activeTasks.isNotEmpty && !_fgServiceActive) {
       _fgServiceActive = true;
       unawaited(DownloadForegroundService.start(count: _activeTasks.length));

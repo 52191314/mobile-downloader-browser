@@ -153,91 +153,110 @@ class MediaEnricher {
     }
 
     try {
-      // Tier 1: HEAD Request (offloaded to isolate)
+      // Tier 1: HEAD Request (offloaded to isolate).
+      // Capture result regardless of status so we can detect 403/401 (WAF
+      // blocks) and skip straight to Tier 4 instead of wasting time on more
+      // HTTP probes that will also be blocked.
       final headResult = await _probeInIsolate(
         method: 'HEAD',
         url: item.url,
         headers: headers,
-        onlySuccess: true,
+        onlySuccess: false, // capture status code even on error
       );
       if (headResult != null) {
-        final headContentRange = headResult['contentRange'] as String? ?? '';
-        final headRangeMatch = RegExp(
-          r'bytes \d+-\d+/(\d+)',
-        ).firstMatch(headContentRange);
-        if (headRangeMatch != null) {
-          contentLength = int.tryParse(headRangeMatch.group(1)!);
-        } else {
-          contentLength = headResult['contentLength'] as int?;
-        }
-        contentType = headResult['contentType'] as String?;
-        debugPrint(
-          '[MediaEnricher] Tier 1 HEAD '
-          'content-length=$contentLength for ${item.url}',
-        );
-      } else {
-        debugPrint(
-          '[MediaEnricher] Tier 1 HEAD failed for ${item.url}',
-        );
-        // Tier 2: GET with Range: bytes=0-0 (offloaded to isolate)
-        bool gotSize = false;
-        try {
-          final rangeResult = await _probeInIsolate(
-            method: 'GET',
-            url: item.url,
-            headers: headers,
-            range: 'bytes=0-0',
-            onlySuccess: true,
-          );
-          if (rangeResult != null) {
-            final cr = rangeResult['contentRange'] as String? ?? '';
-            final rangeMatch = RegExp(
-              r'bytes \d+-\d+/(\d+)',
-            ).firstMatch(cr);
-            final lengthInt = rangeResult['contentLength'] as int?;
-            if (rangeMatch != null) {
-              contentLength = int.tryParse(rangeMatch.group(1)!);
-              gotSize = true;
-            } else if (lengthInt != null && lengthInt > 1) {
-              contentLength = lengthInt;
-              gotSize = true;
-            }
-            contentType = rangeResult['contentType'] as String?;
+        final status = headResult['statusCode'] as int? ?? 0;
+        if (status >= 200 && status < 400) {
+          final headContentRange = headResult['contentRange'] as String? ?? '';
+          final headRangeMatch = RegExp(
+            r'bytes \d+-\d+/(\d+)',
+          ).firstMatch(headContentRange);
+          if (headRangeMatch != null) {
+            contentLength = int.tryParse(headRangeMatch.group(1)!);
+          } else {
+            contentLength = headResult['contentLength'] as int?;
           }
+          contentType = headResult['contentType'] as String?;
           debugPrint(
-            '[MediaEnricher] Tier 2 Range-GET '
-            'gotSize=$gotSize content-length=$contentLength for ${item.url}',
+            '[MediaEnricher] Tier 1 HEAD '
+            'content-length=$contentLength for ${item.url}',
           );
-        } catch (e) {
+        } else if (status == 403 || status == 401) {
+          // WAF/blocked — skip Tiers 2-3 (they'll fail too), go to Tier 4.
           debugPrint(
-            '[MediaEnricher] Tier 2 Range-GET threw for ${item.url}: $e',
+            '[MediaEnricher] Tier 1 HEAD got $status → WAF likely, '
+            'skipping HTTP fallback tiers for ${item.url}',
+          );
+        } else {
+          // Non-2xx non-WAF — fall through to Tiers 2-4.
+          debugPrint(
+            '[MediaEnricher] Tier 1 HEAD status=$status for ${item.url}',
           );
         }
-
-        // Tier 3: If Tier 2 failed/no size resolved, try plain GET without Range
-        if (!gotSize) {
+      }
+      // Tiers 2-3: HTTP probes (only when Tier 1 didn't return a WAF code).
+      if (contentLength == null && headResult?['statusCode'] is int) {
+        final status = headResult!['statusCode'] as int;
+        if (status != 403 && status != 401) {
+          // Tier 2: GET with Range: bytes=0-0
+          bool gotSize = false;
           try {
-            final getResult = await _probeInIsolate(
+            final rangeResult = await _probeInIsolate(
               method: 'GET',
               url: item.url,
               headers: headers,
-              onlySuccess: true,
+              range: 'bytes=0-0',
+              timeoutSeconds: 3, // short timeout for non-2xx responses
             );
-            if (getResult != null) {
-              final lengthInt = getResult['contentLength'] as int?;
-              if (lengthInt != null) {
+            if (rangeResult != null) {
+              final cr = rangeResult['contentRange'] as String? ?? '';
+              final rangeMatch = RegExp(
+                r'bytes \d+-\d+/(\d+)',
+              ).firstMatch(cr);
+              final lengthInt = rangeResult['contentLength'] as int?;
+              if (rangeMatch != null) {
+                contentLength = int.tryParse(rangeMatch.group(1)!);
+                gotSize = true;
+              } else if (lengthInt != null && lengthInt > 1) {
                 contentLength = lengthInt;
+                gotSize = true;
               }
-              contentType = getResult['contentType'] as String?;
+              contentType = rangeResult['contentType'] as String?;
             }
             debugPrint(
-              '[MediaEnricher] Tier 3 GET '
-              'content-length=$contentLength for ${item.url}',
+              '[MediaEnricher] Tier 2 Range-GET '
+              'gotSize=$gotSize content-length=$contentLength for ${item.url}',
             );
           } catch (e) {
             debugPrint(
-              '[MediaEnricher] Tier 3 GET threw for ${item.url}: $e',
+              '[MediaEnricher] Tier 2 Range-GET threw for ${item.url}: $e',
             );
+          }
+
+          // Tier 3: plain GET without Range
+          if (!gotSize) {
+            try {
+              final getResult = await _probeInIsolate(
+                method: 'GET',
+                url: item.url,
+                headers: headers,
+                timeoutSeconds: 3,
+              );
+              if (getResult != null) {
+                final lengthInt = getResult['contentLength'] as int?;
+                if (lengthInt != null) {
+                  contentLength = lengthInt;
+                }
+                contentType = getResult['contentType'] as String?;
+              }
+              debugPrint(
+                '[MediaEnricher] Tier 3 GET '
+                'content-length=$contentLength for ${item.url}',
+              );
+            } catch (e) {
+              debugPrint(
+                '[MediaEnricher] Tier 3 GET threw for ${item.url}: $e',
+              );
+            }
           }
         }
       }
@@ -245,8 +264,8 @@ class MediaEnricher {
       debugPrint('[MediaEnricher] enrich() threw for ${item.url}: $e\n$s');
     }
 
-    // Tier 4: WebView JS fetch (bypasses Cloudflare WAF). Only useful when
-    // contentLength is still null after Tiers 1-3 all failed.
+    // Tier 4: WebView JS fetch (bypasses Cloudflare WAF). Used when all
+    // HTTP tiers failed OR when Tier 1 detected a WAF block (403/401).
     if (contentLength == null && host.fetchViaWebView != null) {
       try {
         final jsHeaders = await host.fetchViaWebView!(item.url);
@@ -760,6 +779,7 @@ class MediaEnricher {
                 height: vHeight,
                 masterUrl: item.url,
               );
+              if (host.isDisposedEngine) continue;
               host.mutableDetectedMedia.add(vItem);
               host.mediaChangedController.add(vItem);
               enqueue(vItem);
@@ -795,10 +815,14 @@ class MediaEnricher {
             }
 
             final samples = <HlsSizeSample>[];
+            // Probe at most 2 segments with a single HEAD to get a rough
+            // size estimate.  The old value of 8 produced up to 64 HTTP
+            // probes for 4-variant pages — wasted bandwidth for cosmetic
+            // sizes that are already estimated via bandwidth×duration.
             if (playlist.totalByteRangeLength == null && segs.isNotEmpty) {
               final indices = HlsSizeEstimator.selectSampleIndices(
                 segs.length,
-                maxSamples: segs.length <= 12 ? segs.length : 8,
+                maxSamples: segs.length <= 6 ? segs.length : 2,
               );
               for (final si in indices) {
                 final segmentUri = segs[si].uri;
@@ -1058,6 +1082,8 @@ class MediaEnricher {
             // so the user gets a useful byte count without us having to
             // probe each segment.
             final baseDuration = duration ?? playlist.duration;
+            // Dedup check — same pattern as HLS variant loop above.
+            final existingUrls = {for (final m in host.mutableDetectedMedia) m.url};
             var variantCount = 0;
             for (final rep in playlist.representations) {
               final variantUrl =
@@ -1091,6 +1117,11 @@ class MediaEnricher {
                 contentLengthBytes: variantSize,
                 isSizeEstimated: variantSize != null,
               );
+              if (existingUrls.contains(variantUrl)) {
+                continue;
+              }
+              if (host.isDisposedEngine) continue;
+              existingUrls.add(variantUrl);
               host.mutableDetectedMedia.add(vItem);
               host.mediaChangedController.add(vItem);
               enqueue(vItem);
@@ -1353,7 +1384,10 @@ class MediaEnricher {
     }
   }
 
-  /// Probe a segment URI for Content-Length (HEAD → Range-GET → WebView).
+  /// Probe a segment URI for Content-Length (HEAD only, no fallback).
+  /// Segment size is cosmetic (the estimate is marked `isEstimated = true`),
+  /// so a single fast HEAD suffices — the Range-GET + WebView JS ladder
+  /// was removed to avoid up to 64 redundant probes on multi-variant pages.
   Future<int?> _probeSegmentContentLength(
     Uri segmentUri,
     Map<String, String> headers,
@@ -1370,41 +1404,7 @@ class MediaEnricher {
         final len = headResult['contentLength'] as int?;
         if (len != null && len > 0) return len;
       }
-
-      final rangeResult = await _probeInIsolate(
-        method: 'GET',
-        url: segmentUri.toString(),
-        headers: headers,
-        range: 'bytes=0-0',
-        timeoutSeconds: 5,
-        onlySuccess: true,
-      );
-      if (rangeResult != null) {
-        final cr = rangeResult['contentRange'] as String? ?? '';
-        final rm = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
-        if (rm != null) {
-          final total = int.tryParse(rm.group(1)!);
-          if (total != null && total > 0) return total;
-        }
-        final lh = rangeResult['contentLength'] as int?;
-        if (lh != null && lh > 1) return lh;
-      }
     } catch (_) {}
-
-    if (host.fetchViaWebView != null) {
-      try {
-        final jsHeaders = await host.fetchViaWebView!(segmentUri.toString());
-        final statusCode = int.tryParse(jsHeaders?['statusCode'] ?? '');
-        if (statusCode != null && statusCode >= 200 && statusCode < 400) {
-          final lengthHeader = jsHeaders?['content-length'] ??
-              jsHeaders?['Content-Length'] ??
-              '';
-          if (lengthHeader.isNotEmpty) {
-            return int.tryParse(lengthHeader);
-          }
-        }
-      } catch (_) {}
-    }
     return null;
   }
 

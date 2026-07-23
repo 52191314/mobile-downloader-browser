@@ -303,12 +303,14 @@ class SniffedMediaCache {
           continue;
         }
         detectedMedia.add(media);
-        // Repopulate both the per-engine and global cross-tab dedup caches
-        // so that restored entries are not duplicated on re-sniff
-        // after a clear-and-reload cycle.
+        // Repopulate the per-engine dedup cache so restored entries are
+        // not duplicated on immediate re-sniff.  Skip the global cross-tab
+        // cache (_globalUrlCache) — restored entries have no eviction timer
+        // and would permanently block re-detection after a clear-and-reload
+        // cycle (the per-engine urlCache IS cleared on clear()).
         final norm = normalizeUrl(media.url);
         urlCache.add(norm);
-        _globalUrlCache.add(norm);
+        // _globalUrlCache intentionally NOT populated here — see comment above.
         added++;
       }
       // Second pass if channel/policy changed since items were written.

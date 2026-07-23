@@ -9,38 +9,160 @@ class CompactNavButton extends StatelessWidget {
   final IconData icon;
   final bool enabled;
   final VoidCallback? onTap;
+  final Key? buttonKey;
+  /// Optional override for the icon color (e.g. amber when bookmarked).
+  final Color? color;
 
   const CompactNavButton({
     super.key,
     required this.icon,
     this.enabled = true,
     this.onTap,
+    this.buttonKey,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    final ac = context.ac;
+    // Always provide a non-null [onPressed] so Material does not stack a
+    // second disabled opacity on our color (Back/Forward looked missing).
+    final resolved = color ?? (enabled ? ac.textPrimary : ac.textSecondary);
     return SizedBox(
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       child: IconButton(
+        key: buttonKey,
         padding: EdgeInsets.zero,
-        icon: Icon(icon, size: 18),
-        color: enabled ? context.ac.textPrimary : context.ac.textDisabled,
-        onPressed: enabled ? onTap : null,
+        icon: Icon(icon, size: 22, color: resolved),
+        style: IconButton.styleFrom(foregroundColor: resolved),
+        onPressed: () {
+          if (enabled) onTap?.call();
+        },
       ),
     );
   }
 }
 
-/// Two-slide browser dock shown in the Sniffer screen's bottom strip.
+/// Samsung-shape primary browser strip: icon-only, even spacing, no labels.
 ///
-/// Slide 1: Backward · Forward · Sniffer · Download · Tab
-/// Slide 2: Browser Tools · Sniffer · History · Bookmarks · Settings
+/// Back · Forward · Queue · Radar · Bookmarks menu · Tabs · Menu
+///
+/// Star (add/remove favorite for the current page) lives on the address bar,
+/// not here — matches Samsung Internet: star vs bookmarks-list icons.
+class BrowserPrimaryBar extends StatelessWidget {
+  final BrowserTab tab;
+  final int sniffedBadgeCount;
+  final VoidCallback onSniffer;
+  final VoidCallback onTabs;
+  final VoidCallback onMenu;
+  /// Open the app Queue shell tab. Placed immediately left of Radar.
+  final VoidCallback? onQueue;
+  /// Open the bookmarks / favorites list (not toggle current page).
+  final VoidCallback? onBookmarksMenu;
+  final GlobalKey? menuKey;
+  final GlobalKey? snifferKey;
+  final GlobalKey? tabsKey;
+
+  const BrowserPrimaryBar({
+    super.key,
+    required this.tab,
+    required this.sniffedBadgeCount,
+    required this.onSniffer,
+    required this.onTabs,
+    required this.onMenu,
+    this.onQueue,
+    this.onBookmarksMenu,
+    this.menuKey,
+    this.snifferKey,
+    this.tabsKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    final canBack = tab.canGoBack;
+    final canForward = tab.canGoForward;
+
+    Widget radarIcon() {
+      final icon = Icon(
+        Icons.radar,
+        size: 22,
+        color: ac.textPrimary,
+      );
+      if (sniffedBadgeCount <= 0) return icon;
+      return Badge(
+        label: Text(
+          sniffedBadgeCount > 99 ? '99+' : '$sniffedBadgeCount',
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: ac.accentAmber,
+        child: icon,
+      );
+    }
+
+    // Back · Forward · Queue · Radar · Bookmarks menu · Tabs · Menu
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        CompactNavButton(
+          buttonKey: const Key('sniffer_back_button'),
+          icon: Icons.arrow_back_ios_new,
+          enabled: canBack,
+          onTap: canBack ? () => tab.controller.goBack() : null,
+        ),
+        CompactNavButton(
+          buttonKey: const Key('sniffer_forward_button'),
+          icon: Icons.arrow_forward_ios,
+          enabled: canForward,
+          onTap: canForward ? () => tab.controller.goForward() : null,
+        ),
+        CompactNavButton(
+          buttonKey: const Key('browser_queue_button'),
+          icon: Icons.download_rounded,
+          onTap: onQueue,
+        ),
+        SizedBox(
+          key: snifferKey,
+          width: 44,
+          height: 44,
+          child: IconButton(
+            key: const Key('sniffer_sniffer_button'),
+            padding: EdgeInsets.zero,
+            onPressed: onSniffer,
+            icon: radarIcon(),
+          ),
+        ),
+        CompactNavButton(
+          buttonKey: const Key('browser_bookmarks_menu_button'),
+          icon: Icons.bookmarks_outlined,
+          onTap: onBookmarksMenu,
+        ),
+        CompactNavButton(
+          buttonKey: tabsKey ?? const Key('browser_tabs_button'),
+          icon: Icons.tab,
+          onTap: onTabs,
+        ),
+        CompactNavButton(
+          buttonKey: menuKey ?? const Key('browser_menu_button'),
+          icon: Icons.more_vert,
+          onTap: onMenu,
+        ),
+      ],
+    );
+  }
+}
+
+/// Two-slide browser toolbar shown in the Sniffer screen's bottom strip.
+///
+/// In-page tools only (back, forward, sniffer, tabs, menu, …). App
+/// destinations Queue / Browser / Settings live on the shell bottom nav.
 ///
 /// Swipe horizontally to move between slides. Icons are flat (no circle
 /// outline). A small pill indicator shows the active slide.
 ///
-/// Icon order comes from [dockOrderStore] (Settings → Appearance → Bottom dock).
+/// Icon order comes from [dockOrderStore]
+/// (Settings → Appearance → Browser toolbar).
 class BrowserDock extends StatefulWidget {
   final BrowserTab tab;
   final VoidCallback onSniffer;

@@ -474,8 +474,29 @@
     } catch(_) {}
     return false;
   }
+  // App deep links (tg:, intent://, market://, mailto:, …) must leave the
+  // WebView. Never treat them as silent-ad redirects or popups — Dart
+  // shouldOverride / loadRequest hand them to ACTION_VIEW.
+  function isExternalAppSchemeUrl(url) {
+    try {
+      var s = String(url || '').trim();
+      if (!s || s.charAt(0) === '#' || /^\s*javascript:/i.test(s)) return false;
+      var u;
+      try { u = new URL(s, document.baseURI); } catch(_) {
+        return /^(tg|telegram|intent|market|mailto|tel|sms|smsto|whatsapp|geo|magnet|fb|fb-messenger|instagram|twitter|x-twitter|spotify|vnd\.youtube|itms|itms-apps|googlegmail|ms-outlook|zoommtg|slack|discord|viber|line|weixin|alipays|paypal):/i.test(s);
+      }
+      var proto = (u.protocol || '').replace(':', '').toLowerCase();
+      if (!proto) return false;
+      return proto !== 'http' && proto !== 'https' && proto !== 'about' &&
+        proto !== 'data' && proto !== 'blob' && proto !== 'javascript' &&
+        proto !== 'file' && proto !== 'chrome' && proto !== 'chrome-error' &&
+        proto !== 'chrome-native';
+    } catch(_) { return false; }
+  }
   function shouldInterceptRedirect(url) {
     if (url == null || url === '') return false;
+    // Never block app schemes — Dart opens them outside the WebView.
+    if (isExternalAppSchemeUrl(url)) return false;
     if (consumeAllowNextCrossOriginNav(url)) return false;
     if (isHashOnlyNav(url)) return false;
     // Always intercept during play-ad suppress (even if setting is off).
@@ -544,6 +565,12 @@
   // During play-ad suppress, same — even if gesture is active.
   var originalWindowOpen = window.open;
   window.open = function(url, name, specs) {
+    // App schemes: always report to Dart (opens outside). Never invent a
+    // blank popup handle ads could navigate later.
+    if (url && isExternalAppSchemeUrl(url)) {
+      postPopupBlocked(url, isPlayAdNavSuppressed() ? 'play-ad-suppress' : 'external-app');
+      return null;
+    }
     if (!popupBlockingOn()) {
       if (originalWindowOpen) {
         return originalWindowOpen.apply(this, arguments);
@@ -708,13 +735,23 @@
         if (hrefAttr == null) return;
         var href = String(hrefAttr).trim();
         if (!href || href.charAt(0) === '#' ||
-            /^\s*javascript:/i.test(href) ||
-            /^\s*mailto:/i.test(href) ||
-            /^\s*tel:/i.test(href)) {
+            /^\s*javascript:/i.test(href)) {
           return;
         }
         var target = (a.getAttribute('target') || '').toLowerCase();
         var isBlank = target === '_blank' || target === '_new';
+
+        // App deep links (tg:, mailto:, intent://, …): never popup-block.
+        // For target=_blank preventDefault so the WebView doesn't invent a
+        // dead tab; Dart still gets the URL via postPopupBlocked → external.
+        if (isExternalAppSchemeUrl(href)) {
+          if (isBlank) {
+            stopEventHard(ev);
+            postPopupBlocked(href, 'external-app');
+          }
+          // Non-blank: allow default → shouldOverride opens the app.
+          return;
+        }
 
         // New-window style links → popup blocker (WebView often loads in-tab).
         if (isBlank && popupBlockingOn()) {

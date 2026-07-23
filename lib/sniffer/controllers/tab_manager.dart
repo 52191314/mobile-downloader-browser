@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../premium/pro_features.dart';
 import '../models/browser_tab.dart';
 import '../models/closed_tab_snapshot.dart';
 import '../models/tab_group.dart';
@@ -24,8 +25,8 @@ class TabManager {
   static const int maxRecentlyClosed = 12;
   static const int maxTabs = 20;
 
-  /// Maximum tab groups for free users.
-  static const int maxFreeTabGroups = 1;
+  /// Maximum tab groups for free users (single-sourced from [ProFeatures]).
+  static const int maxFreeTabGroups = ProFeatures.maxFreeTabGroups;
 
   /// Persistent tab groups, ordered by [TabGroup.sortOrder] ascending.
   /// Tabs reference groups by case-insensitive name through
@@ -233,10 +234,11 @@ class TabManager {
   /// When the move empties a group (no remaining member tabs), the
   /// group is also removed from [tabGroups] to keep the persisted
   /// list tidy.
-  void moveTabToGroup(
+  bool moveTabToGroup(
     BrowserTab tab, {
     String? groupName,
     int? colorIndex,
+    void Function()? onCapExceeded,
   }) {
     final newName = (groupName ?? '').trim();
     if (newName.isEmpty) {
@@ -251,7 +253,10 @@ class TabManager {
       if (!isExistingGroup && !isProCallback()) {
         // Free users limited to maxFreeTabGroups.
         final currentGroupCount = tabGroups.length;
-        if (currentGroupCount >= maxFreeTabGroups) return;
+        if (currentGroupCount >= maxFreeTabGroups) {
+          onCapExceeded?.call();
+          return false;
+        }
       }
       tab.groupName = newName;
       tab.groupColorIndex = colorIndex;
@@ -260,6 +265,7 @@ class TabManager {
     }
     _pruneEmptyGroups();
     onRebuild?.call();
+    return true;
   }
 
   /// Reorder the [tabs] list by moving the entry at [oldIndex] to the

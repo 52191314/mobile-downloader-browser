@@ -19,21 +19,33 @@ import '../../backup/auto_backup_service.dart';
 import '../../backup/auto_backup_models.dart';
 
 import '../../settings/download_settings.dart';
+import '../../settings/onboarding_experiment.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../premium/premium_flags.dart';
+import '../../premium/accent_pack.dart';
+import 'user_guide_page.dart';
 import '../../premium/play_billing_service.dart';
 import '../../premium/build_channel.dart';
 import '../../sniffer/media_sniffer_engine.dart';
+import '../../sniffer/controllers/site_profile_runtime.dart';
 import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
 import '../../sync/sync.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
+import '../settings_open_request.dart';
 import '../widgets/dock_order_store.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
 import 'diagnostics_page.dart';
+import '../../premium/vault_service.dart';
+import '../../premium/watcher/watcher_service.dart';
+import '../../premium/automation/automation_api_service.dart';
+import 'vault_page.dart';
+import 'watcher_page.dart';
+import 'webdav_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final DriveSyncService driveSyncService;
@@ -47,8 +59,17 @@ class SettingsPage extends StatefulWidget {
   final DownloadQueue downloadQueue;
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
+  final WatcherService? watcherService;
+  final AutomationApiService? automationApiService;
   final ProEntitlement proEntitlement;
   final PlayBillingService? playBilling;
+  final VaultService vaultService;
+  final VoidCallback? onRulesChanged;
+  final void Function(String url)? onOpenUrlInBrowser;
+
+  /// Which sub-page to show as the root of this route.
+  /// Pushed from Browser menu; system back returns to Browser (no hub tab).
+  final SettingsSection launchSection;
 
   const SettingsPage({
     super.key,
@@ -63,8 +84,14 @@ class SettingsPage extends StatefulWidget {
     required this.downloadQueue,
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
+    this.watcherService,
+    this.automationApiService,
     required this.proEntitlement,
     this.playBilling,
+    required this.vaultService,
+    this.onRulesChanged,
+    this.onOpenUrlInBrowser,
+    required this.launchSection,
   });
 
   @override
@@ -123,21 +150,96 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  /// Root content for [widget.launchSection] — full-screen; back pops to Browser.
+  Widget _sectionRoot(SettingsSection section) {
+    final isPro = widget.proEntitlement.isPro;
+    switch (section) {
+      case SettingsSection.userGuide:
+        return const UserGuidePage();
+      case SettingsSection.defaults:
+        return _buildDefaultsPage();
+      case SettingsSection.network:
+        return _buildNetworkPage();
+      case SettingsSection.rules:
+        return _buildRulesPage();
+      case SettingsSection.schedule:
+        return _buildSchedulePage();
+      case SettingsSection.adblock:
+        return _buildAdblockPage();
+      case SettingsSection.search:
+        return _buildSearchPage();
+      case SettingsSection.sniffer:
+        return _buildSnifferPage();
+      case SettingsSection.profiles:
+        return _buildProfilesPage();
+      case SettingsSection.appearance:
+        return _buildAppearancePage();
+      case SettingsSection.backup:
+        return _buildBackupPage();
+      case SettingsSection.pro:
+        return _buildProPage();
+      case SettingsSection.vault:
+        if (!isPro) {
+          // Upsell then leave — no empty page.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            showProUpsell(context, ProFeature.privateVault).whenComplete(() {
+              if (mounted) Navigator.of(context).maybePop();
+            });
+          });
+          return const Scaffold(body: SizedBox.shrink());
+        }
+        return _buildVaultPage();
+      case SettingsSection.webdav:
+        if (!isPro) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            showProUpsell(context, ProFeature.webdavBackup).whenComplete(() {
+              if (mounted) Navigator.of(context).maybePop();
+            });
+          });
+          return const Scaffold(body: SizedBox.shrink());
+        }
+        return const WebdavSettingsPage();
+      case SettingsSection.watcher:
+        if (!isPro) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            showProUpsell(context, ProFeature.watcher).whenComplete(() {
+              if (mounted) Navigator.of(context).maybePop();
+            });
+          });
+          return const Scaffold(body: SizedBox.shrink());
+        }
+        if (widget.watcherService == null) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Aurora Watcher')),
+            body: const Center(child: Text('Watcher service not available.')),
+          );
+        }
+        return WatcherPage(
+          watcherService: widget.watcherService!,
+          proEntitlement: widget.proEntitlement,
+        );
+      case SettingsSection.automation:
+        if (!isPro) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            showProUpsell(context, ProFeature.automationApi).whenComplete(() {
+              if (mounted) Navigator.of(context).maybePop();
+            });
+          });
+          return const Scaffold(body: SizedBox.shrink());
+        }
+        return _buildAutomationPage();
+      case SettingsSection.about:
+        return _buildAboutPage();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: [
-            _buildProfileHeader(),
-            const SizedBox(height: 20),
-            _buildSettingsHub(),
-          ],
-        ),
-      ),
-    );
+    return _sectionRoot(widget.launchSection);
   }
 
   // ---------------------------------------------------------------------------
@@ -148,7 +250,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => _openPage(_buildDrivePage()),
+        onTap: () => _openPage(const UserGuidePage()),
         borderRadius: BorderRadius.circular(16),
         child: Ink(
           padding: const EdgeInsets.all(16),
@@ -160,11 +262,11 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: context.ac.surfaceElevated,
+                backgroundColor: context.ac.accentFrost.withValues(alpha: 0.15),
                 radius: 24,
                 child: Icon(
-                  Icons.cloud_outlined,
-                  color: context.ac.textSecondary,
+                  Icons.menu_book_rounded,
+                  color: context.ac.accentFrost,
                   size: 24,
                 ),
               ),
@@ -174,7 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Aurora Downloader',
+                      'User Guide & Tutorial',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -184,7 +286,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Google Drive sync — upcoming',
+                      'Complete feature guide, tutorials & troubleshooting',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -258,7 +360,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               _NavItem(
                 icon: Icons.search_rounded,
-                title: 'Search',
+                title: 'Search & Privacy',
                 subtitle: _settings.searchEngine.name,
                 onTap: () => _openPage(_buildSearchPage()),
               ),
@@ -289,12 +391,13 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 18),
             _buildSectionTitle('Data & account'),
             _buildNavGroup([
-              _NavItem(
-                icon: Icons.cloud_outlined,
-                title: 'Google Drive',
-                subtitle: 'Upcoming — cloud sync & backup',
-                onTap: () => _openPage(_buildDrivePage()),
-              ),
+              if (kDriveSyncEnabled)
+                _NavItem(
+                  icon: Icons.cloud_outlined,
+                  title: 'Google Drive',
+                  subtitle: 'Upcoming — cloud sync & backup',
+                  onTap: () => _openPage(_buildDrivePage()),
+                ),
               _NavItem(
                 icon: Icons.backup_rounded,
                 title: 'Backup',
@@ -311,6 +414,54 @@ class _SettingsPageState extends State<SettingsPage> {
                     : 'Unlock premium features',
                 onTap: () => _openPage(_buildProPage()),
               ),
+              _NavItem(
+                icon: Icons.shield_outlined,
+                title: 'Private Vault',
+                subtitle: isPro
+                    ? 'Encrypted file storage'
+                    : 'Secure private storage — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.privateVault);
+                    return;
+                  }
+                  _openPage(_buildVaultPage());
+                },
+              ),
+              _NavItem(
+                icon: Icons.cloud_outlined,
+                title: 'WebDAV Backup',
+                subtitle: isPro
+                    ? 'Remote backup to your server'
+                    : 'Cloud backup — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.webdavBackup);
+                    return;
+                  }
+                  _openPage(const WebdavSettingsPage());
+                },
+              ),
+              if (widget.watcherService != null)
+                _NavItem(
+                  icon: Icons.folder_special_outlined,
+                  title: 'Folder Watcher',
+                  subtitle: isPro
+                      ? 'Auto-enqueue from watched folders'
+                      : 'Watched folder automation — Pro feature',
+                  onTap: () {
+                    if (!isPro) {
+                      showProUpsell(context, ProFeature.watcher);
+                      return;
+                    }
+                    _openPage(
+                      WatcherPage(
+                        watcherService: widget.watcherService!,
+                        proEntitlement: widget.proEntitlement,
+                      ),
+                    );
+                  },
+                ),
             ]),
             const SizedBox(height: 18),
             _buildSectionTitle('About'),
@@ -318,7 +469,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.info_outline_rounded,
                 title: 'About',
-                subtitle: 'v1.1.9 · diagnostics · battery',
+                subtitle: 'v2.4.5 · diagnostics · battery',
                 onTap: () => _openPage(_buildAboutPage()),
               ),
             ]),
@@ -496,8 +647,37 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(
-                icon: Icons.download_rounded, title: 'Download Defaults'),
+            Builder(builder: (context) {
+              final tier = widget.proEntitlement.tier;
+              final maxConcurrent = ProFeatures.maxConcurrentFor(tier);
+              final maxChunks = ProFeatures.chunksFor(tier);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Max concurrent downloads'),
+                  _slider(local.maxConcurrentDownloads.toDouble(), 1,
+                      maxConcurrent.toDouble(), maxConcurrent - 1,
+                      '${local.maxConcurrentDownloads}', (v) {
+                    setLocal(() => local = local.copyWith(
+                        maxConcurrentDownloads: v.round()));
+                    _update(local);
+                  }),
+                  const SizedBox(height: 16),
+                  _label('Chunks per download'),
+                  _slider(local.chunksPerTask.toDouble(), 1, maxChunks.toDouble(),
+                      maxChunks - 1, '${local.chunksPerTask}', (v) {
+                    setLocal(() =>
+                        local = local.copyWith(chunksPerTask: v.round()));
+                    _update(local);
+                  }),
+                  const SizedBox(height: 16),
+                ],
+              );
+            }),
+            const ListTile(
+                leading: Icon(Icons.download_rounded),
+                title: Text('Download Defaults'),
+                contentPadding: EdgeInsets.zero),
             const SizedBox(height: 8),
             Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _label('Destination (under Downloads)'),
@@ -512,22 +692,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   _update(local);
                 },
               ),
-              const SizedBox(height: 16),
-              _label('Max concurrent downloads'),
-              _slider(local.maxConcurrentDownloads.toDouble(), 1, 12, 11,
-                  '${local.maxConcurrentDownloads}',
-                  (v) {
-                    setLocal(() => local = local.copyWith(maxConcurrentDownloads: v.round()));
-                    _update(local);
-                  }),
-              const SizedBox(height: 16),
-              _label('Chunks per download'),
-              _slider(local.chunksPerTask.toDouble(), 1, 32, 31,
-                  '${local.chunksPerTask}',
-                  (v) {
-                    setLocal(() => local = local.copyWith(chunksPerTask: v.round()));
-                    _update(local);
-                  }),
               const SizedBox(height: 16),
               SwitchListTile(
                   title: const Text('Auto-retry failed downloads'),
@@ -847,7 +1011,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          final isPro = widget.proEntitlement.isPro;
+          final isPro = widget.proEntitlement.isPro;
+          final tier = widget.proEntitlement.tier;
                           final totalCount = local.adblockFilterSources.length;
                           if (!isPro &&
                               totalCount > ProFeatures.freeFilterListSlots) {
@@ -986,14 +1151,37 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildSearchPage() {
+    var local = _settings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Search Engine')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          PanelHeader(icon: Icons.search_rounded, title: 'Search Engine'),
-          const SizedBox(height: 8),
-          Panel(child: Column(children: [
+      appBar: AppBar(title: const Text('Search & Privacy')),
+      body: StatefulBuilder(
+        builder: (context, setLocal) => ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            PanelHeader(icon: Icons.visibility_off_outlined, title: 'Private Browsing'),
+            const SizedBox(height: 8),
+            Panel(
+              child: SwitchListTile(
+                title: const Text('Private / Incognito mode'),
+                subtitle: Text(
+                  local.privateMode
+                      ? 'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.'
+                      : 'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.',
+                  style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
+                ),
+                value: local.privateMode,
+                onChanged: (v) {
+                  final updated = local.copyWith(privateMode: v);
+                  setLocal(() => local = updated);
+                  _update(updated);
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            const SizedBox(height: 20),
+            PanelHeader(icon: Icons.search_rounded, title: 'Search Engine'),
+            const SizedBox(height: 8),
+            Panel(child: Column(children: [
             DropdownButtonFormField<String>(
                 value: _settings.searchEngine.id == 'custom'
                     ? 'custom'
@@ -1044,8 +1232,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       searchEngine: SearchEngine(
                           id: 'custom', name: 'Custom', templateUrl: v)))),
             ],
-          ])),
-        ],
+            ])),
+          ],
+        ),
       ),
     );
   }
@@ -1102,6 +1291,46 @@ class _SettingsPageState extends State<SettingsPage> {
                 );
               }).toList(),
             )),
+            const SizedBox(height: 16),
+            PanelHeader(icon: Icons.language_rounded, title: 'Extra Video Hosts'),
+            const SizedBox(height: 8),
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Additional domains that serve video files. '
+                    'One host per line (e.g. `example.com`). '
+                    'URLs from these hosts are probed for video content.',
+                    style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: TextEditingController(
+                      text: _settings.customVideoHosts.join('\n'),
+                    )..selection = TextSelection.collapsed(offset: 0),
+                    maxLines: 4,
+                    minLines: 2,
+                    style: const TextStyle(fontSize: 13, fontFamily: 'JetBrainsMono'),
+                    decoration: InputDecoration(
+                      hintText: 'cdn.example.com\nvideo.host.org',
+                      contentPadding: const EdgeInsets.all(8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      final hosts = value
+                          .split(RegExp(r'[\n\r,]+'))
+                          .map((h) => h.trim())
+                          .where((h) => h.isNotEmpty)
+                          .toList();
+                      _update(_settings.copyWith(customVideoHosts: hosts));
+                    },
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1212,11 +1441,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
                 contentPadding: EdgeInsets.zero,
               ),
+              const SizedBox(height: 16),
+              _buildAccentPackPicker(context),
             ])),
             const SizedBox(height: 20),
             PanelHeader(
               icon: Icons.view_carousel_outlined,
-              title: 'Bottom dock',
+              title: 'Browser toolbar',
             ),
             const SizedBox(height: 8),
             Panel(
@@ -1224,9 +1455,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Drag to reorder icons on each dock slide. '
-                    'Add or remove actions (up to $kMaxDockItemsPerSlide per slide). '
-                    'Swipe the browser dock left/right to switch slides.',
+                    'Browser uses a fixed strip (Back · Forward · Queue · Radar · Bookmarks · Tabs · Menu). '
+                    'The address-bar star saves the current page; the bookmarks icon opens the list. '
+                    'Menu opens Settings | Tools. Advanced users can still reorder '
+                    'extra toolbar slides here (up to $kMaxDockItemsPerSlide per slide).',
                     style: TextStyle(
                       fontSize: 13,
                       color: context.ac.textSecondary,
@@ -1240,6 +1472,139 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAccentPackPicker(BuildContext context) {
+    final tier = widget.proEntitlement.tier;
+    final packs = availableAccentPacks(tier);
+    final activeId = activeAccentPack().id;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Accent pack',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: context.ac.textPrimary,
+              ),
+            ),
+            if (!tier.isAtLeastPro) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: context.ac.accentPurple.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'PRO',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                    color: context.ac.accentPurple,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 10),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisExtent: 52,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemCount: packs.length,
+          itemBuilder: (context, index) {
+            final pack = packs[index];
+            final isActive = pack.id == activeId;
+            final isLocked = pack.id != kDefaultAccent.id && !tier.isAtLeastPro;
+
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: isLocked
+                    ? () => showProUpsell(context, ProFeature.themePack)
+                    : () {
+                        saveAccentPack(pack.id);
+                        setState(() {});
+                      },
+                borderRadius: BorderRadius.circular(12),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? pack.primary.withValues(alpha: 0.14)
+                        : context.ac.surfaceElevated,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isActive
+                          ? pack.primary
+                          : context.ac.glassBorder,
+                      width: isActive ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: pack.swatchColors,
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: context.ac.glassBorder,
+                            width: 1,
+                          ),
+                        ),
+                        child: isLocked
+                            ? Icon(Icons.lock,
+                                size: 13,
+                                color: context.ac.textTertiary)
+                            : (isActive
+                                ? Icon(Icons.check,
+                                    size: 15,
+                                    color: context.ac.statusSuccess)
+                                : null),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          pack.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                            color: isActive
+                                ? context.ac.textPrimary
+                                : context.ac.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -1673,6 +2038,199 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildAutomationPage() {
+    final service = widget.automationApiService;
+    final isUltra = widget.proEntitlement.isUltra;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Automation API')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PanelHeader(
+            icon: Icons.api_rounded,
+            title: 'Automation API',
+          ),
+          const SizedBox(height: 8),
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Control Aurora from Tasker, scripts, or other automation '
+                  'tools via a local REST API.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: context.ac.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (service != null && isUltra) ...[
+                  SwitchListTile(
+                    title: const Text('Enable Automation API'),
+                    subtitle: Text(
+                      service.isStarted
+                          ? 'API server is running on port ${service.port}'
+                          : 'Start the localhost REST server.',
+                    ),
+                    value: service.isStarted,
+                    onChanged: (val) async {
+                      if (val) {
+                        try {
+                          await service.start();
+                          if (mounted) setState(() {});
+                        } catch (e) {
+                          if (mounted) {
+                            AuroraSnackbar.show(
+                              context,
+                              'Failed to start: $e',
+                            );
+                          }
+                        }
+                      } else {
+                        await service.stop();
+                        if (mounted) setState(() {});
+                      }
+                    },
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (service.isStarted) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'API Token',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: context.ac.surfaceElevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: context.ac.glassBorder),
+                      ),
+                      child: SelectableText(
+                        service.token ?? 'No token',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'JetBrainsMono',
+                          color: context.ac.accentFrost,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Use this token in the Authorization header:\n'
+                      'Authorization: Bearer <token>',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.ac.textTertiary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Regenerate Token'),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Regenerate Token?'),
+                              content: const Text(
+                                'Existing API clients will stop working. '
+                                'You will need to update their token.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(ctx).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () =>
+                                      Navigator.of(ctx).pop(true),
+                                  child: const Text('Regenerate'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true && service != null) {
+                            await service.regenerateToken();
+                            if (mounted) setState(() {});
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Endpoints',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.ac.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'GET  /v1/status\n'
+                      'GET  /v1/tasks\n'
+                      'POST /v1/tasks         (JSON body: {"url": "..."})\n'
+                      'POST /v1/tasks/:id/pause\n'
+                      'POST /v1/tasks/:id/resume\n'
+                      'POST /v1/tasks/:id/cancel',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'JetBrainsMono',
+                        color: context.ac.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ] else ...[
+                  if (!isUltra)
+                    ListTile(
+                      leading: Icon(Icons.lock_outline,
+                          size: 18, color: context.ac.textTertiary),
+                      title: Text('Ultra feature',
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: context.ac.textSecondary)),
+                      subtitle: Text(
+                          'Automation API requires Aurora Ultra.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: context.ac.textTertiary)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      onTap: () => showProUpsell(
+                          context, ProFeature.automationApi),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Center(
+                        child: Text(
+                          'Automation API service not initialized.',
+                          style: TextStyle(
+                            color: context.ac.textTertiary,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAboutPage() {
     return Scaffold(
       appBar: AppBar(title: const Text('About')),
@@ -1686,9 +2244,10 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Downloader',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.1.9', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v2.4.5', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
-              Text('Android download manager with segmented downloads, streaming video, torrents, in-browser media detection, and Google Drive sync.',
+              Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.'
+                  '${kDriveSyncEnabled ? ' Google Drive sync available.' : ''}',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 24),
               Text('Built with Flutter and the Nord color palette.',
@@ -1709,6 +2268,30 @@ class _SettingsPageState extends State<SettingsPage> {
                   _update(_settings.copyWith(
                     neverAskBatteryOpt: !val,
                   ));
+                },
+              ),
+              const Divider(height: 1, indent: 56),
+              ListTile(
+                leading: Icon(
+                  Icons.tour_outlined,
+                  color: context.ac.accentFrost,
+                ),
+                title: const Text('Show app tour'),
+                subtitle: const Text(
+                  'Interactive walkthrough of the main controls',
+                ),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: context.ac.textSecondary,
+                ),
+                onTap: () async {
+                  await OnboardingExperiment.resetOnboarding();
+                  if (!context.mounted) return;
+                  // Pop back to the shell so the spotlight can attach.
+                  // [_openSettingsSection] re-shows the tour when completion
+                  // is still false after this route closes.
+                  Navigator.of(context, rootNavigator: true)
+                      .popUntil((route) => route.isFirst);
                 },
               ),
               const Divider(height: 1, indent: 56),
@@ -1737,6 +2320,7 @@ class _SettingsPageState extends State<SettingsPage> {
         listenable: widget.proEntitlement,
         builder: (context, _) {
           final isPro = widget.proEntitlement.isPro;
+          final tier = widget.proEntitlement.tier;
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -1797,7 +2381,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               Panel(
                 child: Column(
-                  children: _buildFeatureRows(isPro),
+                  children: _buildFeatureRows(tier),
                 ),
               ),
 
@@ -1808,19 +2392,33 @@ class _SettingsPageState extends State<SettingsPage> {
                     icon: Icons.bug_report_outlined, title: 'Debug'),
                 const SizedBox(height: 8),
                 Panel(
-                  child: SwitchListTile(
-                    secondary: Icon(
-                      Icons.developer_mode,
-                      color: context.ac.accentFrost,
+                  child: DropdownButtonFormField<EntitlementTier>(
+                    value: widget.proEntitlement.tier,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Force tier (resets on restart)',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: InputBorder.none,
                     ),
-                    title: const Text('Debug: Force Pro'),
-                    subtitle: const Text(
-                        'Treat this device as Pro (resets on restart)'),
-                    value: widget.proEntitlement.isPro,
+                    items: const [
+                      DropdownMenuItem(
+                        value: EntitlementTier.free,
+                        child: Text('Free'),
+                      ),
+                      DropdownMenuItem(
+                        value: EntitlementTier.pro,
+                        child: Text('Pro'),
+                      ),
+                      DropdownMenuItem(
+                        value: EntitlementTier.ultra,
+                        child: Text('Ultra'),
+                      ),
+                    ],
                     onChanged: (val) {
-                      widget.proEntitlement.setDebugPro(val);
+                      widget.proEntitlement.setDebugTier(val);
                     },
-                    contentPadding: EdgeInsets.zero,
                   ),
                 ),
               ],
@@ -1835,8 +2433,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     icon: const Icon(Icons.shopping_cart_outlined, size: 18),
                     label: Text(
                       BuildChannel.isPlay
-                          ? (widget.playBilling?.localizedPrice != null
-                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedPrice}'
+                          ? (widget.playBilling?.localizedProPrice != null
+                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedProPrice}'
                               : 'Get Aurora Pro')
                           : 'Get Aurora Pro on Google Play',
                     ),
@@ -1921,7 +2519,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  List<Widget> _buildFeatureRows(bool isPro) {
+  List<Widget> _buildFeatureRows(EntitlementTier tier) {
     final features = [
       (ProFeature.extraFilterLists, 'Extra filter lists', '2 free'),
       (ProFeature.trackerPack, 'Tracker blocking pack', 'Pro only'),
@@ -1934,7 +2532,8 @@ class _SettingsPageState extends State<SettingsPage> {
       (ProFeature.autoHostGroups, 'Auto-host groups', 'Pro only'),
       (ProFeature.unlimitedCosmeticRules, 'Cosmetic rules',
           '${ProFeatures.maxFreeCosmeticRules} free / unlimited Pro'),
-      (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
+      if (kDriveSyncEnabled)
+        (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
       (ProFeature.scheduledAutoBackup, 'Scheduled auto-backup', 'Pro only'),
       (ProFeature.proxy, 'HTTP/SOCKS5 proxy', 'Pro only'),
       (ProFeature.wifiOnly, 'Wi‑Fi only & advanced stall', 'Pro only'),
@@ -1944,7 +2543,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final widgets = <Widget>[];
     for (int i = 0; i < features.length; i++) {
       final (feature, name, detail) = features[i];
-      final allowed = ProFeatures.allows(feature, isPro);
+      final allowed = ProFeatures.allows(feature, tier);
       widgets.add(
         ListTile(
           leading: Icon(
@@ -2072,6 +2671,13 @@ class _SettingsPageState extends State<SettingsPage> {
     ]);
   }
 
+  Widget _buildVaultPage() {
+    return VaultPage(
+      vault: widget.vaultService,
+      tier: widget.proEntitlement.tier,
+    );
+  }
+
   Widget _buildBackupPage() {
     return BackupPage(
       downloadQueue: widget.downloadQueue,
@@ -2084,7 +2690,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildRulesPage() {
-    return _RulesPage(proEntitlement: widget.proEntitlement);
+    return _RulesPage(
+      proEntitlement: widget.proEntitlement,
+      onRulesChanged: widget.onRulesChanged,
+    );
   }
 }
 
@@ -2245,6 +2854,7 @@ class BackupPage extends StatefulWidget {
   final ValueNotifier<int> libraryUpdateNotifier;
   final AutoBackupService autoBackupService;
   final ProEntitlement proEntitlement;
+  final void Function(String url)? onOpenUrlInBrowser;
 
   const BackupPage({
     super.key,
@@ -2254,6 +2864,7 @@ class BackupPage extends StatefulWidget {
     required this.libraryUpdateNotifier,
     required this.autoBackupService,
     required this.proEntitlement,
+    this.onOpenUrlInBrowser,
   });
 
   @override
@@ -2269,6 +2880,8 @@ class _BackupPageState extends State<BackupPage> {
   bool exportSavedPages = true;
   bool exportQueue = true;
   bool exportSettings = true;
+  bool exportTabs = true;
+  bool exportRules = true;
 
   List<Map<String, dynamic>> _localBackups = [];
 
@@ -2294,28 +2907,45 @@ class _BackupPageState extends State<BackupPage> {
       final root = DownloadSettings.mediaStoreRelativeFromDisplay(
         widget.settings.downloadDestination,
       );
-      // Primary + legacy roots so old backups remain restorable.
-      final primary = await PublicDownloadsService.listBackupFiles(
-        relativePath: '$root/Backup',
-      );
-      final legacyDefault = await PublicDownloadsService.listBackupFiles(
-        relativePath: 'Download/Aurora Downloader/Backup',
-      );
-      final legacyOldName = await PublicDownloadsService.listBackupFiles(
-        relativePath: 'Download/Aurora Downloads/Backups',
-      );
+      // Manual exports land in …/Backup; scheduled/one-shot auto in …/Auto Backup.
+      // Also scan legacy roots so old installs remain restorable.
+      final roots = <String>{
+        '$root/Backup',
+        '$root/Auto Backup',
+        'Download/Aurora Downloader/Backup',
+        'Download/Aurora Downloader/Auto Backup',
+        'Download/Aurora Downloads/Backups',
+        'Download/Aurora Downloads/Backup',
+      };
       final seen = <String>{};
       final files = <Map<String, dynamic>>[];
-      for (final item in [...primary, ...legacyDefault, ...legacyOldName]) {
-        final key = (item['uri'] ?? item['displayName'] ?? item).toString();
-        if (seen.add(key)) files.add(item);
+      for (final relativePath in roots) {
+        final items = await PublicDownloadsService.listBackupFiles(
+          relativePath: relativePath,
+        );
+        for (final item in items) {
+          final key = (item['uri'] ?? item['displayName'] ?? item).toString();
+          if (seen.add(key)) files.add(item);
+        }
       }
+      files.sort((a, b) {
+        final da = (a['dateModified'] as num?)?.toInt() ?? 0;
+        final db = (b['dateModified'] as num?)?.toInt() ?? 0;
+        return db.compareTo(da);
+      });
       if (mounted) {
         setState(() {
           _localBackups = files;
         });
       }
-    } catch (_) {}
+    } catch (e, s) {
+      debugPrint('[BackupPage] _loadLocalBackups failed: $e\n$s');
+      if (mounted) {
+        setState(() {
+          _localBackups = [];
+        });
+      }
+    }
   }
 
   void _showSnack(String message) {
@@ -2334,12 +2964,73 @@ class _BackupPageState extends State<BackupPage> {
           ? widget.settings.toJson()
           : null;
 
+      List<Map<String, dynamic>>? tabsJson;
+      dynamic downloadRulesJson;
+      final Map<String, dynamic> extraJson = {};
+
+      final baseDir = (await getApplicationSupportDirectory()).path;
+      if (exportTabs) {
+        try {
+          final tabsFile = File('$baseDir/browser_tabs.json');
+          if (await tabsFile.exists()) {
+            final decodedTabs = jsonDecode(await tabsFile.readAsString());
+            if (decodedTabs is List) {
+              tabsJson = decodedTabs.whereType<Map<String, dynamic>>().toList();
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (exportRules) {
+        try {
+          final rulesFile = File('$baseDir/download_rules.json');
+          if (await rulesFile.exists()) {
+            final content = await rulesFile.readAsString();
+            if (content.trim().isNotEmpty) {
+              downloadRulesJson = jsonDecode(content);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Include extra app JSON files if present
+      try {
+        final dir = Directory(baseDir);
+        if (await dir.exists()) {
+          await for (final entity in dir.list()) {
+            if (entity is! File || !entity.path.endsWith('.json')) continue;
+            final name = p.basename(entity.path);
+            if (name.startsWith('sniffed_media_cache_')) continue;
+            final key = p.basenameWithoutExtension(name);
+            if (const [
+              'download_queue',
+              'download_settings',
+              'browser_tabs',
+              'tab_groups',
+              'browser_library',
+              'download_rules',
+            ].contains(key)) {
+              continue;
+            }
+            try {
+              final content = await entity.readAsString();
+              if (content.trim().isNotEmpty) {
+                extraJson[key] = jsonDecode(content);
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+
       final file = await const BrowserLibraryStore().exportToFile(
         exportFavorites: exportFavorites,
         exportHistory: exportHistory,
         exportSavedPages: exportSavedPages,
         downloadQueueJson: downloadQueueJson,
         settingsJson: settingsJson,
+        tabsJson: tabsJson,
+        downloadRulesJson: downloadRulesJson,
+        extraJson: extraJson.isNotEmpty ? extraJson : null,
       );
 
       final root = DownloadSettings.mediaStoreRelativeFromDisplay(
@@ -2386,12 +3077,17 @@ class _BackupPageState extends State<BackupPage> {
       final hasSavedPages = decoded.containsKey('savedPages') && (decoded['savedPages'] is List) && (decoded['savedPages'] as List).isNotEmpty;
       final hasQueue = decoded.containsKey('downloadQueue') && (decoded['downloadQueue'] is List) && (decoded['downloadQueue'] as List).isNotEmpty;
       final hasSettings = decoded.containsKey('settings');
+      final hasTabs = decoded.containsKey('tabs') && (decoded['tabs'] is List) && (decoded['tabs'] as List).isNotEmpty;
+      final hasRules = decoded.containsKey('downloadRules') || decoded.containsKey('download_rules');
 
       final isLegacy = decoded.containsKey('favorites') ||
           decoded.containsKey('history') ||
           decoded.containsKey('savedPages') ||
           (!decoded.containsKey('settings') &&
               !decoded.containsKey('downloadQueue') &&
+              !decoded.containsKey('tabs') &&
+              !decoded.containsKey('downloadRules') &&
+              !decoded.containsKey('download_rules') &&
               decoded.isNotEmpty &&
               !decoded.containsKey('favorites') &&
               !decoded.containsKey('history') &&
@@ -2402,6 +3098,8 @@ class _BackupPageState extends State<BackupPage> {
       bool importSavedPages = hasSavedPages || isLegacy;
       bool importQueue = hasQueue;
       bool importSettings = hasSettings;
+      bool importTabs = hasTabs;
+      bool importRules = hasRules || isLegacy;
 
       if (!hasFavorites && !isLegacy) importFavorites = false;
       if (!hasHistory && !isLegacy) importHistory = false;
@@ -2467,7 +3165,7 @@ class _BackupPageState extends State<BackupPage> {
                       ),
                       SwitchListTile(
                         activeColor: context.ac.accentFrost,
-                        title: Text('Download History (Queue)', style: TextStyle(color: context.ac.textPrimary)),
+                        title: Text('Download History (Queue & Schedule)', style: TextStyle(color: context.ac.textPrimary)),
                         value: importQueue,
                         onChanged: hasQueue
                             ? (val) => setModalState(() => importQueue = val)
@@ -2479,6 +3177,28 @@ class _BackupPageState extends State<BackupPage> {
                         value: importSettings,
                         onChanged: hasSettings
                             ? (val) => setModalState(() => importSettings = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Browser Sessions & Open Tabs', style: TextStyle(color: context.ac.textPrimary)),
+                        subtitle: hasTabs
+                            ? Text(
+                                '${(decoded['tabs'] as List).length} tabs',
+                                style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
+                              )
+                            : null,
+                        value: importTabs,
+                        onChanged: hasTabs
+                            ? (val) => setModalState(() => importTabs = val)
+                            : null,
+                      ),
+                      SwitchListTile(
+                        activeColor: context.ac.accentFrost,
+                        title: Text('Download Rules & Organization', style: TextStyle(color: context.ac.textPrimary)),
+                        value: importRules,
+                        onChanged: (hasRules || isLegacy)
+                            ? (val) => setModalState(() => importRules = val)
                             : null,
                       ),
                       const SizedBox(height: 16),
@@ -2499,7 +3219,9 @@ class _BackupPageState extends State<BackupPage> {
                                     !importHistory &&
                                     !importSavedPages &&
                                     !importQueue &&
-                                    !importSettings)
+                                    !importSettings &&
+                                    !importTabs &&
+                                    !importRules)
                                 ? null
                                 : () {
                                     proceed = true;
@@ -2530,7 +3252,10 @@ class _BackupPageState extends State<BackupPage> {
       int importedHistoryCount = 0;
       int importedSavedPagesCount = 0;
       int importedQueueCount = 0;
+      int importedTabsCount = 0;
       bool importedSettings = false;
+      bool importedRules = false;
+      String? activeTabUrlToReopen;
 
       BrowserLibrary updatedLibrary = _library ?? BrowserLibrary.empty();
 
@@ -2546,7 +3271,7 @@ class _BackupPageState extends State<BackupPage> {
         }
       }
 
-      // 2. Download Queue
+      // 2. Download Queue & Scheduled Tasks
       if (importQueue && decoded.containsKey('downloadQueue')) {
         final queueList = decoded['downloadQueue'];
         if (queueList is List) {
@@ -2591,7 +3316,11 @@ class _BackupPageState extends State<BackupPage> {
               taskMap['isBackupImport'] = true;
               final task = DownloadTask.fromJson(taskMap);
               if (task.state != DownloadState.completed) {
-                task.state = DownloadState.paused;
+                final isFutureScheduled = task.scheduledStartAt != null &&
+                    task.scheduledStartAt!.isAfter(DateTime.now());
+                if (!isFutureScheduled && task.state != DownloadState.scheduled) {
+                  task.state = DownloadState.paused;
+                }
               }
               widget.downloadQueue.addTask(task);
               importedQueueCount++;
@@ -2779,6 +3508,76 @@ class _BackupPageState extends State<BackupPage> {
         await const BrowserLibraryStore().save(updatedLibrary);
       }
 
+      // 6. Browser Sessions & Open Tabs
+      if (importTabs && decoded.containsKey('tabs')) {
+        final tabsList = decoded['tabs'];
+        if (tabsList is List && tabsList.isNotEmpty) {
+          final tabsFile = File('$baseDir/browser_tabs.json');
+          await tabsFile.writeAsString(jsonEncode(tabsList));
+          importedTabsCount = tabsList.length;
+
+          if (decoded.containsKey('tabGroups')) {
+            final groupsFile = File('$baseDir/tab_groups.json');
+            await groupsFile.writeAsString(jsonEncode(decoded['tabGroups']));
+          }
+
+          // Extract active tab URL to reopen in browser view
+          for (final item in tabsList) {
+            if (item is Map) {
+              final url = (item['url'] as String? ?? '').trim();
+              if (item['active'] == true && url.isNotEmpty) {
+                activeTabUrlToReopen = url;
+                break;
+              }
+            }
+          }
+          if (activeTabUrlToReopen == null || activeTabUrlToReopen.isEmpty) {
+            for (final item in tabsList) {
+              if (item is Map) {
+                final url = (item['url'] as String? ?? '').trim();
+                if (url.isNotEmpty) {
+                  activeTabUrlToReopen = url;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 7. Download Rules & Organization
+      if (importRules && (decoded.containsKey('downloadRules') || decoded.containsKey('download_rules'))) {
+        try {
+          final rulesData = decoded['downloadRules'] ?? decoded['download_rules'];
+          final rulesFile = File('$baseDir/download_rules.json');
+          await rulesFile.writeAsString(jsonEncode(rulesData));
+          importedRules = true;
+        } catch (_) {}
+      }
+
+      // 8. Restore any additional root JSON files in backup
+      for (final entry in decoded.entries) {
+        final key = entry.key;
+        if (const [
+          'downloadQueue',
+          'settings',
+          'tabs',
+          'tabGroups',
+          'favorites',
+          'folders',
+          'history',
+          'savedPages',
+          'downloadRules',
+          'download_rules'
+        ].contains(key)) {
+          continue;
+        }
+        try {
+          final f = File('$baseDir/$key.json');
+          await f.writeAsString(jsonEncode(entry.value));
+        } catch (_) {}
+      }
+
       final List<String> summary = [];
       if (importedFavoritesCount > 0) {
         summary.add('$importedFavoritesCount favorites');
@@ -2790,7 +3589,13 @@ class _BackupPageState extends State<BackupPage> {
         summary.add('$importedSavedPagesCount saved pages');
       }
       if (importedQueueCount > 0) {
-        summary.add('$importedQueueCount download tasks');
+        summary.add('$importedQueueCount download tasks (including schedule)');
+      }
+      if (importedTabsCount > 0) {
+        summary.add('$importedTabsCount browser tabs');
+      }
+      if (importedRules) {
+        summary.add('download rules');
       }
       if (importedSettings) {
         summary.add('app settings');
@@ -2804,6 +3609,15 @@ class _BackupPageState extends State<BackupPage> {
 
       widget.libraryUpdateNotifier.value++;
       await _loadLibrary();
+
+      // Open active restored tab in browser view if requested
+      final targetUrl = activeTabUrlToReopen;
+      if (targetUrl != null && targetUrl.isNotEmpty) {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).maybePop();
+        }
+        widget.onOpenUrlInBrowser?.call(targetUrl);
+      }
     } catch (error) {
       _showSnack('Couldn\'t import backup. $error. Make sure the file is a valid backup.');
     }
@@ -2942,6 +3756,26 @@ class _BackupPageState extends State<BackupPage> {
                           value: exportSettings,
                           onChanged: (v) => setState(() => exportSettings = v),
                         ),
+                        SwitchListTile(
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Browser Sessions & Open Tabs', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                          subtitle: Text(
+                            'Saved browser tabs and tab groups',
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
+                          ),
+                          value: exportTabs,
+                          onChanged: (v) => setState(() => exportTabs = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: context.ac.accentFrost,
+                          title: Text('Download Rules & Organization', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                          subtitle: Text(
+                            'Auto-rename and organize rules',
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
+                          ),
+                          value: exportRules,
+                          onChanged: (v) => setState(() => exportRules = v),
+                        ),
                         const SizedBox(height: 12),
                         ElevatedButton.icon(
                           icon: const Icon(Icons.share_rounded),
@@ -2954,7 +3788,9 @@ class _BackupPageState extends State<BackupPage> {
                                   !exportHistory &&
                                   !exportSavedPages &&
                                   !exportQueue &&
-                                  !exportSettings)
+                                  !exportSettings &&
+                                  !exportTabs &&
+                                  !exportRules)
                               ? null
                               : _exportBackup,
                         ),
@@ -2972,7 +3808,8 @@ class _BackupPageState extends State<BackupPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Restore bookmarks, history, settings, or downloads from a backup file.',
+                          'Pick an Aurora backup (.json) or a 1DM export (.1dmbak). '
+                          'In the system picker, choose “All files” / browse storage if the file is hidden.',
                           style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                         ),
                         const SizedBox(height: 16),
@@ -2989,14 +3826,15 @@ class _BackupPageState extends State<BackupPage> {
                   const SizedBox(height: 8),
                   Panel(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           activeColor: context.ac.accentFrost,
                           title: Text('Enable auto backup', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            'Aurora saves your data to your Downloads folder automatically.',
+                            'Aurora periodically saves a full snapshot under Downloads → Auto Backup. '
+                            'Restore any snapshot from Local Backups below.',
                             style: TextStyle(fontSize: 11, color: context.ac.textSecondary),
                           ),
                           value: widget.settings.autoBackupEnabled,
@@ -3043,38 +3881,20 @@ class _BackupPageState extends State<BackupPage> {
                               : null,
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.save_rounded, size: 16),
-                                label: const Text('Back up now', style: TextStyle(fontSize: 12)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: context.ac.accentFrost,
-                                  foregroundColor: context.ac.surfaceField,
-                                ),
-                                onPressed: () async {
-                                  final result = await widget.autoBackupService.performBackup();
-                                  _showSnack(result.message);
-                                  await _loadLocalBackups();
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.restore_rounded, size: 16),
-                                label: const Text('Restore', style: TextStyle(fontSize: 12)),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: context.ac.accentFrost,
-                                  side: BorderSide(color: context.ac.accentFrost),
-                                ),
-                                onPressed: () async {
-                                  await _showRestoreDialog();
-                                },
-                              ),
-                            ),
-                          ],
+                        // One-tap full snapshot. Selective export is above; restore
+                        // lives only on Local Backups rows (no duplicate Restore button).
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.save_rounded, size: 16),
+                          label: const Text('Back up now', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.ac.accentFrost,
+                            foregroundColor: context.ac.surfaceField,
+                          ),
+                          onPressed: () async {
+                            final result = await widget.autoBackupService.performBackup();
+                            _showSnack(result.message);
+                            await _loadLocalBackups();
+                          },
                         ),
                       ],
                     ),
@@ -3117,7 +3937,8 @@ class _BackupPageState extends State<BackupPage> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'No backups found yet. Export one first from the panel above.',
+                              'No backups found yet. Use Export above, or Back up now, then tap Scan.',
+                              textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
                                 color: context.ac.textSecondary,
@@ -3131,7 +3952,11 @@ class _BackupPageState extends State<BackupPage> {
                     Column(
                       children: _localBackups.map((item) {
                         final name = item['displayName'] as String? ?? 'backup.json';
-                        final isAuto = name.startsWith('aurora_auto_backup_');
+                        final kind = (item['kind'] as String?)?.toLowerCase();
+                        final rel = (item['relativePath'] as String?) ?? '';
+                        final isAuto = kind == 'auto' ||
+                            name.startsWith('aurora_auto_backup_') ||
+                            rel.contains('Auto Backup');
                         final timestamp = item['dateModified'] as int? ?? 0;
                         final formattedTime = timestamp > 0 ? _formatDateTime(timestamp) : 'Unknown Date';
                         final size = item['size'] as int? ?? 0;
@@ -3171,6 +3996,7 @@ class _BackupPageState extends State<BackupPage> {
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.settings_backup_restore_rounded, size: 18, color: Colors.green),
+                                  tooltip: 'Restore',
                                   onPressed: () => _importLocalBackup(uri),
                                 ),
                                 IconButton(
@@ -3189,65 +4015,6 @@ class _BackupPageState extends State<BackupPage> {
     );
   }
 
-  Future<void> _showRestoreDialog() async {
-    final backups = await widget.autoBackupService.listBackups();
-    if (!mounted) return;
-    if (backups.isEmpty) {
-      _showSnack('No backups found.');
-      return;
-    }
-    // Group files by snapshot timestamp.
-    final byTimestamp = <String, List<AutoBackupFile>>{};
-    for (final file in backups) {
-      byTimestamp.putIfAbsent(file.timestamp, () => []).add(file);
-    }
-    final timestamps = byTimestamp.keys.toList()
-      ..sort((a, b) => b.compareTo(a)); // newest first
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Restore from backup'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: timestamps.length,
-            itemBuilder: (_, index) {
-              final ts = timestamps[index];
-              final count = byTimestamp[ts]!.length;
-              return ListTile(
-                title: Text(ts.replaceAll('_', ' ')),
-                subtitle: Text(count == 1
-                    ? '1 consolidated backup file'
-                    : '$count files'),
-                onTap: () async {
-                  Navigator.of(dialogContext).pop();
-                  final restored =
-                      await widget.autoBackupService.restoreBackup(ts);
-                  if (mounted) {
-                    setState(() {});
-                    _showSnack(restored > 0
-                        ? 'Done \u2014 restored $restored files. Restart the app to apply.'
-                        : 'Couldn\'t restore backup. It may be corrupted. Try a different snapshot.');
-                    await _loadLocalBackups();
-                  }
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _pad(int n) => n.toString().padLeft(2, '0');
 }
 
 class BatteryOptimizationTile extends StatefulWidget {
@@ -3359,8 +4126,9 @@ class _BatteryOptimizationTileState extends State<BatteryOptimizationTile> {
 /// Settings sub-page for managing download rules (Pro feature).
 class _RulesPage extends StatefulWidget {
   final ProEntitlement proEntitlement;
+  final VoidCallback? onRulesChanged;
 
-  const _RulesPage({required this.proEntitlement});
+  const _RulesPage({required this.proEntitlement, this.onRulesChanged});
 
   @override
   State<_RulesPage> createState() => _RulesPageState();
@@ -3389,6 +4157,7 @@ class _RulesPageState extends State<_RulesPage> {
 
   Future<void> _saveRules() async {
     await _store.save(_rules);
+    widget.onRulesChanged?.call();
   }
 
   void _addRule(DownloadRule rule) {
@@ -3969,6 +4738,8 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
 
   Future<void> _save() async {
     await _store.save(_profiles);
+    // Ensure navigation/enqueue pick up CRUD immediately (not next restart).
+    invalidateCache();
   }
 
   void _addProfile() {
@@ -4444,8 +5215,7 @@ class _SchedulePageContentState extends State<_SchedulePageContent> {
               children: [
                 Text(
                   'Schedule downloads to start at a specific time. '
-                  'New downloads can be scheduled directly from the Queue page '
-                  'by tapping the clock icon.',
+                  'New downloads can be scheduled from the Queue page via the clock icon next to the Download button or from the item menu.',
                   style: TextStyle(
                       fontSize: 13, color: context.ac.textSecondary),
                 ),
@@ -4544,10 +5314,10 @@ class _SchedulePageContentState extends State<_SchedulePageContent> {
 }
 
 // ---------------------------------------------------------------------------
-// Bottom dock reorder editor (Settings → Appearance)
+// Browser toolbar reorder editor (Settings → Appearance)
 // ---------------------------------------------------------------------------
 
-/// Drag-to-reorder UI for the two browser dock slides.
+/// Drag-to-reorder UI for the two browser toolbar slides.
 class _DockReorderEditor extends StatefulWidget {
   const _DockReorderEditor();
 
@@ -4700,7 +5470,7 @@ class _DockReorderEditorState extends State<_DockReorderEditor> {
           child: TextButton.icon(
             onPressed: _reset,
             icon: const Icon(Icons.restart_alt, size: 18),
-            label: const Text('Reset dock to default'),
+            label: const Text('Reset toolbar to default'),
           ),
         ),
       ],

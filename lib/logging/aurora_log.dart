@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
+import '../sniffer/worker_isolate_pool.dart';
+
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
@@ -178,13 +180,24 @@ class AuroraLog {
       final file = File(path);
       if (await file.exists()) {
         final content = await file.readAsString();
-        final decoded = jsonDecode(content);
+        // Offload jsonDecode to a background isolate so parsing 10 000
+        // entries does not block the UI thread on every cold start.
+        final decoded = await WorkerIsolatePool.instance.execute(
+          'jsonDecode',
+          {'json': content},
+        );
         if (decoded is List) {
           _entries.clear();
+          // Cap entries during restore to keep main-isolate iteration time
+          // bounded even when the persisted file is at _maxEntries.
+          final maxRestore = _maxEntries ~/ 5; // 2000 entries max
+          var count = 0;
           for (final item in decoded) {
             if (item is Map<String, dynamic>) {
               try {
                 _entries.add(AuroraLogEntry.fromJson(item));
+                count++;
+                if (count >= maxRestore) break;
               } catch (_) {
                 // Skip malformed entries during load.
               }

@@ -66,8 +66,9 @@ class AutoBackupService {
     _timer = null;
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
-    // Don't start the timer if the user is not Pro.
+    // Don't start the timer if the user is not Pro or if backing up on backgrounding.
     if (!_isProCallback()) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     _timer = Timer.periodic(settings.autoBackupInterval.duration, (_) {
       unawaited(_runIfDue());
     });
@@ -76,6 +77,7 @@ class AutoBackupService {
   Future<void> _runCatchUpIfDue() async {
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     final now = DateTime.now();
     final last = lastBackupTime;
     if (last == null ||
@@ -87,12 +89,30 @@ class AutoBackupService {
   Future<void> _runIfDue() async {
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     final last = lastBackupTime;
     if (last != null &&
         DateTime.now().difference(last) < settings.autoBackupInterval.duration) {
       return;
     }
     await performBackup();
+  }
+
+  /// Triggers an automatic backup when the app enters background,
+  /// provided auto-backup is enabled and user is eligible.
+  Future<AutoBackupResult?> performBackgroundBackup() async {
+    final settings = _settings;
+    if (settings == null || !settings.autoBackupEnabled) return null;
+    if (!_isProCallback()) return null;
+
+    final last = lastBackupTime;
+    if (settings.autoBackupInterval != AutoBackupInterval.onBackground) {
+      if (last != null &&
+          DateTime.now().difference(last) < settings.autoBackupInterval.duration) {
+        return null;
+      }
+    }
+    return await performBackup();
   }
 
   /// Copies every root-level data `.json` (except the sniffed-media cache)
@@ -145,11 +165,14 @@ class AutoBackupService {
         }
       }
 
-      final temp = File('${tempDir.path}/aurora_bak_aurora_backup.json');
+      // Unique display name so MediaStore listing and Local Backups scan can
+      // distinguish snapshots (still recognized by isAuroraBackupFileName).
+      final displayName = 'aurora_auto_backup_$timestamp.json';
+      final temp = File('${tempDir.path}/aurora_bak_$displayName');
       await temp.writeAsString(jsonEncode(consolidatedMap));
       final ok = await PublicDownloadsService.backupFileToDownloads(
         sourcePath: temp.path,
-        displayName: 'aurora_backup.json',
+        displayName: displayName,
         relativePath: '$autoBackupRootRelative/$timestamp',
       );
       await temp.delete();
@@ -157,7 +180,7 @@ class AutoBackupService {
       if (!ok) {
         return const AutoBackupResult(
           success: false,
-          message: "Couldn't write aurora_backup.json. Free up storage and try again.",
+          message: "Couldn't write the auto-backup file. Free up storage and try again.",
         );
       }
 
@@ -198,10 +221,19 @@ class AutoBackupService {
     if (matching.isEmpty) return 0;
 
     final supportDir = await getApplicationSupportDirectory();
-    final hasConsolidated = matching.any((f) => f.name == 'aurora_backup.json');
-
-    if (hasConsolidated) {
-      final file = matching.firstWhere((f) => f.name == 'aurora_backup.json');
+    // Prefer consolidated snapshot JSON (new auto names or legacy fixed name).
+    AutoBackupFile? consolidated;
+    for (final f in matching) {
+      final n = f.name.toLowerCase();
+      if (n == 'aurora_backup.json' ||
+          n.startsWith('aurora_auto_backup_') ||
+          n.startsWith('aurora_backup_')) {
+        consolidated = f;
+        break;
+      }
+    }
+    if (consolidated != null) {
+      final file = consolidated;
       final tempDir = await getTemporaryDirectory();
       final tempDest = File('${tempDir.path}/aurora_restore_consolidated.json');
       final ok = await PublicDownloadsService.restoreBackupFile(

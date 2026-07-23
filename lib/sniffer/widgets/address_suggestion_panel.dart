@@ -15,8 +15,8 @@ class AddressSuggestionPanel extends StatelessWidget {
   final String searchEngineName;
   final bool allowScroll;
 
-  /// Fixed height for each suggestion row.
-  static const double rowHeight = 52.0;
+  /// Fixed height for each suggestion row (compact).
+  static const double rowHeight = 44.0;
 
   const AddressSuggestionPanel({
     super.key,
@@ -66,8 +66,8 @@ class AddressSuggestionPanel extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(icon, size: 18, color: context.ac.accentFrost),
-                const SizedBox(width: 12),
+                Icon(icon, size: 16, color: context.ac.accentFrost),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -88,7 +88,7 @@ class AddressSuggestionPanel extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 10,
                           color: context.ac.textTertiary,
                         ),
                       ),

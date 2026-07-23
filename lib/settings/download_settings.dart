@@ -524,10 +524,13 @@ class DownloadSettings {
   final DownloadLinkBehavior downloadLinkBehavior;
   final bool trackerBlockingEnabled;
   final List<String> adblockAllowlist;
+  final List<String> customVideoHosts;
   final DarkModePreference darkModePreference;
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
   final Map<String, String> siteUserAgents;
+  final List<String> menuSettingsOrder;
+  final List<String> menuToolOrder;
 
   // --- Proxy settings ---
   final ProxyType proxyType;
@@ -611,10 +614,13 @@ class DownloadSettings {
     this.downloadLinkBehavior = DownloadLinkBehavior.capture,
     this.trackerBlockingEnabled = false,
     this.adblockAllowlist = const [],
+    this.customVideoHosts = const [],
     this.darkModePreference = DarkModePreference.system,
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
     this.siteUserAgents = const {},
+    this.menuSettingsOrder = const [],
+    this.menuToolOrder = const [],
     this.proxyType = ProxyType.none,
     this.proxyHost = '',
     this.proxyPort = 8080,
@@ -699,10 +705,13 @@ class DownloadSettings {
     DownloadLinkBehavior? downloadLinkBehavior,
     bool? trackerBlockingEnabled,
     List<String>? adblockAllowlist,
+    List<String>? customVideoHosts,
     DarkModePreference? darkModePreference,
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
     Map<String, String>? siteUserAgents,
+    List<String>? menuSettingsOrder,
+    List<String>? menuToolOrder,
     ProxyType? proxyType,
     String? proxyHost,
     int? proxyPort,
@@ -791,11 +800,14 @@ class DownloadSettings {
       trackerBlockingEnabled:
           trackerBlockingEnabled ?? this.trackerBlockingEnabled,
       adblockAllowlist: adblockAllowlist ?? this.adblockAllowlist,
+      customVideoHosts: customVideoHosts ?? this.customVideoHosts,
       darkModePreference: darkModePreference ?? this.darkModePreference,
       translateTargetLang:
           translateTargetLang ?? this.translateTargetLang,
       siteZoomLevels: siteZoomLevels ?? this.siteZoomLevels,
       siteUserAgents: siteUserAgents ?? this.siteUserAgents,
+      menuSettingsOrder: menuSettingsOrder ?? this.menuSettingsOrder,
+      menuToolOrder: menuToolOrder ?? this.menuToolOrder,
       proxyType: proxyType ?? this.proxyType,
       proxyHost: proxyHost ?? this.proxyHost,
       proxyPort: proxyPort ?? this.proxyPort,
@@ -836,11 +848,14 @@ class DownloadSettings {
       'doNotTrackEnabled': doNotTrackEnabled,
       'downloadLinkBehavior': downloadLinkBehavior.name,
     'trackerBlockingEnabled': trackerBlockingEnabled,
-    'adblockAllowlist': adblockAllowlist,
-    'darkModePreference': darkModePreference.name,
+      'adblockAllowlist': adblockAllowlist,
+      'customVideoHosts': customVideoHosts,
+      'darkModePreference': darkModePreference.name,
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
     'siteUserAgents': siteUserAgents,
+    'menuSettingsOrder': menuSettingsOrder,
+    'menuToolOrder': menuToolOrder,
     'proxyType': proxyType.name,
     'proxyHost': proxyHost,
     'proxyPort': proxyPort,
@@ -939,6 +954,8 @@ class DownloadSettings {
           defaults.trackerBlockingEnabled,
       adblockAllowlist: (json['adblockAllowlist'] as List?)
           ?.cast<String>() ?? defaults.adblockAllowlist,
+      customVideoHosts: (json['customVideoHosts'] as List?)
+          ?.cast<String>() ?? defaults.customVideoHosts,
       darkModePreference: DarkModePreference.values.byName(
         json['darkModePreference'] as String? ??
             defaults.darkModePreference.name,
@@ -949,6 +966,10 @@ class DownloadSettings {
         json['siteZoomLevels'] as Map?,
       ),
       siteUserAgents: _parseStringStringMap(json['siteUserAgents'] as Map?),
+      menuSettingsOrder:
+          (json['menuSettingsOrder'] as List?)?.cast<String>() ?? const [],
+      menuToolOrder:
+          (json['menuToolOrder'] as List?)?.cast<String>() ?? const [],
       proxyType: ProxyType.values.firstWhere(
         (e) => e.name == json['proxyType'],
         orElse: () => ProxyType.none,

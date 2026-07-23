@@ -6,6 +6,11 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/premium/free_taste.dart';
+import 'package:aurora_downloader/premium/pro_entitlement.dart';
+import 'package:aurora_downloader/premium/pro_features.dart';
+import 'package:aurora_downloader/premium/pro_upsell_sheet.dart';
+import 'package:aurora_downloader/premium/upsell_controller.dart';
 import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_batch_bar.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_empty_state.dart';
@@ -21,6 +26,7 @@ import 'package:aurora_downloader/sniffer/controllers/media_catch_controller.dar
 import 'package:aurora_downloader/sniffer/media_capture_analyzer.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
+import 'package:aurora_downloader/sniffer/series_grab_detector.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 export 'package:aurora_downloader/sniffer/capture/media_filter.dart';
@@ -183,9 +189,129 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
 
   Future<void> _runBatchDownload(List<CaptureGroup> selected) async {
     if (selected.isEmpty) return;
+
+    // P1 — free taste via FreeTaste softActionCap (first-N + upsell).
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final decision = await FreeTaste.evaluate(
+      feature: ProFeature.batchCapture,
+      tier: tier,
+      actionSize: selected.length,
+    );
+    if (!decision.allowed) {
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            widget.parentContext,
+            feature: ProFeature.batchCapture,
+            userTier: tier,
+          ),
+        );
+      }
+      return;
+    }
+
+    var toEnqueue = selected;
+    final cap = decision.allowedCount;
+    if (cap != null && cap < selected.length) {
+      toEnqueue = selected.take(cap).toList();
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            widget.parentContext,
+            feature: ProFeature.batchCapture,
+            userTier: tier,
+          ),
+        );
+      }
+    }
+
+    await _enqueueGroups(toEnqueue);
+  }
+
+  /// P2 series grab: order capture groups that look like episodes and enqueue
+  /// with soft first-5 free taste.
+  Future<void> _runSeriesGrab(List<CaptureGroup> displayedGroups) async {
+    if (displayedGroups.isEmpty) return;
+
+    final scored = <({CaptureGroup group, int order})>[];
+    for (final group in displayedGroups) {
+      final media = group.primary.media;
+      final labels = <String>[
+        media.name,
+        media.url,
+        if (media.pageTitle != null) media.pageTitle!,
+      ];
+      EpisodeLink? parsed;
+      for (final label in labels) {
+        if (label.trim().isEmpty) continue;
+        parsed = parseEpisodeLink(label, media.url);
+        if (parsed != null) break;
+      }
+      if (parsed != null) {
+        scored.add((group: group, order: parsed.order));
+      }
+    }
+
+    if (scored.length < 2) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No series pattern found in captured media '
+            '(need titles like EP01, S01E02, 第1集).',
+          ),
+        ),
+      );
+      return;
+    }
+
+    scored.sort((a, b) => a.order.compareTo(b.order));
+    var ordered = scored.map((e) => e.group).toList();
+    if (ordered.length > seriesGrabSafetyMax) {
+      ordered = ordered.take(seriesGrabSafetyMax).toList();
+    }
+
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final decision = await FreeTaste.evaluate(
+      feature: ProFeature.seriesGrab,
+      tier: tier,
+      actionSize: ordered.length,
+    );
+    if (!decision.allowed) {
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            widget.parentContext,
+            feature: ProFeature.seriesGrab,
+            userTier: tier,
+          ),
+        );
+      }
+      return;
+    }
+
+    var toEnqueue = ordered;
+    final cap = decision.allowedCount;
+    if (cap != null && cap < ordered.length) {
+      toEnqueue = ordered.take(cap).toList();
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            widget.parentContext,
+            feature: ProFeature.seriesGrab,
+            userTier: tier,
+          ),
+        );
+      }
+    }
+
+    await _enqueueGroups(toEnqueue);
+  }
+
+  Future<void> _enqueueGroups(List<CaptureGroup> toEnqueue) async {
     final nav = Navigator.of(context);
     nav.pop();
-    for (final group in selected) {
+    for (final group in toEnqueue) {
       if (!widget.parentContext.mounted) break;
       final ok = await widget.onAddToQueue(
         widget.parentContext,
@@ -330,6 +456,11 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                         );
                         unawaited(_runBatchDownload(selected));
                       },
+                      onSeriesGrab: displayedGroups.isEmpty
+                          ? null
+                          : () => unawaited(
+                                _runSeriesGrab(displayedGroups),
+                              ),
                       onRescan: widget.onRescan,
                     ),
                   ),

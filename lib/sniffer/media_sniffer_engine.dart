@@ -29,6 +29,14 @@ class MediaSnifferEngine implements MediaEnricherHost {
 
   Set<MediaType> disabledMediaTypes = const {};
 
+  Set<String> _customVideoHosts = const {};
+
+  /// Updates the set of user-configured video-hosting domains.
+  /// These are checked in addition to the built-in [isVideoHostingUrl] list.
+  void setCustomVideoHosts(Set<String> hosts) {
+    _customVideoHosts = hosts;
+  }
+
   /// Tracks URLs that have already been enqueued for enrichment.
   /// Used to skip re-enrichment when a content-type update or re-classification
   /// fires for an already-enriched item, preventing redundant HTTP probe chains.
@@ -164,10 +172,13 @@ class MediaSnifferEngine implements MediaEnricherHost {
         return true;
       }
       // Numbered .ts inside a stream/CDN path is almost certainly a segment.
+      // Tightened (G3): match only when the number sits in a segment-like
+      // position (e.g. `/seq-123.ts` or `/123.ts` after `/hls/`).  Bare
+      // paths like `/clips/fun.ts` on a video host are kept.
       if ((path.contains('/hls/') ||
               path.contains('/stream/') ||
               path.contains('/cdn/')) &&
-          RegExp(r'/\d+\.ts$').hasMatch(path)) {
+          RegExp(r'/(\d+|[a-z]+-\d+)\.ts$').hasMatch(path)) {
         return true;
       }
     }
@@ -385,7 +396,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
     // (DoodStream, Streamtape, MixDrop, etc.) that don't have a standard
     // media extension. These are video pages/download links that the user
     // can open to reach the actual video.
-    if (type == null && isVideoHostingUrl(url)) {
+    if (type == null && isVideoHostingUrl(url, extraHosts: _customVideoHosts)) {
       type = MediaType.video;
     }
 
@@ -437,6 +448,19 @@ class MediaSnifferEngine implements MediaEnricherHost {
       cache.detectedMedia.add(item);
       _mediaDetectedController.add(item);
       cache.mediaChangedController.add(item);
+
+      // G6: When a playlist (.m3u8/.mpd) is confirmed, remove any blob:
+      // entries sharing the same source page — they're just a proxy for
+      // the same stream and clutter the capture tray.  (If no playlist
+      // exists, keep the blob entry — it's the only hint.)
+      if ((type == MediaType.playlist || type == MediaType.video) &&
+          sourcePageUrl != null &&
+          sourcePageUrl.isNotEmpty) {
+        cache.detectedMedia.removeWhere((m) =>
+            m.url.startsWith('blob:') &&
+            m.sourcePageUrl == sourcePageUrl);
+      }
+
       // Eager-enrich only downloadable-priority types so thumbnail/doc
       // floods do not trigger HEAD/Range storms mid page-load. Images,
       // documents, archives, etc. stay listed in the capture UI.

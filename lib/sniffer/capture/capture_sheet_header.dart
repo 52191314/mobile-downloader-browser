@@ -14,6 +14,7 @@ class CaptureSheetHeader extends StatelessWidget {
     required this.onSelectBest,
     required this.onDownloadSelected,
     required this.onRescan,
+    this.onSeriesGrab,
   });
 
   final int totalShown;
@@ -21,6 +22,9 @@ class CaptureSheetHeader extends StatelessWidget {
   final VoidCallback onSelectBest;
   final VoidCallback onDownloadSelected;
   final VoidCallback onRescan;
+
+  /// Optional series auto-grab (P2). Null hides the control.
+  final VoidCallback? onSeriesGrab;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +92,16 @@ class CaptureSheetHeader extends StatelessWidget {
             ),
             onPressed: totalShown == 0 ? null : onSelectBest,
           ),
+          if (onSeriesGrab != null)
+            IconButton(
+              key: const Key('capture_series_grab_button'),
+              tooltip: 'Grab series (episode order)',
+              icon: Icon(
+                Icons.playlist_play_rounded,
+                color: totalShown == 0 ? ac.textDisabled : ac.accentFrost,
+              ),
+              onPressed: totalShown == 0 ? null : onSeriesGrab,
+            ),
           IconButton(
             key: const Key('capture_download_selected_button'),
             tooltip: canDownload

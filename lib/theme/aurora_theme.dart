@@ -9,6 +9,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../premium/accent_pack.dart';
 import 'aurora_palette.dart';
 import 'aurora_tokens.dart';
 
@@ -95,18 +96,7 @@ ThemeData buildDarkTheme({bool isOled = false, AColors? colors}) {
       thumbColor: c.accentFrost,
       overlayColor: c.accentFrost.withValues(alpha: 0.14),
     ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: c.dockSurface,
-      indicatorColor: colorScheme.primaryContainer,
-      labelTextStyle: WidgetStateProperty.all(
-        TextStyle(
-          fontFamily: 'Inter',
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: c.textSecondary,
-        ),
-      ),
-    ),
+    navigationBarTheme: _buildNavigationBarTheme(c, indicatorAlpha: 0.22),
     dialogTheme: DialogThemeData(
       backgroundColor: c.surfacePanel,
       elevation: 0,
@@ -230,18 +220,7 @@ ThemeData buildLightTheme({AColors? colors}) {
       thumbColor: c.accentFrost,
       overlayColor: c.accentFrost.withValues(alpha: 0.14),
     ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: c.dockSurface,
-      indicatorColor: colorScheme.primaryContainer,
-      labelTextStyle: WidgetStateProperty.all(
-        TextStyle(
-          fontFamily: 'Inter',
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: c.textSecondary,
-        ),
-      ),
-    ),
+    navigationBarTheme: _buildNavigationBarTheme(c, indicatorAlpha: 0.14),
     dialogTheme: DialogThemeData(
       backgroundColor: c.surfacePanel,
       elevation: 0,
@@ -281,6 +260,39 @@ ThemeData buildLightTheme({AColors? colors}) {
     // Restrained splash — louder was overpowering on white.
     splashColor: c.accentFrost.withValues(alpha: 0.10),
     highlightColor: c.accentFrost.withValues(alpha: 0.05),
+  );
+}
+
+/// Shared shell bottom-nav theme: always-show labels, frost selection.
+NavigationBarThemeData _buildNavigationBarTheme(
+  AColors c, {
+  required double indicatorAlpha,
+}) {
+  return NavigationBarThemeData(
+    backgroundColor: c.dockSurface,
+    indicatorColor: c.accentFrost.withValues(alpha: indicatorAlpha),
+    surfaceTintColor: Colors.transparent,
+    elevation: 0,
+    height: 64,
+    labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+    labelTextStyle: WidgetStateProperty.resolveWith((states) {
+      final selected = states.contains(WidgetState.selected);
+      return TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 11,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        color: selected ? c.accentFrost : c.textSecondary,
+      );
+    }),
+    iconTheme: WidgetStateProperty.resolveWith((states) {
+      final selected = states.contains(WidgetState.selected);
+      return IconThemeData(
+        size: 24,
+        color: selected
+            ? c.accentFrost
+            : c.textSecondary.withValues(alpha: 0.7),
+      );
+    }),
   );
 }
 
@@ -409,9 +421,14 @@ class AuroraTheme extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Prefer an explicit override (e.g. from MyApp after accent-pack
+    // resolution) so Material ThemeData and InheritedWidget share one
+    // palette instance.  Fall back to brightness + active pack.
+    final AColors baseColors = paletteOverride ??
+        colorsForAccentPack(activeAccentPack(), isLight: isLight);
     return AuroraPalette(
       isLight: isLight,
-      colors: paletteOverride ?? (isLight ? AColors.light() : AColors.dark()),
+      colors: baseColors,
       child: child,
     );
   }

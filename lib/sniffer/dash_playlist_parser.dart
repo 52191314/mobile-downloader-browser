@@ -276,9 +276,10 @@ class DashPlaylistParser {
   }
 
   /// Resolves a (possibly templated) relative URL against the manifest
-  /// base URI. Replaces `$RepresentationID$` and `$Number$` placeholders
-  /// with their literal tokens so the URL is at least partially usable
-  /// as a display label in the UI.
+  /// base URI. Replaces `$RepresentationID$`, `$Number$`, and `$Time$`
+  /// placeholders (including format specifiers like `$Number%05d$`) with
+  /// literal tokens so the URL is at least partially usable as a display
+  /// label and for variant selection.
   static Uri _resolveAgainstManifest(
     Uri manifestUri,
     String value,
@@ -286,7 +287,8 @@ class DashPlaylistParser {
   ) {
     var resolved = value
         .replaceAll('\$RepresentationID\$', representationId)
-        .replaceAll('\$Number\$', '1');
+        .replaceAll(RegExp(r'\$Number(?:%(\d+)d)?\$'), '1')
+        .replaceAll('\$Time\$', '1');
     final resolvedUri = Uri.tryParse(resolved);
     if (resolvedUri != null && resolvedUri.hasScheme) {
       return resolvedUri;

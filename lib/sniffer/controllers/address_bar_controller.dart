@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../browser_search.dart';
+import '../external_scheme.dart';
 import '../models/address_suggestion.dart';
 import '../models/browser_tab.dart';
 import '../browser_library.dart';
@@ -41,7 +42,9 @@ class AddressBarController {
 
     var uri = Uri.tryParse(trimmed);
     uri ??= BrowserSearch.resolveInput(trimmed, searchEngine);
-    if (!uri.hasScheme || uri.host.isEmpty) {
+    // App schemes (tg:, magnet:, …) often have no host — still valid.
+    if (!uri.hasScheme ||
+        (uri.host.isEmpty && !isExternalAppUri(uri))) {
       uri = BrowserSearch.resolveInput(trimmed, searchEngine);
     }
     loadUrl(tab, uri);
@@ -118,6 +121,9 @@ class AddressBarController {
       ..clear()
       ..addAll(local)
       ..addAll(searchFallback);
+    if (suggestions.length > 5) {
+      suggestions.removeRange(5, suggestions.length);
+    }
     rebuild();
 
     // Skip remote typeahead when the user is clearly pasting/typing a URL.
@@ -150,9 +156,9 @@ class AddressBarController {
         )) {
       suggestions.add(searchFallback.first);
     }
-    // Cap total rows for the panel.
-    if (suggestions.length > 10) {
-      suggestions.removeRange(10, suggestions.length);
+    // Cap total rows — keep the typeahead short so it doesn't dominate the UI.
+    if (suggestions.length > 5) {
+      suggestions.removeRange(5, suggestions.length);
     }
     rebuild();
   }
@@ -167,15 +173,15 @@ class AddressBarController {
   static bool _looksLikeNavigableUrl(String query) {
     if (query.contains(RegExp(r'\s'))) return false;
     final parsed = Uri.tryParse(query);
-    if (parsed != null &&
-        parsed.hasScheme &&
-        (parsed.scheme == 'http' ||
-            parsed.scheme == 'https' ||
-            parsed.scheme == 'file' ||
-            parsed.scheme == 'about' ||
-            parsed.scheme == 'magnet') &&
-        (parsed.host.isNotEmpty || parsed.scheme == 'about' || parsed.scheme == 'magnet')) {
-      return true;
+    if (parsed != null && parsed.hasScheme) {
+      if (isExternalAppUri(parsed)) return true;
+      if ((parsed.scheme == 'http' ||
+              parsed.scheme == 'https' ||
+              parsed.scheme == 'file' ||
+              parsed.scheme == 'about') &&
+          (parsed.host.isNotEmpty || parsed.scheme == 'about')) {
+        return true;
+      }
     }
     // bare host: example.com or example.com/path
     if (query.contains('.') &&
@@ -201,7 +207,7 @@ class AddressBarController {
 
     void add(String label, String url, AddressSuggestionKind kind) {
       final key = url.toLowerCase();
-      if (seen.add(key) && out.length < 6) {
+      if (seen.add(key) && out.length < 3) {
         out.add(AddressSuggestion(label: label, url: url, kind: kind));
       }
     }
