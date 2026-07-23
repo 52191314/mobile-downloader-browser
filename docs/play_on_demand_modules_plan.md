@@ -67,7 +67,7 @@ Confirm feasibility and size savings before structural work.
 |------|--------|
 | Measure current Play AAB / device install size (arm64) | Baseline MB |
 | Identify FFmpeg contribution (arm64 `.so` from ffmpeg-kit) | Delta ~8–12 MB (see `docs/ffmpeg_spike_pr-21a.md`) |
-| Confirm Flutter deferred components + plugin native libs path for current Flutter/AGP | Spike notes: works / blocked / workaround |
+| Confirm Flutter deferred components + plugin native libs path for current Flutter/AGP | Spike notes: **BLOCKED** — see [`ffmpeg_spike_pr-21a.md`](./ffmpeg_spike_pr-21a.md) |
 | Check Play Console requirements (AAB only, app signing, min API) | Checklist |
 | Decide: FFmpeg-only v1 vs FFmpeg+torrent later | Recommendation in spike close-out |
 

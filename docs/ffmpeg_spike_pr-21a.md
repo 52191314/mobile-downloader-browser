@@ -1,199 +1,177 @@
-# FFmpeg Spike — PR-21a Deliverable
+# Phase 0 Spike: FFmpeg on-demand module feasibility
 
 | Field | Value |
 |-------|-------|
-| **Author** | Implementation Agent |
-| **Date** | 2026-07-20 |
-| **Status** | Spike complete — ready for PR-22 (FFmpeg MVP) |
-| **Applies to** | Phase 3 Ultra (`ProFeature.ffmpegSuite`) |
+| **Date** | 2026-07-23 |
+| **Status** | **BLOCKED** — Flutter plugin native libs cannot be split into dynamic feature modules with current tooling |
+| **PR** | PR-A per `play_on_demand_modules_plan.md` |
+| **Spike scope** | Measure AAB size, verify if FFmpeg native libs can be deferred via Play Feature Delivery |
 
 ---
 
-## 1. Build approach
+## 1. Measurements (arm64-v8a only)
 
-**Recommendation: `ffmpeg-kit` min-gpl, static arm64 jniLibs, embedded in APK/AAB.**
+| Metric | Baseline (before spike) | After changes | Delta |
+|--------|------------------------|---------------|-------|
+| AAB file size | 144.4 MB | 144.6 MB | +0.2 MB |
+| Base module contribution | ~144 MB | ~144 MB | ~0 |
+| FFmpeg module contribution | N/A | < 100 KB (manifest + dex only) | +0.1 MB |
+| Device install size (estimated via bundletool) | ~134 MB (typical) | Same | ~0 |
 
-| Approach | Size (arm64) | Maintenance | Complexity | Verdict |
-|----------|-------------|-------------|------------|---------|
-| **ffmpeg-kit min-gpl** | ~8–12 MB | Upstream prebuilt, active | Low | ✅ **Chosen** |
-| mobile-ffmpeg min-gpl | ~12–16 MB | Archived (2023) | Low | ❌ Unmaintained |
-| Custom NDK build | ~6–10 MB | Full control | High | ⏸️ Fallback if page-size issues |
-| Download at runtime | 0 MB APK | Server cost, offline fails | Medium | ❌ Rejected |
-
-**ffmpeg-kit** (`com.arthenica:ffmpeg-kit-min-gpl:6.0.3`) is the actively maintained successor to `mobile-ffmpeg`. It ships prebuilt `.so` files for arm64-v8a. Aurora already ships only arm64 (`abiFilters = ["arm64-v8a"]`), so the other ABIs are automatically excluded, keeping the FFmpeg contribution to the single arm64 `.so`.
-
-### 16 KB page size (Android 15+)
-
-Android 15 (API 35) requires 16 KB page size for native libraries. `ffmpeg-kit` 6.0.3 **does not** ship 16 KB-aligned binaries by default. The workaround:
-
-1. Use `android:extractNativeLibs="true"` in `AndroidManifest.xml` (forces re-extraction at install time, which aligns pages).
-2. Or build FFmpeg with `--page-size=16384` (custom NDK build path).
-3. Or wait for `ffmpeg-kit` to ship 16 KB-aligned builds (tracked upstream).
-
-**Recommendation:** Start with `ffmpeg-kit` and `extractNativeLibs=true`. Monitor upstream for native 16 KB support. If performance or install-time issues arise, fall back to a custom NDK build.
+**Conclusion:** The AAB size is **not reduced** because the native FFmpeg libraries remain in the base module.
 
 ---
 
-## 2. APK size delta
+## 2. AAB module contents
 
-Current APK size breakdown (estimated from typical mobile-ffmpeg/ffmpeg-kit deployments):
+### Base module (arm64-v8a)
+| File | Size (est.) | Source |
+|------|------------|--------|
+| `base/lib/arm64-v8a/libffmpegkit.so` | ~3 MB | `ffmpeg_kit_flutter_new_min_gpl` plugin |
+| `base/lib/arm64-v8a/libavcodec.so` | ~4 MB | " |
+| `base/lib/arm64-v8a/libavformat.so` | ~2 MB | " |
+| `base/lib/arm64-v8a/libavutil.so` | ~1 MB | " |
+| `base/lib/arm64-v8a/libswresample.so` | < 1 MB | " |
+| `base/lib/arm64-v8a/libswscale.so` | < 1 MB | " |
+| `base/lib/arm64-v8a/libavfilter.so` | < 1 MB | " |
+| `base/lib/arm64-v8a/libavdevice.so` | < 1 MB | " |
+| **Total FFmpeg native** | **~12 MB** | |
 
-| Component | Size |
-|-----------|------|
-| Base Aurora APK (arm64) | ~15–25 MB |
-| FFmpeg arm64 .so (min-gpl) | ~8–12 MB |
-| **Estimated total** | **~23–37 MB** |
-| **Delta** | **+8–12 MB** |
+### FFmpeg dynamic feature module
+| File | Size | Notes |
+|------|------|-------|
+| `ffmpeg/manifest/AndroidManifest.xml` | < 1 KB | `dist:on-demand` delivery |
+| `ffmpeg/dex/classes.dex` | ~10 KB | Flutter deferred component stub |
+| `ffmpeg/resources.pb` | < 1 KB | Module metadata |
 
-The delta is acceptable for a premium feature (Ultra tier $9.99). AAB delivery means users download only the arm64 split, so the install-time delta is identical. The app was already arm64-only to keep the native adblock engine small; FFmpeg follows the same constraint.
-
-**Budget:** target < +15 MB. `ffmpeg-kit` min-gpl meets this.
-
----
-
-## 3. Licensing
-
-### FFmpeg license
-FFmpeg is available under **LGPL** or **GPL** depending on which codecs are linked.
-
-- `ffmpeg-kit-min-gpl`: GPL-2.0. Includes libx264 (GPL). Compatible with Aurora's GPL-3.0.
-- `ffmpeg-kit-min-lgpl`: LGPL-3.0. Omits x264; uses OpenH264 (BSD) instead.
-
-**Recommendation:** Use **`ffmpeg-kit-min-gpl`** for maximum codec support (x264 for CRF compression). Aurora is GPL-3.0, so linking a GPL-2.0 library is permitted as long as the combined work is distributed under GPL-3.0.
-
-### Required notices (About page)
-
-Add the following to Aurora's About → OSS Licenses screen:
-
-```
-This software uses FFmpeg (https://ffmpeg.org/) licensed under the
-GNU Lesser General Public License version 2.1 or later
-(https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
-
-FFmpeg source code is available at:
-https://github.com/FFmpeg/FFmpeg
-```
-
-If `min-gpl` variant is used, add:
-
-```
-This build links against libx264 (https://www.videolan.org/developers/x264.html)
-which is licensed under the GNU General Public License version 2.
-```
-
-### Source code offer
-Flutter apps using ffmpeg-kit are not required to distribute source with the binary. A written offer in the About page (URL to FFmpeg GitHub + build instructions) satisfies GPL requirements.
+The `:ffmpeg` module contains **no native `.so` files** — only manifest, dex, and resources. The native libs are still in `base/lib/`.
 
 ---
 
-## 4. Allowed operations — MVP
+## 3. Why the split doesn't work
 
-### Trim
-```bash
-ffmpeg -i input.mp4 -ss 00:00:10 -to 00:00:30 -c copy output.mp4
+Root cause: **Flutter's Gradle plugin bundles plugin native libs into the base module automatically.**
+
+The dependency chain is:
+
 ```
-- Uses stream copy (`-c copy`) — no re-encode, very fast, near-lossless.
-- Duration limited to 30 minutes (configurable).
-
-### Compress (CRF)
-```bash
-ffmpeg -i input.mp4 -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 64k output.mp4
+pubspec.yaml
+  └── ffmpeg_kit_flutter_new_min_gpl: ^2.5.3
+        └── android/ (plugin directory with .so files)
+              └── Flutter Gradle plugin → base/lib/arm64-v8a/
 ```
-- CRF range slider: 18–51 (lower = better quality, larger file).
-- Default: 28 (good balance).
-- `-preset fast` keeps encode time reasonable on mobile.
-- Max encode time: 30 minutes.
 
-### GIF generation
-```bash
-ffmpeg -i input.mp4 -vf "fps=10,scale=320:-1:flags=lanczos" -c:v gif output.gif
-```
-- Configurable: FPS (5–15), width (160–640), palette generation for quality.
-- Max duration: 30 seconds of output (to prevent huge GIFs).
+The Flutter Gradle plugin (`flutter.groovy`) iterates all plugins and copies their native `.so` libraries into the **base** module's `jniLibs`. It does **not** check the `deferred-components` configuration when placing native libs — it only uses that config for Dart code splitting.
 
-### Rejected for MVP
-- Audio transcoding (handled by Media3 Transformer, P5)
-- Concatenation, overlay, filters — future
-- Hardware acceleration (MediaCodec) — future
+Related issues:
+- [flutter#91556](https://github.com/flutter/flutter/issues/91556) - Deferred components + native plugins
+- [flutter#100380](https://github.com/flutter/flutter/issues/100380) - Plugin native libs in dynamic features
 
 ---
 
-## 5. Thread / process policy
+## 4. What was implemented (architecture is correct)
 
-### Architecture
-```
-Flutter isolate (UI)
-    │
-    ▼
-ffmpeg-kit CommandExecution (native thread pool)
-    │
-    ├── Progress callback (stderr parse → 0–100%)
-    ├── Cancel → kill process group
-    └── Timeout → kill process group (30-min default)
-```
+The following **will work** once the native lib split is resolved:
 
-### Constraints
-| Property | Value |
-|----------|-------|
-| Max concurrent FFmpeg processes | **1** (sequential queue) |
-| Max execution time | **30 minutes** per op |
-| Cancel behaviour | `SIGTERM` → `SIGKILL` after 5s grace |
-| UI thread | Never blocked (ffmpeg-kit runs on its own thread) |
-| Download queue impact | None — separate native thread, separate I/O |
-| Notification | Show "Processing video…" progress notification during encode |
-
-### Implementation pattern (Dart)
-```dart
-import 'package:flutter_ffmpeg_kit/flutter_ffmpeg_kit.dart';
-
-Future<FfprobeResult?> runFfmpeg(String cmd) async {
-  final session = await FlutterFFmpegKit.executeWithTimeout(cmd, 1800);
-  // session.returnCode, session.allLogs, session.duration
-  return session;
-}
-```
+| Layer | Status | What it does |
+|-------|--------|--------------|
+| **`FeatureModuleLoader`** | ✅ Shipped | Channel-aware `ensureInstalled()` with `FeatureModuleStatus` |
+| **`GitHubModuleLoader`** | ✅ Shipped | Always returns `ready` (fat APK) |
+| **`PlayModuleLoader`** | ✅ Shipped | Calls native `SplitInstallManager` via method channel |
+| **Method channel** | ✅ Shipped | `aurora_downloader/feature_delivery` with real `startInstall/getModuleStatus/cancelInstall` |
+| **Android manifest** | ✅ Shipped | `dist:on-demand` delivery + `dist:fusing` |
+| **FFmpeg Studio wiring** | ✅ Shipped | Download prompt → progress → retry in `queue_page.dart` and `ffmpeg_studio_page.dart` |
+| **`ffmpeg_runtime.dart`** | ✅ Shipped | Isolates `ffmpeg_kit` imports for future deferred loading |
+| **`pubspec.yaml`** | ✅ Shipped | `deferred-components` section ready |
+| **Gradle channel detection** | ✅ Shipped | `AURORA_BUILD_CHANNEL` env var + `-P` flag |
+| **Play Core dependency** | ✅ Shipped | `feature-delivery:2.1.0` in base `build.gradle.kts` |
+| **Native lib split** | ❌ **Blocked** | Flutter plugin bundles libs into base module |
 
 ---
 
-## 6. Integration points
+## 5. Options to unblock
 
-| UI surface | Where to add | Gate |
-|------------|-------------|------|
-| Completed download → "Compress" | `download_card.dart` popup | Ultra |
-| Completed download → "Convert to GIF" | `download_card.dart` popup | Ultra |
-| Queue → overflow → "Trim video" | `queue_page.dart` overflow menu | Ultra |
-| Settings → FFmpeg quality presets | `settings_page.dart` Pro section | Ultra |
+### Option A: Fork ffmpeg-kit Flutter plugin (recommended in plan)
+
+Create a forked version of `ffmpeg_kit_flutter_new_min_gpl` that:
+1. Uses a custom Gradle configuration to package native libs into the `:ffmpeg` dynamic feature module
+2. Uses `dist:onDemand` manifest for the feature module
+3. Ships the Dart wrapper as a **deferred** Flutter library
+
+**Effort:** ~3–5 days  
+**Risk:** Medium — fork maintenance burden  
+**Upside:** Full size reduction (~12 MB), clean Play Feature Delivery integration
+
+### Option B: Runtime download from CDN
+
+Download the FFmpeg `.so` files at runtime from a CDN/hosted location:
+1. Package the `.so` files as assets or host on a server
+2. Download on first Ultra-gated Studio use
+3. Load with `DynamicLibrary.open()` in Dart FFI
+
+**Effort:** ~2–3 days  
+**Risk:** Low — fully under your control  
+**Downside:** Not Play Feature Delivery; works on both channels; extra network on first use  
+**Note:** The `FeatureModuleLoader` abstraction already supports this pattern — `PlayModuleLoader.ensureInstalled()` would just download from a URL instead of calling SplitInstallManager.
+
+### Option C: Accept current size (do nothing)
+
+Keep the on-demand **Dart architecture** but remove the empty `:ffmpeg` Gradle module. The AAB stays at ~144 MB. The code is ready for when Flutter tooling supports plugin native lib splitting.
+
+**Effort:** None  
+**Risk:** None  
+**Downside:** No install size reduction today
 
 ---
 
-## 7. Risk assessment
+## 6. Recommendation
 
-| Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
-| 16 KB page size breaks on Android 15+ | High | Crash on launch | `extractNativeLibs=true` + monitor upstream |
-| APK size exceeds budget (+15 MB) | Medium | User complaints | Rebuild with custom configure; trim codecs |
-| FFmpeg process killed by OS (memory) | Medium | Failed encode | Add retry with lower preset; document device reqs |
-| GPL compliance lawsuit | Low | Legal | Include accurate notices; link to source |
-| User expects faster encodes | Medium | Bad reviews | Show progress notification; document expected times |
+**Option B (runtime download)** is the pragmatic path forward:
 
----
+- The `FeatureModuleLoader` abstraction is already designed for this
+- Works on both Play and GitHub channels
+- No plugin fork needed
+- Can be implemented in 2–3 days
+- Full size reduction without waiting for Flutter tooling
 
-## 8. Next steps (PR order)
-
-1. ~~PR-21a: This spike~~ ✅
-2. **PR-21b**: Add `ffmpeg-kit-min-gpl` dependency, define Ultra op stubs
-3. **PR-22**: Implement trim + compress + GIF operations with progress notification
-4. **PR-23**: Wire UI actions + settings presets + OSS license notices
-5. **Play Console**: Activate `aurora_ultra_unlock` + `aurora_ultra_upgrade` SKUs
-6. **Production**: Remove `AURORA_DISABLE_ULTRA_UI` compile flag
+The Play Feature Delivery dynamic module (`:ffmpeg`) should be **removed** from the build since it currently contributes no native libs. The `FeatureModuleLoader` + method channel + Studio wiring remain.
 
 ---
 
-## 9. Key Decisions
+## 7. Detailed size breakdown (AAB)
 
-1. **`ffmpeg-kit-min-gpl`** over custom NDK build — prebuilt, maintained, familiar API.
-2. **GPL variant** over LGPL — x264 support for CRF compression is worth the GPL requirement.
-3. **Embedded .so** over runtime download — offline-capable, no server cost, instant availability.
-4. **16 KB page workaround** via `extractNativeLibs=true` — adequate until upstream ships aligned binaries.
-5. **+8–12 MB delta** accepted for Ultra tier ($9.99) — consistent with category norms.
-6. **Single FFmpeg process** limit — prevents resource starvation. Queue FFmpeg jobs if needed.
+| Component | Size | % of total |
+|-----------|------|------------|
+| Flutter engine + framework | ~30 MB | 21% |
+| InAppWebView + Chromium | ~25 MB | 17% |
+| FFmpeg native libs (8 .so) | ~12 MB | 8% |
+| libtorrent_flutter | ~8 MB | 6% |
+| Dart kernel + assets | ~8 MB | 6% |
+| AndroidX / Material / Play deps | ~20 MB | 14% |
+| Resources (drawables, layouts, etc.) | ~25 MB | 17% |
+| Other (dex, META-INF, etc.) | ~16 MB | 11% |
+| **Total** | **~144 MB** | **100%** |
+
+The FFmpeg share (~12 MB) is the largest single deferrable component. BitTorrent (~8 MB) is next.
+
+---
+
+## 8. References
+
+- [`play_on_demand_modules_plan.md`](./play_on_demand_modules_plan.md) — original plan
+- `android/ffmpeg/build.gradle.kts` — dynamic feature module build
+- `lib/premium/ffmpeg/ffmpeg_module_loader.dart` — `FeatureModuleLoader` abstraction
+- `android/app/.../MainActivity.kt` — `feature_delivery` method channel
+- Flutter deferred components: https://docs.flutter.dev/perf/deferred-components
+- Play Feature Delivery: https://developer.android.com/guide/playcore/feature-delivery/on-demand
+
+---
+
+## 9. Decision log
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Proceed with Phase 1? | **On hold** | Native lib split blocked by Flutter tooling |
+| Keep `FeatureModuleLoader`? | **Yes** | Architecture is correct and useful |
+| Remove `:ffmpeg` Gradle module? | **TBD** | Empty module adds no value |
+| Fallback strategy | **Option B (runtime download)** | Pragmatic, works now, no plugin fork |
