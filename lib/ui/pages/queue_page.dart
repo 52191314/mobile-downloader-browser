@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../downloader/downloader.dart';
+import '../../premium/ffmpeg/ffmpeg_module_loader.dart';
 import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
@@ -1703,6 +1704,12 @@ class _QueuePageState extends State<QueuePage> {
       );
       return;
     }
+
+    // Ensure the FFmpeg on-demand module is installed (Play) or ready (GitHub).
+    final loader = FeatureModuleLoader.instance;
+    final moduleReady = await _ensureFfmpegModule(context, loader);
+    if (!moduleReady) return;
+
     final name = path.replaceAll('\\', '/').split('/').last;
     final item = FfmpegStudioItem(
       id: task.id,
@@ -1710,6 +1717,7 @@ class _QueuePageState extends State<QueuePage> {
       filePath: path,
       fileSizeBytes: task.totalBytes,
     );
+    if (!context.mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1720,6 +1728,90 @@ class _QueuePageState extends State<QueuePage> {
         ),
       ),
     );
+  }
+
+  /// Checks FFmpeg module availability and prompts Play install if needed.
+  /// Returns `true` if the module is ready (or fat APK).
+  Future<bool> _ensureFfmpegModule(
+    BuildContext context,
+    FeatureModuleLoader loader,
+  ) async {
+    final status = loader.statusFor('ffmpeg');
+    if (status == FeatureModuleStatus.ready ||
+        status == FeatureModuleStatus.notNeeded) {
+      return true;
+    }
+
+    if (status == FeatureModuleStatus.downloading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg module is already downloading…')),
+      );
+      return false;
+    }
+
+    // Show confirmation dialog before triggering the download.
+    if (!context.mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download FFmpeg tools?'),
+        content: Text(
+          'FFmpeg media tools are not included in the base app on this '
+          'distribution channel.\n\n'
+          'A one-time download of ~10 MB is required. '
+          'Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    if (!context.mounted) return false;
+
+    // Trigger install.
+    final ok = await loader.ensureInstalled('ffmpeg');
+    if (!context.mounted) return false;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg tools ready.')),
+      );
+      return true;
+    }
+
+    // Show failure + retry.
+    final retry = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download failed'),
+        content: const Text(
+          'Could not download the FFmpeg module. '
+          'Check your network connection and try again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+    if (retry == true && context.mounted) {
+      return _ensureFfmpegModule(context, loader);
+    }
+    return false;
   }
 
   String _fileName(String path) {

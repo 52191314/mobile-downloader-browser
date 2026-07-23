@@ -130,6 +130,7 @@ Constant: `kAuroraProProductId` in `lib/premium/play_billing_service.dart`.
 |------|--------|
 | Gradle `productFlavors { play, github }` | Optional later: different applicationId, icons, or automatic dart-defines per flavor |
 | `AURORA_ENABLE_LOG_SERVER` | Possible compile-time debug tooling (today log server is `kDebugMode` only) |
+| `AURORA_ENABLE_FFMPEG_MODULE` | When `false` (default: `true`), the on-demand FFmpeg module download is disabled. Useful for internal testing without Play Feature Delivery. |
 
 Do not invent new channel values (`beta`, `fdroid`, …) without documenting them here and handling unknown values safely (treat unknown like `github` unless explicitly designed otherwise).
 
@@ -138,20 +139,44 @@ Do not invent new channel values (`beta`, `fdroid`, …) without documenting the
 ## Quick reference for agents
 
 ```text
-Daily test APK (full sniffer, no Play billing):
+Daily test APK (full sniffer, no Play billing, fat APK — FFmpeg included):
   flutter build apk --debug --target-platform android-arm64
   adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
-Play compliance APK:
+Play compliance APK (still fat — FFmpeg included, local testing):
   flutter build apk --debug --target-platform android-arm64 --dart-define=AURORA_BUILD_CHANNEL=play
   adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
-Play upload:
+Play release AAB (on-demand FFmpeg module — ~10 MB deferred):
   flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
+
+Play internal testing AAB (must install via Play, not sideload, for on-demand):
+  bundletool build-apks --bundle=build/app/outputs/bundle/release/app-release.aab \
+    --output=build/app.apks --ks=android/upload-keystore.jks --ks-pass=pass:...
+  # Then install via Play Console internal testing track OR bundletool install-apks
+
+GitHub release APK (fat — everything included, no Play required):
+  flutter build apk --release
 ```
+
+### On-demand module notes
+
+The FFmpeg on-demand module is only active when building an **AAB with `AURORA_BUILD_CHANNEL=play`**.  
+Debug / profile APK builds are always fat (FFmpeg included) regardless of channel.
+
+| Artifact | FFmpeg packaging | Download required? |
+|----------|------------------|--------------------|
+| Debug APK (any channel) | In APK (fat) | No |
+| Release APK (github) | In APK (fat) | No |
+| Release AAB (play) | On-demand module | Yes (~10 MB, one-time) |
+
+For local testing of the on-demand download UX without Play Feature Delivery:
+1. Build a debug APK (`flutter build apk --debug`) — fat, always ready.
+2. Test the download UI by enabling dev mode: `AURORA_ENABLE_FFMPEG_MODULE=false` simulates a missing module.
 
 Related:
 
+- [`play_on_demand_modules_plan.md`](./play_on_demand_modules_plan.md)
 - [`play_store_compliance.md`](./play_store_compliance.md)  
 - [`play_store_listing.md`](./play_store_listing.md)  
 - [`play_store_console_runbook.md`](./play_store_console_runbook.md)  

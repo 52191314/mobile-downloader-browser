@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play Feature Delivery — on-demand FFmpeg dynamic feature module.
+
+  This module is installed on demand when the user first attempts to use
+  FFmpeg Studio (Ultra tier). It is NOT included in the base install for
+  Play Store AAB builds.
+
+  GitHub / sideload APK builds ignore this module and package everything
+  in the base APK as a fat build.
+
+  dist:onDemand="true"   — installed on first use, not at app install
+  dist:title              — human-readable name shown in Play module download UI
+  dist:removable="false"  — cannot be uninstalled independently (FFmpeg needed
+                            for operations on previously processed files)
+
+  See: docs/play_on_demand_modules_plan.md
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:dist="http://schemas.android.com/apk/distribution"
+    package="com.personal.aurora_downloader.ffmpeg">
+
+    <dist:module
+        dist:onDemand="true"
+        dist:title="@string/feature_ffmpeg_title">
+        <dist:delivery>
+            <dist:on-demand />
+        </dist:delivery>
+        <dist:fusing dist:include="true" />
+    </dist:module>
+
+    <application />
+</manifest>

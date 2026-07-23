@@ -17,12 +17,10 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min_gpl/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new_min_gpl/ffprobe_kit.dart';
 
 import 'ffmpeg_job.dart';
 import 'ffmpeg_ops.dart';
+import 'ffmpeg_runtime.dart';
 
 /// Maximum execution time per FFmpeg job (seconds).
 const kFfmpegMaxExecutionSeconds = 1800; // 30 minutes
@@ -83,11 +81,11 @@ class FfmpegService extends ChangeNotifier {
   }
 
   Future<FfmpegVersion> _ffprobeVersion() async {
-    final session = await FFprobeKit.execute('-version');
-    final output = await session.getOutput() ?? '';
-    final returnCode = await session.getReturnCode();
-    final success = ReturnCode.isSuccess(returnCode);
-    return FfmpegVersion(rawOutput: output, available: success);
+    final probe = await FfmpegRuntime.probeVersion();
+    return FfmpegVersion(
+      rawOutput: probe?.rawOutput ?? '',
+      available: probe?.available ?? false,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -172,17 +170,18 @@ class FfmpegService extends ChangeNotifier {
         return;
       }
 
-      final session = await FFmpegKit.execute(cmd);
-
-      final returnCode = await session.getReturnCode();
-      if (ReturnCode.isSuccess(returnCode)) {
+      final session = await FfmpegRuntime.execute(cmd) as dynamic;
+      final returnCode = await (session.getReturnCode() as Future<dynamic>);
+      final returnCodeVal = returnCode.toString();
+      if (returnCodeVal.contains('success') || returnCodeVal.contains('0')) {
         job.state = FfmpegJobState.completed;
         job.progress = 1.0;
-      } else if (ReturnCode.isCancel(returnCode)) {
+      } else if (returnCodeVal.contains('cancel')) {
         job.state = FfmpegJobState.cancelled;
       } else {
         job.state = FfmpegJobState.failed;
-        final allLogs = await session.getAllLogsAsString();
+        final allLogs =
+            await (session.getAllLogsAsString() as Future<String?>);
         job.errorMessage = allLogs ?? 'FFmpeg execution failed';
       }
       job.completedAt = DateTime.now();
@@ -224,7 +223,7 @@ class FfmpegService extends ChangeNotifier {
     job.completedAt = DateTime.now();
 
     if (job.sessionHandle != null) {
-      FFmpegKit.cancel(job.sessionHandle as int);
+      FfmpegRuntime.cancel(job.sessionHandle as int);
     }
   }
 

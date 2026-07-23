@@ -10,8 +10,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/ffmpeg/ffmpeg_job.dart';
+import '../../premium/ffmpeg/ffmpeg_module_loader.dart';
+import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -103,6 +104,84 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
 
   void _onServiceChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Ensures the FFmpeg on-demand module is installed (Play) or ready (GitHub).
+  /// Returns `true` if the module is ready to use.
+  Future<bool> _ensureModuleReady(BuildContext context) async {
+    final loader = FeatureModuleLoader.instance;
+    final status = loader.statusFor('ffmpeg');
+    if (status == FeatureModuleStatus.ready ||
+        status == FeatureModuleStatus.notNeeded) {
+      return true;
+    }
+
+    if (status == FeatureModuleStatus.downloading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg module is still downloading…')),
+      );
+      return false;
+    }
+
+    // Show download confirmation.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download FFmpeg tools?'),
+        content: const Text(
+          'FFmpeg media tools need a one-time download (~10 MB). '
+          'Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    if (!mounted) return false;
+
+    final ok = await loader.ensureInstalled('ffmpeg');
+    if (!mounted) return false;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FFmpeg tools ready.')),
+      );
+      return true;
+    }
+
+    // Failure — offer retry.
+    final retry = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Download failed'),
+        content: const Text(
+          'Could not download the FFmpeg module. '
+          'Check your network and try again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+    if (retry == true && mounted) {
+      return _ensureModuleReady(context);
+    }
+    return false;
   }
 
   @override
@@ -673,7 +752,19 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
   }
 
   // ── Start job ──
-  void _startJob(FfmpegStudioItem item) {
+  Future<void> _startJob(FfmpegStudioItem item) async {
+    // Safety net: ensure FFmpeg module is ready before starting any job.
+    // The primary check happens before navigation, but this guards against
+    // edge cases where the module was uninstalled or the process was killed.
+    final loader = FeatureModuleLoader.instance;
+    final status = loader.statusFor('ffmpeg');
+    if (status != FeatureModuleStatus.ready &&
+        status != FeatureModuleStatus.notNeeded) {
+      if (!mounted) return;
+      final ok = await _ensureModuleReady(context);
+      if (!ok || !mounted) return;
+    }
+
     final baseName = item.name.replaceAll(RegExp(r'\.[^.]+$'), '');
     String suffix;
     switch (_selectedOp) {

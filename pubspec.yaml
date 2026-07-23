@@ -101,3 +101,22 @@ flutter:
     - family: JetBrains Mono
       fonts:
         - asset: assets/fonts/JetBrainsMono.ttf
+
+  # ---------------------------------------------------------------------------
+  # Deferred (on-demand) components — Play Store AAB only.
+  # GitHub / sideload builds ignore this and ship everything in a fat APK.
+  #
+  # The `ffmpeg` component defers ~8–12 MB of native FFmpeg libraries until
+  # the user's first Ultra-gated FFmpeg Studio operation. The Dart loading
+  # code is in [FeatureModuleLoader] (lib/premium/ffmpeg/).
+  #
+  # Flutter deferred components guide:
+  #   https://docs.flutter.dev/perf/deferred-components
+  # Plan:
+  #   docs/play_on_demand_modules_plan.md
+  # ---------------------------------------------------------------------------
+  deferred-components:
+    - name: ffmpeg
+      libraries:
+        - lib/premium/ffmpeg/ffmpeg_runtime.dart
+      android-dynamic-module: ffmpeg
