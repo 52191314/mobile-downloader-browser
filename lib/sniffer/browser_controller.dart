@@ -11,6 +11,7 @@ import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'adblock_injector.dart';
 import 'browser_guard_installer.dart';
+import 'external_scheme.dart';
 import 'sniffer_url_utils.dart';
 import 'webview_fetch_delegate.dart';
 import 'worker_isolate_pool.dart';
@@ -116,6 +117,13 @@ abstract interface class SnifferBrowserController {
   /// When true, injected JS intercepts site media `play()` and routes
   /// playback to Aurora's in-app player instead.
   Future<void> setReplaceSitePlayer(bool enabled);
+
+  /// Enable or disable WebView incognito (private browsing) mode.
+  /// When on, cookies/cache/history for this WebView are not persisted.
+  Future<void> setIncognito(bool incognito);
+
+  /// Whether incognito (private browsing) mode is active.
+  bool get isIncognito;
 
   /// Briefly block main-frame cross-origin navigations after play intercept
   /// so ad-on-play redirects cannot steal the tab.
@@ -490,6 +498,22 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
           )
           .catchError((_) {});
     }
+  }
+
+  bool _isIncognito = false;
+
+  @override
+  bool get isIncognito => _isIncognito;
+
+  /// Sets incognito (private browsing) mode on the WebView.
+  /// When enabled, the WebView doesn't persist cookies, cache, or history.
+  @override
+  Future<void> setIncognito(bool incognito) async {
+    _isIncognito = incognito;
+    await _ready.future;
+    await _controller?.setSettings(
+      settings: InAppWebViewSettings(incognito: incognito),
+    );
   }
 
   /// Block main-frame cross-origin navigations for a short window after
@@ -946,6 +970,23 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     final url = action.request.url?.toString() ?? '';
     final pageUri = _currentUri;
     final requestUri = Uri.tryParse(url);
+
+    // External / custom schemes: never load inside the WebView.
+    // Main-frame only — subresources with exotic schemes are just cancelled.
+    if (url.isNotEmpty &&
+        requestUri != null &&
+        isExternalAppUri(requestUri)) {
+      if (action.isForMainFrame) {
+        unawaited(
+          handleExternalAppUri(
+            requestUri,
+            onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+          ),
+        );
+      }
+      return NavigationActionPolicy.CANCEL;
+    }
+
     final sourceHost = _currentHost;
     final requestType = action.isForMainFrame ? 'document' : 'subdocument';
     bool isThirdParty = false;
@@ -1039,6 +1080,33 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       _onIframeMediaDetected?.call(url);
     }
     return NavigationActionPolicy.ALLOW;
+  }
+
+  /// Safety net when WebView still surfaces [ERR_UNKNOWN_URL_SCHEME]
+  /// (e.g. rare loads that skip shouldOverride).
+  void onReceivedErrorCallback(
+    WebResourceRequest request,
+    WebResourceError error,
+  ) {
+    final url = request.url.toString();
+    if (url.isEmpty || request.isForMainFrame != true) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !isExternalAppUri(uri)) return;
+
+    final desc = error.description.toLowerCase();
+    final typeName = error.type.toString().toLowerCase();
+    final looksUnknownScheme = desc.contains('unknown_url_scheme') ||
+        desc.contains('err_unknown_url_scheme') ||
+        typeName.contains('unsupported_scheme') ||
+        typeName.contains('unknown_url_scheme');
+    if (!looksUnknownScheme) return;
+
+    unawaited(
+      handleExternalAppUri(
+        uri,
+        onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+      ),
+    );
   }
 
   /// Called by InAppWebView onDownloadStartRequest when the WebView detects
@@ -1193,6 +1261,15 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (urlStr.isEmpty) {
       debugPrint(
         '[BrowserController] loadRequest called with empty URI — ignoring',
+      );
+      return;
+    }
+    // Address bar / context menu / redirect "open here" can request tg:,
+    // magnet:, etc. Never push those into Chromium.
+    if (isExternalAppUri(uri)) {
+      await handleExternalAppUri(
+        uri,
+        onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
       );
       return;
     }
@@ -1988,6 +2065,12 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   Future<void> setReplaceSitePlayer(bool enabled) async {}
+
+  @override
+  Future<void> setIncognito(bool incognito) async {}
+
+  @override
+  bool get isIncognito => false;
 
   @override
   int get blockedRequestCount => 0;

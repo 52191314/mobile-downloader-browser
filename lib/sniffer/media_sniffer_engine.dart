@@ -29,6 +29,14 @@ class MediaSnifferEngine implements MediaEnricherHost {
 
   Set<MediaType> disabledMediaTypes = const {};
 
+  Set<String> _customVideoHosts = const {};
+
+  /// Updates the set of user-configured video-hosting domains.
+  /// These are checked in addition to the built-in [isVideoHostingUrl] list.
+  void setCustomVideoHosts(Set<String> hosts) {
+    _customVideoHosts = hosts;
+  }
+
   /// Tracks URLs that have already been enqueued for enrichment.
   /// Used to skip re-enrichment when a content-type update or re-classification
   /// fires for an already-enriched item, preventing redundant HTTP probe chains.
@@ -388,7 +396,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
     // (DoodStream, Streamtape, MixDrop, etc.) that don't have a standard
     // media extension. These are video pages/download links that the user
     // can open to reach the actual video.
-    if (type == null && isVideoHostingUrl(url)) {
+    if (type == null && isVideoHostingUrl(url, extraHosts: _customVideoHosts)) {
       type = MediaType.video;
     }
 

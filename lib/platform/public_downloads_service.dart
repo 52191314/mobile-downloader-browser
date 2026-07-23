@@ -298,6 +298,8 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     }
   }
 
+  /// Opens [url] with the system resolver (browser, Telegram, market, …).
+  /// Throws [PlatformException] when no handler is installed.
   static Future<void> openUrl(String url) async {
     await _channel.invokeMethod<void>('openUrl', {'url': url});
   }

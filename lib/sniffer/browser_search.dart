@@ -1,4 +1,5 @@
 import '../settings/download_settings.dart';
+import 'external_scheme.dart';
 
 class BrowserSearch {
   static Uri resolveInput(String rawInput, SearchEngine searchEngine) {
@@ -8,8 +9,11 @@ class BrowserSearch {
     }
 
     final parsed = Uri.tryParse(input);
-    if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
-      return parsed;
+    // http(s) with host, or app schemes without a host (tg:resolve?…, magnet:…).
+    if (parsed != null && parsed.hasScheme) {
+      if (parsed.host.isNotEmpty || isExternalAppUri(parsed)) {
+        return parsed;
+      }
     }
 
     if (_looksLikeHost(input)) {

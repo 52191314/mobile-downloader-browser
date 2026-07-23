@@ -31,20 +31,24 @@ const kAllDockItems = <DockItem>[
   DockItem(id: 'home', icon: Icons.home_rounded, label: 'Home'),
   DockItem(id: 'menu', icon: Icons.menu_rounded, label: 'Browser tools'),
   DockItem(id: 'history', icon: Icons.history_rounded, label: 'History'),
-  DockItem(id: 'bookmarks', icon: Icons.star_rounded, label: 'Bookmarks'),
-  DockItem(id: 'settings', icon: Icons.tune_rounded, label: 'Settings'),
+  // List/menu icon — distinct from the address-bar star (add current page).
+  DockItem(id: 'bookmarks', icon: Icons.bookmarks_rounded, label: 'Bookmarks'),
+  DockItem(id: 'settings', icon: Icons.settings_rounded, label: 'Settings'),
   DockItem(id: 'adblock', icon: Icons.shield, label: 'Adblock'),
   DockItem(id: 'readerMode', icon: Icons.auto_stories, label: 'Reader mode'),
 ];
 
-/// Default order matching the previous hardcoded `_BrowserDock` layout.
-const kDefaultSlide1Order = ['back', 'forward', 'sniffer', 'downloads', 'tabs'];
+/// Product primary bar (fixed in UI):
+/// Back · Forward · Queue · Radar · Bookmarks menu · Tabs · Menu.
+/// Star (toggle current page) sits on the address bar, not the primary strip.
+/// Appearance editor still uses these defaults for reset / custom slides.
+const kDefaultSlide1Order = ['back', 'forward', 'sniffer', 'tabs', 'menu'];
 const kDefaultSlide2Order = [
-  'menu',
+  'home',
   'history',
-  'sniffer',
   'bookmarks',
-  'settings',
+  'adblock',
+  'readerMode',
 ];
 
 /// Max buttons per dock slide (matches the even-spaced row layout).

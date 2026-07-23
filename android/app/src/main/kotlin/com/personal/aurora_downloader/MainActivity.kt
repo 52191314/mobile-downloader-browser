@@ -22,7 +22,11 @@ import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.app.PictureInPictureParams
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.util.Log
+import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
@@ -48,7 +52,9 @@ class MainActivity : FlutterActivity() {
     private val networkChannelName = "aurora_downloader/network"
     private val fgServiceChannelName = "aurora_downloader/foreground_service"
     private val intentChannelName = "aurora_downloader/intent"
+    private val pipChannelName = "aurora_downloader/pip"
     private var intentUrlChannel: MethodChannel? = null
+    private var pipChannel: MethodChannel? = null
     private var pendingImportResult: MethodChannel.Result? = null
     private var pendingExportResult: MethodChannel.Result? = null
     private var pendingExportSourcePath: String? = null
@@ -231,6 +237,22 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Picture-in-Picture (PiP) channel
+        pipChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pipChannelName)
+        pipChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "enterPip" -> {
+                    val width = call.argument<Int>("width") ?: 16
+                    val height = call.argument<Int>("height") ?: 9
+                    result.success(enterPipMode(width, height))
+                }
+                "isPipSupported" -> {
+                    result.success(isPipSupported())
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     /**
@@ -263,31 +285,34 @@ class MainActivity : FlutterActivity() {
             outputFile.parentFile?.mkdirs()
 
             val transformer = androidx.media3.transformer.Transformer.Builder(this)
-                .setOutputMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
+                .setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
                 .build()
 
             val mediaItem = androidx.media3.common.MediaItem.fromUri(Uri.fromFile(inputFile))
+            val editedMediaItem = androidx.media3.transformer.EditedMediaItem.Builder(mediaItem).build()
+            val sequence = androidx.media3.transformer.EditedMediaItemSequence.Builder(listOf(editedMediaItem)).build()
+            val composition = androidx.media3.transformer.Composition.Builder(sequence).build()
 
             transformer.addListener(object : androidx.media3.transformer.Transformer.Listener {
                 override fun onCompleted(
-                    transformer: androidx.media3.transformer.Transformer,
-                    mediaItem: androidx.media3.common.MediaItem
+                    composition: androidx.media3.transformer.Composition,
+                    exportResult: androidx.media3.transformer.ExportResult
                 ) {
                     Log.d(TAG, "Audio extract completed: $outputPath")
                     result.success(outputPath)
                 }
 
                 override fun onError(
-                    transformer: androidx.media3.transformer.Transformer,
-                    mediaItem: androidx.media3.common.MediaItem,
-                    error: androidx.media3.transformer.TransformerException
+                    composition: androidx.media3.transformer.Composition,
+                    exportResult: androidx.media3.transformer.ExportResult,
+                    error: androidx.media3.transformer.ExportException
                 ) {
                     Log.e(TAG, "Audio extract failed: ${error.message}", error)
                     result.error("extract_failed", error.message, null)
                 }
             })
 
-            transformer.start(mediaItem, outputPath)
+            transformer.start(composition, outputPath)
         } catch (e: Exception) {
             Log.e(TAG, "Audio extract exception", e)
             result.error("extract_error", e.message, null)
@@ -870,17 +895,65 @@ class MainActivity : FlutterActivity() {
             result.error("bad_args", "url is required.", null)
             return
         }
-        // Resolve through the system default browser chooser instead of
-        // hardcoding a specific vendor package like UC Browser. This lets
-        // users pick their preferred browser on first run.
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
         try {
+            val intent = buildViewIntent(url)
             startActivity(intent)
             result.success(null)
         } catch (_: ActivityNotFoundException) {
-            result.error("no_activity", "No browser found.", null)
+            // intent:// often embeds a browser_fallback_url — try that next.
+            val fallback = extractBrowserFallbackUrl(url)
+            if (!fallback.isNullOrBlank()) {
+                try {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(fallback)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                    result.success(null)
+                    return
+                } catch (_: ActivityNotFoundException) {
+                    // fall through
+                }
+            }
+            Toast.makeText(
+                this,
+                "No app found to open this link",
+                Toast.LENGTH_SHORT
+            ).show()
+            result.error(
+                "no_activity",
+                "No app found to open this link.",
+                null
+            )
+        } catch (e: Exception) {
+            result.error("open_failed", e.message, null)
+        }
+    }
+
+    /**
+     * Builds an ACTION_VIEW intent for http(s) and custom app schemes
+     * (tg:, market://, mailto:, …). intent:// URLs are parsed with
+     * [Intent.parseUri] so package + extras + fallback survive.
+     */
+    private fun buildViewIntent(url: String): Intent {
+        return if (url.startsWith("intent:", ignoreCase = true)) {
+            Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        } else {
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+    }
+
+    private fun extractBrowserFallbackUrl(url: String): String? {
+        if (!url.startsWith("intent:", ignoreCase = true)) return null
+        return try {
+            Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                .getStringExtra("browser_fallback_url")
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -1703,6 +1776,33 @@ class MainActivity : FlutterActivity() {
                         ))
                     }
                 }
+                if (list.isEmpty()) {
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val underDownloads = if (pathPrefix.startsWith("Download/")) {
+                        pathPrefix.removePrefix("Download/")
+                    } else {
+                        pathPrefix
+                    }
+                    val destDir = File(downloadsDir, underDownloads)
+                    if (destDir.exists() && destDir.canRead()) {
+                        destDir.walkTopDown()
+                            .filter { it.isFile && isAuroraBackupFileName(it.name) }
+                            .sortedByDescending { it.lastModified() }
+                            .forEach { file ->
+                                val kind = if (file.path.contains("${File.separator}Auto Backup") ||
+                                    file.name.lowercase().startsWith("aurora_auto_backup_")
+                                ) "auto" else "manual"
+                                list.add(mapOf(
+                                    "uri" to Uri.fromFile(file).toString(),
+                                    "displayName" to file.name,
+                                    "size" to file.length(),
+                                    "dateModified" to file.lastModified(),
+                                    "kind" to kind,
+                                    "relativePath" to underDownloads
+                                ))
+                            }
+                    }
+                }
                 result.success(list)
             } catch (e: Exception) {
                 result.error("query_failed", e.message, null)
@@ -2064,5 +2164,36 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.w(TAG, "Path migration failed: ${e.message}")
         }
+    }
+
+    private fun isPipSupported(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    }
+
+    private fun enterPipMode(width: Int = 16, height: Int = 9): Boolean {
+        if (!isPipSupported()) return false
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val num = if (width > 0) width else 16
+                val den = if (height > 0) height else 9
+                val builder = PictureInPictureParams.Builder()
+                val ratioFloat = num.toFloat() / den.toFloat()
+                if (ratioFloat in 0.418f..2.39f) {
+                    builder.setAspectRatio(Rational(num, den))
+                }
+                enterPictureInPictureMode(builder.build())
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error entering PiP mode", e)
+            false
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
     }
 }

@@ -66,8 +66,9 @@ class AutoBackupService {
     _timer = null;
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
-    // Don't start the timer if the user is not Pro.
+    // Don't start the timer if the user is not Pro or if backing up on backgrounding.
     if (!_isProCallback()) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     _timer = Timer.periodic(settings.autoBackupInterval.duration, (_) {
       unawaited(_runIfDue());
     });
@@ -76,6 +77,7 @@ class AutoBackupService {
   Future<void> _runCatchUpIfDue() async {
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     final now = DateTime.now();
     final last = lastBackupTime;
     if (last == null ||
@@ -87,12 +89,30 @@ class AutoBackupService {
   Future<void> _runIfDue() async {
     final settings = _settings;
     if (settings == null || !settings.autoBackupEnabled) return;
+    if (settings.autoBackupInterval == AutoBackupInterval.onBackground) return;
     final last = lastBackupTime;
     if (last != null &&
         DateTime.now().difference(last) < settings.autoBackupInterval.duration) {
       return;
     }
     await performBackup();
+  }
+
+  /// Triggers an automatic backup when the app enters background,
+  /// provided auto-backup is enabled and user is eligible.
+  Future<AutoBackupResult?> performBackgroundBackup() async {
+    final settings = _settings;
+    if (settings == null || !settings.autoBackupEnabled) return null;
+    if (!_isProCallback()) return null;
+
+    final last = lastBackupTime;
+    if (settings.autoBackupInterval != AutoBackupInterval.onBackground) {
+      if (last != null &&
+          DateTime.now().difference(last) < settings.autoBackupInterval.duration) {
+        return null;
+      }
+    }
+    return await performBackup();
   }
 
   /// Copies every root-level data `.json` (except the sniffed-media cache)

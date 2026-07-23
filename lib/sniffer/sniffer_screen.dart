@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
+import '../downloader/download_rules.dart';
 import '../premium/pro_features.dart';
 import '../downloader/headless_webview_fetcher.dart';
 import '../logging/aurora_log.dart';
@@ -24,6 +25,7 @@ import 'ad_block_engine_native.dart';
 import 'browser_controller.dart';
 import 'browser_library.dart';
 import 'browser_open_request.dart';
+import '../premium/pro_upsell_sheet.dart';
 import 'controllers/address_bar_controller.dart';
 import 'controllers/element_picker_controller.dart';
 import 'controllers/library_controller.dart';
@@ -58,6 +60,7 @@ import 'actions/context_menu_action.dart';
 import 'actions/translate_action.dart';
 import 'capture_sort.dart';
 import 'enqueue_download.dart';
+import 'external_scheme.dart';
 import 'filename_utils.dart';
 import 'headless_resniffer.dart';
 import 'token_refresh_service.dart';
@@ -67,7 +70,8 @@ import 'playback_quality.dart';
 import 'sheets/duplicate_download_dialog.dart';
 import 'sheets/favorite_dialogs.dart';
 import 'sheets/phishing_warning_dialog.dart';
-import 'sheets/browser_menu_sheet.dart';
+import 'sheets/browser_overflow_popup.dart';
+import '../ui/settings_open_request.dart';
 import 'sheets/favorites_sheet.dart';
 import 'sheets/group_actions_sheet.dart' show showGroupActionsSheet, GroupActionsCallbacks;
 import 'sheets/history_sheet.dart';
@@ -105,6 +109,9 @@ class SnifferScreen extends StatefulWidget {
   final ValueChanged<DownloadSettings>? onSettingsChanged;
   final VoidCallback? onOpenQueue;
   final VoidCallback? onOpenSettings;
+  /// Deep-open a Settings sub-page (from overflow Settings segment).
+  /// Completes when the user leaves that page (back) so the menu can reopen.
+  final Future<void> Function(SettingsSection section)? onOpenSettingsSection;
   final ValueChanged<int>? onSniffedCountChanged;
   final BrowserLibraryStore libraryStore;
   final SnifferBrowserController Function()? debugControllerFactory;
@@ -118,10 +125,19 @@ class SnifferScreen extends StatefulWidget {
   /// and auto-host features for free users.
   final bool Function()? isProCallback;
 
+  /// Download rule engine used to match filename renames, folder routing, and
+  /// time-window constraints on direct downloads.
+  final DownloadRuleEngine? ruleEngine;
+
   /// Whether the main shell is currently showing the Browser tab.
   /// When false (Queue/Settings visible), WebViews are paused so switching
   /// main tabs does not leave a frozen compositor under opacity 0.
   final bool isShellVisible;
+
+  /// GlobalKeys for browser chrome (spotlight coachmark).
+  final GlobalKey? menuKey;
+  final GlobalKey? snifferKey;
+  final GlobalKey? tabsKey;
 
   SnifferScreen({
     super.key,
@@ -132,6 +148,7 @@ class SnifferScreen extends StatefulWidget {
     this.onSettingsChanged,
     this.onOpenQueue,
     this.onOpenSettings,
+    this.onOpenSettingsSection,
     this.onSniffedCountChanged,
     BrowserLibraryStore? libraryStore,
     this.debugControllerFactory,
@@ -139,7 +156,11 @@ class SnifferScreen extends StatefulWidget {
     this.libraryUpdateNotifier,
     this.openRequestBus,
     this.isProCallback,
+    this.ruleEngine,
     this.isShellVisible = true,
+    this.menuKey,
+    this.snifferKey,
+    this.tabsKey,
   }) : settings = settings ?? DownloadSettings.defaults(),
        libraryStore = libraryStore ?? const BrowserLibraryStore(),
        safeBrowsing =
@@ -239,6 +260,9 @@ class _SnifferScreenState extends State<SnifferScreen>
   int _lastBarsToggleAtMs = 0;
   bool _barsVisible = true;
   bool _isContextMenuShowing = false;
+  /// True while the Samsung-style Menu (⋯) general dialog is on the stack.
+  /// Used to dismiss it when leaving the Browser shell so it is not sticky.
+  bool _browserOverflowOpen = false;
   final ValueNotifier<int> _progressNotifier = ValueNotifier<int>(0);
 
   /// Debounce timer for navigation callbacks ([onUrlChanged], [onPageStarted],
@@ -301,6 +325,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   static const Duration _strictRedirectPromptCooldown = Duration(seconds: 8);
   final Set<String> _activeStrictRedirectPrompts = {};
   final Map<String, int> _recentStrictRedirectPrompts = {};
+  /// Redirect prompts blocked while the source tab was not visible.
+  /// Keyed by [BrowserTab.id]; flushed when that tab becomes active again.
+  final Map<String, List<PendingStrictRedirectPrompt>>
+      _pendingStrictRedirectByTabId = {};
+  /// Tab id currently presenting deferred redirect dialogs (re-entry guard).
+  String? _flushingStrictRedirectTabId;
 
   // Cookie cache is owned by [_sniffIntakeController] (see
   // `SniffIntakeController.cookieCache`). Cleared on each page
@@ -480,6 +510,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
     if (oldWidget.settings.privateMode != widget.settings.privateMode) {
       _privateMode = widget.settings.privateMode;
+      for (final tab in _tabs) {
+        unawaited(tab.controller.setIncognito(widget.settings.privateMode));
+      }
     }
     if (oldWidget.settings.replaceSitePlayer !=
         widget.settings.replaceSitePlayer) {
@@ -502,7 +535,15 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (oldWidget.isShellVisible != widget.isShellVisible) {
       if (widget.isShellVisible) {
         unawaited(_resumeBrowserShell());
+        // Prompts deferred while user was on Queue / Settings.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !widget.isShellVisible) return;
+          unawaited(_flushPendingStrictRedirectPrompts(_activeTab));
+        });
       } else {
+        // Leave Browser (Queue / other shell) → drop the Menu popup so it
+        // does not float over the next screen or reappear later.
+        _dismissBrowserOverflowPopup();
         unawaited(_pauseBrowserShell());
       }
     }
@@ -531,6 +572,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     final hosts = widget.settings.customVideoHosts;
     for (final tab in _tabs) {
       tab.controller.updateCustomVideoHosts(hosts);
+      tab.snifferEngine.setCustomVideoHosts(hosts.toSet());
     }
   }
 
@@ -584,6 +626,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     _updateBuiltTabIds();
     _progressNotifier.value = _activeTab.progress;
     setState(() {});
+    // Tab-aware redirect prompts: only surface after this tab is visible.
+    _pruneStalePendingStrictRedirects();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_flushPendingStrictRedirectPrompts(_activeTab));
+    });
   }
 
   /// Completes cold-start work that [openNewTab] deferred for bulk restore.
@@ -936,7 +984,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   void _startVideoPoll(BrowserTab tab) =>
       _tabLifecycleController.startVideoPoll(tab);
 
-  void _closeTab(int index) => _tabLifecycleController.closeTab(index);
+  void _closeTab(int index) {
+    if (index >= 0 && index < _tabs.length) {
+      _discardPendingStrictRedirectsForTab(_tabs[index].id);
+    }
+    _tabLifecycleController.closeTab(index);
+  }
 
   void _reopenLastClosedTab() => _tabLifecycleController.reopenLastClosedTab();
 
@@ -948,6 +1001,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     )) {
       _downloadQueue.browserContextAttacher = null;
     }
+    _pendingStrictRedirectByTabId.clear();
+    _activeStrictRedirectPrompts.clear();
     _progressNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     widget.libraryUpdateNotifier?.removeListener(_onLibraryUpdate);
@@ -1247,6 +1302,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     },
     getTabLabel: _tabLabel,
     onCloseAllTabs: () {
+      _pendingStrictRedirectByTabId.clear();
+      _activeStrictRedirectPrompts.clear();
       _tabLifecycleController.closeAllTabs();
       setState(() {});
     },
@@ -1254,7 +1311,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     onDropOnGroup: (draggedTabId, groupName) {
       final idx = _tabManager.indexOfTabId(draggedTabId);
       if (idx >= 0) {
-        _tabManager.moveTabToGroup(_tabs[idx], groupName: groupName);
+        _tabManager.moveTabToGroup(
+          _tabs[idx],
+          groupName: groupName,
+          onCapExceeded: () => showProUpsell(context, ProFeature.unlimitedTabGroups),
+        );
         setState(() {});
       }
     },
@@ -1320,7 +1381,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     tabs: _tabs,
     activeTabIndex: _activeTabIndex,
     onCloseTab: (index) {
-      _tabLifecycleController.closeTab(index);
+      _closeTab(index);
       setState(() {});
     },
     onSwitchToActiveTab: (index) {
@@ -1725,6 +1786,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     Map<String, String>? extraHeaders,
     bool addToHistory = true,
   }) async {
+    // App deep links (tg:, intent://, mailto:, magnet:, …) never enter
+    // Chromium — controller.loadRequest routes them externally / to queue.
+    if (isExternalAppUri(uri)) {
+      await tab.controller.loadRequest(uri, addToHistory: false);
+      return;
+    }
+
     final host = uri.host.toLowerCase();
     SafeBrowsingResult safety;
     try {
@@ -1909,6 +1977,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (url == null || url.isEmpty) return;
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) return;
+    // App deep links in window.open / target=_blank / external-app reason:
+    // open outside immediately (no "Popup blocked" dialog).
+    if (isExternalAppUri(uri) || event.reason == 'external-app') {
+      if (isExternalAppUri(uri)) {
+        unawaited(tab.controller.loadRequest(uri, addToHistory: false));
+      }
+      return;
+    }
     _suppressBlockedRedirectNoise(
       tab,
       url,
@@ -1946,6 +2022,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (url == null || url.isEmpty) return;
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) return;
+    // Scripted tg: / intent:// / mailto: — open the app, don't "block redirect".
+    if (isExternalAppUri(uri) && !suppressedDuringPlay) {
+      unawaited(tab.controller.loadRequest(uri, addToHistory: false));
+      return;
+    }
     final userInitiated = data['userInitiated'] as bool? ?? false;
     tab.controller.incrementBlockedInvisibleRedirects();
     setState(() {});
@@ -1972,6 +2053,10 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (!mounted || !widget.settings.invisibleRedirectBlockingEnabled) return;
     final uri = Uri.tryParse(event.url);
     if (uri == null || !uri.hasScheme) return;
+    if (isExternalAppUri(uri)) {
+      unawaited(tab.controller.loadRequest(uri, addToHistory: false));
+      return;
+    }
     tab.controller.incrementBlockedInvisibleRedirects();
     setState(() {});
     _suppressBlockedRedirectNoise(
@@ -2023,41 +2108,177 @@ class _SnifferScreenState extends State<SnifferScreen>
         now - lastPromptAt < _strictRedirectPromptCooldown.inMilliseconds) {
       return;
     }
-    _activeStrictRedirectPrompts.add(promptKey);
+    final alreadyQueued = _pendingStrictRedirectByTabId[tab.id]
+            ?.any((p) => p.promptKey == promptKey) ??
+        false;
+    if (alreadyQueued) return;
+
     _recentStrictRedirectPrompts[promptKey] = now;
+    if (!mounted || !_tabs.contains(tab)) return;
+
+    // Tab-aware: never interrupt another tab (or Queue shell). Queue until
+    // the source tab is active and the browser shell is visible.
+    final sourceIsVisible =
+        widget.isShellVisible && identical(tab, _activeTab);
+    if (!sourceIsVisible) {
+      _enqueuePendingStrictRedirect(
+        tabId: tab.id,
+        uri: uri,
+        title: title,
+        method: method,
+        sourcePageUrl: sourcePageUrl,
+        promptKey: promptKey,
+      );
+      return;
+    }
+
+    await _presentStrictRedirectPrompt(
+      tab: tab,
+      uri: uri,
+      title: title,
+      method: method,
+      sourcePageUrl: sourcePageUrl,
+      promptKey: promptKey,
+    );
+  }
+
+  void _enqueuePendingStrictRedirect({
+    required String tabId,
+    required Uri uri,
+    required String title,
+    required String method,
+    required String promptKey,
+    String? sourcePageUrl,
+  }) {
+    final list = _pendingStrictRedirectByTabId.putIfAbsent(tabId, () => []);
+    list.removeWhere((p) => p.promptKey == promptKey);
+    list.add(
+      PendingStrictRedirectPrompt(
+        uri: uri,
+        title: title,
+        method: method,
+        sourcePageUrl: sourcePageUrl,
+        promptKey: promptKey,
+      ),
+    );
+  }
+
+  void _discardPendingStrictRedirectsForTab(String tabId) {
+    _pendingStrictRedirectByTabId.remove(tabId);
+    _activeStrictRedirectPrompts.removeWhere((k) => k.startsWith('$tabId|'));
+  }
+
+  void _pruneStalePendingStrictRedirects() {
+    if (_pendingStrictRedirectByTabId.isEmpty) return;
+    final liveIds = _tabs.map((t) => t.id).toSet();
+    _pendingStrictRedirectByTabId.removeWhere((id, _) => !liveIds.contains(id));
+  }
+
+  /// Surfaces deferred redirect prompts for [tab] when it is the active tab.
+  Future<void> _flushPendingStrictRedirectPrompts(BrowserTab tab) async {
+    if (!mounted || !widget.isShellVisible) return;
+    if (!_tabs.contains(tab) || !identical(tab, _activeTab)) return;
+    if (_flushingStrictRedirectTabId == tab.id) return;
+
+    _flushingStrictRedirectTabId = tab.id;
     try {
-      if (!mounted) return;
+      while (mounted &&
+          widget.isShellVisible &&
+          _tabs.contains(tab) &&
+          identical(tab, _activeTab)) {
+        final list = _pendingStrictRedirectByTabId[tab.id];
+        if (list == null || list.isEmpty) {
+          _pendingStrictRedirectByTabId.remove(tab.id);
+          return;
+        }
+        final pending = list.removeAt(0);
+        if (list.isEmpty) {
+          _pendingStrictRedirectByTabId.remove(tab.id);
+        }
+        await _presentStrictRedirectPrompt(
+          tab: tab,
+          uri: pending.uri,
+          title: pending.title,
+          method: pending.method,
+          sourcePageUrl: pending.sourcePageUrl,
+          promptKey: pending.promptKey,
+        );
+      }
+    } finally {
+      if (_flushingStrictRedirectTabId == tab.id) {
+        _flushingStrictRedirectTabId = null;
+      }
+    }
+  }
+
+  Future<void> _presentStrictRedirectPrompt({
+    required BrowserTab tab,
+    required Uri uri,
+    required String title,
+    required String method,
+    required String promptKey,
+    String? sourcePageUrl,
+  }) async {
+    // Re-check visibility: user may have switched between enqueue and present.
+    if (!mounted || !_tabs.contains(tab)) return;
+    if (!widget.isShellVisible || !identical(tab, _activeTab)) {
+      _enqueuePendingStrictRedirect(
+        tabId: tab.id,
+        uri: uri,
+        title: title,
+        method: method,
+        sourcePageUrl: sourcePageUrl,
+        promptKey: promptKey,
+      );
+      return;
+    }
+    if (_activeStrictRedirectPrompts.contains(promptKey)) return;
+
+    final url = uri.toString();
+    _activeStrictRedirectPrompts.add(promptKey);
+    try {
       final sourceHost = Uri.tryParse(sourcePageUrl ?? '')?.host;
       final targetHost = uri.host.isNotEmpty ? uri.host : url;
       final decision = await showStrictRedirectPromptDialog(
         context: context,
         title: title,
         targetHost: targetHost,
-        method: method,
         sourceHost: sourceHost,
       );
       if (!mounted || !_tabs.contains(tab)) return;
+
+      // Actions always target the *source* tab, not whatever is active now.
+      final tabIndex = _tabs.indexOf(tab);
+      final insertAt = tabIndex >= 0 ? tabIndex + 1 : _activeTabIndex + 1;
+
       switch (decision) {
         case RedirectPromptAction.foreground:
-          _tabLifecycleController.openNewTab(
-            url: url,
-            insertAtIndex: _activeTabIndex + 1,
-          );
-          break;
         case RedirectPromptAction.background:
-          _tabLifecycleController.openNewTab(
-            url: url,
-            switchToTab: false,
-            insertAtIndex: _activeTabIndex + 1,
-            buildImmediately: true,
-          );
-          _showSnack('Opened in background: $targetHost');
-          break;
         case RedirectPromptAction.currentTab:
-          // Explicit allow so the invisible-redirect / ad-nav gate does not
-          // re-prompt the same destination after the user confirmed.
-          unawaited(tab.controller.allowNextCrossOriginNavigation(url));
-          unawaited(_loadUrlWithHostSettings(tab, uri));
+          // App schemes (tg:, intent://, …) always leave the WebView.
+          if (isExternalAppUri(uri)) {
+            unawaited(tab.controller.loadRequest(uri, addToHistory: false));
+            break;
+          }
+          if (decision == RedirectPromptAction.foreground) {
+            _tabLifecycleController.openNewTab(
+              url: url,
+              insertAtIndex: insertAt,
+            );
+          } else if (decision == RedirectPromptAction.background) {
+            _tabLifecycleController.openNewTab(
+              url: url,
+              switchToTab: false,
+              insertAtIndex: insertAt,
+              buildImmediately: true,
+            );
+            _showSnack('Opened in background: $targetHost');
+          } else {
+            // Explicit allow so the invisible-redirect / ad-nav gate does not
+            // re-prompt the same destination after the user confirmed.
+            unawaited(tab.controller.allowNextCrossOriginNavigation(url));
+            unawaited(_loadUrlWithHostSettings(tab, uri));
+          }
           break;
         case RedirectPromptAction.ignore:
         case null:
@@ -2218,7 +2439,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       activeIndex: _activeTabIndex,
       isPrivateMode: _privateMode,
       onSwitch: _switchToActiveTab,
-      onClose: (i) => _tabLifecycleController.closeTab(i),
+      onClose: _closeTab,
       onNewTab: () => _tabLifecycleController.openNewTab(),
     );
   }
@@ -2232,9 +2453,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     // previously clipped the panel to ~one row).
     final double topHeight = _findVisible ? 54.0 : 0.0;
     final screenH = MediaQuery.sizeOf(context).height;
-    // Grow with suggestion count; cap at 65% of the screen so typeahead can
-    // show many rows without covering the whole UI.
-    final maxSuggestionH = screenH * 0.65;
+    // Compact typeahead: a few rows above the chrome, not half the screen.
+    final maxSuggestionH = screenH * 0.32;
     final rawSuggestionH = _addressSuggestions.isEmpty
         ? 0.0
         : _addressSuggestions.length * AddressSuggestionPanel.rowHeight + 8.0;
@@ -2303,30 +2523,13 @@ class _SnifferScreenState extends State<SnifferScreen>
                       borderRadius: BorderRadius.circular(24),
                       child: Stack(
                         children: [
+                          // Address pill: lock · text · star · reload/stop.
+                          // Star = add/remove this page (Samsung-style).
+                          // Bookmarks list icon lives on the primary strip
+                          // (right of Radar). Keyboard Go submits the URL.
                           Row(
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.only(left: 12),
-                                child: IconButton(
-                                  key: const Key('browser_star_button'),
-                                  icon: Icon(
-                                    _isCurrentPageFavorited()
-                                        ? Icons.star
-                                        : Icons.star_border,
-                                    color: _isCurrentPageFavorited()
-                                        ? context.ac.accentAmber
-                                        : context.ac.textSecondary,
-                                    size: 18,
-                                  ),
-                                  onPressed: _toggleFavorite,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                    minWidth: 32,
-                                    minHeight: 32,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 12),
                               GestureDetector(
                                 onTap: () {
                                   final url = tab.currentUrl;
@@ -2442,20 +2645,33 @@ class _SnifferScreenState extends State<SnifferScreen>
                                         ),
                                       ),
                               ),
-                              if (_addressExpanded)
-                                IconButton(
-                                  key: const Key('sniffer_go_button'),
-                                  icon: const Icon(
-                                    Icons.arrow_forward,
-                                    size: 18,
-                                  ),
-                                  onPressed: () => _loadAddress(),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                    minWidth: 36,
-                                    minHeight: 36,
-                                  ),
-                                ),
+                              // Star: toggle favorite for the current page.
+                              Builder(
+                                builder: (context) {
+                                  final starred = _isCurrentPageFavorited();
+                                  return IconButton(
+                                    key: const Key('browser_address_star_button'),
+                                    tooltip: starred
+                                        ? 'Remove bookmark'
+                                        : 'Add bookmark',
+                                    icon: Icon(
+                                      starred
+                                          ? Icons.star_rounded
+                                          : Icons.star_border_rounded,
+                                      size: 20,
+                                      color: starred
+                                          ? context.ac.accentAmber
+                                          : context.ac.textSecondary,
+                                    ),
+                                    onPressed: _toggleFavorite,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 36,
+                                      minHeight: 36,
+                                    ),
+                                  );
+                                },
+                              ),
                               tab.isLoading
                                   ? IconButton(
                                       icon: const Icon(Icons.close, size: 18),
@@ -2600,8 +2816,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                 _buildFloatingPlayerOverlay(toolbarHeight),
               topBar,
               bottomBar,
-              // Typeahead above the bottom chrome so it can grow to ~65% of
-              // the screen. Anchored just above the bottom bar.
+              // Compact typeahead above the bottom chrome.
               if (_addressExpanded &&
                   _addressSuggestions.isNotEmpty &&
                   suggestionHeight > 0)
@@ -2655,11 +2870,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     unawaited(_loadUrlWithHostSettings(_activeTab, Uri.parse(home)));
   }
 
-  /// Unified bottom strip — a two-slide browser dock.
-  ///
-  /// Icon order is customizable in Settings → Appearance → Bottom dock.
-  /// Swipe horizontally to switch slides.
+  /// Samsung-shape primary strip:
+  /// Back · Forward · Queue · Radar · Bookmarks menu · Tabs · Menu.
+  /// Star (add/remove this page) is on the address bar.
   Widget _buildConsolidatedStrip(BrowserTab tab, double height) {
+    final badge = tab.snifferEngine.detectedMedia.length;
     return SizedBox(
       height: height,
       child: Padding(
@@ -2670,18 +2885,17 @@ class _SnifferScreenState extends State<SnifferScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: context.ac.borderStrong),
           ),
-          child: BrowserDock(
+          child: BrowserPrimaryBar(
             tab: tab,
+            sniffedBadgeCount: badge,
             onSniffer: _showSniffedMediaSheet,
-            onDownload: () => widget.onOpenQueue?.call(),
-            onTab: _showTabsSheet,
-            onBrowserTools: _showBrowserMenuSheet,
-            onSettings: () => widget.onOpenSettings?.call(),
-            onHistory: _showHistorySheet,
-            onBookmarks: _showFavoritesSheet,
-            onHome: _goDockHome,
-            onAdblock: () => _showAdblockPopup(tab),
-            onReaderMode: () => unawaited(_showReaderMode()),
+            onTabs: _showTabsSheet,
+            onMenu: _showBrowserOverflowPopup,
+            onQueue: widget.onOpenQueue,
+            onBookmarksMenu: _showFavoritesSheet,
+            menuKey: widget.menuKey,
+            snifferKey: widget.snifferKey,
+            tabsKey: widget.tabsKey,
           ),
         ),
       ),
@@ -3396,104 +3610,287 @@ class _SnifferScreenState extends State<SnifferScreen>
     onReopen: () => _showSavedPagesSheet(),
   );
 
-  void _showBrowserMenuSheet() {
+  /// Closes the Menu (⋯) dialog if it is currently showing.
+  void _dismissBrowserOverflowPopup() {
+    if (!_browserOverflowOpen || !mounted) return;
+    Navigator.of(context, rootNavigator: true).maybePop();
+  }
+
+  void _showBrowserOverflowPopup() {
+    // One instance only — re-tap while open dismisses instead of stacking.
+    if (_browserOverflowOpen) {
+      _dismissBrowserOverflowPopup();
+      return;
+    }
+    if (!widget.isShellVisible) return;
+
     final settings = widget.settings;
     final host = Uri.tryParse(_activeTab.currentUrl ?? '')?.host ?? '';
     final isAllowlisted =
         host.isNotEmpty && settings.adblockAllowlist.contains(host);
     final ac = context.ac;
-    showBrowserMenuSheet(
-      context,
-      blockedPopupsCount: _activeTab.controller.blockedPopupsCount,
-      actions: [
-        BrowserMenuAction(
-          icon: Icons.star_rounded,
-          label: 'Favorites',
-          color: ac.accentAmber,
-          onTap: _showFavoritesSheet,
+    final pageUrl = _activeTab.currentUrl;
+    final pageTitle = _activeTab.title;
+
+    Future<void> openSection(SettingsSection section) async {
+      // Remember Settings segment for the next intentional open; do not
+      // auto-reopen the menu after the settings page closes.
+      OverflowMenuSegmentStore.last = OverflowMenuSegment.settings;
+      final handler = widget.onOpenSettingsSection;
+      if (handler != null) {
+        await handler(section);
+      } else {
+        widget.onOpenSettings?.call();
+      }
+    }
+
+    final rawSettingsEntries = [
+      OverflowMenuEntry(
+        icon: Icons.menu_book_rounded,
+        label: 'User Guide',
+        color: ac.accentFrost,
+        onTap: () => unawaited(openSection(SettingsSection.userGuide)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.download_rounded,
+        label: 'Defaults',
+        onTap: () => unawaited(openSection(SettingsSection.defaults)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.wifi_rounded,
+        label: 'Network',
+        onTap: () => unawaited(openSection(SettingsSection.network)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.rule_rounded,
+        label: 'Rules',
+        onTap: () => unawaited(openSection(SettingsSection.rules)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.schedule_rounded,
+        label: 'Schedule',
+        onTap: () => unawaited(openSection(SettingsSection.schedule)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.shield_rounded,
+        label: 'Adblock',
+        onTap: () => unawaited(openSection(SettingsSection.adblock)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.search_rounded,
+        label: 'Search & Privacy',
+        onTap: () => unawaited(openSection(SettingsSection.search)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.tune_rounded,
+        label: 'Sniffer',
+        onTap: () => unawaited(openSection(SettingsSection.sniffer)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.people_outline_rounded,
+        label: 'Profiles',
+        onTap: () => unawaited(openSection(SettingsSection.profiles)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.palette_outlined,
+        label: 'Theme',
+        onTap: () => unawaited(openSection(SettingsSection.appearance)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.backup_rounded,
+        label: 'Backup',
+        onTap: () => unawaited(openSection(SettingsSection.backup)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.auto_awesome,
+        label: 'Aurora Pro',
+        color: ac.accentAmber,
+        onTap: () => unawaited(openSection(SettingsSection.pro)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.shield_outlined,
+        label: 'Private Vault',
+        onTap: () => unawaited(openSection(SettingsSection.vault)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.cloud_outlined,
+        label: 'WebDAV Backup',
+        onTap: () => unawaited(openSection(SettingsSection.webdav)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.rss_feed,
+        label: 'Aurora Watcher',
+        onTap: () => unawaited(openSection(SettingsSection.watcher)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.api,
+        label: 'Automation API',
+        onTap: () => unawaited(openSection(SettingsSection.automation)),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.info_outline_rounded,
+        label: 'About',
+        onTap: () => unawaited(openSection(SettingsSection.about)),
+      ),
+    ];
+
+    final rawToolEntries = [
+      OverflowMenuEntry(
+        icon: _privateMode ? Icons.security_rounded : Icons.shield_outlined,
+        label: _privateMode ? 'Incognito: On' : 'Incognito: Off',
+        color: _privateMode ? Colors.purpleAccent : ac.textPrimary,
+        onTap: _toggleIncognitoMode,
+      ),
+      OverflowMenuEntry(
+        icon: Icons.history_rounded,
+        label: 'History',
+        onTap: _showHistorySheet,
+      ),
+      OverflowMenuEntry(
+        icon: Icons.star_rounded,
+        label: 'Favorites',
+        color: ac.accentAmber,
+        onTap: _showFavoritesSheet,
+      ),
+      OverflowMenuEntry(
+        icon: Icons.offline_pin_rounded,
+        label: 'Saved pages',
+        onTap: _showSavedPagesSheet,
+      ),
+      OverflowMenuEntry(
+        icon: Icons.save_alt_rounded,
+        label: 'Save page',
+        onTap: () => unawaited(_saveCurrentPage()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.find_in_page_rounded,
+        label: 'Find on page',
+        onTap: () => setState(() => _findVisible = true),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.assignment_ind_rounded,
+        label: 'Autofill',
+        onTap: () => unawaited(_showAutofillMenu()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.chrome_reader_mode_rounded,
+        label: 'Reader mode',
+        onTap: () => unawaited(_showReaderMode()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.ads_click,
+        label: 'Block element',
+        onTap: () => unawaited(_startElementPicker()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.undo,
+        label: 'Reset blocks',
+        onTap: _resetPageElementBlocks,
+      ),
+      OverflowMenuEntry(
+        icon: !settings.adblockEnabled
+            ? Icons.shield
+            : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
+        label: !settings.adblockEnabled
+            ? 'Adblock: Off'
+            : (isAllowlisted ? 'Ads allowed' : 'Adblock: On'),
+        color: !settings.adblockEnabled
+            ? Colors.redAccent
+            : (isAllowlisted ? ac.textSecondary : Colors.green),
+        onTap: () => _showAdblockPopup(_activeTab),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.refresh_rounded,
+        label: 'Re-scan media',
+        onTap: () => unawaited(_rescanPageMedia()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.cookie_rounded,
+        label: 'Clear cookies',
+        color: Colors.redAccent,
+        onTap: () {
+          unawaited(
+            _activeTab.controller.currentUrl().then((url) {
+              if (url != null && url.isNotEmpty) {
+                unawaited(_clearDataForSite(url));
+              }
+            }),
+          );
+        },
+      ),
+    ];
+
+    _browserOverflowOpen = true;
+    unawaited(
+      showBrowserOverflowPopup(
+        context,
+        pageTitle: pageTitle,
+        pageUrl: pageUrl,
+        settingsEntries: _sortOverflowEntries(
+          rawSettingsEntries,
+          settings.menuSettingsOrder,
         ),
-        BrowserMenuAction(
-          icon: Icons.offline_pin_rounded,
-          label: 'Saved Pages',
-          color: Colors.green,
-          onTap: _showSavedPagesSheet,
+        toolEntries: _sortOverflowEntries(
+          rawToolEntries,
+          settings.menuToolOrder,
         ),
-        BrowserMenuAction(
-          icon: Icons.save_alt_rounded,
-          label: 'Save Page',
-          color: Colors.green,
-          onTap: () => unawaited(_saveCurrentPage()),
-        ),
-        BrowserMenuAction(
-          icon: Icons.history_rounded,
-          label: 'History',
-          color: Colors.blue,
-          onTap: _showHistorySheet,
-        ),
-        BrowserMenuAction(
-          icon: Icons.find_in_page_rounded,
-          label: 'Find in Page',
-          color: Colors.purple,
-          onTap: () => setState(() => _findVisible = true),
-        ),
-        BrowserMenuAction(
-          icon: Icons.assignment_ind_rounded,
-          label: 'Autofill',
-          color: Colors.teal,
-          onTap: () => unawaited(_showAutofillMenu()),
-        ),
-        BrowserMenuAction(
-          icon: Icons.chrome_reader_mode_rounded,
-          label: 'Reader Mode',
-          color: Colors.orange,
-          onTap: () => unawaited(_showReaderMode()),
-        ),
-        BrowserMenuAction(
-          icon: Icons.ads_click,
-          label: 'Block Element',
-          color: Colors.redAccent,
-          onTap: () => unawaited(_startElementPicker()),
-        ),
-        BrowserMenuAction(
-          icon: Icons.undo,
-          label: 'Reset Blocks',
-          color: ac.textSecondary,
-          onTap: _resetPageElementBlocks,
-        ),
-        BrowserMenuAction(
-          icon: !settings.adblockEnabled
-              ? Icons.shield
-              : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
-          label: !settings.adblockEnabled
-              ? 'Adblock: Off'
-              : (isAllowlisted ? 'Ads Allowed' : 'Adblock: On'),
-          color: !settings.adblockEnabled
-              ? Colors.redAccent
-              : (isAllowlisted ? ac.textSecondary : Colors.green),
-          onTap: () => _showAdblockPopup(_activeTab),
-        ),
-        BrowserMenuAction(
-          icon: Icons.refresh_rounded,
-          label: 'Re-scan',
-          color: Colors.cyanAccent,
-          onTap: () => unawaited(_rescanPageMedia()),
-        ),
-        BrowserMenuAction(
-          icon: Icons.cookie_rounded,
-          label: 'Clear Cookies',
-          color: Colors.redAccent,
-          onTap: () {
-            unawaited(
-              _activeTab.controller.currentUrl().then((url) {
-                if (url != null && url.isNotEmpty) {
-                  unawaited(_clearDataForSite(url));
-                }
-              }),
-            );
-          },
-        ),
-      ],
+        onReorderSettings: (newOrder) {
+          final normalizedOrder = newOrder.map(_menuEntryKey).toList();
+          widget.onSettingsChanged?.call(
+            widget.settings.copyWith(menuSettingsOrder: normalizedOrder),
+          );
+        },
+        onReorderTools: (newOrder) {
+          final normalizedOrder = newOrder.map(_menuEntryKey).toList();
+          widget.onSettingsChanged?.call(
+            widget.settings.copyWith(menuToolOrder: normalizedOrder),
+          );
+        },
+      ).whenComplete(() {
+        _browserOverflowOpen = false;
+      }),
     );
+  }
+
+  String _menuEntryKey(String label) {
+    if (label.startsWith('Incognito:')) return 'Incognito';
+    if (label.startsWith('Adblock:')) return 'Adblock';
+    if (label == 'Ads allowed') return 'Adblock';
+    return label;
+  }
+
+  List<OverflowMenuEntry> _sortOverflowEntries(
+    List<OverflowMenuEntry> entries,
+    List<String> order,
+  ) {
+    if (order.isEmpty) return entries;
+    final sorted = <OverflowMenuEntry>[];
+    final map = <String, OverflowMenuEntry>{};
+    for (final e in entries) {
+      final key = _menuEntryKey(e.label);
+      map[key] = e;
+    }
+    for (final key in order) {
+      final normKey = _menuEntryKey(key);
+      final entry = map.remove(normKey);
+      if (entry != null) {
+        sorted.add(entry);
+      }
+    }
+    sorted.addAll(map.values);
+    return sorted;
+  }
+
+  void _toggleIncognitoMode() {
+    final nextState = !_privateMode;
+    setState(() {
+      _privateMode = nextState;
+    });
+    for (final tab in _tabs) {
+      unawaited(tab.controller.setIncognito(nextState));
+    }
+    final updated = widget.settings.copyWith(privateMode: nextState);
+    widget.onSettingsChanged?.call(updated);
   }
 
   void _showHistorySheet() => showHistorySheet(
@@ -4084,7 +4481,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     BrowserTab tab,
     String url,
     String? suggestedFilename,
-  ) {
+  ) async {
+    final currentUrl = await tab.controller.currentUrl() ?? '';
+    final pageUri = Uri.tryParse(currentUrl);
+    final media = tab.snifferEngine.detectedMedia
+        .where((m) => m.url == url)
+        .lastOrNull;
+
     return enqueueDirectDownload(
       context: context,
       tab: tab,
@@ -4097,6 +4500,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
       showSnack: _showSnack,
       isMounted: () => mounted,
+      ruleEngine: widget.ruleEngine,
+      pageHost: pageUri?.host,
+      mediaTypeForRule: media?.contentType,
     );
   }
 

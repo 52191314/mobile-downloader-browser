@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../platform/public_downloads_service.dart';
 import '../theme/aurora_palette.dart';
 
 /// One selectable HLS/DASH (or progressive) quality for [AuroraVideoPlayer].
@@ -126,6 +128,10 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   // --- Star ---
   bool _isFavorited = false;
 
+  // --- PiP ---
+  static const MethodChannel _pipChannel = MethodChannel('aurora_downloader/pip');
+  bool _isInPipMode = false;
+
   // --- Dimensions (for fit switching when not initialized yet) ---
   double _videoWidth = 16;
   double _videoHeight = 9;
@@ -141,6 +147,19 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     _initPlayer();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
+    });
+    _pipChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onPipModeChanged') {
+        final inPip = call.arguments as bool? ?? false;
+        if (mounted) {
+          setState(() {
+            _isInPipMode = inPip;
+            if (inPip) {
+              _controlsVisible = false;
+            }
+          });
+        }
+      }
     });
   }
 
@@ -281,6 +300,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
   @override
   void dispose() {
+    _pipChannel.setMethodCallHandler(null);
     _autoHideTimer?.cancel();
     _clockTimer?.cancel();
     _previewSeekDebounce?.cancel();
@@ -670,6 +690,31 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     }
   }
 
+  Future<void> _enterPip() async {
+    _resetAutoHideTimer();
+    try {
+      final int w = _videoWidth.round();
+      final int h = _videoHeight.round();
+      final bool success = await _pipChannel.invokeMethod<bool>('enterPip', {
+        'width': w > 0 ? w : 16,
+        'height': h > 0 ? h : 9,
+      }) ?? false;
+
+      if (!success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Picture-in-Picture is not available on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    }
+  }
+
   void _showOverflowMenu() {
     final ac = context.ac;
     _resetAutoHideTimer();
@@ -729,15 +774,20 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       if (value == 'quality') {
         _showQualityMenu();
       } else if (value == 'open_browser') {
-        // Pop and let the caller handle it (or use the sourcePageUrl)
-        Navigator.pop(context, 'open_browser');
+        final targetUrl = widget.sourcePageUrl ?? _activeUrl;
+        unawaited(PublicDownloadsService.openUrl(targetUrl));
       } else if (value == 'copy_url') {
-        // Copy URL to clipboard
-        // ignore: deprecated_member_use
-        // Clipboard.setData(ClipboardData(text: widget.url));
-        Navigator.pop(context, 'copy_url');
+        unawaited(Clipboard.setData(ClipboardData(text: _activeUrl)));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Copied video link to clipboard'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        }
       } else if (value == 'share') {
-        Navigator.pop(context, 'share');
+        unawaited(PublicDownloadsService.shareUrl(_activeUrl));
       }
     });
   }
@@ -763,6 +813,12 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isInPipMode) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildVideoArea(),
+      );
+    }
     final ac = context.ac;
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1035,9 +1091,9 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                 ],
               ),
             ),
-            // PiP / Minimize button
+            // PiP button
             GestureDetector(
-              onTap: () => Navigator.pop(context),
+              onTap: _enterPip,
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8),
                 child: Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 20),

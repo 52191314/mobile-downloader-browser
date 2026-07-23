@@ -234,10 +234,11 @@ class TabManager {
   /// When the move empties a group (no remaining member tabs), the
   /// group is also removed from [tabGroups] to keep the persisted
   /// list tidy.
-  void moveTabToGroup(
+  bool moveTabToGroup(
     BrowserTab tab, {
     String? groupName,
     int? colorIndex,
+    void Function()? onCapExceeded,
   }) {
     final newName = (groupName ?? '').trim();
     if (newName.isEmpty) {
@@ -252,7 +253,10 @@ class TabManager {
       if (!isExistingGroup && !isProCallback()) {
         // Free users limited to maxFreeTabGroups.
         final currentGroupCount = tabGroups.length;
-        if (currentGroupCount >= maxFreeTabGroups) return;
+        if (currentGroupCount >= maxFreeTabGroups) {
+          onCapExceeded?.call();
+          return false;
+        }
       }
       tab.groupName = newName;
       tab.groupColorIndex = colorIndex;
@@ -261,6 +265,7 @@ class TabManager {
     }
     _pruneEmptyGroups();
     onRebuild?.call();
+    return true;
   }
 
   /// Reorder the [tabs] list by moving the entry at [oldIndex] to the

@@ -529,6 +529,8 @@ class DownloadSettings {
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
   final Map<String, String> siteUserAgents;
+  final List<String> menuSettingsOrder;
+  final List<String> menuToolOrder;
 
   // --- Proxy settings ---
   final ProxyType proxyType;
@@ -617,6 +619,8 @@ class DownloadSettings {
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
     this.siteUserAgents = const {},
+    this.menuSettingsOrder = const [],
+    this.menuToolOrder = const [],
     this.proxyType = ProxyType.none,
     this.proxyHost = '',
     this.proxyPort = 8080,
@@ -706,6 +710,8 @@ class DownloadSettings {
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
     Map<String, String>? siteUserAgents,
+    List<String>? menuSettingsOrder,
+    List<String>? menuToolOrder,
     ProxyType? proxyType,
     String? proxyHost,
     int? proxyPort,
@@ -800,6 +806,8 @@ class DownloadSettings {
           translateTargetLang ?? this.translateTargetLang,
       siteZoomLevels: siteZoomLevels ?? this.siteZoomLevels,
       siteUserAgents: siteUserAgents ?? this.siteUserAgents,
+      menuSettingsOrder: menuSettingsOrder ?? this.menuSettingsOrder,
+      menuToolOrder: menuToolOrder ?? this.menuToolOrder,
       proxyType: proxyType ?? this.proxyType,
       proxyHost: proxyHost ?? this.proxyHost,
       proxyPort: proxyPort ?? this.proxyPort,
@@ -846,6 +854,8 @@ class DownloadSettings {
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
     'siteUserAgents': siteUserAgents,
+    'menuSettingsOrder': menuSettingsOrder,
+    'menuToolOrder': menuToolOrder,
     'proxyType': proxyType.name,
     'proxyHost': proxyHost,
     'proxyPort': proxyPort,
@@ -956,6 +966,10 @@ class DownloadSettings {
         json['siteZoomLevels'] as Map?,
       ),
       siteUserAgents: _parseStringStringMap(json['siteUserAgents'] as Map?),
+      menuSettingsOrder:
+          (json['menuSettingsOrder'] as List?)?.cast<String>() ?? const [],
+      menuToolOrder:
+          (json['menuToolOrder'] as List?)?.cast<String>() ?? const [],
       proxyType: ProxyType.values.firstWhere(
         (e) => e.name == json['proxyType'],
         orElse: () => ProxyType.none,

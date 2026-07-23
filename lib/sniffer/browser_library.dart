@@ -317,6 +317,8 @@ class BrowserLibraryStore {
     List<Map<String, dynamic>>? downloadQueueJson,
     Map<String, dynamic>? settingsJson,
     List<Map<String, dynamic>>? tabsJson,
+    dynamic downloadRulesJson,
+    Map<String, dynamic>? extraJson,
   }) async {
     final library = await load();
     final Directory dir;
@@ -353,6 +355,12 @@ class BrowserLibraryStore {
     }
     if (tabsJson != null) {
       exportData['tabs'] = tabsJson;
+    }
+    if (downloadRulesJson != null) {
+      exportData['downloadRules'] = downloadRulesJson;
+    }
+    if (extraJson != null) {
+      exportData.addAll(extraJson);
     }
 
     await file.writeAsString(jsonEncode(exportData));

@@ -7,7 +7,7 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 | | |
 |---|---|
 | **Platform** | Android only (API 24+) |
-| **Version** | 2.4.4+28 |
+| **Version** | 2.4.5+29 |
 | **License** | [GPL-3.0](LICENSE) |
 | **Repo** | [github.com/52191314/Aurora-Downloader](https://github.com/52191314/Aurora-Downloader) |
 
@@ -20,7 +20,7 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 - **Catch media while browsing** — not only paste a URL. The browser hooks DOM, `fetch`/`XHR`, media elements, and resource loads.
 - **Survive real CDNs** — cookies, Referer, User-Agent, WebView-bound fetches for WAF/Cloudflare-style hosts, HLS token refresh.
 - **Finish the job** — pause/resume, multi-chunk HTTP, HLS segment download + AES-128, TS→MP4 remux, auto-classify into folders, notifications + foreground service.
-- **Stay usable** — floating dock, queue + browser + settings, tab groups, capture tray, Nordic light/dark UI.
+- **Stay usable** — bottom nav (Queue · Browser · Settings), tab groups, capture tray, Nordic light/dark UI.
 
 ---
 
@@ -147,7 +147,7 @@ Segmented multi-thread HTTP downloads, HLS/DASH capture, an in-app browser that 
 ### UI / shell
 
 - **Aurora Glass** theme: Nordic dark + light (Snow Storm), optional OLED black
-- Floating **dock** navigation: Queue | Browser | Settings
+- **Samsung-style browser chrome**: Back · Forward · Radar · Tabs · Menu ⋮ (Settings|Tools popup); Queue on address bar; slim Queue·Browser·Settings bar off-browser
 - Queue metrics / progress visualization
 - Settings dashboard cards (Defaults, Adblock, Search, Sniffer, Appearance, Network, Backup, ~~Drive~~, About, **Aurora Pro**)
 - Diagnostics page / logging

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -7,9 +8,14 @@ import 'package:path_provider/path_provider.dart';
 import '../../platform/secure_window.dart';
 import '../../premium/phase2_caps.dart';
 import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_features.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../../premium/vault_service.dart';
+import '../../premium/vault_sync_service.dart';
+import '../../premium/webdav_backup_service.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
+import 'webdav_settings_page.dart';
 
 /// Vault UI — lists encrypted vault files with lock/unlock, export, and delete.
 ///
@@ -147,6 +153,213 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _syncWebdavVault() async {
+    if (!VaultSyncService.isAllowed(widget.tier)) {
+      showProUpsell(context, ProFeature.vaultSync);
+      return;
+    }
+
+    final webdavSettings = await WebdavBackupService.loadSettings();
+    if (webdavSettings == null || webdavSettings.url.trim().isEmpty || webdavSettings.username.trim().isEmpty) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('WebDAV Not Configured'),
+          content: const Text(
+              'Please configure your WebDAV URL and credentials in WebDAV Settings before syncing.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const WebdavSettingsPage(),
+                  ),
+                );
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final passphraseController = TextEditingController();
+    int actionType = 0; // 0 = upload, 1 = restore, 2 = delete remote
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('WebDAV Encrypted Vault Sync'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Sync your encrypted vault items to your private WebDAV server using AES-GCM encryption.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                RadioListTile<int>(
+                  title: const Text('Upload Local Vault to WebDAV'),
+                  value: 0,
+                  groupValue: actionType,
+                  onChanged: (v) => setDialogState(() => actionType = v!),
+                  dense: true,
+                ),
+                RadioListTile<int>(
+                  title: const Text('Restore Vault from WebDAV'),
+                  value: 1,
+                  groupValue: actionType,
+                  onChanged: (v) => setDialogState(() => actionType = v!),
+                  dense: true,
+                ),
+                RadioListTile<int>(
+                  title: const Text('Delete Remote Vault Backup'),
+                  value: 2,
+                  groupValue: actionType,
+                  onChanged: (v) => setDialogState(() => actionType = v!),
+                  dense: true,
+                ),
+                if (actionType != 2) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passphraseController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Sync Passphrase',
+                      hintText: 'Enter passphrase for encryption key',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Proceed'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    final passphrase = passphraseController.text.trim();
+    if (actionType != 2 && passphrase.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sync passphrase cannot be empty.')),
+      );
+      return;
+    }
+
+    final syncService = VaultSyncService(
+      webdavBaseUrl: webdavSettings.url,
+      webdavUsername: webdavSettings.username,
+      webdavPassword: webdavSettings.password,
+    );
+
+    setState(() => _loading = true);
+    try {
+      if (actionType == 0) {
+        final map = <String, dynamic>{
+          'entries': _entries
+              .map((e) => {
+                    'name': e.name,
+                    'size': e.size,
+                    'modified': e.modified.toIso8601String(),
+                  })
+              .toList(),
+        };
+        final ok = await syncService.uploadVault(
+          passphrase: passphrase,
+          vaultData: map,
+        );
+        if (ok) {
+          final vaultDir = await widget.vault.vaultDir;
+          final files = await vaultDir.list().toList();
+          for (final f in files.whereType<File>()) {
+            final name = f.uri.pathSegments.last;
+            if (name.endsWith('.vault')) {
+              await syncService.uploadVaultBlob(
+                passphrase: passphrase,
+                vaultName: name,
+                vaultFile: f,
+              );
+            }
+          }
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok
+                ? 'Vault & files successfully uploaded to WebDAV'
+                : 'Failed to upload vault to WebDAV'),
+          ),
+        );
+      } else if (actionType == 1) {
+        final restored = await syncService.downloadVault(passphrase: passphrase);
+        if (!mounted) return;
+        if (restored != null) {
+          final entries = restored['entries'] as List? ?? [];
+          final vaultDir = await widget.vault.vaultDir;
+          int restoredCount = 0;
+          for (final entry in entries) {
+            final name = entry['name'] as String?;
+            if (name != null &&
+                await syncService.downloadAndRestoreVaultBlob(
+                  passphrase: passphrase,
+                  vaultName: name,
+                  vaultDir: vaultDir,
+                )) {
+              restoredCount++;
+            }
+          }
+          await _loadEntries();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Vault restored: $restoredCount files from WebDAV.'),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to restore vault (incorrect passphrase or no remote backup).'),
+            ),
+          );
+        }
+      } else if (actionType == 2) {
+        final ok = await syncService.deleteRemoteVault();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok
+                ? 'Remote vault backup deleted from WebDAV'
+                : 'Failed to delete remote vault backup'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
@@ -157,13 +370,18 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
         title: const Text('Private Vault'),
         backgroundColor: ac.surfacePanel,
         actions: [
-          if (_unlocked)
+          if (_unlocked) ...[
+            IconButton(
+              icon: const Icon(Icons.cloud_sync_outlined),
+              tooltip: 'WebDAV Vault Sync',
+              onPressed: _syncWebdavVault,
+            ),
             IconButton(
               icon: const Icon(Icons.lock_outline),
               tooltip: 'Lock vault',
               onPressed: _lock,
-            )
-          else
+            ),
+          ] else
             IconButton(
               icon: const Icon(Icons.lock_open),
               tooltip: 'Unlock vault',

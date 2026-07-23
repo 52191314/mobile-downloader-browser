@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../downloader/download_rules.dart';
 import '../downloader/downloader.dart';
 import '../downloader/filename_service.dart';
 import '../downloader/url_filename_resolver.dart';
@@ -102,6 +103,9 @@ Future<void> enqueueDirectDownload({
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
   required void Function(String message) showSnack,
   required bool Function() isMounted,
+  DownloadRuleEngine? ruleEngine,
+  String? pageHost,
+  String? mediaTypeForRule,
 }) async {
   final media = tab.snifferEngine.detectedMedia
       .where((m) => m.url == url)
@@ -191,6 +195,23 @@ Future<void> enqueueDirectDownload({
     mergeHeaders(headerMap, enqueueOverride.customHeaders!);
   }
 
+  // --- Download Rules Engine (rename, destination, constraints) ---
+  DownloadRule? matchedRule;
+  if (ruleEngine != null) {
+    matchedRule = ruleEngine.matchRule(
+      url,
+      mediaType: mediaTypeForRule,
+      pageHost: pageHost,
+    );
+    if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
+      suggestedName = ruleEngine.applyRename(matchedRule!, suggestedName);
+    }
+    final ruleDest = ruleEngine.getDestinationFolder(matchedRule);
+    if (ruleDest != null && ruleDest.isNotEmpty) {
+      saveDir = '${baseDir ?? '.'}${Platform.pathSeparator}$ruleDest';
+    }
+  }
+
   final task = DownloadTask(
     id: taskId,
     url: url,
@@ -241,6 +262,27 @@ Future<void> enqueueDirectDownload({
     force = true;
   }
   downloadQueue.addTask(task, force: force);
+
+  // Apply rule time window constraint
+  if (matchedRule != null) {
+    final now = DateTime.now();
+    if (matchedRule.timeWindowStartHour != null && matchedRule.timeWindowEndHour != null) {
+      final currentHour = now.hour;
+      final startH = matchedRule.timeWindowStartHour!;
+      final endH = matchedRule.timeWindowEndHour!;
+      final inWindow = startH <= endH
+          ? (currentHour >= startH && currentHour < endH)
+          : (currentHour >= startH || currentHour < endH);
+      if (!inWindow) {
+        var schedDate = DateTime(now.year, now.month, now.day, startH);
+        if (schedDate.isBefore(now)) {
+          schedDate = schedDate.add(const Duration(days: 1));
+        }
+        downloadQueue.scheduleTask(task, schedDate);
+        return;
+      }
+    }
+  }
 
   if (isMounted()) {
     showSnack('Started downloading $suggestedName');

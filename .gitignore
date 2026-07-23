@@ -171,3 +171,14 @@ docs/premium_implementation_tracker.md
 .claude/
 .cursor/
 .opencode/
+# Added by code-review-graph
+.code-review-graph/
+
+# -----------------------------------------------------------------------------
+# Personal IDE / tooling config (not project-wide)
+# -----------------------------------------------------------------------------
+.cursorrules
+.gemini/
+.mcp.json
+GEMINI.md
+opencode.jsonc

@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../downloader/downloader.dart';
+import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -14,6 +16,7 @@ import '../notifications/aurora_snackbar.dart';
 import '../widgets/download_card.dart';
 import '../widgets/empty_queue.dart';
 import '../widgets/settings_formatters.dart';
+import 'ffmpeg_studio_page.dart';
 
 /// Describes a state-filter chip option in the queue page.
 /// [states] is `null` to show all tasks; otherwise only tasks whose
@@ -70,7 +73,9 @@ class QueuePage extends StatefulWidget {
   final Future<void> Function(DownloadTask task)? onSendToPc;
   final Future<void> Function(DownloadTask task)? onMoveToVault;
   final Future<void> Function(DownloadTask task)? onRedownload;
+  final Future<void> Function(DownloadTask task)? onOpenFfmpegStudio;
   final VoidCallback? onOpenBrowser;
+  final GlobalKey? urlInputKey;
 
   const QueuePage({
     super.key,
@@ -91,7 +96,9 @@ class QueuePage extends StatefulWidget {
     this.onSendToPc,
     this.onMoveToVault,
     this.onRedownload,
+    this.onOpenFfmpegStudio,
     this.onOpenBrowser,
+    this.urlInputKey,
   });
 
   @override
@@ -712,6 +719,7 @@ class _QueuePageState extends State<QueuePage> {
       behavior: HitTestBehavior.translucent,
       onTap: () => _urlFocusNode.requestFocus(),
       child: Card(
+        key: widget.urlInputKey,
         color: ac.glassSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -781,6 +789,15 @@ class _QueuePageState extends State<QueuePage> {
               const SizedBox(width: 4),
               SizedBox(
                 height: 40,
+                child: IconButton(
+                  tooltip: 'Schedule download',
+                  icon: Icon(Icons.schedule, size: 20, color: ac.accentFrost),
+                  onPressed: () => _scheduleDownloadFromUrlInput(context),
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                height: 40,
                 child: IconButton.filled(
                   tooltip: 'Add download',
                   onPressed: widget.onAddDownload,
@@ -801,6 +818,51 @@ class _QueuePageState extends State<QueuePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _scheduleDownloadFromUrlInput(BuildContext context) async {
+    final rawUrl = widget.urlController.text.trim();
+    if (rawUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a URL to schedule.')),
+      );
+      return;
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(hours: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (picked == null || !context.mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(picked),
+    );
+    if (time == null || !context.mounted) return;
+    final startAt = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      time.hour,
+      time.minute,
+    );
+    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+    final task = DownloadTask(
+      id: taskId,
+      url: rawUrl,
+      savePath: rawUrl.split('/').last.isNotEmpty
+          ? rawUrl.split('/').last
+          : 'download',
+      tempDir: 'temp_$taskId',
+    );
+    widget.queue.scheduleTask(task, startAt);
+    widget.urlController.clear();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download scheduled.')),
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1611,6 +1673,15 @@ class _QueuePageState extends State<QueuePage> {
       onSendToPc: widget.onSendToPc,
       onMoveToVault: widget.onMoveToVault,
       onRedownload: widget.onRedownload,
+      onOpenFfmpegStudio: widget.onOpenFfmpegStudio ?? _openFfmpegStudioForTask,
+      onSchedule: (t, startAt) {
+        widget.queue.scheduleTask(t, startAt);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Scheduled ${t.savePath.split('/').last} for start.')),
+          );
+        }
+      },
       enableSwipe: !_selectionMode && !isMerging,
       selectionMode: _selectionMode,
       selected: _selectedIds.contains(task.id),
@@ -1621,6 +1692,33 @@ class _QueuePageState extends State<QueuePage> {
           _selectedIds.add(task.id);
         }
       }),
+    );
+  }
+
+  Future<void> _openFfmpegStudioForTask(DownloadTask task) async {
+    final path = task.savePath;
+    if (path.isEmpty || !File(path).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File path is missing or file does not exist.')),
+      );
+      return;
+    }
+    final name = path.replaceAll('\\', '/').split('/').last;
+    final item = FfmpegStudioItem(
+      id: task.id,
+      name: name,
+      filePath: path,
+      fileSizeBytes: task.totalBytes,
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FfmpegStudioPage(
+          ffmpegService: FfmpegService(),
+          proEntitlement: proUpsellEntitlement ?? ProEntitlement(),
+          items: [item],
+        ),
+      ),
     );
   }
 

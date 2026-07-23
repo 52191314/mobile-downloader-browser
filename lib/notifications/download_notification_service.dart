@@ -92,7 +92,7 @@ class DownloadNotificationService {
       iOS: iosSettings,
     );
     await _plugin.initialize(
-      settings,
+      settings: settings,
       onDidReceiveNotificationResponse: _onNotificationResponse,
     );
     await _createChannels();
@@ -151,7 +151,7 @@ class DownloadNotificationService {
   void cancelForTask(String taskId) {
     try {
       final id = _notificationIdFor(taskId);
-      unawaited(_plugin.cancel(id));
+      unawaited(_plugin.cancel(id: id));
       _activeLiveNotificationIds.remove(taskId);
     } catch (e, s) {
       _logError('Failed to cancel notification', e, s);
@@ -226,10 +226,10 @@ class DownloadNotificationService {
     final body = isRich ? _richProgressBody(task, filename) : filename;
 
     _plugin.show(
-      id,
-      'Downloading $progress%',
-      body,
-      NotificationDetails(
+      id: id,
+      title: 'Downloading $progress%',
+      body: body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -271,10 +271,10 @@ class DownloadNotificationService {
     final body = progress > 0 ? '$filename · $progress%' : filename;
 
     _plugin.show(
-      id,
-      'Paused',
-      body,
-      NotificationDetails(
+      id: id,
+      title: 'Paused',
+      body: body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -312,10 +312,10 @@ class DownloadNotificationService {
     final filename = _shortName(task.savePath);
 
     _plugin.show(
-      id,
-      'Finishing…',
-      filename,
-      NotificationDetails(
+      id: id,
+      title: 'Finishing…',
+      body: filename,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -369,10 +369,10 @@ class DownloadNotificationService {
     }
 
     _plugin.show(
-      id,
-      'Done',
-      filename,
-      NotificationDetails(
+      id: id,
+      title: 'Done',
+      body: filename,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _doneChannelId,
           _doneChannelName,
@@ -392,10 +392,10 @@ class DownloadNotificationService {
     final id = _notificationIdFor(task.id);
     final filename = _shortName(task.savePath);
     _plugin.show(
-      id,
-      "Couldn't download",
-      '$filename. ${task.errorMessage ?? 'Something went wrong.'}',
-      NotificationDetails(
+      id: id,
+      title: "Couldn't download",
+      body: '$filename. ${task.errorMessage ?? 'Something went wrong.'}',
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _doneChannelId,
           _doneChannelName,

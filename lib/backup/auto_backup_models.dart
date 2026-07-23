@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 /// How often the app automatically backs up its data.
 enum AutoBackupInterval {
+  onBackground(Duration.zero, 'When app is backgrounded'),
   hourly(const Duration(hours: 1), 'Every hour'),
   every6h(const Duration(hours: 6), 'Every 6 hours'),
   every12h(const Duration(hours: 12), 'Every 12 hours'),

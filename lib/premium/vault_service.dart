@@ -102,10 +102,8 @@ class VaultService {
     try {
       final didAuth = await _localAuth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: false, // allow PIN/pattern fallback
-        ),
+        persistAcrossBackgrounding: true,
+        biometricOnly: false, // allow PIN/pattern fallback
       );
       if (didAuth) {
         _unlockedAt = DateTime.now();

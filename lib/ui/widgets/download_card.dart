@@ -101,6 +101,8 @@ class DownloadCard extends StatelessWidget {
     this.onSendToPc,
     this.onMoveToVault,
     this.onRedownload,
+    this.onOpenFfmpegStudio,
+    this.onSchedule,
     this.onShowProperties,
     this.selectionMode = false,
     this.selected = false,
@@ -127,6 +129,9 @@ class DownloadCard extends StatelessWidget {
   final Future<void> Function(DownloadTask task)? onMoveToVault;
   /// Start a fresh download of the same URL (new queue entry).
   final Future<void> Function(DownloadTask task)? onRedownload;
+  /// Process or edit completed file in FFmpeg Studio.
+  final Future<void> Function(DownloadTask task)? onOpenFfmpegStudio;
+  final void Function(DownloadTask task, DateTime startAt)? onSchedule;
   final VoidCallback? onShowProperties;
 
   final bool selectionMode;
@@ -836,6 +841,20 @@ class DownloadCard extends StatelessWidget {
       );
     }
 
+    // Edit in FFmpeg Studio — completed media files only.
+    if (isCompleted && onOpenFfmpegStudio != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'ffmpeg_studio',
+          child: _popupRow(
+            Icons.movie_outlined,
+            ac.accentFrost,
+            'Edit in FFmpeg Studio',
+          ),
+        ),
+      );
+    }
+
     // Redownload — fresh queue entry (not the same as Retry of a partial).
     if (onRedownload != null && !isActive && !isMagnet && !isBlob) {
       popupItems.add(
@@ -910,6 +929,16 @@ class DownloadCard extends StatelessWidget {
       }
     }
 
+    // Schedule download
+    if (task.state != DownloadState.scheduled && onSchedule != null) {
+      popupItems.add(
+        PopupMenuItem(
+          value: 'schedule',
+          child: _popupRow(Icons.schedule, ac.accentFrost, 'Schedule download'),
+        ),
+      );
+    }
+
     // Delete / Cancel
     popupItems.add(
       PopupMenuItem(
@@ -976,10 +1005,14 @@ class DownloadCard extends StatelessWidget {
                         onSendToPc?.call(task);
                       case 'move_to_vault':
                         onMoveToVault?.call(task);
+                      case 'ffmpeg_studio':
+                        onOpenFfmpegStudio?.call(task);
                       case 'redownload':
                         onRedownload?.call(task);
                       case 'force_merge':
                         onForceMerge?.call();
+                      case 'schedule':
+                        _pickScheduleTime(context);
                       case 'open_source':
                         if (task.sourcePageUrl != null) {
                           onOpenUrlInBrowser?.call(task.sourcePageUrl!);
@@ -1011,4 +1044,26 @@ class DownloadCard extends StatelessWidget {
     );
   }
 
+  Future<void> _pickScheduleTime(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(hours: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (picked == null || !context.mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(picked),
+    );
+    if (time == null || !context.mounted) return;
+    final startAt = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      time.hour,
+      time.minute,
+    );
+    onSchedule?.call(task, startAt);
+  }
 }

@@ -348,6 +348,8 @@ void openContextTarget(
     onShowSnack('Could not open target.');
     return;
   }
+  // onLoadUrl → _loadUrlWithHostSettings / loadRequest already routes
+  // external app schemes (tg:, intent://, …) out of the WebView.
   unawaited(onLoadUrl(uri));
 }
 

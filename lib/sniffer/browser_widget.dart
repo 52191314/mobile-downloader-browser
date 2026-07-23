@@ -35,6 +35,7 @@ class BrowserWidget extends StatelessWidget {
         webView: InAppWebView(
           initialUrlRequest: initialRequest,
           initialSettings: InAppWebViewSettings(
+            incognito: ctrl.isIncognito,
             javaScriptEnabled: true,
             useShouldOverrideUrlLoading: true,
             useOnLoadResource: false,
@@ -66,6 +67,8 @@ class BrowserWidget extends StatelessWidget {
           onScrollChanged: (c, x, y) => ctrl.onScrollChanged(x, y),
           onDownloadStartRequest: (c, request) =>
               ctrl.onDownloadStartRequestCallback(request),
+          onReceivedError: (c, request, error) =>
+              ctrl.onReceivedErrorCallback(request, error),
           onRenderProcessGone: (c, detail) => ctrl.onRenderProcessGone(),
         ),
         onSwipeForward: onSwipeForward,

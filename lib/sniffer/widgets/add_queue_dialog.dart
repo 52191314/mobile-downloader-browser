@@ -13,7 +13,6 @@ import '../filename_utils.dart';
 import '../hls_playlist_cache_lookup.dart';
 import '../models/browser_tab.dart';
 import '../models/sniffed_media.dart';
-import '../sheets/duplicate_download_dialog.dart';
 import '../sniffer_url_utils.dart';
 import 'folder_selector.dart';
 import 'rename_file_dialog.dart';
@@ -234,6 +233,219 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
     return 'Default / Master';
   }
 
+  /// Date + time pickers for "Download later". Returns null if cancelled.
+  Future<DateTime?> _pickScheduleStartAt() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 30)),
+    );
+    if (picked == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (time == null || !mounted) return null;
+    return DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      time.hour,
+      time.minute,
+    );
+  }
+
+  /// Builds the task and either starts now or schedules for [startAt].
+  Future<void> _submit({DateTime? startAt}) async {
+    var filename = filenameController.text.trim();
+    if (filename.isEmpty) return;
+    if (FilenameService.utf8ByteLength(filename) >
+        FilenameService.defaultMaxFileNameBytes) {
+      filename = FilenameService.truncate(
+        filename,
+        maxBytes: FilenameService.defaultMaxFileNameBytes,
+      );
+    }
+    final navigator = Navigator.of(context);
+    final scheduleLater = startAt != null;
+
+    setState(() => isSubmitting = true);
+
+    try {
+      final mediaUrl = selectedMedia.url;
+      if (RestrictedMediaPolicy.isBlocked(
+        mediaUrl: mediaUrl,
+        sourcePageUrl: widget.currentUrl ??
+            widget.tab.currentUrl ??
+            selectedMedia.sourcePageUrl,
+      )) {
+        if (mounted) {
+          setState(() => isSubmitting = false);
+          AuroraSnackbar.show(
+            context,
+            RestrictedMediaPolicy.userMessageRestricted,
+          );
+        }
+        return;
+      }
+
+      final baseDir = widget.baseDir ?? Directory.systemTemp.path;
+      final baseTemp = widget.baseTemp ?? Directory.systemTemp.path;
+      final cookieHeaders = await widget.getCookiesForUrl(selectedMedia.url);
+      final taskHeaders = buildSniffedDownloadHeaders(
+        tab: widget.tab,
+        media: selectedMedia,
+        cookieHeaders: cookieHeaders,
+        currentUrl: widget.currentUrl,
+      );
+
+      // Use the sniffer/quality-picker URL as-is. No pre-flight playlist
+      // refresh — that only delayed the queue and often 403'd on Cloudflare
+      // while the selected URL was already fine.
+
+      final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+      final saveDir = selectedFolder.isNotEmpty
+          ? '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$selectedFolder'
+          : '$baseDir${Platform.pathSeparator}completed';
+      final savePath = FilenameService.uniquePath(
+        '$saveDir${Platform.pathSeparator}$filename',
+        reservedPaths: widget.downloadQueue.allTasks.map((t) => t.savePath),
+      );
+      final task = DownloadTask(
+        id: taskId,
+        url: mediaUrl,
+        sourcePageUrl: selectedMedia.sourcePageUrl,
+        savePath: savePath,
+        tempDir: '$baseTemp${Platform.pathSeparator}temp_$taskId',
+        priority: selectedPriority,
+        contentType: selectedMedia.contentType,
+        headers: taskHeaders,
+        totalBytes: selectedMedia.contentLengthBytes ?? -1,
+      );
+      // Wire up the token-refresh hook so the HLS downloader can recover
+      // from 403 by re-sniffing the page URL.
+      if (widget.onTokenExpired != null) {
+        task.onTokenExpired = widget.onTokenExpired;
+      }
+      // Wire up the WebView JS fetch bridge so the HLS downloader can
+      // request playlists through the browser's networking stack.
+      task.fetchViaWebView = (url, {headers}) =>
+          widget.tab.controller.fetchPlaylistBodyViaJavaScript(url);
+      // Wire up the HLS playlist body cache so the downloader can use
+      // browser-captured playlist bodies directly.
+      task.hlsPlaylistCache = (url) =>
+          lookupHlsPlaylistCache(widget.tab.hlsPlaylistCache, url);
+      task.fetchBinaryViaWebView =
+          (url) => widget.tab.controller.fetchBinaryViaJavaScript(url);
+      task.cookieProvider =
+          (url) => widget.tab.controller.getCookiesForDomain(url: url);
+
+      bool force = false;
+      final hasDuplicate = widget.downloadQueue.urlExists(mediaUrl) ||
+          widget.downloadQueue.samePageFilenameExists(
+            filename,
+            selectedMedia.sourcePageUrl,
+          );
+      if (hasDuplicate) {
+        if (!mounted) return;
+        final choice = await showDialog<DuplicateChoice>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Already in Queue'),
+              content: const Text(
+                'This download link has already been added to your queue.\n\n'
+                'What would you like to do?',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(DuplicateChoice.skip),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(DuplicateChoice.downloadAgain),
+                  child: const Text('Create New'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context)
+                      .pop(DuplicateChoice.updateExisting),
+                  child: const Text('Update Existing'),
+                ),
+              ],
+            );
+          },
+        );
+        if (choice == null || choice == DuplicateChoice.skip) {
+          if (mounted) {
+            setState(() => isSubmitting = false);
+          }
+          return;
+        }
+        if (choice == DuplicateChoice.updateExisting) {
+          final existingId = widget.downloadQueue.resniffPendingTaskId ??
+              widget.downloadQueue.getTaskByUrl(mediaUrl)?.id ??
+              widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
+          if (existingId != null) {
+            await widget.downloadQueue.updateTaskFromDonor(existingId, task);
+            if (!mounted) return;
+            navigator.pop(true);
+            AuroraSnackbar.show(
+              context,
+              'Done — Link updated. Download will retry.',
+            );
+            return;
+          }
+        }
+        force = true;
+      }
+
+      if (scheduleLater) {
+        // scheduleTask owns persistence + scheduled state; ignore force —
+        // a new id always creates a distinct scheduled entry.
+        widget.downloadQueue.scheduleTask(task, startAt);
+        AuroraLog.instance.info(
+          'Media scheduled: "$filename" for $startAt (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
+          category: LogCategory.sniffer,
+          screen: LogScreen.browser,
+          eventType: LogEventType.sniff,
+          taskId: task.id,
+        );
+        if (!mounted) return;
+        navigator.pop(true);
+        final hh = startAt.hour.toString().padLeft(2, '0');
+        final mm = startAt.minute.toString().padLeft(2, '0');
+        AuroraSnackbar.show(
+          context,
+          'Scheduled "$filename" for ${startAt.month}/${startAt.day} $hh:$mm.',
+        );
+      } else {
+        widget.downloadQueue.addTask(task, force: force);
+        AuroraLog.instance.info(
+          'Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
+          category: LogCategory.sniffer,
+          screen: LogScreen.browser,
+          eventType: LogEventType.sniff,
+          taskId: task.id,
+        );
+        if (!mounted) return;
+        navigator.pop(true);
+        AuroraSnackbar.show(context, 'Added "$filename" to queue.');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
+      AuroraSnackbar.show(
+        context,
+        'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -378,185 +590,20 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                 },
           child: const Text('Cancel'),
         ),
-        ElevatedButton(
-          key: const Key('dialog_add_button'),
+        TextButton(
+          key: const Key('dialog_download_later_button'),
           onPressed: isSubmitting
               ? null
               : () async {
-                  var filename = filenameController.text.trim();
-                  if (filename.isEmpty) return;
-                  if (FilenameService.utf8ByteLength(filename) >
-                      FilenameService.defaultMaxFileNameBytes) {
-                    filename = FilenameService.truncate(
-                      filename,
-                      maxBytes: FilenameService.defaultMaxFileNameBytes,
-                    );
-                  }
-                  final navigator = Navigator.of(context);
-
-                  setState(() => isSubmitting = true);
-
-                  try {
-                    final mediaUrl = selectedMedia.url;
-                    if (RestrictedMediaPolicy.isBlocked(
-                      mediaUrl: mediaUrl,
-                      sourcePageUrl: widget.currentUrl ??
-                          widget.tab.currentUrl ??
-                          selectedMedia.sourcePageUrl,
-                    )) {
-                      if (mounted) {
-                        setState(() => isSubmitting = false);
-                        AuroraSnackbar.show(
-                          context,
-                          RestrictedMediaPolicy.userMessageRestricted,
-                        );
-                      }
-                      return;
-                    }
-
-                    final baseDir = widget.baseDir ?? Directory.systemTemp.path;
-                    final baseTemp =
-                        widget.baseTemp ?? Directory.systemTemp.path;
-                    final cookieHeaders = await widget.getCookiesForUrl(
-                      selectedMedia.url,
-                    );
-                    final taskHeaders = buildSniffedDownloadHeaders(
-                      tab: widget.tab,
-                      media: selectedMedia,
-                      cookieHeaders: cookieHeaders,
-                      currentUrl: widget.currentUrl,
-                    );
-
-                    // Use the sniffer/quality-picker URL as-is. No pre-flight
-                    // playlist refresh — that only delayed the queue and often
-                    // 403'd on Cloudflare while the selected URL was already fine.
-
-                    final taskId = DateTime.now().millisecondsSinceEpoch
-                        .toString();
-                    final saveDir = selectedFolder.isNotEmpty
-                        ? '$baseDir${Platform.pathSeparator}completed${Platform.pathSeparator}$selectedFolder'
-                        : '$baseDir${Platform.pathSeparator}completed';
-                    final savePath = FilenameService.uniquePath(
-                      '$saveDir${Platform.pathSeparator}$filename',
-                      reservedPaths: widget.downloadQueue.allTasks
-                          .map((t) => t.savePath),
-                    );
-                    final task = DownloadTask(
-                      id: taskId,
-                      url: mediaUrl,
-                      sourcePageUrl: selectedMedia.sourcePageUrl,
-                      savePath: savePath,
-                      tempDir: '$baseTemp${Platform.pathSeparator}temp_$taskId',
-                      priority: selectedPriority,
-                      contentType: selectedMedia.contentType,
-                      headers: taskHeaders,
-                      totalBytes: selectedMedia.contentLengthBytes ?? -1,
-                    );
-                    // Wire up the token-refresh hook so the HLS downloader
-                    // can recover from 403 by re-sniffing the page URL.
-                    if (widget.onTokenExpired != null) {
-                      task.onTokenExpired = widget.onTokenExpired;
-                    }
-                    // Wire up the WebView JS fetch bridge so the HLS
-                    // downloader can request playlists through the
-                    // browser's networking stack (Cloudflare clearance
-                    // cookies, raw UA, correct TLS fingerprint).
-                    task.fetchViaWebView = (url, {headers}) =>
-                        widget.tab.controller.fetchPlaylistBodyViaJavaScript(url);
-                    // Wire up the HLS playlist body cache so the
-                    // downloader can use browser-captured playlist
-                    // bodies directly (zero network requests).
-                    task.hlsPlaylistCache = (url) =>
-                        lookupHlsPlaylistCache(widget.tab.hlsPlaylistCache, url);
-                    task.fetchBinaryViaWebView = (url) =>
-                        widget.tab.controller.fetchBinaryViaJavaScript(url);
-                    task.cookieProvider = (url) =>
-                        widget.tab.controller.getCookiesForDomain(url: url);
-
-                    bool force = false;
-                    final hasDuplicate = widget.downloadQueue.urlExists(mediaUrl) ||
-                        widget.downloadQueue.samePageFilenameExists(
-                          filename,
-                          selectedMedia.sourcePageUrl,
-                        );
-                    if (hasDuplicate) {
-                      if (!context.mounted) return;
-                      final choice = await showDialog<DuplicateChoice>(
-                        context: context,
-                        builder: (BuildContext context) {
-                          return AlertDialog(
-                            title: const Text('Already in Queue'),
-                            content: const Text(
-                              'This download link has already been added to your queue.\n\n'
-                              'What would you like to do?',
-                            ),
-                            actions: <Widget>[
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
-                                child: const Text('Create New'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
-                                child: const Text('Update Existing'),
-                              ),
-                            ],
-                          );
-                        },
-                      );
-                      if (choice == null || choice == DuplicateChoice.skip) {
-                        if (mounted) {
-                          setState(() => isSubmitting = false);
-                        }
-                        return;
-                      }
-                      if (choice == DuplicateChoice.updateExisting) {
-                        final existingId =
-                            widget.downloadQueue.resniffPendingTaskId ??
-                            widget.downloadQueue.getTaskByUrl(mediaUrl)?.id ??
-                            widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
-                        if (existingId != null) {
-                          await widget.downloadQueue.updateTaskFromDonor(
-                            existingId,
-                            task,
-                          );
-                          if (!mounted) return;
-                          navigator.pop(true);
-                          AuroraSnackbar.show(
-                            context,
-                            'Done — Link updated. Download will retry.',
-                          );
-                          return;
-                        }
-                      }
-                      force = true;
-                    }
-
-                    widget.downloadQueue.addTask(task, force: force);
-                    AuroraLog.instance.info(
-                      'Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
-                      category: LogCategory.sniffer,
-                      screen: LogScreen.browser,
-                      eventType: LogEventType.sniff,
-                      taskId: task.id,
-                    );
-
-                    if (!mounted) return;
-                    navigator.pop(true);
-                    AuroraSnackbar.show(context, 'Added "$filename" to queue.');
-                  } catch (e) {
-                    if (mounted) {
-                      setState(() => isSubmitting = false);
-                    }
-                    AuroraSnackbar.show(
-                      context,
-                      'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
-                    );
-                  }
+                  final startAt = await _pickScheduleStartAt();
+                  if (startAt == null || !mounted) return;
+                  await _submit(startAt: startAt);
                 },
+          child: const Text('Download later'),
+        ),
+        ElevatedButton(
+          key: const Key('dialog_add_button'),
+          onPressed: isSubmitting ? null : () => _submit(),
           child: isSubmitting
               ? const SizedBox(
                   width: 18,

@@ -23,12 +23,13 @@ import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
 import 'sync/sync.dart';
 import 'theme/aurora_glass_background.dart';
-import 'theme/aurora_palette.dart';
 import 'theme/aurora_theme.dart';
+import 'theme/aurora_tokens.dart';
 import 'ui/pages/queue_page.dart';
 import 'ui/widgets/aurora_dock.dart';
 import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
+import 'ui/settings_open_request.dart';
 import 'backup/auto_backup_service.dart';
 import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
@@ -38,11 +39,16 @@ import 'premium/turbo_policy.dart';
 import 'premium/send_to_pc_sheet.dart';
 import 'premium/audio_extract_platform.dart';
 import 'premium/phase2_caps.dart';
+import 'premium/accent_pack.dart';
 import 'premium/vault_service.dart';
 import 'ui/pages/vault_page.dart';
 import 'sniffer/token_refresh_service.dart';
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
+import 'premium/watcher/watcher_service.dart';
+import 'premium/automation/automation_api_service.dart';
+import 'settings/onboarding_experiment.dart';
+import 'ui/widgets/onboarding_spotlight.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
 /// same constant in sniffer_screen.dart so manually-pasted HLS requests look
@@ -74,8 +80,9 @@ void main() {
   // because Samsung's One UI aggressively kills apps that hit an uncaught
   // error during init.
   runZonedGuarded(
-    () {
+    () async {
       WidgetsFlutterBinding.ensureInitialized();
+      await loadSavedAccentPack();
       if (kDebugMode) {
         LogServer.start();
       }
@@ -121,29 +128,45 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to both the theme-mode and OLED-dark notifiers. Wired via
-    // Listenable.merge so a single rebuild handles both changes.
+    // Listen to theme-mode, OLED-dark, and accent-pack notifiers so a single
+    // rebuild keeps Material ThemeData and AuroraPalette in lockstep.
     return ListenableBuilder(
-      listenable: Listenable.merge([appThemeModeNotifier, appOledDarkNotifier]),
+      listenable: Listenable.merge([
+        appThemeModeNotifier,
+        appOledDarkNotifier,
+        appAccentPackNotifier,
+      ]),
       builder: (context, _) {
         final mode = appThemeModeNotifier.value;
         final isOled = appOledDarkNotifier.value;
-        final isLight = _isLightFor(mode);
+        // Accent packs must paint both Material ThemeData (sliders, nav,
+        // progress) and the AuroraPalette InheritedWidget.  Build both
+        // palettes once so light/dark ThemeData stay consistent with
+        // context.ac after a pack change.
+        final lightColors = _colorsForBrightness(isLight: true);
+        final darkColors = _colorsForBrightness(isLight: false);
         return MaterialApp(
           title: 'Aurora Downloader',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
-          theme: buildLightTheme(),
+          theme: buildLightTheme(colors: lightColors),
           // OLED black: only when the user explicitly selected
           // "Dark (OLED black)" (forced). System-default and light mode
           // use the standard near-black slate background.
-          darkTheme: buildDarkTheme(isOled: isOled),
-          // Wrap the entire subtree with the palette so every descendant
-          // resolves colors via `context.ac` regardless of brightness.
-          builder: (ctx, child) => AuroraTheme(
-            isLight: isLight,
-            child: child ?? const SizedBox.shrink(),
-          ),
+          darkTheme: buildDarkTheme(isOled: isOled, colors: darkColors),
+          // Resolve brightness from the Theme MaterialApp just applied.
+          // ThemeMode.system must follow the platform — never hardcode
+          // dark for the palette while Material goes light (or vice
+          // versa). That dual-source mismatch inverted text/surfaces.
+          builder: (ctx, child) {
+            final isLight =
+                Theme.of(ctx).brightness == Brightness.light;
+            return AuroraTheme(
+              isLight: isLight,
+              paletteOverride: isLight ? lightColors : darkColors,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           home: AuroraHome(
             browserController: browserController,
             downloadQueue: downloadQueue,
@@ -155,18 +178,10 @@ class MyApp extends StatelessWidget {
     );
   }
 
-  /// Maps the active [ThemeMode] to a boolean for the [AuroraPalette].
-  ///
-  /// "System default" always resolves to **dark** — the app's historic
-  /// identity is dark, and the vast majority of users expect it to stay
-  /// dark unless they explicitly opt into "Light" via Settings.  This
-  /// prevents the "inverted" appearance on devices in light mode (the
-  /// default on Samsung phones).
-  static bool _isLightFor(ThemeMode mode) {
-    if (mode == ThemeMode.light) return true;
-    // ThemeMode.system → always dark (preserves historic behaviour).
-    // ThemeMode.dark   → always dark.
-    return false;
+  /// Base light/dark [AColors] with the active accent pack fully applied
+  /// (accents, media chips, tab groups, subtle surface tint).
+  static AColors _colorsForBrightness({required bool isLight}) {
+    return colorsForAccentPack(activeAccentPack(), isLight: isLight);
   }
 }
 
@@ -198,6 +213,103 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   /// Guards concurrent soft dialogs if launch + first download race.
   static bool _batteryOptDialogShowing = false;
 
+  final GlobalKey _urlInputKey = GlobalKey();
+  final GlobalKey _browserTabKey = GlobalKey();
+  final GlobalKey _browserMenuKey = GlobalKey();
+  final GlobalKey _browserSnifferKey = GlobalKey();
+  final GlobalKey _browserTabsKey = GlobalKey();
+  final GlobalKey _queueTabKey = GlobalKey();
+
+  /// True while the spotlight tour is on-screen (prevents stacking).
+  bool _onboardingTourVisible = false;
+
+  /// Hard gate for notification / battery prompts.
+  ///
+  /// Starts **false** so nothing can race ahead of the first-launch tour.
+  /// Flipped to true only when:
+  /// - the tour is finished or skipped, or
+  /// - launch decides the tour is not needed (already completed / disabled).
+  bool _permissionPromptsAllowed = false;
+
+  void _showOnboardingSpotlight() {
+    if (!mounted || _onboardingTourVisible) return;
+    _onboardingTourVisible = true;
+    // Hold every soft/system permission dialog until dismiss.
+    _permissionPromptsAllowed = false;
+    // Steps 1–2 stay on Queue so shell dock keys stay mounted.
+    // Steps 3–5 switch to Browser so primary-bar keys (sniffer / tabs / ⋯) exist.
+    // No Queue-tab spotlight: that icon only exists on the Queue shell bar.
+    OnboardingSpotlightOverlay.show(
+      context,
+      steps: [
+        SpotlightStep(
+          targetKey: _urlInputKey,
+          title: 'Link & URL Input',
+          description:
+              'Paste media URLs or stream links here to start a download without opening the browser.',
+          icon: Icons.link_rounded,
+          onStepEntered: () => _selectTab(0),
+        ),
+        SpotlightStep(
+          targetKey: _browserTabKey,
+          title: 'Media Sniffer Browser',
+          description:
+              'Open the built-in browser to browse sites and auto-detect streams, HLS playlists, and audio.',
+          icon: Icons.language_rounded,
+          onStepEntered: () => _selectTab(0),
+        ),
+        SpotlightStep(
+          targetKey: _browserSnifferKey,
+          title: 'Sniffed Media (Radar)',
+          description:
+              'When the radar lights up, tap it to review detected media and add items to the queue. '
+              'Queue is left of Radar; bookmarks list is on the right. '
+              'Use the star in the address bar to save the current page.',
+          icon: Icons.radar,
+          onStepEntered: () => _selectTab(1),
+        ),
+        SpotlightStep(
+          targetKey: _browserTabsKey,
+          title: 'Browser Tabs',
+          description:
+              'Manage multiple pages at once — open, switch, or close tabs from this control.',
+          icon: Icons.tab_rounded,
+          onStepEntered: () => _selectTab(1),
+        ),
+        SpotlightStep(
+          targetKey: _browserMenuKey,
+          title: 'Menu Popup (⋯)',
+          description:
+              'Opens Settings and Tools. Important destinations: User Guide, Adblock, Download Rules, '
+              'Private Vault, Profiles, WebDAV Backup, Aurora Watcher, History, and Favorites.',
+          icon: Icons.more_vert_rounded,
+          onStepEntered: () => _selectTab(1),
+        ),
+      ],
+      onDismissed: () {
+        _onboardingTourVisible = false;
+        // Unlock + request only after finish / skip.
+        _permissionPromptsAllowed = true;
+        unawaited(_requestPostOnboardingPermissions());
+      },
+    );
+  }
+
+  /// Whether soft/system permission dialogs may show right now.
+  bool get _canPromptPermissions =>
+      _permissionPromptsAllowed && !_onboardingTourVisible;
+
+  /// Notification then battery — only after the tour is done (or not needed).
+  Future<void> _requestPostOnboardingPermissions() async {
+    if (!mounted || !_canPromptPermissions) return;
+    // Sequential so system sheets do not stack on top of each other.
+    await _requestNotificationPermissionIfNeeded();
+    if (!mounted || !_canPromptPermissions) return;
+    await Future.delayed(const Duration(milliseconds: 350));
+    if (!mounted || !_canPromptPermissions) return;
+    await _promptBatteryOptIfNeeded();
+  }
+
   late final DownloadQueue _downloadQueue;
   late final DriveSyncService _driveSyncService;
   late final SnifferBrowserController _browserController;
@@ -220,6 +332,19 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       DownloadNotificationService();
   late final AutoBackupService _autoBackupService = AutoBackupService(
     isProCallback: () => _proEntitlement.isPro,
+  );
+  late final WatcherService _watcherService = WatcherService(
+    onEnqueue: (url, {label}) async {
+      _urlController.text = url;
+      await _addDownloadFromUrl();
+    },
+  );
+  late final AutomationApiService _automationApiService = AutomationApiService(
+    proEntitlement: _proEntitlement,
+    onQueueChanged: () {
+      if (mounted) setState(() {});
+    },
+    downloadQueue: _downloadQueue,
   );
   StreamSubscription<DownloadTask>? _queueSubscription;
   StreamSubscription<DriveSyncState>? _driveSubscription;
@@ -262,8 +387,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         return LogScreen.queue;
       case 1:
         return LogScreen.browser;
-      case 2:
-        return LogScreen.settings;
       default:
         return LogScreen.unknown;
     }
@@ -272,8 +395,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _currentTabIndex = widget.initialTabIndex;
-    _visitedMainTabs.add(widget.initialTabIndex);
+    _currentTabIndex = widget.initialTabIndex.clamp(0, 1);
+    _visitedMainTabs.add(_currentTabIndex);
     _downloadQueue =
         widget.downloadQueue ??
         DownloadQueue(
@@ -343,15 +466,37 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       }
       // Soft battery-opt prompt on first download if launch path has not
       // already handled it this session (Later / never / already exempt).
+      // Hard-gated until the first-launch tour finishes or is skipped.
       if (task.state == DownloadState.downloading) {
-        unawaited(_promptBatteryOptIfNeeded(delay: Duration.zero));
+        unawaited(_promptBatteryOptIfNeeded());
       }
     });
     _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
-    // Soft battery-opt prompt on app start (once), after the UI settles.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_promptBatteryOptIfNeeded(delay: const Duration(seconds: 2)));
+    unawaited(_watcherService.initialize());
+    if (_automationApiService.isAllowed) {
+      unawaited(_automationApiService.start().catchError((e) {
+        if (kDebugMode) debugPrint('[AutomationApi] Auto-start failed: $e');
+        return '';
+      }));
+    }
+    // First install: tour first. Permissions stay locked (_permissionPromptsAllowed
+    // = false) until finish/skip. Returning users unlock immediately.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      try {
+        if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+      } catch (_) {}
+      final showTour = await OnboardingExperiment.shouldAutoShowTour();
+      debugPrint('[OnboardingCheck] shouldAutoShowTour=$showTour');
+      if (showTour) {
+        // Keep _permissionPromptsAllowed false for the whole tour.
+        _showOnboardingSpotlight();
+        return;
+      }
+      _permissionPromptsAllowed = true;
+      unawaited(_requestPostOnboardingPermissions());
     });
   }
 
@@ -399,9 +544,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     } catch (e, s) {
       _logError('Failed to init notifications', e, s);
     }
-    // On Android 13+, request POST_NOTIFICATIONS at most once (persisted),
-    // and only when not already granted.
-    unawaited(_requestNotificationPermissionIfNeeded());
+    // POST_NOTIFICATIONS is requested only after the first-launch tour is
+    // finished/skipped (or when the tour was already completed) — see
+    // [_requestPostOnboardingPermissions]. Init here must not prompt.
     _driveSubscription = _driveSyncService.onStateChanged.listen((state) {
       if (mounted) {
         setState(() {
@@ -419,13 +564,18 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   /// After the first system prompt we persist [notificationPermissionAsked]
   /// so a deny is not re-prompted on every cold start (OS permanent-deny is
   /// still respected if the user later enables notifications in Settings).
+  ///
+  /// Blocked until [_permissionPromptsAllowed] (tour finished/skipped or
+  /// not required this session).
   Future<void> _requestNotificationPermissionIfNeeded() async {
     try {
       if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     } catch (_) {}
+    if (!_canPromptPermissions) return;
     if (_loadSettingsFuture != null) {
       await _loadSettingsFuture;
     }
+    if (!_canPromptPermissions) return;
     if (await DownloadForegroundService.areNotificationsEnabled()) {
       return;
     }
@@ -439,6 +589,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   /// Soft battery-opt prompt used by launch and first-download paths.
   ///
+  /// - Hard-gated by [_permissionPromptsAllowed] until the app tour ends.
   /// - Skips when already exempt, user chose never-ask, or this process
   ///   already handled the prompt (including **Later** session suppress).
   /// - Always shows the soft dialog first; only "Open settings" opens the
@@ -449,15 +600,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     try {
       if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     } catch (_) {}
+    // Never interrupt the spotlight tour (or pre-tour launch window).
+    if (!_canPromptPermissions) return;
     if (_loadSettingsFuture != null) {
       await _loadSettingsFuture;
     }
+    if (!_canPromptPermissions) return;
     if (_settings.neverAskBatteryOpt) return;
     if (_batteryOptRequested || _batteryOptDialogShowing) return;
 
     if (delay > Duration.zero) {
       await Future.delayed(delay);
       if (!mounted) return;
+      // Re-check after delay — tour may have started or re-locked prompts.
+      if (!_canPromptPermissions) return;
       if (_settings.neverAskBatteryOpt) return;
       if (_batteryOptRequested || _batteryOptDialogShowing) return;
     }
@@ -466,6 +622,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _batteryOptRequested = true;
       return;
     }
+
+    if (!_canPromptPermissions) return;
 
     _batteryOptDialogShowing = true;
     try {
@@ -570,23 +728,76 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     );
   }
 
-  /// Switches the active main tab (Queue=0, Browser=1, Settings=2).
+  /// Switches the active main tab (Queue=0, Browser=1).
+  /// Settings sub-pages are full-screen routes, not a third tab.
   ///
   /// Browser pause/resume is driven by [SnifferScreen.isShellVisible]
   /// (set from `_currentTabIndex == 1`), not by the shell
   /// [_browserController] — that instance has no attached platform WebView.
   void _selectTab(int index) {
+    final clamped = index.clamp(0, 1);
+    if (clamped == _currentTabIndex) {
+      // Still mark visited so lazy tab children stay mounted if needed.
+      if (!_visitedMainTabs.contains(clamped)) {
+        setState(() => _visitedMainTabs.add(clamped));
+      }
+      return;
+    }
     final previous = _currentTabIndex;
     setState(() {
-      _currentTabIndex = index;
-      _visitedMainTabs.add(index);
+      _currentTabIndex = clamped;
+      _visitedMainTabs.add(clamped);
     });
     AuroraLog.instance.info(
-      'Tab switch: $previous → $index',
+      'Tab switch: $previous → $clamped',
       category: LogCategory.app,
       screen: LogScreen.settings,
       eventType: LogEventType.navigation,
     );
+  }
+
+  /// Opens a Settings sub-page over the shell (usually Browser).
+  /// Completes when the route is popped (menu does not auto-reopen).
+  Future<void> _openSettingsSection(SettingsSection section) async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(
+          driveSyncService: _driveSyncService,
+          folderController: _folderController,
+          adblockSourceController: _adblockSourceController,
+          customSearchController: _customSearchController,
+          settings: _settings,
+          onSettingsChanged: _updateSettings,
+          downloadQueue: _downloadQueue,
+          libraryUpdateNotifier: _libraryUpdateNotifier,
+          autoBackupService: _autoBackupService,
+          watcherService: _watcherService,
+          automationApiService: _automationApiService,
+          proEntitlement: _proEntitlement,
+          playBilling: _playBilling,
+          vaultService: _vaultService,
+          onRulesChanged: _reloadRules,
+          launchSection: section,
+          onOpenUrlInBrowser: _openUrlInBrowser,
+          speedLimitKbps: _speedLimitKbps,
+          onSpeedLimitChanged: (value) {
+            setState(() => _speedLimitKbps = value);
+            _downloadQueue.setSpeedLimit(value.round());
+            TorrentDownloader.setNativeDownloadLimit(
+              (value * 1024).round(),
+            );
+          },
+        ),
+      ),
+    );
+    // Returning from Settings after "Show app tour" (reset completion).
+    if (await OnboardingExperiment.shouldAutoShowTour()) {
+      if (mounted) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        _showOnboardingSpotlight();
+      }
+    }
   }
 
   @override
@@ -638,6 +849,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       if (_downloadQueue.queuePath != null) {
         unawaited(_downloadQueue.saveToFile(_downloadQueue.queuePath!));
       }
+      // Trigger background auto backup if enabled.
+      unawaited(_autoBackupService.performBackgroundBackup());
     } else if (state == AppLifecycleState.resumed) {
       debugPrint('[AuroraHome] App resumed');
       AuroraLog.instance.info(
@@ -664,11 +877,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Browser tab has its own bottom bar; Queue and Settings need dock padding.
-    final needsDockPad = _currentTabIndex != 1;
-    final bottomInset = needsDockPad
-        ? MediaQuery.of(context).padding.bottom + 64.0
-        : 0.0;
+    // Always-visible shell nav (Queue · Browser · Settings). Scaffold's
+    // bottomNavigationBar insets the body, so Browser chrome sits above it.
     return AuroraGlassBackground(
       child: PopScope(
         canPop: false,
@@ -696,134 +906,99 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         child: Scaffold(
           body: Stack(
             children: [
-              Padding(
-                padding: EdgeInsets.only(bottom: bottomInset),
-                child: Stack(
-                  children: [
-                    if (_visitedMainTabs.contains(0))
-                      IgnorePointer(
-                        ignoring: _currentTabIndex != 0,
-                        child: AnimatedOpacity(
-                          opacity: _currentTabIndex == 0 ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 150),
-                          child: QueuePage(
-                            key: const ValueKey('queue_tab'),
-                            queue: _downloadQueue,
-                            urlController: _urlController,
-                            onAddDownload: _addDownloadFromUrl,
-                            onOpenDownload: _openDownload,
-                            onRetryTask: (task) async {
-                              await _downloadQueue.retryHlsTaskWithRefreshAsync(
-                                task.id,
-                                forceReload: true,
-                              );
-                            },
-                            onPauseTask: (task) =>
-                                () => unawaited(
-                                  _downloadQueue.pauseTaskAsync(task.id),
-                                ),
-                            onResumeTask: (task) =>
-                                () => unawaited(
-                                  _downloadQueue.resumeTaskAsync(task.id),
-                                ),
-                            onCancelTask: (task) =>
-                                () => unawaited(
-                                  _downloadQueue.cancelTaskAsync(task.id),
-                                ),
-                            onForceMergeTask: (task) =>
-                                _downloadQueue.forceMergeTask(task.id),
-                            speedLimitKbps: _speedLimitKbps,
-                            onOpenUrlInBrowser: _openUrlInBrowser,
-                            onResniffAuto: _resniffAuto,
-                            onResniffManual: _resniffManual,
-                            onShareDownload: _shareDownload,
-                            onSendToPc: _sendToPc,
-                            onMoveToVault: _moveToVault,
-                            onRedownload: _redownloadTask,
-                            onOpenBrowser: () => _selectTab(1),
+              if (_visitedMainTabs.contains(0))
+                IgnorePointer(
+                  ignoring: _currentTabIndex != 0,
+                  child: AnimatedOpacity(
+                    opacity: _currentTabIndex == 0 ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 150),
+                    child: QueuePage(
+                      key: const ValueKey('queue_tab'),
+                      urlInputKey: _urlInputKey,
+                      queue: _downloadQueue,
+                      urlController: _urlController,
+                      onAddDownload: _addDownloadFromUrl,
+                      onOpenDownload: _openDownload,
+                      onRetryTask: (task) async {
+                        await _downloadQueue.retryHlsTaskWithRefreshAsync(
+                          task.id,
+                          forceReload: true,
+                        );
+                      },
+                      onPauseTask: (task) =>
+                          () => unawaited(
+                            _downloadQueue.pauseTaskAsync(task.id),
                           ),
-                        ),
-                      ),
-                    if (_visitedMainTabs.contains(1))
-                      IgnorePointer(
-                        ignoring: _currentTabIndex != 1,
-                        child: AnimatedOpacity(
-                          opacity: _currentTabIndex == 1 ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 150),
-                          child: SnifferScreen(
-                            key: const ValueKey('browser_tab'),
-                            controller: _browserController,
-                            downloadQueue: _downloadQueue,
-                            settings: _settings,
-                            onSettingsChanged: _updateSettings,
-                            libraryUpdateNotifier: _libraryUpdateNotifier,
-                            openRequestBus: _browserOpenRequestBus,
-                            isProCallback: () => _proEntitlement.isPro,
-                            // Drive pause/resume when leaving/entering Browser
-                            // so platform views do not freeze under opacity 0.
-                            isShellVisible: _currentTabIndex == 1,
-                            onOpenQueue: () => _selectTab(0),
-                            onOpenSettings: () => _selectTab(2),
-                            onSniffedCountChanged: (count) {
-                              if (_sniffedCount == count) return;
-                              _sniffedCount = count;
-                              if (mounted) {
-                                _sniffedCountNotifier.value = count;
-                              }
-                            },
+                      onResumeTask: (task) =>
+                          () => unawaited(
+                            _downloadQueue.resumeTaskAsync(task.id),
                           ),
-                        ),
-                      ),
-                    if (_visitedMainTabs.contains(2))
-                      IgnorePointer(
-                        ignoring: _currentTabIndex != 2,
-                        child: AnimatedOpacity(
-                          opacity: _currentTabIndex == 2 ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 150),
-                          child: SettingsPage(
-                            key: const ValueKey('settings_tab'),
-                            driveSyncService: _driveSyncService,
-                            folderController: _folderController,
-                            adblockSourceController: _adblockSourceController,
-                            customSearchController: _customSearchController,
-                            settings: _settings,
-                            onSettingsChanged: _updateSettings,
-                            downloadQueue: _downloadQueue,
-                            libraryUpdateNotifier: _libraryUpdateNotifier,
-                            autoBackupService: _autoBackupService,
-                            proEntitlement: _proEntitlement,
-                            playBilling: _playBilling,
-                            vaultService: _vaultService,
-                            speedLimitKbps: _speedLimitKbps,
-                            onSpeedLimitChanged: (value) {
-                              setState(() => _speedLimitKbps = value);
-                              _downloadQueue.setSpeedLimit(value.round());
-                              TorrentDownloader.setNativeDownloadLimit(
-                                (value * 1024).round(),
-                              );
-                            },
+                      onCancelTask: (task) =>
+                          () => unawaited(
+                            _downloadQueue.cancelTaskAsync(task.id),
                           ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: MediaQuery.of(context).padding.bottom + 8,
-                child: Offstage(
-                  offstage: _currentTabIndex == 1, // hidden on browser tab
-                  child: AuroraDock(
-                    currentIndex: _currentTabIndex,
-                    onTabSelected: (index) => _selectTab(index),
-                    onAddPressed: _addDownloadFromUrl,
-                    sniffedBadgeCountNotifier: _sniffedCountNotifier,
+                      onForceMergeTask: (task) =>
+                          _downloadQueue.forceMergeTask(task.id),
+                      speedLimitKbps: _speedLimitKbps,
+                      onOpenUrlInBrowser: _openUrlInBrowser,
+                      onResniffAuto: _resniffAuto,
+                      onResniffManual: _resniffManual,
+                      onShareDownload: _shareDownload,
+                      onSendToPc: _sendToPc,
+                      onMoveToVault: _moveToVault,
+                      onRedownload: _redownloadTask,
+                      onOpenBrowser: () => _selectTab(1),
+                    ),
                   ),
                 ),
-              ),
+              if (_visitedMainTabs.contains(1))
+                IgnorePointer(
+                  ignoring: _currentTabIndex != 1,
+                  child: AnimatedOpacity(
+                    opacity: _currentTabIndex == 1 ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 150),
+                    child: SnifferScreen(
+                      key: const ValueKey('browser_tab'),
+                      menuKey: _browserMenuKey,
+                      snifferKey: _browserSnifferKey,
+                      tabsKey: _browserTabsKey,
+                      controller: _browserController,
+                      downloadQueue: _downloadQueue,
+                      settings: _settings,
+                      onSettingsChanged: _updateSettings,
+                      libraryUpdateNotifier: _libraryUpdateNotifier,
+                      openRequestBus: _browserOpenRequestBus,
+                      isProCallback: () => _proEntitlement.isPro,
+                      ruleEngine: _ruleEngine,
+                      // Drive pause/resume when leaving/entering Browser
+                      // so platform views do not freeze under opacity 0.
+                      isShellVisible: _currentTabIndex == 1,
+                      onOpenQueue: () => _selectTab(0),
+                      onOpenSettings: () =>
+                          _openSettingsSection(SettingsSection.about),
+                      onOpenSettingsSection: _openSettingsSection,
+                      onSniffedCountChanged: (count) {
+                        if (_sniffedCount == count) return;
+                        _sniffedCount = count;
+                        if (mounted) {
+                          _sniffedCountNotifier.value = count;
+                        }
+                      },
+                    ),
+                  ),
+                ),
             ],
           ),
+          // Browser: own toolbar. Queue: slim Queue | Browser switcher only.
+          bottomNavigationBar: _currentTabIndex == 1
+              ? null
+              : AuroraDock(
+                  currentIndex: _currentTabIndex,
+                  onTabSelected: (index) => _selectTab(index),
+                  sniffedBadgeCountNotifier: _sniffedCountNotifier,
+                  queueKey: _queueTabKey,
+                  browserKey: _browserTabKey,
+                ),
         ),
       ),
     );
@@ -956,11 +1131,29 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     // Probe the URL for a real filename, Content-Type, and size.
     final resolved = await resolveFilename(url: rawUrl, headers: headers);
-    final fileName = FilenameService.truncate(
+    var fileName = FilenameService.truncate(
       FilenameService.sanitize(resolved.name),
     );
+
+    var targetDir = baseDir.path;
+    DownloadRule? matchedRule;
+    if (_ruleEngine != null) {
+      matchedRule = _ruleEngine!.matchRule(
+        rawUrl,
+        mediaType: resolved.contentType,
+        pageHost: uri.host,
+      );
+      if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
+        fileName = _ruleEngine!.applyRename(matchedRule!, fileName);
+      }
+      final ruleDest = _ruleEngine!.getDestinationFolder(matchedRule);
+      if (ruleDest != null && ruleDest.isNotEmpty) {
+        targetDir = p.join(baseDir.path, ruleDest);
+      }
+    }
+
     final savePath = FilenameService.uniquePath(
-      '${baseDir.path}/$fileName',
+      '$targetDir/$fileName',
       reservedPaths: _downloadQueue.allTasks.map((t) => t.savePath),
     );
     final task = DownloadTask(
@@ -991,6 +1184,29 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         }
       }
       force = true;
+    }
+
+    if (matchedRule != null &&
+        matchedRule.timeWindowStartHour != null &&
+        matchedRule.timeWindowEndHour != null) {
+      final now = DateTime.now();
+      final currentHour = now.hour;
+      final startH = matchedRule.timeWindowStartHour!;
+      final endH = matchedRule.timeWindowEndHour!;
+      final inWindow = startH <= endH
+          ? (currentHour >= startH && currentHour < endH)
+          : (currentHour >= startH || currentHour < endH);
+      if (!inWindow) {
+        var schedDate = DateTime(now.year, now.month, now.day, startH);
+        if (schedDate.isBefore(now)) {
+          schedDate = schedDate.add(const Duration(days: 1));
+        }
+        _downloadQueue.scheduleTask(task, schedDate);
+        _urlController.clear();
+        _showSnack('Scheduled $fileName for time window start.');
+        if (mounted) setState(() {});
+        return;
+      }
     }
 
     _downloadQueue.addTask(task, force: force);
@@ -1267,6 +1483,17 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _reloadRules() async {
+    try {
+      final rules = await const DownloadRulesStore().load();
+      if (mounted) {
+        setState(() => _ruleEngine = DownloadRuleEngine(rules));
+      }
+    } catch (e, s) {
+      _logError('Failed to load download rules', e, s);
+    }
+  }
+
   Future<void> _loadSettings() async {
     final loaded = await _settingsStore.load();
     if (!mounted) return;
@@ -1279,15 +1506,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     });
     _applySettings(loaded);
 
-    // Load download rules.
-    try {
-      final rules = await const DownloadRulesStore().load();
-      if (mounted) {
-        setState(() => _ruleEngine = DownloadRuleEngine(rules));
-      }
-    } catch (e, s) {
-      _logError('Failed to load download rules', e, s);
-    }
+    await _reloadRules();
 
     try {
       final docs = await getApplicationSupportDirectory();
@@ -1588,7 +1807,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
     final vaultName = await _vaultService.store(file, tier: tier);
     if (vaultName != null) {
+      try {
+        await file.delete();
+      } catch (_) {
+        // Deletion failed but file is encrypted in vault — no plaintext leak
+      }
       _showSnack('Moved to vault.');
+    } else {
+      _showSnack('Failed to move to vault.');
     }
   }
 

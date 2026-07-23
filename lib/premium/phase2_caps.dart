@@ -112,11 +112,10 @@ class Phase2Caps {
   // ---------------------------------------------------------------------------
   // P13 — Theme & Accent Pack
   // ---------------------------------------------------------------------------
-  // Product rule: system/OLED global stays free; accent pack is Pro+.
-  // Gate check via ProFeatures.allows(themePack, tier) at the accent colour
-  // picker in Settings → Appearance.
-  // TODO(P13): implement accent colour palette (provider + preview +
-  // persistence); gate the non-free colours behind Pro.
+  // Product rule: system/OLED global stays free; accent packs are Pro+.
+  // Implemented: accent_pack.dart (load/save + notifier) + Appearance picker
+  // + colorsForAccentPack (accents, media chips, tab groups, surface tint).
+  // Gate: ProFeature.themePack on non-default packs in Settings → Appearance.
 }
 
 // ---------------------------------------------------------------------------

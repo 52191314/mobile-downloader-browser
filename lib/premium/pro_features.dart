@@ -10,13 +10,13 @@
 /// |-----|-----:|----:|------:|
 /// | `maxConcurrentDownloads` | 3 | 16 | 64 |
 /// | `chunksPerTask` | 8 | 32 | 64 |
-/// | HLS segments | 8 | 8 | 16 |
-/// | Enabled remote filter lists | 2 | unlimited | unlimited |
+/// | HLS segments | 4 | 8 | 64 (unlimited) |
+/// | Enabled remote filter lists | 3 | unlimited | unlimited |
 /// | Custom filter list URLs | 0 | unlimited | unlimited |
 /// | Tracker pack | no | yes | yes |
-/// | Tab groups | 1 | unlimited | unlimited |
+/// | Tab groups | 3 | unlimited | unlimited |
 /// | Auto-host on groups | no | yes | yes |
-/// | Cosmetic rules | 10 | unlimited | unlimited |
+/// | Cosmetic rules | 25 | unlimited | unlimited |
 /// | Drive sync | no | yes | yes |
 /// | Scheduled auto-backup | no | yes | yes |
 /// | Manual backup/export | yes | yes | yes |
@@ -178,10 +178,10 @@ class ProFeatures {
   static const int chunksPerTaskPro = 32;
   static const int chunksPerTaskUltra = 64;
 
-  /// HLS concurrent segment cap by tier (Key Decision: free/pro 8, ultra 16).
-  static const int hlsSegmentCapFree = 8;
+  /// HLS concurrent segment cap by tier: Free 4, Pro 8, Ultra 64 (unlimited).
+  static const int hlsSegmentCapFree = 4;
   static const int hlsSegmentCapPro = 8;
-  static const int hlsSegmentCapUltra = 16;
+  static const int hlsSegmentCapUltra = 64;
 
   // -- Adblock limits --
 
