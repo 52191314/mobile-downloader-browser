@@ -18,7 +18,15 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/services.dart';
+
 import '../build_channel.dart';
+
+/// Method channel name for Play Feature Delivery SplitInstallManager.
+const _kFeatureDeliveryChannel = 'aurora_downloader/feature_delivery';
+
+/// Method channel name for install progress events.
+const _kFeatureDeliveryProgress = 'aurora_downloader/feature_delivery_progress';
 
 // ---------------------------------------------------------------------------
 // Status enum
@@ -154,17 +162,22 @@ class GitHubModuleLoader extends FeatureModuleLoader {
 /// dynamic feature module. This loader uses Play Core's [SplitInstallManager]
 /// to download and install the module on first Ultra-gated use.
 ///
-/// **Current status:** Stub ready for Play Core integration.
-/// Full implementation requires:
-/// 1. Dynamic feature module `:ffmpeg` in Gradle (PR-C).
-/// 2. Dart deferred import split of ffmpeg-kit dependent code (PR-C).
-/// 3. Play Core dependency in `build.gradle.kts`.
+/// Communicates with the native Android [SplitInstallManager] via
+/// the `aurora_downloader/feature_delivery` method channel, defined in
+/// [MainActivity.kt].
 class PlayModuleLoader extends FeatureModuleLoader {
   PlayModuleLoader() : super._();
 
+  final MethodChannel _channel = const MethodChannel(_kFeatureDeliveryChannel);
+  final MethodChannel _progressChannel =
+      const MethodChannel(_kFeatureDeliveryProgress);
+
   final _statusController = StreamController<FeatureModuleStatus>.broadcast();
   final Map<String, FeatureModuleStatus> _cache = {};
-  bool _initialized = false;
+  bool _listening = false;
+
+  /// Session IDs for active installs, keyed by module name.
+  final Map<String, int> _activeSessions = {};
 
   FeatureModuleStatus _resolveStatus(String moduleId) {
     return _cache[moduleId] ?? FeatureModuleStatus.missing;
@@ -191,42 +204,41 @@ class PlayModuleLoader extends FeatureModuleLoader {
       return true;
     }
     if (current == FeatureModuleStatus.downloading) {
-      // Already in progress — wait for the stream to resolve.
       return _waitForModule(moduleId);
+    }
+
+    // First, check if the module is already installed.
+    final installed = await _checkModuleInstalled(moduleId);
+    if (installed) {
+      _cache[moduleId] = FeatureModuleStatus.ready;
+      _emit(moduleId, FeatureModuleStatus.ready);
+      return true;
     }
 
     _cache[moduleId] = FeatureModuleStatus.downloading;
     _emit(moduleId, FeatureModuleStatus.downloading);
 
     try {
-      // --- Play Core SplitInstallManager call goes here (PR-C) ---
-      // This is a stub that simulates the async install flow.
-      // The real implementation will:
-      //   1. Create a SplitInstallManager
-      //   2. Create a SplitInstallRequest for moduleId
-      //   3. Await the install with progress listener
-      //   4. Handle state changes (downloading, installed, failed)
-      //
-      // See: https://developer.android.com/guide/playcore/feature-delivery/on-demand
-      //
-      // Pseudocode:
-      //   final manager = SplitInstallManager.create(context);
-      //   final request = SplitInstallRequest.newBuilder()
-      //       .addModule(moduleId)
-      //       .build();
-      //   final task = manager.startInstall(request);
-      //   task.addListener(() {
-      //     final state = task.installState;
-      //     onProgress?.call(state.bytesDownloaded / state.totalBytes);
-      //   });
-      //   await task; // or handle failures
-      //
-      // For now, simulate a successful fast-path so Studio can be tested
-      // on Play internal track with FFmpeg already in the base APK.
+      // Listen for progress events from the native side.
+      _ensureProgressListener(onProgress);
 
-      // TODO(PR-C): Replace with real Play Core SplitInstallManager call.
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Start the install via method channel.
+      final sessionId = await _channel.invokeMethod<int>('startInstall', {
+        'module': moduleId,
+      });
 
+      if (sessionId == null) {
+        throw Exception('Failed to start module install (null session)');
+      }
+
+      _activeSessions[moduleId] = sessionId;
+
+      // Wait for completion via the progress stream.
+      final success = await _waitForModule(moduleId);
+      return success;
+    } on MissingPluginException {
+      // Feature delivery not available (debug APK, emulator, etc.).
+      // Assume module is present (fat APK fallback).
       _cache[moduleId] = FeatureModuleStatus.ready;
       _emit(moduleId, FeatureModuleStatus.ready);
       return true;
@@ -237,8 +249,63 @@ class PlayModuleLoader extends FeatureModuleLoader {
     }
   }
 
+  /// Queries the native side for module install status.
+  Future<bool> _checkModuleInstalled(String moduleId) async {
+    try {
+      final installed = await _channel.invokeMethod<bool>('getModuleStatus', {
+        'module': moduleId,
+      });
+      return installed == true;
+    } on MissingPluginException {
+      return true; // Feature delivery not available — assume present.
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Registers the progress event listener if not already registered.
+  void _ensureProgressListener(ModuleProgressCallback? onProgress) {
+    if (_listening) return;
+    _listening = true;
+
+    _progressChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onProgress') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final statusCode = args?['status'] as int?;
+        final progress = (args?['progress'] as num?)?.toDouble() ?? 0.0;
+        final module = args?['module'] as String? ?? 'ffmpeg';
+
+        // Map SplitInstallSessionStatus to FeatureModuleStatus.
+        if (statusCode == 5) {
+          // SplitInstallSessionStatus.INSTALLED = 5
+          _cache[module] = FeatureModuleStatus.ready;
+          _emit(module, FeatureModuleStatus.ready);
+        } else if (statusCode == 6) {
+          // SplitInstallSessionStatus.FAILED = 6
+          _cache[module] = FeatureModuleStatus.failed;
+          _emit(module, FeatureModuleStatus.failed);
+        } else if (statusCode == 3) {
+          // SplitInstallSessionStatus.DOWNLOADING = 3
+          _cache[module] = FeatureModuleStatus.downloading;
+          _emit(module, FeatureModuleStatus.downloading);
+          onProgress?.call(progress);
+        } else if (statusCode == 4) {
+          // SplitInstallSessionStatus.INSTALLING = 4
+          _cache[module] = FeatureModuleStatus.downloading;
+          _emit(module, FeatureModuleStatus.downloading);
+          onProgress?.call(progress);
+        }
+      }
+    });
+  }
+
   /// Waits for the module stream to resolve to a terminal state.
   Future<bool> _waitForModule(String moduleId) async {
+    // If already resolved in cache, return immediately.
+    final cached = _resolveStatus(moduleId);
+    if (cached == FeatureModuleStatus.ready) return true;
+    if (cached == FeatureModuleStatus.failed) return false;
+
     final completer = Completer<bool>();
     final sub = _statusController.stream.listen((status) {
       if (status == FeatureModuleStatus.ready) {
@@ -247,17 +314,16 @@ class PlayModuleLoader extends FeatureModuleLoader {
         completer.complete(false);
       }
     });
-    // Check cache again in case it already resolved.
-    final current = _resolveStatus(moduleId);
-    if (current == FeatureModuleStatus.ready) {
-      await sub.cancel();
-      return true;
-    }
-    if (current == FeatureModuleStatus.failed) {
-      await sub.cancel();
-      return false;
-    }
+
+    // Timeout after 5 minutes — install should not take longer.
+    final timer = Timer(const Duration(minutes: 5), () {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+    });
+
     final result = await completer.future;
+    timer.cancel();
     await sub.cancel();
     return result;
   }
@@ -291,5 +357,6 @@ class PlayModuleLoader extends FeatureModuleLoader {
   /// Release resources. Call when the app no longer needs module loading.
   void dispose() {
     _statusController.close();
+    _progressChannel.setMethodCallHandler(null);
   }
 }

@@ -30,6 +30,11 @@ import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import com.google.android.play.core.splitinstall.SplitInstallManager
+import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
+import com.google.android.play.core.splitinstall.SplitInstallRequest
+import com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
+import com.google.android.play.core.splitinstall.model.SplitInstallSessionStatus
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -232,6 +237,101 @@ class MainActivity : FlutterActivity() {
                                 window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                             }
                             result.success(null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // -------------------------------------------------------------------
+        // Play Feature Delivery — on-demand module install for FFmpeg.
+        // Uses SplitInstallManager to download the :ffmpeg dynamic feature
+        // module on first Ultra-gated FFmpeg Studio use.
+        // Only active for play-channel AAB builds; no-op for APK/fat builds.
+        // -------------------------------------------------------------------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/feature_delivery")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getModuleStatus" -> {
+                        val moduleName = call.argument<String>("module") ?: "ffmpeg"
+                        try {
+                            val manager: SplitInstallManager =
+                                SplitInstallManagerFactory.create(applicationContext)
+                            val sessions = manager.installedModules
+                            result.success(sessions.contains(moduleName))
+                        } catch (e: Exception) {
+                            // Feature delivery not available (APK build, emulator, etc.)
+                            result.success(true) // Assume installed (fallback)
+                        }
+                    }
+                    "startInstall" -> {
+                        val moduleName = call.argument<String>("module") ?: "ffmpeg"
+                        val channel = MethodChannel(
+                            flutterEngine.dartExecutor.binaryMessenger,
+                            "aurora_downloader/feature_delivery_progress"
+                        )
+                        try {
+                            val manager: SplitInstallManager =
+                                SplitInstallManagerFactory.create(applicationContext)
+
+                            // Register a listener for install progress.
+                            val listener = SplitInstallStateUpdatedListener { state ->
+                                val statusCode = state.status()
+                                val progress = if (state.totalBytesToDownload() > 0) {
+                                    state.bytesDownloaded().toFloat() / state.totalBytesToDownload().toFloat()
+                                } else {
+                                    0f
+                                }
+                                channel.invokeMethod("onProgress", mapOf(
+                                    "status" to statusCode,
+                                    "progress" to progress,
+                                    "module" to moduleName,
+                                ))
+                                if (statusCode == SplitInstallSessionStatus.INSTALLED ||
+                                    statusCode == SplitInstallSessionStatus.FAILED) {
+                                    manager.unregisterListener(this@MainActivity)
+                                }
+                            }
+                            manager.registerListener(listener)
+
+                            val request = SplitInstallRequest.newBuilder()
+                                .addModule(moduleName)
+                                .build()
+
+                            manager.startInstall(request)
+                                .addOnSuccessListener { sessionId ->
+                                    Log.d(TAG, "SplitInstall started: session=$sessionId module=$moduleName")
+                                    result.success(sessionId)
+                                }
+                                .addOnFailureListener { exception ->
+                                    Log.e(TAG, "SplitInstall failed: ${exception.message}")
+                                    result.error("install_failed", exception.message, null)
+                                }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "SplitInstall exception", e)
+                            result.error("install_error", e.message, null)
+                        }
+                    }
+                    "cancelInstall" -> {
+                        val sessionId = call.argument<Int>("sessionId") ?: 0
+                        try {
+                            val manager: SplitInstallManager =
+                                SplitInstallManagerFactory.create(applicationContext)
+                            manager.cancelInstall(sessions = setOf(sessionId))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("cancel_error", e.message, null)
+                        }
+                    }
+                    "deferredInstall" -> {
+                        val moduleName = call.argument<String>("module") ?: "ffmpeg"
+                        try {
+                            val manager: SplitInstallManager =
+                                SplitInstallManagerFactory.create(applicationContext)
+                            manager.deferredInstall(listOf(moduleName))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("deferred_error", e.message, null)
                         }
                     }
                     else -> result.notImplemented()

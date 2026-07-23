@@ -127,4 +127,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-muxer:1.5.1")
+    // Play Feature Delivery (on-demand modules) — only used for Play AAB builds.
+    // GitHub fat APK builds don't include this but it's harmless (no-op).
+    implementation("com.google.android.play:feature-delivery:2.1.0")
+    implementation("com.google.android.play:feature-delivery-ktx:2.1.0")
 }

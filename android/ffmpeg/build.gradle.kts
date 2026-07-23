@@ -27,4 +27,7 @@ dependencies {
     // so they are NOT included in the base APK for Play builds.
     // GitHub / sideload builds ship everything in the fat APK instead.
     implementation("com.arthenica:ffmpeg-kit-min-gpl:6.0.LTS")
+
+    // Native FFmpeg library is packaged here for Play AAB on-demand delivery.
+    // The base app calls SplitInstallManager to trigger the download.
 }
