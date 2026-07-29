@@ -14,7 +14,10 @@ import 'package:path/path.dart' as p;
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
 import '../downloader/download_rules.dart';
+import '../premium/pro_entitlement.dart';
 import '../premium/pro_features.dart';
+import '../premium/upsell_controller.dart';
+import 'video_library.dart';
 import '../downloader/headless_webview_fetcher.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
@@ -1185,6 +1188,59 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   String? _baseDir;
   String? _baseTemp;
+
+  /// Saves a played video to the Videos subpage of Favorites.
+  ///
+  /// The free inventory cap lives in [VideoLibrary]; this only turns its
+  /// verdict into feedback. A capped save must say so — silently doing nothing
+  /// after the user taps a star reads as a broken button.
+  Future<void> _saveVideoFavorite(SniffedMedia media) async {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final result = await VideoLibrary.addFavorite(
+      library: _library,
+      tier: tier,
+      url: media.url,
+      title: media.pageTitle?.trim().isNotEmpty == true
+          ? media.pageTitle!.trim()
+          : media.name,
+      thumbnailUrl: media.thumbnailUrl,
+      sourcePageUrl: media.sourcePageUrl,
+    );
+    if (!mounted) return;
+
+    switch (result.outcome) {
+      case VideoSaveOutcome.saved:
+        await _saveLibrary(result.library);
+        if (mounted) _showSnack('Saved to Favorites → Videos');
+      case VideoSaveOutcome.duplicate:
+        _showSnack('Already in your saved videos');
+      case VideoSaveOutcome.capped:
+        unawaited(
+          UpsellController.show(
+            context,
+            feature: ProFeature.videoLibrary,
+            userTier: tier,
+          ),
+        );
+    }
+  }
+
+  /// Appends a playback to the Videos subpage of History. Fire-and-forget:
+  /// failing to record a watch must never interrupt playback.
+  void _recordVideoPlay(SniffedMedia media) {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final updated = VideoLibrary.recordPlay(
+      library: _library,
+      tier: tier,
+      url: media.url,
+      title: media.pageTitle?.trim().isNotEmpty == true
+          ? media.pageTitle!.trim()
+          : media.name,
+      thumbnailUrl: media.thumbnailUrl,
+      sourcePageUrl: media.sourcePageUrl,
+    );
+    unawaited(_saveLibrary(updated));
+  }
 
   Future<void> _loadLibrary() => _libraryController.load();
 
@@ -3595,7 +3651,36 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     },
     onEditFavorite: (favorite) => _editFavoriteFolder(favorite),
+    onPlayVideo: (favorite) => _playLibraryVideo(
+      url: favorite.url,
+      title: favorite.title,
+      sourcePageUrl: favorite.sourcePageUrl,
+      thumbnailUrl: favorite.thumbnailUrl,
+    ),
   );
+
+  /// Replays a video stored in Favorites or History.
+  ///
+  /// The stored URL is a CDN link that has very likely expired, so this goes
+  /// through the normal preview path — which re-resolves cookies and Referer
+  /// from the tab — rather than handing the raw URL straight to the player.
+  Future<void> _playLibraryVideo({
+    required String url,
+    required String title,
+    String? sourcePageUrl,
+    String? thumbnailUrl,
+  }) async {
+    final media = SniffedMedia(
+      url: url,
+      name: title,
+      type: MediaType.video,
+      sourcePageUrl: sourcePageUrl,
+      pageTitle: title,
+      thumbnailUrl: thumbnailUrl,
+      sniffSource: SniffSource.session,
+    );
+    await _showMediaPreview(media);
+  }
 
   Widget _buildFavoritesFolderList(
     BrowserTab tab,
@@ -3943,6 +4028,12 @@ class _SnifferScreenState extends State<SnifferScreen>
         _openNewTab(url: url, switchToTab: false);
       }
     },
+    onPlayVideo: (entry) => _playLibraryVideo(
+      url: entry.url,
+      title: entry.title,
+      sourcePageUrl: entry.sourcePageUrl,
+      thumbnailUrl: entry.thumbnailUrl,
+    ),
   );
 
   void _showLibrarySheet<T>({
@@ -4374,6 +4465,8 @@ class _SnifferScreenState extends State<SnifferScreen>
         refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
         onAddToQueue: (m) async => _showAddQueueDialog(context, m),
         qualityVariants: qualityVariants,
+        onSaveVideoFavorite: _saveVideoFavorite,
+        onRecordVideoPlay: _recordVideoPlay,
         engine: switch (widget.settings.playbackEngine) {
           PlaybackEngineSetting.videoPlayer => PlaybackEngineKind.videoPlayer,
           PlaybackEngineSetting.mediaKit => PlaybackEngineKind.mediaKit,

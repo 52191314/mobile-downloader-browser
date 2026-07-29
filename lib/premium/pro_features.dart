@@ -165,6 +165,11 @@ enum ProFeature {
 
   /// Vault sync. Ultra only.
   vaultSync,
+
+  /// Saved videos + watch history (the Videos subpages of Favorites and
+  /// History). Free: [ProFeatures.freeVideoLibraryItems] entries in each list.
+  /// Pro+: unlimited. Page bookmarks and page history stay free and uncapped.
+  videoLibrary,
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +225,11 @@ class ProFeatures {
 
   /// Private vault: free inventory item cap.
   static const int freeVaultItems = 25;
+
+  /// Saved videos / watch history: free inventory cap, applied to each list
+  /// separately. Generous enough that a casual user never meets it, small
+  /// enough that anyone actually collecting videos does.
+  static const int freeVideoLibraryItems = 10;
 
   // -- Pure helpers for free-taste cap decisions (mirror batch pattern) --
 
@@ -289,6 +299,7 @@ class ProFeatures {
     ProFeature.watcher: EntitlementTier.ultra,
     ProFeature.automationApi: EntitlementTier.ultra,
     ProFeature.vaultSync: EntitlementTier.ultra,
+    ProFeature.videoLibrary: EntitlementTier.pro,
   };
 
   // -------------------------------------------------------------------------
@@ -377,6 +388,8 @@ class ProFeatures {
         return 'Automation API';
       case ProFeature.vaultSync:
         return 'Vault sync';
+      case ProFeature.videoLibrary:
+        return 'Saved videos & watch history';
     }
   }
 

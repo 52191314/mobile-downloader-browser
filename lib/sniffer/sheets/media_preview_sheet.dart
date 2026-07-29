@@ -58,6 +58,11 @@ Future<void> showMediaPreview(
   /// a stream will not start; [onEngineChanged] persists that choice.
   PlaybackEngineKind engine = PlaybackEngineKind.videoPlayer,
   ValueChanged<PlaybackEngineKind>? onEngineChanged,
+  /// Saves [media] to the Videos subpage of Favorites. Owns its own free-tier
+  /// gate and user feedback; this sheet just hands the media over.
+  Future<void> Function(SniffedMedia media)? onSaveVideoFavorite,
+  /// Records a playback in the Videos subpage of History.
+  void Function(SniffedMedia media)? onRecordVideoPlay,
 }) async {
   showDialog(
     context: context,
@@ -112,6 +117,11 @@ Future<void> showMediaPreview(
     final effectivePageUrl = pageUrl;
     final effectiveCurrentUrl = currentUrl;
 
+    // Recorded on open rather than on completion: the user asked for this
+    // video, and a stream they abandoned after ten seconds is still one they
+    // will want to find again.
+    onRecordVideoPlay?.call(finalMedia);
+
     Future<Map<String, String>> resolveFor(String url) async {
       // Rebuild Cookie/Referer/Origin for the newly selected CDN URL.
       SniffedMedia variant = finalMedia.copyWith(url: url);
@@ -143,7 +153,9 @@ Future<void> showMediaPreview(
           onEnginePreferenceChanged: onEngineChanged,
           resolveHeadersForUrl: resolveFor,
           onDownload: () => Navigator.pop(context, 'download'),
-          onFavorite: (url) => _addToFavorites(context, url, finalMedia.name),
+          onFavorite: onSaveVideoFavorite == null
+              ? null
+              : (_) => onSaveVideoFavorite(finalMedia),
           source: PlaybackSource(
             url: finalMedia.url,
             title: finalMedia.name.isNotEmpty
@@ -295,12 +307,3 @@ String _qualityLabel(SniffedMedia m) {
   return 'Default';
 }
 
-Future<void> _addToFavorites(BuildContext context, String url, String name) async {
-  if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('Added "$name" to favorites'),
-      duration: const Duration(seconds: 1),
-    ),
-  );
-}

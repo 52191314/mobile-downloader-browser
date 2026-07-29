@@ -2,9 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../browser_library.dart';
 import '../models/browser_tab.dart';
+import '../video_library.dart';
 import '../../theme/aurora_palette.dart';
+import 'video_library_views.dart';
 
 void showFavoritesSheet(
   BuildContext context, {
@@ -18,6 +22,8 @@ void showFavoritesSheet(
   required Future<void> Function() onNewFolderCreated,
   required Future<BrowserLibrary?> Function(BrowserFavorite favorite)
       onEditFavorite,
+  /// Plays a saved video. Null falls back to loading its URL as a page.
+  Future<void> Function(BrowserFavorite favorite)? onPlayVideo,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -35,6 +41,7 @@ void showFavoritesSheet(
         onFavoriteToggled: onFavoriteToggled,
         onNewFolderCreated: onNewFolderCreated,
         onEditFavorite: onEditFavorite,
+        onPlayVideo: onPlayVideo,
       );
     },
   );
@@ -51,6 +58,7 @@ class FavoritesSheetContent extends StatefulWidget {
   final Future<void> Function() onNewFolderCreated;
   final Future<BrowserLibrary?> Function(BrowserFavorite favorite)
       onEditFavorite;
+  final Future<void> Function(BrowserFavorite favorite)? onPlayVideo;
 
   const FavoritesSheetContent({
     super.key,
@@ -63,6 +71,7 @@ class FavoritesSheetContent extends StatefulWidget {
     required this.onFavoriteToggled,
     required this.onNewFolderCreated,
     required this.onEditFavorite,
+    this.onPlayVideo,
   });
 
   @override
@@ -74,6 +83,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
   late BrowserLibrary _currentLibrary;
   TabController? _tabController;
   late List<BookmarkFolder> _folders;
+  LibrarySection _section = LibrarySection.sites;
 
   /// Controllers waiting for a safe post-frame dispose (after TabBar has
   /// detached). Prevents `_dependents.isEmpty` crashes when recreating
@@ -252,15 +262,80 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
                   ),
                 ),
                 const Spacer(),
-                TextButton.icon(
-                  onPressed: _createNewFolder,
-                  icon: const Icon(Icons.create_new_folder_outlined),
-                  label: const Text('New folder'),
-                ),
+                if (_section == LibrarySection.sites)
+                  TextButton.icon(
+                    onPressed: _createNewFolder,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('New folder'),
+                  ),
               ],
             ),
           ),
-          TabBar(
+          LibrarySectionBar(
+            current: _section,
+            videoCount: _currentLibrary.videoFavorites.length,
+            onChanged: (s) => setState(() => _section = s),
+          ),
+          if (_section == LibrarySection.videos)
+            _buildVideosSection(context)
+          else
+            ..._buildSitesSection(controller),
+        ],
+      ),
+    );
+  }
+
+  /// Saved videos. Flat, and gated by the free inventory cap — folders are a
+  /// page-organising idea and every saved video would land in "Unsorted".
+  Widget _buildVideosSection(BuildContext context) {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final limit = VideoLibrary.freeLimitFor(tier);
+    final videos = _currentLibrary.videoFavorites;
+
+    // Fixed height, matching the folder view — the sheet's Column is
+    // MainAxisSize.min, so an Expanded here would be unbounded and throw.
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.55,
+      child: Column(
+        children: [
+          if (limit != null)
+            VideoGateBanner(
+              used: videos.length,
+              limit: limit,
+              tier: tier,
+              message: 'Pro saves unlimited videos',
+            ),
+          Expanded(
+            child: VideoFavoritesList(
+              items: videos,
+              onOpen: (fav) async {
+                Navigator.of(context).pop();
+                final play = widget.onPlayVideo;
+                if (play != null) {
+                  await play(fav);
+                } else {
+                  await widget.onLoadUrl(fav.url);
+                }
+              },
+              onOpenSourcePage: (fav) {
+                Navigator.of(context).pop();
+                unawaited(widget.onLoadUrl(fav.sourcePageUrl!));
+              },
+              onRemove: (fav) async {
+                await _onLibrarySaved(
+                  VideoLibrary.removeFavorite(_currentLibrary, fav.id),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildSitesSection(TabController controller) {
+    return [
+      TabBar(
             // Key forces a clean TabBar when length changes so it never
             // keeps a disposed controller identity across rebuilds.
             key: ValueKey('fav_tabs_${controller.length}_${controller.hashCode}'),
@@ -310,9 +385,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
               ],
             ),
           ),
-        ],
-      ),
-    );
+    ];
   }
 }
 

@@ -2,8 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../premium/pro_entitlement.dart';
+import '../../premium/pro_upsell_sheet.dart';
 import '../browser_library.dart';
 import '../models/browser_tab.dart';
+import '../video_library.dart';
+import 'video_library_views.dart';
 
 /// Shows the browser-history bottom sheet with multi-select, range-select,
 /// and "open all selected" support.
@@ -24,6 +28,8 @@ void showHistorySheet(
   /// Called when the user wants to open multiple URLs, each in its own
   /// new tab.  The list is already deduplicated (unique URLs only).
   required Future<void> Function(List<String> urls) onOpenUrlsInNewTabs,
+  /// Replays a watched video. Null falls back to loading its URL as a page.
+  Future<void> Function(BrowserHistoryEntry entry)? onPlayVideo,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -35,6 +41,7 @@ void showHistorySheet(
       onSaveLibrary: onSaveLibrary,
       onLoadUrl: onLoadUrl,
       onOpenUrlsInNewTabs: onOpenUrlsInNewTabs,
+      onPlayVideo: onPlayVideo,
     ),
   );
 }
@@ -44,12 +51,14 @@ class _HistorySheetContent extends StatefulWidget {
   final Future<void> Function(BrowserLibrary) onSaveLibrary;
   final Future<void> Function(String url) onLoadUrl;
   final Future<void> Function(List<String> urls) onOpenUrlsInNewTabs;
+  final Future<void> Function(BrowserHistoryEntry entry)? onPlayVideo;
 
   const _HistorySheetContent({
     required this.library,
     required this.onSaveLibrary,
     required this.onLoadUrl,
     required this.onOpenUrlsInNewTabs,
+    this.onPlayVideo,
   });
 
   @override
@@ -68,8 +77,14 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
   final Set<String> _selectedUrls = {};
   int? _rangeAnchorIndex;
 
+  LibrarySection _section = LibrarySection.sites;
+
   BrowserLibrary get _library => widget.library;
-  List<BrowserHistoryEntry> get _items => _library.history;
+
+  /// Page visits only. Selection, range-select and search all operate on this
+  /// list, so scoping it here keeps the whole existing interaction correct
+  /// without touching any of it.
+  List<BrowserHistoryEntry> get _items => _library.siteHistory;
 
   @override
   void dispose() {
@@ -174,8 +189,10 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
     unawaited(
       widget.onSaveLibrary(
         _library.copyWith(
+          // Match on kind too: a page and a video can share a URL, and
+          // deleting a site row must not silently take the video with it.
           history: _library.history
-              .where((e) => e.url != item.url)
+              .where((e) => !(e.url == item.url && e.kind == item.kind))
               .toList(growable: false),
         ),
       ),
@@ -183,8 +200,10 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
   }
 
   void _deleteAllSelected() {
+    // Selection only ever contains site rows — leave video history alone.
     final remaining = _library.history
-        .where((e) => !_selectedUrls.contains(e.url))
+        .where((e) =>
+            e.kind != LibraryEntryKind.site || !_selectedUrls.contains(e.url))
         .toList(growable: false);
     _exitSelectionMode();
     unawaited(
@@ -206,14 +225,30 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
           // ---- Header ----
           _buildHeader(filtered.length),
 
+          LibrarySectionBar(
+            current: _section,
+            videoCount: _library.videoHistory.length,
+            onChanged: (s) => setState(() {
+              _section = s;
+              // Selection is a sites-list concept; carrying it across would
+              // leave an action bar acting on rows that are not visible.
+              _selectionMode = false;
+              _selectedUrls.clear();
+              _rangeAnchorIndex = null;
+            }),
+          ),
+
           const Divider(height: 1),
 
-          // ---- Selection action bar ----
-          if (_selectionMode && _selectedUrls.isNotEmpty)
-            _buildSelectionBar(),
+          if (_section == LibrarySection.videos)
+            Expanded(child: _buildVideosSection())
+          else ...[
+            // ---- Selection action bar ----
+            if (_selectionMode && _selectedUrls.isNotEmpty)
+              _buildSelectionBar(),
 
-          // ---- List ----
-          Expanded(
+            // ---- List ----
+            Expanded(
             child: filtered.isEmpty
                 ? Center(
                     child: Padding(
@@ -250,9 +285,48 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
                       );
                     },
                   ),
-          ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// Watch history. No selection mode — the multi-select flow exists to open
+  /// many pages in tabs, which does not translate to replaying videos.
+  Widget _buildVideosSection() {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final limit = VideoLibrary.freeLimitFor(tier);
+    final videos = _library.videoHistory;
+
+    return Column(
+      children: [
+        if (limit != null)
+          VideoGateBanner(
+            used: videos.length,
+            limit: limit,
+            tier: tier,
+            message: 'Pro keeps your full watch history',
+          ),
+        Expanded(
+          child: VideoHistoryList(
+            items: videos,
+            onOpen: (entry) async {
+              Navigator.pop(context);
+              final play = widget.onPlayVideo;
+              if (play != null) {
+                await play(entry);
+              } else {
+                await widget.onLoadUrl(entry.url);
+              }
+            },
+            onOpenSourcePage: (entry) {
+              Navigator.pop(context);
+              unawaited(widget.onLoadUrl(entry.sourcePageUrl!));
+            },
+          ),
+        ),
+      ],
     );
   }
 
