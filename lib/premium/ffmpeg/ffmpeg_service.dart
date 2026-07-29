@@ -170,18 +170,16 @@ class FfmpegService extends ChangeNotifier {
         return;
       }
 
-      final session = await FfmpegRuntime.execute(cmd) as dynamic;
-      final returnCode = await (session.getReturnCode() as Future<dynamic>);
-      final returnCodeVal = returnCode.toString();
-      if (returnCodeVal.contains('success') || returnCodeVal.contains('0')) {
+      final session = await FfmpegRuntime.execute(cmd);
+      final returnCode = await session.getReturnCode();
+      if (ReturnCode.isSuccess(returnCode)) {
         job.state = FfmpegJobState.completed;
         job.progress = 1.0;
-      } else if (returnCodeVal.contains('cancel')) {
+      } else if (ReturnCode.isCancel(returnCode)) {
         job.state = FfmpegJobState.cancelled;
       } else {
         job.state = FfmpegJobState.failed;
-        final allLogs =
-            await (session.getAllLogsAsString() as Future<String?>);
+        final allLogs = await session.getAllLogsAsString();
         job.errorMessage = allLogs ?? 'FFmpeg execution failed';
       }
       job.completedAt = DateTime.now();

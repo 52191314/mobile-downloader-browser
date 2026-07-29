@@ -1,0 +1,19 @@
+# Aurora license server — local-only artifacts
+node_modules/
+dist/
+
+# Runtime state (contains purchase tokens — never commit)
+data/
+
+# Signing keys (also matched by root .gitignore *.pem / *.key)
+keys/
+
+# Secrets
+.env
+.env.*
+!.env.example
+service-account*.json
+
+# Test / tooling noise
+coverage/
+*.log

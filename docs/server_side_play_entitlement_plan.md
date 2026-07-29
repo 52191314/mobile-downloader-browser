@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-07-20 |
-| **Status** | Plan only (not implemented) |
+| **Date** | 2026-07-20 (reviewed 2026-07-24) |
+| **Status** | **P1–P3 implemented** 2026-07-25. Server: [`license_server/`](../license_server/README.md) (Node 24 · Express 5 · TypeScript ESM; 31 tests). Client: `lib/premium/license/` (RS256 verify, offline grace, refresh, refund handling; 35 tests). **Not yet active in any build** — needs `AURORA_LICENSE_URL` + a trusted key, and a real Play test purchase end-to-end. P4/P5 open. Reviewed 2026-07-24 — architecture is sound. Five gaps (§15) must close before **P2/P3** (gating real users on it). GCP/Android Publisher API setup is **not blocked** — confirmed 2026-07-24 that the unrelated GCP account currently in dispute resolution is a different Google account entirely from the one tied to this app's Play Console listing. |
 | **Goal** | Make the **Play** build’s Pro/Ultra unlock depend on a **verified purchase** (Google Play Developer API), not only local `pro_entitlement.json` / client honor |
 | **Out of scope** | Implementing code in this doc · non-Play GitHub monetization · full DRM against patched APKs |
 | **Related** | `docs/SECURITY_AUDIT.md` · `docs/ultra_full_feature_pack_plan.md` |
@@ -169,9 +169,9 @@ Sign with **server private key** (Ed25519 or RS256). App embeds **public** key o
 | Phase | Work | Outcome |
 |-------|------|---------|
 | **P0 — Design freeze** | Products, grace days, non-Play behavior, privacy blurb | Written AC |
-| **P1 — Server MVP** | `/activate`, `/health`, Google verify, JWT issue, SQLite store | curl-tested with real test purchase |
-| **P2 — App Play path** | Activate after buy/restore; gate on JWT; offline grace | License tester: buy → kill app → still pro offline within grace |
-| **P3 — Refresh + refund** | Resume refresh; revoked purchase → free | Refund test account drops tier online |
+| ~~**P1 — Server MVP**~~ ✅ | `/activate`, `/refresh`, `/health`, `/ready`, JWKS, Google verify, RS256 JWT issue, SQLite store, rate limiting, token redaction | Built in `license_server/`. Verified against the stub verifier end-to-end; **still needs a curl test with a real Play test purchase** once the service account is provisioned |
+| ~~**P2 — App Play path**~~ ✅ | Activate after buy/restore; gate on JWT; offline grace; migration backfill | Built in `lib/premium/license/`. Gate is `ProEntitlement.tier`, now fed by the license; `storeTier` keeps purchase UX working. **Still needs the device test:** buy → kill app → still Pro offline within grace |
+| ~~**P3 — Refresh + refund**~~ ✅ | Resume refresh (24h throttle, 30min retry backoff); revoked → free | `refreshIfDue()` on `AppLifecycleState.resumed`. **Still needs the device test:** refund test account drops tier online |
 | **P4 — Hardening** | Rate limit, logging (no full tokens in logs), backup keys, uptime monitor | Production-ready |
 | **P5 — Optional** | Play Integrity token checked **on server** when issuing license | Extra friction for modified devices |
 
@@ -248,6 +248,44 @@ Even before the VPS:
 3. Limited offline grace tied to last successful BC reconcile.
 
 These shrink JSON forge while the license service is built.
+
+---
+
+## 15. Review findings (2026-07-24) — close before P2/P3
+
+Architecture reviewed against the codebase and current launch state. Cleared to start P1 as written. These five gaps should close before gating real users on it (P2 onward), since they're the ones that generate support tickets and refund requests, not the ones that generate security incidents:
+
+| Gap | Why it matters | Fix |
+|---|---|---|
+| **Multi-device / reinstall not addressed** | JWT is keyed on `sub=installId`. A user who buys Ultra then gets a new phone, or reinstalls, gets a new installId and the old JWT is meaningless. | `/activate` must re-verify the same `purchaseToken` against a *new* installId and reissue, driven by `restorePurchases()` — not just the first-purchase flow. Add as an explicit P2 acceptance criterion. |
+| **Upgrade SKU combination logic undefined** | `aurora_ultra_upgrade` only makes sense combined with an existing `aurora_pro_unlock`. The doc's productId → tier table treats each SKU independently. | Compute entitlement from the *set* of all purchases Google returns for that account (via `purchases.products.get` per owned productId), not from the single token being activated. |
+| **No key-rotation / compromise recovery** | "Backup signing key offline" is mentioned, but there's no procedure if the JWT signing key leaks — rotating it naively invalidates every legitimate offline license instantly. | Add a `kid` (key id) to the JWT header; client accepts 2 valid public keys at once so a rotation has a grace overlap instead of bricking paying users. |
+| **No migration path for pre-existing buyers** | Launching in a week without this. When the server ships later, existing Pro/Ultra buyers on the current local-JSON check will hit "not verified" on update unless handled. | Add explicit P2 step: silent one-time `restorePurchases()` → `/activate` backfill on first launch after the update that introduces this system. |
+| **Oracle Free Tier reliability vs. grace window** | Oracle's Ampere free tier has a known history of surprise capacity reclamation. Recommendation §12 pairs it with only a 7–14 day grace window — if the instance is reclaimed and it takes a while to notice, paying users lose Ultra mid-grace. | Either pick a paid $3–5/mo box (Lightsail/Fly) as primary from day one, or bias the grace window to 30 days until uptime is proven over a full billing cycle. |
+
+**Status of these five after P1–P3 (2026-07-25): all closed in code.**
+
+| Gap | State |
+|---|---|
+| Multi-device / reinstall | **Closed.** Server: `install_purchases` is many-to-many, so re-activating a token under a new `installId` reissues rather than failing. Client: `restorePurchases()` → `reconcileEntitlements` sends the full snapshot to `/activate`. |
+| Upgrade SKU combination | **Closed.** Entitlement is the union of every purchase linked to the install, never the single token being activated. `/activate` takes a full `purchases[]` snapshot from `queryPurchases`. |
+| Key rotation | **Closed.** JWTs carry `kid`; the server signs with `LICENSE_ACTIVE_KID` while publishing every key on the ring, and `LicenseConfig._bakedKeys` holds a list so the client trusts two keys at once. Rotation order (client update first) is documented in `license_server/README.md` §5. |
+| Migration for pre-existing buyers | **Closed.** First launch after the update opens a `legacyGraceUntil` window (default 14 days) for an install that already owned Pro/Ultra; cold-start reconcile backfills a real license, which closes the window. |
+| Host reliability vs grace | **Mitigated by default:** `LICENSE_TTL_DAYS` defaults to **30** and *is* the offline grace window. Host choice is still an owner decision. |
+
+**Client behaviour worth knowing before enabling this:**
+
+| Situation | Result |
+|---|---|
+| Licensing not configured (no URL / no key / GitHub build) | Gating off entirely — pre-existing behaviour, bit for bit |
+| Valid cached license, offline | Works until `exp`, no network needed on cold start |
+| Host down, license still valid | Works; refresh retries every 30 min |
+| Host down, license expired | Free **with an explanation** in Settings, not a silent downgrade |
+| Refund | Next refresh returns `entitlement_revoked` → license cleared → free |
+| Hand-edited `pro_entitlement.json` | Grants nothing; the tier gate reads the signed license, not the file |
+| Debug "Force Pro" | Still wins, debug/profile builds only |
+
+**GCP status (confirmed 2026-07-24):** the GCP account currently in dispute resolution is unrelated to Aurora — different Google account than the one tied to Play Console. Android Publisher API / service-account setup for P1 can proceed on a fresh or existing GCP project without waiting on that dispute.
 
 ---
 

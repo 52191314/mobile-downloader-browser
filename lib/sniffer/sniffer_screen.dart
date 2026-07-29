@@ -25,6 +25,7 @@ import 'ad_block_engine_native.dart';
 import 'browser_controller.dart';
 import 'browser_library.dart';
 import 'browser_open_request.dart';
+import 'player/playback_engine.dart';
 import '../premium/pro_upsell_sheet.dart';
 import 'controllers/address_bar_controller.dart';
 import 'controllers/element_picker_controller.dart';
@@ -61,6 +62,7 @@ import 'actions/translate_action.dart';
 import 'capture_sort.dart';
 import 'enqueue_download.dart';
 import 'external_scheme.dart';
+import 'sheets/external_app_prompt_sheet.dart';
 import 'filename_utils.dart';
 import 'headless_resniffer.dart';
 import 'token_refresh_service.dart';
@@ -346,6 +348,29 @@ class _SnifferScreenState extends State<SnifferScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Websites that try to open apps (tg:, intent://, …) confirm here first.
+    externalAppPromptHandler = ({
+      required Uri uri,
+      required String appKey,
+      required String displayName,
+      String? pageHost,
+    }) async {
+      if (!mounted) return ExternalAppPromptResult.denyOnce;
+      return showExternalAppPromptSheet(
+        context: context,
+        displayName: displayName,
+        uri: uri,
+        pageHost: pageHost,
+        onOpenSettings: () {
+          final sectionHandler = widget.onOpenSettingsSection;
+          if (sectionHandler != null) {
+            unawaited(sectionHandler(SettingsSection.externalApps));
+          } else {
+            widget.onOpenSettings?.call();
+          }
+        },
+      );
+    };
     _safeBrowsing = widget.safeBrowsing;
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -995,6 +1020,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   void dispose() {
+    externalAppPromptHandler = null;
     if (identical(
       _downloadQueue.browserContextAttacher,
       _attachBrowserContextToTask,
@@ -1543,6 +1569,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     return null;
   }
 
+
   /// Returns `true` if [incoming] should replace the current [_latestVideoMedia]
   /// used for auto-replace playback. Keeps the best candidate: HLS > large > other.
   bool _shouldReplaceVideo(SniffedMedia incoming) {
@@ -1788,8 +1815,13 @@ class _SnifferScreenState extends State<SnifferScreen>
   }) async {
     // App deep links (tg:, intent://, mailto:, magnet:, …) never enter
     // Chromium — controller.loadRequest routes them externally / to queue.
+    // skipExternalPrompt: user typed/chose this URL (address bar, favorites).
     if (isExternalAppUri(uri)) {
-      await tab.controller.loadRequest(uri, addToHistory: false);
+      await tab.controller.loadRequest(
+        uri,
+        addToHistory: false,
+        skipExternalPrompt: true,
+      );
       return;
     }
 
@@ -2447,7 +2479,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   @override
   Widget build(BuildContext context) {
     final tab = _activeTab;
-    final sniffedCount = tab.snifferEngine.detectedMedia.length;
+
     // Top bar: only the find bar. Suggestions overlay the main Stack above
     // the bottom chrome (not inside the short bottom-bar Stack, which
     // previously clipped the panel to ~one row).
@@ -3150,7 +3182,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   void _attachBrowserContextToTask(DownloadTask task) {
     if (_tabs.isEmpty) return;
     final tab = _findTabForTask(task) ?? _activeTab;
-    final sourcePage = task.sourcePageUrl ?? tab.addressController.text;
+
 
     // Same playlist body path as MediaEnricher/sniffer (not generic
     // fetchViaJavaScript — that path was returning null/network error while
@@ -3687,6 +3719,11 @@ class _SnifferScreenState extends State<SnifferScreen>
         onTap: () => unawaited(openSection(SettingsSection.sniffer)),
       ),
       OverflowMenuEntry(
+        icon: Icons.open_in_new_rounded,
+        label: 'External apps',
+        onTap: () => unawaited(openSection(SettingsSection.externalApps)),
+      ),
+      OverflowMenuEntry(
         icon: Icons.people_outline_rounded,
         label: 'Profiles',
         onTap: () => unawaited(openSection(SettingsSection.profiles)),
@@ -3703,7 +3740,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
       OverflowMenuEntry(
         icon: Icons.auto_awesome,
-        label: 'Aurora Pro',
+        label: 'Aurora Pro & Ultra',
         color: ac.accentAmber,
         onTap: () => unawaited(openSection(SettingsSection.pro)),
       ),
@@ -4337,6 +4374,23 @@ class _SnifferScreenState extends State<SnifferScreen>
         refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
         onAddToQueue: (m) async => _showAddQueueDialog(context, m),
         qualityVariants: qualityVariants,
+        engine: switch (widget.settings.playbackEngine) {
+          PlaybackEngineSetting.videoPlayer => PlaybackEngineKind.videoPlayer,
+          PlaybackEngineSetting.mediaKit => PlaybackEngineKind.mediaKit,
+        },
+        onEngineChanged: (kind) {
+          // The player offers the switch when a stream will not start; make it
+          // stick so the next video opens on whichever one worked.
+          widget.onSettingsChanged?.call(
+            widget.settings.copyWith(
+              playbackEngine: switch (kind) {
+                PlaybackEngineKind.videoPlayer =>
+                  PlaybackEngineSetting.videoPlayer,
+                PlaybackEngineKind.mediaKit => PlaybackEngineSetting.mediaKit,
+              },
+            ),
+          );
+        },
       );
 
   Future<String> _refreshM3u8IfNeeded(

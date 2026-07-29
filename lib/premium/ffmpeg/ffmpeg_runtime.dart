@@ -33,8 +33,21 @@ library;
 // These imports from ffmpeg-kit are the only direct dependency on the
 // native plugin. Isolating them here means other Dart files can reference
 // FfmpegService / FfmpegJob without pulling ffmpeg-kit into the main bundle.
-export 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart'
-    show FFmpegKit, FFprobeKit, ReturnCode;
+//
+// Both import and export are needed:
+// - import: makes the symbols available in THIS file
+// - export: re-exports them to consumers of this library
+//
+// We import from the three key ffmpeg-kit entry points:
+//   ffmpeg_kit.dart  → FFmpegKit
+//   ffprobe_kit.dart → FFprobeKit
+//   return_code.dart → ReturnCode
+import 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min_gpl/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min_gpl/return_code.dart';
+export 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart';
+export 'package:ffmpeg_kit_flutter_new_min_gpl/ffprobe_kit.dart';
+export 'package:ffmpeg_kit_flutter_new_min_gpl/return_code.dart';
 
 /// Version probe result from the native FFmpeg runtime.
 class FfmpegRuntimeProbe {

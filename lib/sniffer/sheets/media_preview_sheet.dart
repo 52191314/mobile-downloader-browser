@@ -15,6 +15,9 @@ import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/sniffer/aurora_video_player.dart';
 import 'package:aurora_downloader/sniffer/media_preview_widget.dart';
+import 'package:aurora_downloader/sniffer/player/aurora_player_screen.dart';
+import 'package:aurora_downloader/sniffer/player/playback_engine.dart';
+import 'package:aurora_downloader/sniffer/player/playback_source.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 
@@ -51,6 +54,10 @@ Future<void> showMediaPreview(
   required Future<void> Function(SniffedMedia media) onAddToQueue,
   /// Alternate renditions for the in-player quality picker.
   List<SniffedMedia> qualityVariants = const [],
+  /// Backend the player opens with. The user can switch inside the player when
+  /// a stream will not start; [onEngineChanged] persists that choice.
+  PlaybackEngineKind engine = PlaybackEngineKind.videoPlayer,
+  ValueChanged<PlaybackEngineKind>? onEngineChanged,
 }) async {
   showDialog(
     context: context,
@@ -80,7 +87,9 @@ Future<void> showMediaPreview(
       buildSniffedDownloadHeaders: buildSniffedDownloadHeaders,
     );
 
-    if (media.type == MediaType.video || media.type == MediaType.audio) {
+    if (media.type == MediaType.video ||
+        media.type == MediaType.audio ||
+        media.type == MediaType.playlist) {
       resolvedUrl = await refreshM3u8IfNeeded(media.url, resolvedHeaders);
     }
   } catch (_) {}
@@ -94,7 +103,8 @@ Future<void> showMediaPreview(
   );
 
   if (finalMedia.type == MediaType.video ||
-      finalMedia.type == MediaType.audio) {
+      finalMedia.type == MediaType.audio ||
+      finalMedia.type == MediaType.playlist) {
     final qualityOptions = _playerQualityOptions(
       playing: finalMedia,
       variants: qualityVariants,
@@ -102,41 +112,55 @@ Future<void> showMediaPreview(
     final effectivePageUrl = pageUrl;
     final effectiveCurrentUrl = currentUrl;
 
+    Future<Map<String, String>> resolveFor(String url) async {
+      // Rebuild Cookie/Referer/Origin for the newly selected CDN URL.
+      SniffedMedia variant = finalMedia.copyWith(url: url);
+      for (final v in qualityVariants) {
+        if (v.url == url) {
+          variant = v;
+          break;
+        }
+      }
+      return _resolvePlaybackHeaders(
+        mediaUrl: url,
+        media: variant,
+        activeTab: activeTab,
+        pageUrl: effectivePageUrl ??
+            variant.sourcePageUrl ??
+            activeTab.addressController.text,
+        currentUrl: effectiveCurrentUrl,
+        getCookiesForUrl: getCookiesForUrl,
+        getPlaybackCookies: getPlaybackCookies,
+        buildSniffedDownloadHeaders: buildSniffedDownloadHeaders,
+      );
+    }
+
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => AuroraVideoPlayer(
-          url: finalMedia.url,
-          title: finalMedia.name.isNotEmpty
-              ? finalMedia.name
-              : 'Sniffed media',
-          headers: finalMedia.headers,
-          sourcePageUrl: finalMedia.sourcePageUrl,
-          qualityOptions: qualityOptions,
-          resolveHeadersForUrl: (url) async {
-            // Rebuild Cookie/Referer/Origin for the newly selected CDN URL.
-            SniffedMedia variant = finalMedia.copyWith(url: url);
-            for (final v in qualityVariants) {
-              if (v.url == url) {
-                variant = v;
-                break;
-              }
-            }
-            return _resolvePlaybackHeaders(
-              mediaUrl: url,
-              media: variant,
-              activeTab: activeTab,
-              pageUrl: effectivePageUrl ??
-                  variant.sourcePageUrl ??
-                  activeTab.addressController.text,
-              currentUrl: effectiveCurrentUrl,
-              getCookiesForUrl: getCookiesForUrl,
-              getPlaybackCookies: getPlaybackCookies,
-              buildSniffedDownloadHeaders: buildSniffedDownloadHeaders,
-            );
-          },
+        builder: (_) => AuroraPlayerScreen(
+          initialEngine: engine,
+          onEnginePreferenceChanged: onEngineChanged,
+          resolveHeadersForUrl: resolveFor,
           onDownload: () => Navigator.pop(context, 'download'),
           onFavorite: (url) => _addToFavorites(context, url, finalMedia.name),
+          source: PlaybackSource(
+            url: finalMedia.url,
+            title: finalMedia.name.isNotEmpty
+                ? finalMedia.name
+                : 'Sniffed media',
+            headers: finalMedia.headers,
+            sourcePageUrl: finalMedia.sourcePageUrl,
+            variants: [
+              for (final q in qualityOptions)
+                PlaybackVariant(
+                  url: q.url,
+                  label: q.label,
+                  height: q.height,
+                  bandwidth: q.bandwidth,
+                ),
+            ],
+          ),
         ),
       ),
     );

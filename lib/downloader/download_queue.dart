@@ -357,6 +357,47 @@ class DownloadQueue {
     }
   }
 
+  /// Host used by staged screenshot fixtures. `.invalid` is reserved by
+  /// RFC 2606 and can never resolve, so a fixture that escapes into the
+  /// download engine fails DNS rather than hitting a real server.
+  static const String _fixtureHost = 'example.invalid';
+
+  /// Ids seeded by [seedDisplayOnlyTasks]. Held so these tasks can be kept out
+  /// of the persisted queue file — they live for the lifetime of the process
+  /// and must never outlive it.
+  final Set<String> _displayOnlyTaskIds = <String>{};
+
+  /// True for a staged screenshot fixture, whether it was seeded this session
+  /// or restored from a queue file written by an earlier screenshot build.
+  bool _isDisplayOnlyTask(DownloadTask task) {
+    if (_displayOnlyTaskIds.contains(task.id)) return true;
+    return Uri.tryParse(task.url)?.host == _fixtureHost;
+  }
+
+  /// Inserts display-only tasks so the Queue UI has something to render during
+  /// store-screenshot capture. See `lib/dev/screenshot_fixtures.dart`.
+  ///
+  /// These bypass scheduling (never added to `_executionQueue`), persistence
+  /// (filtered out of [saveToFile]), and the restricted-media check. They exist
+  /// only to be drawn.
+  ///
+  /// Persistence matters more than it looks: [saveToFile] writes every entry in
+  /// `_tasks`, so without the filter these fixtures land in the queue file, and
+  /// the next launch restores them as `downloading` → `idle` and hands them to
+  /// the engine. They would then appear to "really download" — against a host
+  /// that cannot resolve — in ordinary builds, long after the screenshot run.
+  ///
+  /// **No-op in release builds** — the screenshot build is compiled in profile
+  /// mode, which is also what makes [ProEntitlement.setDebugTier] work.
+  void seedDisplayOnlyTasks(List<DownloadTask> tasks) {
+    if (kReleaseMode || _isDisposed) return;
+    for (final task in tasks) {
+      _displayOnlyTaskIds.add(task.id);
+      _tasks[task.id] = task;
+      _emitTask(task);
+    }
+  }
+
   void addTask(DownloadTask task, {bool force = false}) {
     if (_isDisposed) return;
     // Play compliance: never enqueue restricted platform media (Wave 1+).
@@ -1091,8 +1132,12 @@ class DownloadQueue {
       }
       final backupFile = File('$path.bak');
       // Persist all tasks, including completed history, so the queue survives
-      // app restarts and ADB installs.
-      final data = _tasks.values.map((t) => t.toJson()).toList(growable: false);
+      // app restarts and ADB installs — except staged screenshot fixtures,
+      // which must not outlive the process that seeded them.
+      final data = _tasks.values
+          .where((t) => !_isDisplayOnlyTask(t))
+          .map((t) => t.toJson())
+          .toList(growable: false);
       final jsonString = await WorkerIsolatePool.instance.execute(
         'jsonEncode',
         {'data': data},
@@ -1190,6 +1235,16 @@ class DownloadQueue {
             task.state = DownloadState.failed;
             task.failureReason = DownloadFailure.mergeInterrupted;
             task.errorMessage = 'Merge was interrupted while combining saved parts. Tap Retry to re-merge.';
+          }
+          // Self-heal: drop staged screenshot fixtures written by an earlier
+          // build before the persistence filter existed. Without this they
+          // stay in the queue file forever and get retried on every launch
+          // against a host that cannot resolve.
+          if (_isDisplayOnlyTask(task)) {
+            debugPrint(
+              '[DownloadQueue] dropped stale screenshot fixture ${task.id}',
+            );
+            continue;
           }
           addTask(task);
         } catch (e, s) {

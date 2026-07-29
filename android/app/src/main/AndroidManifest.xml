@@ -12,7 +12,7 @@
 
     <application
         android:label="Aurora Downloader"
-        android:name="${applicationName}"
+        android:name=".AuroraApplication"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true">
         <activity
@@ -43,6 +43,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Flutter deferred components / Play Feature Delivery loading-unit map.
+             Updated by Flutter tooling when Dart deferred libraries change. -->
+        <meta-data
+            android:name="io.flutter.embedding.engine.deferredcomponents.DeferredComponentManager.loadingUnitMapping"
+            android:value="" />
+        <!-- Keep the on-demand module title in the *base* resource table
+             (required by Bundletool for dist:title on :ffmpeg). -->
+        <meta-data
+            android:name="com.personal.aurora_downloader.FEATURE_FFMPEG_TITLE"
+            android:value="@string/feature_ffmpeg_title" />
         <service
             android:name=".DownloadForegroundService"
             android:foregroundServiceType="dataSync"

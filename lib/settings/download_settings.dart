@@ -10,6 +10,11 @@ enum SniffedMediaSort { newest, name, type, size, duration }
 
 enum SniffedMediaDisplayMode { size, duration, both }
 
+/// Which backend the in-app player decodes with. See
+/// `lib/sniffer/player/playback_engine.dart` — kept as its own enum here so
+/// settings persistence does not drag the player package into this file.
+enum PlaybackEngineSetting { videoPlayer, mediaKit }
+
 enum BrowserToolbarPosition { bottom, top }
 
 enum DarkModePreference {
@@ -330,6 +335,23 @@ class AdblockFilterSource {
     ),
   ];
 
+  /// Returns the default list of trusted filter sources.
+  /// Exactly 3 slots are enabled by default (fitting within [freeFilterListSlots]):
+  /// - EasyList (Ads)
+  /// - EasyPrivacy (Trackers & Privacy)
+  /// - Peter Lowe's List (Adservers & tracking)
+  static List<AdblockFilterSource> defaultSources() {
+    const defaultEnabledUrls = {
+      'https://easylist.to/easylist/easylist.txt',
+      'https://easylist.to/easylist/easyprivacy.txt',
+      'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblock&showintro=0&mimetype=plaintext',
+    };
+    return [
+      for (final source in trustedSources)
+        source.copyWith(enabled: defaultEnabledUrls.contains(source.url)),
+    ];
+  }
+
   static List<AdblockFilterSource> disabledTrustedSources() {
     return [
       for (final source in trustedSources) source.copyWith(enabled: false),
@@ -505,6 +527,11 @@ class DownloadSettings {
   final List<CosmeticAdRule> manualCosmeticRules;
   final SniffedMediaSort sniffedMediaSort;
   final SniffedMediaDisplayMode sniffedMediaDisplayMode;
+
+  /// Backend for the in-app player. Switching is also offered in the player
+  /// itself when a stream fails to start, and that choice persists here.
+  final PlaybackEngineSetting playbackEngine;
+
   final BrowserToolbarPosition browserToolbarPosition;
   final bool desktopMode;
   /// User-Agent profile key: 'mobile' (default), 'desktop_chrome',
@@ -597,6 +624,7 @@ class DownloadSettings {
     this.manualCosmeticRules = const [],
     required this.sniffedMediaSort,
     required this.sniffedMediaDisplayMode,
+    this.playbackEngine = PlaybackEngineSetting.videoPlayer,
     required this.browserToolbarPosition,
     this.desktopMode = false,
     this.userAgentProfile = 'mobile',
@@ -612,7 +640,7 @@ class DownloadSettings {
     this.disabledMediaTypes = const {},
     this.doNotTrackEnabled = true,
     this.downloadLinkBehavior = DownloadLinkBehavior.capture,
-    this.trackerBlockingEnabled = false,
+    this.trackerBlockingEnabled = true,
     this.adblockAllowlist = const [],
     this.customVideoHosts = const [],
     this.darkModePreference = DarkModePreference.system,
@@ -664,9 +692,10 @@ class DownloadSettings {
     adblockEnabled: true,
     popupBlockingEnabled: true,
     invisibleRedirectBlockingEnabled: true,
-    adblockFilterSources: AdblockFilterSource.disabledTrustedSources(),
+    adblockFilterSources: AdblockFilterSource.defaultSources(),
     sniffedMediaSort: SniffedMediaSort.newest,
     sniffedMediaDisplayMode: SniffedMediaDisplayMode.both,
+    playbackEngine: PlaybackEngineSetting.videoPlayer,
     browserToolbarPosition: BrowserToolbarPosition.bottom,
     autoRetry: true,
     retryLimit: 3,
@@ -691,6 +720,7 @@ class DownloadSettings {
     List<CosmeticAdRule>? manualCosmeticRules,
     SniffedMediaSort? sniffedMediaSort,
     SniffedMediaDisplayMode? sniffedMediaDisplayMode,
+    PlaybackEngineSetting? playbackEngine,
     BrowserToolbarPosition? browserToolbarPosition,
     bool? desktopMode,
     String? userAgentProfile,
@@ -783,6 +813,7 @@ class DownloadSettings {
       sniffedMediaSort: sniffedMediaSort ?? this.sniffedMediaSort,
       sniffedMediaDisplayMode:
           sniffedMediaDisplayMode ?? this.sniffedMediaDisplayMode,
+      playbackEngine: playbackEngine ?? this.playbackEngine,
       browserToolbarPosition:
           browserToolbarPosition ?? this.browserToolbarPosition,
       desktopMode: desktopMode ?? this.desktopMode,
@@ -835,6 +866,7 @@ class DownloadSettings {
     ],
     'sniffedMediaSort': sniffedMediaSort.name,
     'sniffedMediaDisplayMode': sniffedMediaDisplayMode.name,
+    'playbackEngine': playbackEngine.name,
     'browserToolbarPosition': browserToolbarPosition.name,
     'desktopMode': desktopMode,
     'userAgentProfile': userAgentProfile,
@@ -927,6 +959,12 @@ class DownloadSettings {
       sniffedMediaDisplayMode: SniffedMediaDisplayMode.values.byName(
         json['sniffedMediaDisplayMode'] as String? ??
             defaults.sniffedMediaDisplayMode.name,
+      ),
+      // Tolerate an unknown name rather than throwing the whole settings load
+      // away if this enum ever changes shape.
+      playbackEngine: PlaybackEngineSetting.values.firstWhere(
+        (e) => e.name == json['playbackEngine'],
+        orElse: () => defaults.playbackEngine,
       ),
       browserToolbarPosition: BrowserToolbarPosition.values.byName(
         json['browserToolbarPosition'] as String? ??

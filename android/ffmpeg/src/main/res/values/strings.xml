@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="feature_ffmpeg_title">FFmpeg Media Tools</string>
-</resources>
+<!--
+  Module title for dist:title must live in the *base* module resource table
+  (android/app/src/main/res/values/strings.xml → feature_ffmpeg_title).
+  Do not redefine it here or Bundletool fails with:
+  "Title for module 'ffmpeg' is missing in the base resource table."
+-->
+<resources />

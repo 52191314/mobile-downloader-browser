@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../platform/public_downloads_service.dart';
 import '../theme/aurora_palette.dart';
+import 'sniffer_url_utils.dart';
 
 /// One selectable HLS/DASH (or progressive) quality for [AuroraVideoPlayer].
 class PlayerQualityOption {
@@ -22,17 +23,40 @@ class PlayerQualityOption {
   });
 }
 
+/// Which value a vertical drag is currently adjusting.
+enum _DragMode { none, brightness, volume }
+
+/// A transient overlay pill shown for a gesture (seek, brightness, volume).
+///
+/// Deliberately small and top-anchored: a gesture indicator sits on top of the
+/// thing the user is trying to watch, so it stays out of the picture and never
+/// explains itself. Discoverability belongs in the settings/help copy, not in a
+/// card rendered over the video on every long press.
+class _GestureHud {
+  final IconData icon;
+  final String label;
+
+  /// 0..1 for the thin level bar (brightness/volume). Null hides the bar.
+  final double? value;
+
+  const _GestureHud({required this.icon, required this.label, this.value});
+}
+
 /// A full-screen custom video player with UC Browser-style controls.
 ///
 /// Wraps [VideoPlayerController] directly (no Chewie) so we own every pixel
-/// of the UI: header bar, tap-to-seek, hold-to-speed-up, lockable controls,
-/// clock display, and custom bottom bar.
+/// of the UI: header bar, scrub preview, hold-to-speed-up, lockable controls,
+/// rotation, and custom bottom bar.
 ///
-/// - Tapping the video toggles the control overlays (auto-hide after 3s).
-/// - Long-pressing the video temporarily boosts playback to 2×.
-/// - A lock icon at the left edge disables all overlay controls.
-/// - When [qualityOptions] has 2+ entries, a quality picker appears in the
-///   bottom bar (and overflow menu) so the user can switch mid-playback.
+/// - Tap toggles control overlays (does **not** play/pause — use the center
+///   button or bottom play control).
+/// - Double-tap seeks ∓10s on the left/right third, play/pause in the middle.
+/// - Vertical drag adjusts brightness (left half) or volume (right half).
+/// - Long-press boosts speed to a fixed 2×; other rates live in the speed menu.
+/// - Buffering always shows a spinner + label (slow network is not silent).
+/// - Rotation button forces landscape / returns to sensor orientation.
+/// - Lock icon at the left edge disables overlay controls.
+/// - When [qualityOptions] has 2+ entries, a quality picker is shown.
 class AuroraVideoPlayer extends StatefulWidget {
   final String url;
   final String title;
@@ -110,18 +134,43 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   bool _holdSpeedActive = false;
   double _holdSpeedPrev = 1.0;
 
+  /// Rate applied while holding. Fixed: the vertical axis belongs to
+  /// brightness/volume, and any other rate is one tap away in the speed menu.
+  static const double _holdSpeedRate = 2.0;
+
+  // --- Gesture HUD (transient pill; hold-speed renders from _holdSpeedActive) ---
+  _GestureHud? _hud;
+  Timer? _hudTimer;
+
+  // --- Vertical drag: brightness (left half) / volume (right half) ---
+  _DragMode _dragMode = _DragMode.none;
+  double _dragStartValue = 0;
+  double _dragStartY = 0;
+  double _brightness = 0.5;
+  double _volume = 1.0;
+  static const MethodChannel _windowChannel =
+      MethodChannel('aurora_downloader/player_window');
+
+  // --- Double-tap detection (hand-rolled so single tap stays instant) ---
+  DateTime? _lastTapAt;
+  Offset? _lastTapPos;
+
   // --- Aspect ratio ---
   BoxFit _fit = BoxFit.contain;
+
+  // --- Orientation (false = system/sensor; true = landscape locked) ---
+  bool _landscapeForced = false;
 
   // --- Timers ---
   Timer? _autoHideTimer;
   Timer? _clockTimer;
 
-  // --- Play/pause icon flash ---
+  // --- Play/pause icon flash (center button / double-feedback) ---
   bool _showPlayPauseIcon = false;
   Timer? _playPauseIconTimer;
 
-  // --- Buffering slow detection ---
+  // --- Buffering ---
+  bool _isBuffering = false;
   bool _isBufferingSlow = false;
   Timer? _bufferingTimer;
 
@@ -145,6 +194,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     _activeHeaders = Map<String, String>.from(widget.headers);
     _activeQualityLabel = _labelForUrl(_activeUrl) ?? 'Auto';
     _initPlayer();
+    _seedBrightness();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -161,6 +211,20 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         }
       }
     });
+  }
+
+  /// Start the brightness drag from wherever the device already is, so the
+  /// first swipe doesn't jump. Failures are non-fatal — the drag still works,
+  /// it just starts from the 50% default.
+  Future<void> _seedBrightness() async {
+    try {
+      final value = await _windowChannel.invokeMethod<double>('getBrightness');
+      if (value != null && mounted) {
+        _brightness = value.clamp(0.0, 1.0);
+      }
+    } catch (_) {
+      // Non-Android or channel unavailable — keep the default.
+    }
   }
 
   String? _labelForUrl(String url) {
@@ -263,7 +327,8 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     final lower = url.toLowerCase();
     if (lower.contains('.m3u8') ||
         lower.contains('mpegurl') ||
-        lower.contains('m3u8')) {
+        lower.contains('m3u8') ||
+        isPlaylistPathHint(lower)) {
       return VideoFormat.hls;
     }
     if (lower.contains('.mpd') || lower.contains('dash+xml')) {
@@ -276,21 +341,35 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     if (!mounted || _controller == null) return;
     final v = _controller!.value;
 
-    // Detect buffering
-    if (v.isPlaying && v.isBuffering) {
-      _bufferingTimer ??= Timer(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _isBufferingSlow = true);
-      });
-    } else {
-      _bufferingTimer?.cancel();
-      _bufferingTimer = null;
-      if (_isBufferingSlow) {
-        setState(() => _isBufferingSlow = false);
+    if (v.size.width > 0 && v.size.height > 0) {
+      if (_videoWidth != v.size.width || _videoHeight != v.size.height) {
+        _videoWidth = v.size.width;
+        _videoHeight = v.size.height;
       }
     }
 
-    // Keep the progress bar live (~10 fps). Previously only the 1s clock
-    // timer rebuilt UI, so the bar jumped and felt "stuck in the middle".
+    // Buffering: ExoPlayer often clears isPlaying while stalled — treat
+    // isBuffering alone as the signal so slow networks aren't silent.
+    final buffering = v.isBuffering;
+    if (buffering != _isBuffering) {
+      _isBuffering = buffering;
+      if (buffering) {
+        _bufferingTimer ??= Timer(const Duration(seconds: 3), () {
+          if (mounted && _isBuffering) {
+            setState(() => _isBufferingSlow = true);
+          }
+        });
+      } else {
+        _bufferingTimer?.cancel();
+        _bufferingTimer = null;
+        _isBufferingSlow = false;
+      }
+      // Immediate rebuild so the spinner appears without waiting for throttle.
+      setState(() {});
+      return;
+    }
+
+    // Keep the progress bar live (~10 fps).
     if (_isSeeking) return;
     final now = DateTime.now();
     if (now.difference(_lastProgressUiAt).inMilliseconds < 100) return;
@@ -301,8 +380,16 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   @override
   void dispose() {
     _pipChannel.setMethodCallHandler(null);
+    // Hand screen brightness back to the system — a window override would
+    // otherwise persist for the rest of the app session.
+    unawaited(
+      _windowChannel
+          .invokeMethod('setBrightness', {'value': -1.0})
+          .catchError((_) => null),
+    );
     _autoHideTimer?.cancel();
     _clockTimer?.cancel();
+    _hudTimer?.cancel();
     _previewSeekDebounce?.cancel();
     if (_controllerListener != null) {
       _controller?.removeListener(_controllerListener!);
@@ -311,6 +398,15 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     _bufferingTimer?.cancel();
     _controller?.dispose();
     _previewController?.dispose();
+    // Restore free orientation when leaving the player.
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]),
+    );
     super.dispose();
   }
 
@@ -412,33 +508,205 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
   // ---- Gesture handlers ----
 
+  /// Tap only shows/hides chrome — play/pause is explicit (center / bottom).
   void _onVideoTap() {
     if (_locked) return;
     if (_controller == null || !_initialized) return;
-    setState(() {
-      if (_controller!.value.isPlaying) {
-        _controller!.pause();
-      } else {
-        _controller!.play();
-      }
-      _controlsVisible = !_controlsVisible;
-    });
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) {
+      _startAutoHideTimer();
+    } else {
+      _autoHideTimer?.cancel();
+    }
+  }
+
+  void _onTogglePlayPause() {
+    if (_locked) return;
+    final c = _controller;
+    if (c == null || !_initialized || !c.value.isInitialized) return;
+    if (c.value.isPlaying) {
+      unawaited(c.pause());
+    } else {
+      unawaited(c.play());
+    }
     _flashPlayPauseIcon();
+    _resetAutoHideTimer();
+    setState(() => _controlsVisible = true);
   }
 
   void _onLongPressStart(LongPressStartDetails d) {
     if (_locked) return;
-    if (_controller == null || !_initialized) return;
+    final c = _controller;
+    if (c == null || !_initialized || !c.value.isInitialized) return;
     _holdSpeedPrev = _currentSpeed;
-    _controller!.setPlaybackSpeed(2.0);
-    setState(() => _holdSpeedActive = true);
+    // Ensure we are playing — hold must never look like a silent pause.
+    unawaited(c.play());
+    unawaited(c.setPlaybackSpeed(_holdSpeedRate));
+    setState(() {
+      _holdSpeedActive = true;
+      _controlsVisible = false;
+    });
   }
 
   void _onLongPressEnd(LongPressEndDetails d) {
+    _endHoldSpeed();
+  }
+
+  void _onLongPressCancel() {
+    _endHoldSpeed();
+  }
+
+  void _endHoldSpeed() {
+    if (!_holdSpeedActive) return;
+    final c = _controller;
+    if (c != null && c.value.isInitialized) {
+      unawaited(c.setPlaybackSpeed(_holdSpeedPrev));
+      // Leave playback running; user can pause explicitly.
+      if (!c.value.isPlaying) {
+        unawaited(c.play());
+      }
+    }
+    if (mounted) {
+      setState(() => _holdSpeedActive = false);
+    } else {
+      _holdSpeedActive = false;
+    }
+  }
+
+  // ---- Gesture HUD ----
+
+  void _showHud(_GestureHud hud) {
+    _hudTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _hud = hud);
+    _hudTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) setState(() => _hud = null);
+    });
+  }
+
+  // ---- Tap / double-tap ----
+
+  /// Hand-rolled double-tap so a single tap toggles the chrome immediately.
+  /// Flutter's [GestureDetector.onDoubleTap] would hold the arena open for
+  /// [kDoubleTapTimeout], adding ~300ms of lag to every controls toggle.
+  void _onTapUp(TapUpDetails d) {
+    final now = DateTime.now();
+    final prevAt = _lastTapAt;
+    final prevPos = _lastTapPos;
+    _lastTapAt = now;
+    _lastTapPos = d.localPosition;
+
+    final isDouble = prevAt != null &&
+        prevPos != null &&
+        now.difference(prevAt) < const Duration(milliseconds: 280) &&
+        (d.localPosition - prevPos).distance < 72;
+
+    if (isDouble) {
+      _lastTapAt = null;
+      _lastTapPos = null;
+      _onDoubleTap(d.localPosition);
+      return;
+    }
+    _onVideoTap();
+  }
+
+  void _onDoubleTap(Offset localPosition) {
     if (_locked) return;
-    if (_controller == null || !_initialized) return;
-    _controller!.setPlaybackSpeed(_holdSpeedPrev);
-    setState(() => _holdSpeedActive = false);
+    final c = _controller;
+    if (c == null || !_initialized || !c.value.isInitialized) return;
+    final width = context.size?.width ?? MediaQuery.of(context).size.width;
+    final third = width / 3;
+    if (localPosition.dx < third) {
+      _seekBy(const Duration(seconds: -10));
+    } else if (localPosition.dx > width - third) {
+      _seekBy(const Duration(seconds: 10));
+    } else {
+      _onTogglePlayPause();
+    }
+  }
+
+  void _seekBy(Duration delta) {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    final duration = c.value.duration;
+    var target = c.value.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration;
+    unawaited(c.seekTo(target));
+    final seconds = delta.inSeconds.abs();
+    _showHud(
+      _GestureHud(
+        icon: delta.isNegative
+            ? Icons.fast_rewind_rounded
+            : Icons.fast_forward_rounded,
+        label: '${delta.isNegative ? '−' : '+'}${seconds}s',
+      ),
+    );
+  }
+
+  // ---- Vertical drag: brightness (left) / volume (right) ----
+
+  void _onVerticalDragStart(DragStartDetails d) {
+    if (_locked || _isInPipMode || !_initialized) return;
+    final width = context.size?.width ?? MediaQuery.of(context).size.width;
+    final isLeft = d.localPosition.dx < width / 2;
+    _dragMode = isLeft ? _DragMode.brightness : _DragMode.volume;
+    _dragStartValue = isLeft ? _brightness : _volume;
+    _dragStartY = d.localPosition.dy;
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails d) {
+    if (_dragMode == _DragMode.none || _locked) return;
+    final height = context.size?.height ?? MediaQuery.of(context).size.height;
+    // ~70% of the screen height covers the full range: enough travel for fine
+    // control without needing a full-height swipe.
+    final travel = height * 0.7;
+    if (travel <= 0) return;
+    final delta = (_dragStartY - d.localPosition.dy) / travel;
+    final next = (_dragStartValue + delta).clamp(0.0, 1.0);
+    if (_dragMode == _DragMode.brightness) {
+      _applyBrightness(next);
+    } else {
+      _applyVolume(next);
+    }
+  }
+
+  void _onVerticalDragEnd(DragEndDetails d) => _dragMode = _DragMode.none;
+
+  void _applyBrightness(double value) {
+    _brightness = value;
+    unawaited(
+      _windowChannel
+          .invokeMethod('setBrightness', {'value': value})
+          .catchError((_) => null),
+    );
+    _showHud(
+      _GestureHud(
+        icon: value < 0.34
+            ? Icons.brightness_low_rounded
+            : value < 0.67
+                ? Icons.brightness_medium_rounded
+                : Icons.brightness_high_rounded,
+        label: '${(value * 100).round()}%',
+        value: value,
+      ),
+    );
+  }
+
+  void _applyVolume(double value) {
+    _volume = value;
+    unawaited(_controller?.setVolume(value));
+    _showHud(
+      _GestureHud(
+        icon: value <= 0.001
+            ? Icons.volume_off_rounded
+            : value < 0.5
+                ? Icons.volume_down_rounded
+                : Icons.volume_up_rounded,
+        label: '${(value * 100).round()}%',
+        value: value,
+      ),
+    );
   }
 
   void _onToggleLock() {
@@ -454,6 +722,29 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     });
   }
 
+  void _onToggleOrientation() {
+    _resetAutoHideTimer();
+    _landscapeForced = !_landscapeForced;
+    if (_landscapeForced) {
+      unawaited(
+        SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]),
+      );
+    } else {
+      unawaited(
+        SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]),
+      );
+    }
+    setState(() {});
+  }
+
   void _onRetry() {
     if (_controllerListener != null) {
       _controller?.removeListener(_controllerListener!);
@@ -466,7 +757,16 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
   // ---- Speed selector ----
 
-  static const List<double> _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  static const List<double> _speedOptions = [
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+    3.0,
+    4.0,
+  ];
 
   void _showSpeedMenu() {
     final ac = context.ac;
@@ -501,14 +801,15 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                       color: selected ? ac.accentFrost : ac.textSecondary,
                     ),
                     title: Text(
-                      '${speed}x',
+                      _formatSpeedLabel(speed),
                       style: TextStyle(
                         color: selected ? ac.textPrimary : ac.textSecondary,
-                        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight:
+                            selected ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
                     onTap: () {
-                      _controller?.setPlaybackSpeed(speed);
+                      unawaited(_controller?.setPlaybackSpeed(speed));
                       setState(() => _currentSpeed = speed);
                       Navigator.pop(ctx);
                     },
@@ -804,6 +1105,13 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
+  String _formatSpeedLabel(double speed) {
+    if (speed == speed.roundToDouble()) {
+      return '${speed.toInt()}×';
+    }
+    return '$speed×';
+  }
+
   String get _currentTimeString {
     final now = DateTime.now();
     return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
@@ -819,7 +1127,6 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         body: _buildVideoArea(),
       );
     }
-    final ac = context.ac;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -829,38 +1136,36 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: _onVideoTap,
+                onTapUp: _onTapUp,
                 onLongPressStart: _onLongPressStart,
                 onLongPressEnd: _onLongPressEnd,
+                onLongPressCancel: _onLongPressCancel,
+                onVerticalDragStart: _onVerticalDragStart,
+                onVerticalDragUpdate: _onVerticalDragUpdate,
+                onVerticalDragEnd: _onVerticalDragEnd,
+                onVerticalDragCancel: () => _dragMode = _DragMode.none,
                 child: _buildVideoArea(),
               ),
             ),
 
-            // --- Hold-speed badge ---
-            if (_holdSpeedActive && !_locked)
-              Positioned(
-                top: 60,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: ac.accentFrost.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    '2x',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
+            // --- Gesture HUD pill (speed / seek / brightness / volume) ---
+            if (!_locked) _buildGestureHud(),
 
             // --- Controls ---
             if (_controlsVisible && !_locked) _buildHeader(),
             if (_controlsVisible && !_locked) _buildBottomControls(),
+
+            // --- Center play/pause (when chrome visible, not holding) ---
+            if (_controlsVisible &&
+                !_locked &&
+                !_holdSpeedActive &&
+                _initialized &&
+                _error == null)
+              Positioned.fill(
+                child: Center(
+                  child: _buildCenterPlayButton(),
+                ),
+              ),
 
             // --- Lock button ---
             Positioned(
@@ -887,6 +1192,93 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Transient gesture feedback: a small pill at the top, out of the picture.
+  /// Hold-speed takes precedence over the timed HUD while the finger is down.
+  Widget _buildGestureHud() {
+    final hud = _holdSpeedActive
+        ? _GestureHud(
+            icon: Icons.fast_forward_rounded,
+            label: _formatSpeedLabel(_holdSpeedRate),
+          )
+        : _hud;
+    if (hud == null) return const SizedBox.shrink();
+    final ac = context.ac;
+    return Positioned(
+      top: 16,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.62),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(hud.icon, color: ac.accentFrost, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  hud.label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (hud.value != null) ...[
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 56,
+                    height: 3,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        value: hud.value,
+                        minHeight: 3,
+                        backgroundColor: Colors.white24,
+                        valueColor: AlwaysStoppedAnimation<Color>(ac.accentFrost),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCenterPlayButton() {
+    final c = _controller;
+    final playing = c != null && c.value.isInitialized && c.value.isPlaying;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _onTogglePlayPause,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 68,
+          height: 68,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.45),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Icon(
+            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: Colors.white,
+            size: 40,
+          ),
         ),
       ),
     );
@@ -949,6 +1341,10 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       );
     }
 
+    final vSize = c.value.size;
+    final w = vSize.width > 0 ? vSize.width : _videoWidth;
+    final h = vSize.height > 0 ? vSize.height : _videoHeight;
+
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -958,61 +1354,76 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
             child: FittedBox(
               fit: _fit,
               child: SizedBox(
-                width: _videoWidth,
-                height: _videoHeight,
+                width: w,
+                height: h,
                 child: VideoPlayer(c),
               ),
             ),
           ),
         ),
 
-        // Buffering slow overlay
-        if (_isBufferingSlow && !_locked)
+        // Buffering overlay — always visible while stalled (not only after 3s).
+        if (_isBuffering && !_locked && !_holdSpeedActive)
           Positioned.fill(
-            child: Container(
-              color: Colors.black54,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(ac.accentFrost),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Buffering is slow',
-                    style: TextStyle(color: Colors.white60, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  GestureDetector(
-                    onTap: _onRetry,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: ac.accentFrost,
-                        borderRadius: BorderRadius.circular(6),
+            child: IgnorePointer(
+              ignoring: !_isBufferingSlow,
+              child: Container(
+                color: _isBufferingSlow ? Colors.black54 : Colors.transparent,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(ac.accentFrost),
                       ),
-                      child: const Text(
-                        'Retry',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _isBufferingSlow
+                          ? 'Buffering is slow'
+                          : 'Buffering…',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (_isBufferingSlow) ...[
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: _onRetry,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: ac.accentFrost,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'Retry',
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
 
-        // Play/pause flash icon
+        // Brief play/pause flash after explicit toggle
         if (_showPlayPauseIcon)
           IgnorePointer(
             child: AnimatedOpacity(
@@ -1021,12 +1432,14 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
               child: Container(
                 width: 64,
                 height: 64,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.black38,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  c.value.isPlaying ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                  c.value.isPlaying
+                      ? Icons.play_arrow_rounded
+                      : Icons.pause_rounded,
                   color: Colors.white,
                   size: 32,
                 ),
@@ -1173,13 +1586,34 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
             // --- Bottom action row ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: [
+                  // Play / pause (explicit — tap on video no longer toggles)
+                  _miniButton(
+                    onTap: _onTogglePlayPause,
+                    child: Icon(
+                      (c != null &&
+                              c.value.isInitialized &&
+                              c.value.isPlaying)
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                  ),
                   // Time
-                  Text(
-                    '${_formatDuration(displayPosition)} / ${_formatDuration(duration)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  Flexible(
+                    child: Text(
+                      '${_formatDuration(displayPosition)} / ${_formatDuration(duration)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ),
                   const Spacer(),
                   // Quality (HLS variants / multi-rendition)
@@ -1206,13 +1640,12 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 2),
                   ],
-                  // Speed
+                  // Speed (includes 2× / 4× for permanent rate)
                   _miniButton(
                     onTap: _showSpeedMenu,
                     child: Text(
-                      '${_currentSpeed}x',
+                      _formatSpeedLabel(_currentSpeed),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -1220,17 +1653,28 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 2),
+                  // Screen rotation
+                  _miniButton(
+                    onTap: _onToggleOrientation,
+                    child: Icon(
+                      _landscapeForced
+                          ? Icons.screen_lock_rotation_rounded
+                          : Icons.screen_rotation_rounded,
+                      color: _landscapeForced ? ac.accentFrost : Colors.white70,
+                      size: 20,
+                    ),
+                  ),
                   // Star (favorite)
                   _miniButton(
                     onTap: _onToggleFavorite,
                     child: Icon(
-                      _isFavorited ? Icons.star_rounded : Icons.star_outline_rounded,
+                      _isFavorited
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
                       color: _isFavorited ? ac.accentFrost : Colors.white70,
                       size: 20,
                     ),
                   ),
-                  const SizedBox(width: 2),
                   // Download
                   _miniButton(
                     onTap: () {
@@ -1242,7 +1686,6 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                       size: 20,
                     ),
                   ),
-                  const SizedBox(width: 2),
                   // Aspect ratio
                   _miniButton(
                     onTap: _onToggleAspectRatio,

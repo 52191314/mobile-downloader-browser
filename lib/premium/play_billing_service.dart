@@ -5,6 +5,8 @@ import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
 import '../logging/aurora_log.dart';
 import 'build_channel.dart';
+import 'license/license_api_client.dart';
+import 'license/license_service.dart';
 import 'local_funnel_store.dart';
 import 'pro_entitlement.dart';
 
@@ -25,9 +27,13 @@ void Function(String event, {Map<String, dynamic>? props})? auroraFunnelRecorder
 /// client / Console misconfig), we still grant Ultra and record the
 /// `upgrade_arbitrage` funnel event.
 class PlayBillingService {
-  PlayBillingService(this.entitlement);
+  PlayBillingService(this.entitlement, {this.licenseService});
 
   final ProEntitlement entitlement;
+
+  /// Server-side license verification. Null (or disabled) leaves the original
+  /// client-side-only behaviour intact.
+  final LicenseService? licenseService;
 
   final InAppPurchase _iap = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
@@ -55,8 +61,12 @@ class PlayBillingService {
   String? get lastError => _lastError;
 
   /// Pro sees the upgrade CTA when the upgrade SKU is loaded.
+  ///
+  /// Keyed on [ProEntitlement.storeTier], not the licensed tier: a Pro owner
+  /// whose license has not been fetched yet must still be able to buy the
+  /// upgrade rather than being pushed to full-price Ultra.
   bool get showUltraUpgrade =>
-      entitlement.tier == EntitlementTier.pro &&
+      entitlement.storeTier == EntitlementTier.pro &&
       ultraUpgradeProduct != null &&
       !_ultraUiDisabled;
 
@@ -68,8 +78,8 @@ class PlayBillingService {
   bool get showUltraFull =>
       ultraProduct != null &&
       !_ultraUiDisabled &&
-      (entitlement.tier == EntitlementTier.free ||
-          (entitlement.tier == EntitlementTier.pro &&
+      (entitlement.storeTier == EntitlementTier.free ||
+          (entitlement.storeTier == EntitlementTier.pro &&
               ultraUpgradeProduct == null));
 
   String? get localizedProPrice => _proProduct?.price;
@@ -192,7 +202,7 @@ class PlayBillingService {
           'Aurora Ultra is sold only through the Google Play edition of this app.';
       return false;
     }
-    if (entitlement.tier != EntitlementTier.pro) {
+    if (entitlement.storeTier != EntitlementTier.pro) {
       _lastError = 'Upgrade is only available to Aurora Pro owners.';
       return false;
     }
@@ -263,6 +273,49 @@ class PlayBillingService {
   // Purchase stream (GRANT-ONLY, UNION)
   // -------------------------------------------------------------------------
 
+  /// Map Play purchases to the `{productId, purchaseToken}` pairs the license
+  /// server verifies. On Android `serverVerificationData` **is** the purchase
+  /// token.
+  List<PlayPurchase> _toLicensePurchases(Iterable<PurchaseDetails> purchases) {
+    final seen = <String>{};
+    final result = <PlayPurchase>[];
+    for (final p in purchases) {
+      if (!kAllProductIds.contains(p.productID)) continue;
+      if (p.status != PurchaseStatus.purchased &&
+          p.status != PurchaseStatus.restored) {
+        continue;
+      }
+      final token = p.verificationData.serverVerificationData;
+      if (token.isEmpty) continue;
+      if (!seen.add('${p.productID}:$token')) continue;
+      result.add(PlayPurchase(productId: p.productID, purchaseToken: token));
+    }
+    return result;
+  }
+
+  /// Hand purchase tokens to the license server. Never throws — a failure here
+  /// leaves the cached license (and therefore the user's tier) untouched.
+  Future<void> _activateLicense(
+    Iterable<PurchaseDetails> purchases, {
+    required String reason,
+  }) async {
+    final service = licenseService;
+    if (service == null || !service.isEnabled) return;
+    final mapped = _toLicensePurchases(purchases);
+    if (mapped.isEmpty) return;
+    try {
+      await service.activate(mapped, reason: reason);
+    } catch (e, s) {
+      AuroraLog.instance.warn(
+        'PlayBilling license activate failed: $e',
+        category: LogCategory.app,
+        screen: LogScreen.settings,
+        eventType: LogEventType.error,
+        stackTrace: s,
+      );
+    }
+  }
+
   Future<void> _onPurchaseUpdates(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       if (!kAllProductIds.contains(purchase.productID)) continue;
@@ -297,6 +350,11 @@ class PlayBillingService {
           break;
       }
     }
+
+    // A partial batch is fine: the server unions these tokens with everything
+    // already linked to this install, so a lone upgrade-SKU purchase still
+    // resolves to Ultra alongside the earlier Pro purchase.
+    await _activateLicense(purchases, reason: 'purchase_stream');
   }
 
   // -------------------------------------------------------------------------
@@ -365,6 +423,14 @@ class PlayBillingService {
               !previousOwned.contains(kAuroraUltraUpgradeProductId)) {
             auroraFunnelRecorder?.call('upgrade_arbitrage');
           }
+
+          // Authoritative ownership snapshot — the best input the license
+          // server can get. This is also the reinstall / new-device path and
+          // the backfill for users who bought before licensing shipped.
+          await _activateLicense(
+            result.pastPurchases,
+            reason: 'reconcile_$reason',
+          );
           return;
         }
       } catch (e, s) {
@@ -408,6 +474,9 @@ class PlayBillingService {
           await entitlement.grantFromProductId(e.productID); // UNION grant
         }
       }
+      // Grant-only fallback, but the tokens themselves are still real and the
+      // server verifies each one independently.
+      await _activateLicense(collected, reason: 'fallback_$reason');
       await entitlement.recordReconcileFailure(); // not authoritative
       AuroraLog.instance.info(
         'reconcile used grant-only restore fallback (reason=$reason)',

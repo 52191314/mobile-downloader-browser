@@ -11,6 +11,7 @@
 .env
 .env.*
 !.env.example
+secret/
 *.pem
 *.p12
 *.pfx
@@ -139,6 +140,11 @@ build_*.log
 build_*.txt
 flutter_*.log
 
+# Raw device captures for store screenshots (intermediates).
+# Composited 1080x1920 output under assets/store/out/ stays tracked --
+# see tools/make_store_screenshots.py
+assets/store/raw/
+
 # Accidental APK / bundle drops in repo root
 aurora_downloader.apk
 app-release.apk
@@ -154,6 +160,8 @@ AGENTS.md
 DESIGN.md
 ROADMAP.md
 /test/
+!/test/premium/
+!/test/premium/license/
 /tools/
 
 # Internal docs (agent maps, designs, sessions, freemium backlog)

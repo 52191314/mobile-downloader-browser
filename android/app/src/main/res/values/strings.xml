@@ -7,4 +7,10 @@
     <string name="action_reload">Reload</string>
     <string name="action_close">Close</string>
     <string name="menu_search">Search</string>
+
+    <!-- Deferred component module name — required by Flutter build validation -->
+    <string name="ffmpegName">ffmpeg</string>
+
+    <!-- Title for the :ffmpeg on-demand dynamic feature module -->
+    <string name="feature_ffmpeg_title">FFmpeg Media Tools</string>
 </resources>

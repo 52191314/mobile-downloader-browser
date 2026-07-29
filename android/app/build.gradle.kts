@@ -1,4 +1,5 @@
 import java.io.FileInputStream
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -18,29 +19,43 @@ if (keystorePropertiesFile.exists()) {
 // ---------------------------------------------------------------------------
 // Build channel detection: Play Store AAB vs GitHub fat APK.
 // Default is `github` (fat APK) so open-source builds never ship a dynamic
-// feature module. Play builds set `--dart-define=AURORA_BUILD_CHANNEL=play`.
+// feature module.
 //
-// The dart-define values are available via the Flutter extension's dartDefines
-// list. We also check the Gradle project property (set via -P) as a fallback
-// for CI scripts that may pass it directly.
+// The Flutter Gradle plugin exposes dart-defines as a base64-encoded Gradle
+// project property `dart-defines-encoded`. We decode and check for the
+// Play channel marker.
+// Fallback: AURORA_BUILD_CHANNEL environment variable for CI.
 // See: AGENTS.md, docs/play_on_demand_modules_plan.md
 // ---------------------------------------------------------------------------
 fun isPlayBuildChannel(): Boolean {
-    // Primary path: Flutter's dart-defines from --dart-define=AURORA_BUILD_CHANNEL=play
-    val flutterExt = project.extensions.findByName("flutter")
-    val dartDefines = (flutterExt as? dynamic)?.dartDefines
-    if (dartDefines is List<*>) {
-        if (dartDefines.any { it.toString().lowercase() == "aurora_build_channel=play" }) {
-            return true
+    // Primary: check AURORA_BUILD_CHANNEL environment variable.
+    // Set before building:
+    //   $env:AURORA_BUILD_CHANNEL="play"
+    //   flutter build appbundle --release
+    val envChannel = System.getenv("AURORA_BUILD_CHANNEL")?.lowercase()
+    if (envChannel == "play") return true
+    // Fallback 1: direct Gradle project property -PauroraBuildChannel=play.
+    if (project.hasProperty("auroraBuildChannel")) {
+        val channel = project.property("auroraBuildChannel")
+        if (channel is String && channel.lowercase() == "play") return true
+    }
+    // Fallback 2: Flutter dart-defines properties passed via flutter build
+    if (project.hasProperty("dart-defines-encoded")) {
+        val encoded = project.property("dart-defines-encoded") as String
+        runCatching {
+            val decoded = String(Base64.getDecoder().decode(encoded))
+            if (decoded.contains("AURORA_BUILD_CHANNEL=play") || decoded.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")) return true
         }
     }
-    // Fallback: Gradle project property for CI (-PauroraBuildChannel=play).
-    if (project.hasProperty("auroraBuildChannel")) {
-        val channel = project.property("auroraBuildChannel") as? String
-        if (channel?.lowercase() == "play") return true
+    if (project.hasProperty("dart-defines")) {
+        val defines = project.property("dart-defines") as String
+        if (defines.contains("AURORA_BUILD_CHANNEL=play") || defines.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")) return true
     }
     return false
 }
+// Set the env var before building Play AAB:
+//   $env:AURORA_BUILD_CHANNEL="play"
+//   flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
 val isPlayChannel = isPlayBuildChannel()
 
 android {
@@ -61,7 +76,10 @@ android {
     defaultConfig {
         applicationId = "com.personal.aurora_downloader"
         minSdk = 24
-        targetSdk = flutter.targetSdkVersion
+        // Pinned, not inherited from `flutter.targetSdkVersion`: Play raises the
+        // targetSdk floor for new app submissions to API 36 on 2026-08-31, and a
+        // floating value silently changes with a Flutter SDK upgrade.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
@@ -93,6 +111,56 @@ android {
     // The `:ffmpeg` dynamic feature module ships FFmpeg native libs separately.
     if (isPlayChannel) {
         dynamicFeatures += listOf(":ffmpeg")
+    }
+
+    // Play only & AAB only: keep FFmpeg .so out of the *base* module. The same natives are
+    // packaged into :ffmpeg (see android/ffmpeg/build.gradle.kts). APK builds (debug/profile/release)
+    // omit this block so the Flutter plugin libs remain in the APK.
+    val isBundleTask = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+    if (isPlayChannel && isBundleTask) {
+        packaging {
+            jniLibs {
+                // Keep FFmpeg kit + libav* out of base (all ABI / neon variants).
+                // Same payload is packaged into :ffmpeg for on-demand install.
+                excludes += listOf(
+                    "**/libffmpegkit.so",
+                    "**/libffmpegkit_abidetect.so",
+                    "**/libffmpegkit_armv7a_neon.so",
+                    "**/libavcodec.so",
+                    "**/libavcodec_neon.so",
+                    "**/libavformat.so",
+                    "**/libavformat_neon.so",
+                    "**/libavutil.so",
+                    "**/libavutil_neon.so",
+                    "**/libavfilter.so",
+                    "**/libavfilter_neon.so",
+                    "**/libavdevice.so",
+                    "**/libavdevice_neon.so",
+                    "**/libswresample.so",
+                    "**/libswresample_neon.so",
+                    "**/libswscale.so",
+                    "**/libswscale_neon.so",
+                )
+            }
+        }
+    }
+
+    // defaultConfig.ndk.abiFilters only constrains ABIs we *build* (CMake).
+    // It does not filter prebuilt .so files that arrive inside AAR
+    // dependencies — ffmpeg-kit ships armeabi-v7a and x86_64 payloads, and
+    // those were being packaged despite this app being arm64-only, costing
+    // ~55 MB of natives for ABIs we do not support. Applies to every variant.
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "**/armeabi-v7a/**",
+                "**/armeabi/**",
+                "**/x86/**",
+                "**/x86_64/**",
+                "**/mips/**",
+                "**/mips64/**",
+            )
+        }
     }
 
     buildTypes {
@@ -132,3 +200,6 @@ dependencies {
     implementation("com.google.android.play:feature-delivery:2.1.0")
     implementation("com.google.android.play:feature-delivery-ktx:2.1.0")
 }
+
+// Native payload for :ffmpeg is extracted in android/ffmpeg/build.gradle.kts.
+// Base exclusion is packaging.jniLibs.excludes above (Play only).

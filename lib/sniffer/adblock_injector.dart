@@ -62,6 +62,36 @@ class AdblockInjector {
         ),
       );
 
+      // Generic (hostless) cosmetic rules are the bulk of EasyList. They never
+      // vary by page, so they ship once as a user script instead of crossing
+      // the platform channel on every navigation.
+      final genericCss = _engine.getGenericCosmeticCss();
+      if (genericCss.isNotEmpty) {
+        final escaped = _escapeForJsSingleQuotes(genericCss);
+        await controller.addUserScript(
+          userScript: UserScript(
+            source: '''
+(function() {
+  var css = '$escaped';
+  function apply() {
+    if (!document.documentElement) return false;
+    var style = document.createElement('style');
+    style.setAttribute('data-aurora-adblock', 'generic');
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+    return true;
+  }
+  if (!apply()) {
+    document.addEventListener('DOMContentLoaded', apply, { once: true });
+  }
+})();
+''',
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            groupName: 'aurora_adblock',
+          ),
+        );
+      }
+
       _userScriptsAdded = true;
     } catch (_) {}
   }
@@ -74,13 +104,11 @@ class AdblockInjector {
     final host = Uri.tryParse(pageUrl)?.host ?? '';
     if (host.isEmpty) return;
 
-    // Cosmetic CSS
+    // Host-specific cosmetic CSS. Generic rules are already in place via the
+    // document_start user script installed by [installAsUserScript].
     final cosmeticCss = _engine.getCosmeticCssForHost(host);
     if (cosmeticCss.isNotEmpty) {
-      final escapedCss = cosmeticCss
-          .replaceAll('\\', '\\\\')
-          .replaceAll("'", "\\'")
-          .replaceAll('\n', '\\n');
+      final escapedCss = _escapeForJsSingleQuotes(cosmeticCss);
       await controller
           .evaluateJavascript(
             source: '''
@@ -114,6 +142,17 @@ class AdblockInjector {
           .evaluateJavascript(source: buffer.toString())
           .catchError((_) {});
     }
+  }
+
+  /// Escapes CSS for embedding inside a single-quoted JS string literal.
+  /// Carriage returns matter too: a bare CR inside a JS string is a syntax
+  /// error, and filter lists fetched over HTTP often carry CRLF line endings.
+  static String _escapeForJsSingleQuotes(String value) {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll("'", "\\'")
+        .replaceAll('\r', '\\r')
+        .replaceAll('\n', '\\n');
   }
 
   static Future<String> _loadCosmeticScript() {

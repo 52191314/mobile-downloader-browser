@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+keys
+secrets
+.env
+.env.*
+!.env.example
+test
+coverage
+*.log
+README.md

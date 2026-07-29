@@ -17,7 +17,7 @@
 /// | Tab groups | 3 | unlimited | unlimited |
 /// | Auto-host on groups | no | yes | yes |
 /// | Cosmetic rules | 25 | unlimited | unlimited |
-/// | Drive sync | no | yes | yes |
+/// | ~~Drive sync~~ | — | — | — | **feature removed; see [ProFeature.driveSync]** |
 /// | Scheduled auto-backup | no | yes | yes |
 /// | Manual backup/export | yes | yes | yes |
 /// | Proxy (HTTP+SOCKS5+auth) | no | yes | yes |
@@ -53,6 +53,13 @@ enum ProFeature {
   downloadRules,
 
   /// Google Drive connection + auto-sync.
+  ///
+  /// **Feature removed 2026-07-27** — the Drive implementation and its four
+  /// packages were deleted (see `play_review_audit_2026-07-27.md` §0.1). This
+  /// enum entry, its [ProFeatures.minimumTier] mapping, and its display name are
+  /// retained only because the enum's append order is frozen for analytics and
+  /// error strings. Nothing constructs or queries it. Do not treat a `true` from
+  /// [ProFeatures.allows] here as meaning Drive sync exists.
   driveSync,
 
   /// More than [freeFilterListSlots] enabled remote filter lists.
@@ -79,7 +86,7 @@ enum ProFeature {
   /// Per-site browser/download profiles.
   siteProfiles,
 
-  /// EasyPrivacy / tracker blocking pack.
+  /// Extended/curated tracker lists & auto-updates pack.
   trackerPack,
 
   /// > [maxFreeCosmeticRules] cosmetic rules.
@@ -303,7 +310,7 @@ class ProFeatures {
       case ProFeature.customFilterListUrl:
         return 'Custom filter list URLs';
       case ProFeature.trackerPack:
-        return 'Tracker blocking pack';
+        return 'Extended tracker lists & auto-updates';
       case ProFeature.higherConcurrency:
         return 'Higher concurrent downloads';
       case ProFeature.higherChunks:

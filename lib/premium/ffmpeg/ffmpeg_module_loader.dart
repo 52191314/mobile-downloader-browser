@@ -348,7 +348,8 @@ class PlayModuleLoader extends FeatureModuleLoader {
   int? estimatedSizeBytes(String moduleId) {
     switch (moduleId) {
       case 'ffmpeg':
-        return 10 * 1024 * 1024; // ~10 MB estimate
+        // Stripped arm64 suite is ~15–20 MB; show an upper-bound estimate.
+        return 18 * 1024 * 1024;
       default:
         return null;
     }
