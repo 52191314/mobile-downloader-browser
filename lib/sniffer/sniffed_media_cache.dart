@@ -265,6 +265,7 @@ class SniffedMediaCache {
               'isShortClip': m.isShortClip,
               'isCacheRestored': m.isCacheRestored,
               'isStale': m.isStale,
+              'thumbnailUrl': m.thumbnailUrl,
             },
           )
           .toList(growable: false);
@@ -389,6 +390,7 @@ class SniffedMediaCache {
         audioCodec: _stringFrom(rawItem['audioCodec']),
         bandwidth: _intFrom(rawItem['bandwidth']),
         pageTitle: _stringFrom(rawItem['pageTitle']),
+        thumbnailUrl: _stringFrom(rawItem['thumbnailUrl']),
         isShortClip: rawItem['isShortClip'] as bool? ?? false,
         sniffSource: SniffSource.session,
         isCacheRestored: true,

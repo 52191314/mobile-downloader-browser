@@ -4,18 +4,34 @@ import 'package:aurora_downloader/sniffer/capture/media_filter.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 import 'package:aurora_downloader/theme/aurora_tokens.dart';
 
-/// Horizontal type filter chips for the Capture sheet.
+/// Horizontal type filter chips for the Capture sheet, plus the pinned
+/// options button.
 ///
 /// Selected "All" uses frost; selected type chips use the matching media accent.
+///
+/// Sort / display-mode / show-all used to occupy a fixed block between these
+/// chips and the results, pushing the first captured item most of a screen
+/// down. They now open from [onOpenOptions] — the trailing button never
+/// scrolls away with the chips, and it sits next to the filters because that is
+/// the same job.
 class CaptureFilterBar extends StatelessWidget {
   const CaptureFilterBar({
     super.key,
     required this.current,
     required this.onSelected,
+    this.onOpenOptions,
+    this.optionsActive = false,
   });
 
   final MediaFilter current;
   final ValueChanged<MediaFilter> onSelected;
+
+  /// Opens the sort / display / show-all options. Null hides the button.
+  final VoidCallback? onOpenOptions;
+
+  /// Highlights the options button when any option is off its default, so a
+  /// hidden filter is never invisible.
+  final bool optionsActive;
 
   static const _chips = <(String, MediaFilter, IconData)>[
     ('All', MediaFilter.all, Icons.all_inclusive),
@@ -28,24 +44,44 @@ class CaptureFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ac = context.ac;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var i = 0; i < _chips.length; i++) ...[
-              if (i > 0) const SizedBox(width: 6),
-              _FilterChip(
-                label: _chips[i].$1,
-                value: _chips[i].$2,
-                icon: _chips[i].$3,
-                selected: current == _chips[i].$2,
-                onTap: () => onSelected(_chips[i].$2),
+      padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < _chips.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 6),
+                    _FilterChip(
+                      label: _chips[i].$1,
+                      value: _chips[i].$2,
+                      icon: _chips[i].$3,
+                      selected: current == _chips[i].$2,
+                      onTap: () => onSelected(_chips[i].$2),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+          if (onOpenOptions != null)
+            IconButton(
+              key: const Key('capture_options_button'),
+              tooltip: 'Sort and display options',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.tune,
+                size: 20,
+                color: optionsActive ? ac.accentFrost : ac.textSecondary,
+              ),
+              onPressed: onOpenOptions,
+            ),
+        ],
       ),
     );
   }

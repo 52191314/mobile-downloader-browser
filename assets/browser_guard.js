@@ -1595,6 +1595,103 @@
     }, true);
   })();
 
+  // --- Media Poster Harvest ---
+  // Walks <video>/<audio> elements and reports each element's source together
+  // with the poster image the page already shows for it. Dart stores the poster
+  // on SniffedMedia.thumbnailUrl and paints it as the capture-row thumbnail, so
+  // the sheet shows the same frame the user was looking at instead of a generic
+  // type icon. Cosmetic only — a missing or broken poster just falls back.
+  (function() {
+    if (window.__auroraPosterHarvestActive) return;
+    window.__auroraPosterHarvestActive = true;
+
+    // src|poster pairs already sent. Bounded like the URL cache above so a
+    // long-lived SPA cannot grow it without limit.
+    var _sentPairs = {};
+    var _sentPairsCount = 0;
+
+    function posterFor(el) {
+      try {
+        // 1. The element's own poster attribute — the authoritative frame.
+        var own = el.getAttribute && el.getAttribute('poster');
+        if (own) return normalizeUrl(own);
+
+        // 2. A poster-ish <img> inside the same player container. Many players
+        //    (JW, Video.js, Plyr) paint the still as a sibling <img> rather
+        //    than using the poster attribute. Walk at most 3 levels up so we
+        //    stay inside the player and never reach page chrome.
+        var node = el.parentElement;
+        for (var depth = 0; node && depth < 3; depth++) {
+          var img = node.querySelector('img[src]');
+          if (img) {
+            var w = img.naturalWidth || img.width || 0;
+            // Ignore control-strip icons and tracking pixels.
+            if (w >= 120) return normalizeUrl(img.getAttribute('src'));
+          }
+          node = node.parentElement;
+        }
+      } catch (_) {}
+      return '';
+    }
+
+    function srcFor(el) {
+      try {
+        // currentSrc is the resolved choice across a <source> set.
+        if (el.currentSrc) return normalizeUrl(el.currentSrc);
+        if (el.src) return normalizeUrl(el.src);
+        var source = el.querySelector && el.querySelector('source[src]');
+        if (source) return normalizeUrl(source.getAttribute('src'));
+      } catch (_) {}
+      return '';
+    }
+
+    function scan() {
+      try {
+        var els = document.querySelectorAll('video, audio');
+        for (var i = 0; i < els.length; i++) {
+          var src = srcFor(els[i]);
+          if (!src) continue;
+          var poster = posterFor(els[i]);
+          // No poster and nothing else to add — the network sniffer already has
+          // this URL, so stay quiet rather than spend a bridge hop.
+          if (!poster) continue;
+
+          var key = src + '|' + poster;
+          if (_sentPairs[key]) continue;
+          _sentPairs[key] = true;
+          if (++_sentPairsCount > 200) { _sentPairs = {}; _sentPairsCount = 0; }
+
+          try {
+            MediaMetaChannel.postMessage(
+              JSON.stringify({ src: src, poster: poster })
+            );
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    // Players swap in the real source well after DOMContentLoaded, so sample a
+    // few times rather than once. The observer catches later SPA route changes.
+    scan();
+    setTimeout(scan, 800);
+    setTimeout(scan, 2500);
+
+    try {
+      var pending = null;
+      var observer = new MutationObserver(function() {
+        // Coalesce — player init can fire hundreds of mutations in a burst.
+        if (pending) return;
+        pending = setTimeout(function() { pending = null; scan(); }, 500);
+      });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src', 'poster'],
+      });
+    } catch (_) {}
+  })();
+
   // --- Page Meta Extraction ---
   // Extracts OG meta tags, JSON-LD structured data, and the document title,
   // then posts them via PageMetaChannel (consumed in sniffer_screen.dart to
@@ -1616,6 +1713,7 @@
           h1Title: '',
           ogVideoWidth: '',
           ogVideoHeight: '',
+          ogImage: '',
           ldName: '',
           codeLabel: '',
         };
@@ -1639,6 +1737,14 @@
           else if (prop === 'twitter:title') meta.twitterTitle = content;
           else if (prop === 'og:video:width') meta.ogVideoWidth = content;
           else if (prop === 'og:video:height') meta.ogVideoHeight = content;
+          // Page artwork — the capture sheet's fallback row thumbnail when a
+          // media element has no poster of its own. og:image wins over
+          // twitter:image; neither overwrites an already-resolved value.
+          else if (prop === 'og:image' && !meta.ogImage) {
+            meta.ogImage = normalizeUrl(content);
+          } else if (prop === 'twitter:image' && !meta.ogImage) {
+            meta.ogImage = normalizeUrl(content);
+          }
         }
 
         // Primary page heading — on MissAV this matches the full og:title

@@ -223,6 +223,7 @@ class MediaSnifferEngine implements MediaEnricherHost {
     Map<String, String> headers = const {},
     SniffSource sniffSource = SniffSource.javascript,
     int? contentLength,
+    String? thumbnailUrl,
   }) {
     // Play: URL/CDN/page backstop (site hard-off is enforced before sniff()).
     if (RestrictedMediaPolicy.isBlocked(
@@ -282,6 +283,14 @@ class MediaSnifferEngine implements MediaEnricherHost {
           pageTitle.trim().isNotEmpty &&
           (existing.pageTitle == null || existing.pageTitle!.trim().isEmpty)) {
         updated = updated.copyWith(pageTitle: pageTitle.trim());
+      }
+      // Same for the poster: the DOM scan that carries it usually lands after
+      // the network capture that first created this item.
+      if (thumbnailUrl != null &&
+          thumbnailUrl.trim().isNotEmpty &&
+          (existing.thumbnailUrl == null ||
+              existing.thumbnailUrl!.trim().isEmpty)) {
+        updated = updated.copyWith(thumbnailUrl: thumbnailUrl.trim());
       }
       if (contentType != null) {
         final ct = contentType.toLowerCase().split(';').first.trim();
@@ -443,6 +452,9 @@ class MediaSnifferEngine implements MediaEnricherHost {
         containerFormat: containerFormat,
         pageTitle: (pageTitle != null && pageTitle.trim().isNotEmpty)
             ? pageTitle.trim()
+            : null,
+        thumbnailUrl: (thumbnailUrl != null && thumbnailUrl.trim().isNotEmpty)
+            ? thumbnailUrl.trim()
             : null,
       );
       cache.detectedMedia.add(item);

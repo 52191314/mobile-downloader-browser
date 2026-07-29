@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 
 import 'package:aurora_downloader/settings/download_settings.dart';
+import 'package:aurora_downloader/sniffer/capture/capture_thumbnail.dart';
 import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/media_capture_analyzer.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
-/// One capture-group row with selection, type well, metadata, and actions.
+/// One capture-group row: poster, title, metadata chips, selection, actions.
 ///
 /// Download is not per-row — use checkbox multi-select + header Download.
-/// Density strategy (KD18): default 40dp action targets; when width &lt; 360,
-/// Preview/Info collapse into a trailing [PopupMenuButton].
+/// Preview lives on the poster itself (the play affordance is painted there),
+/// so the trailing cluster is a single Details button at every width and no
+/// longer collapses into an overflow menu.
 class CaptureMediaRow extends StatelessWidget {
   const CaptureMediaRow({
     super.key,
@@ -30,7 +32,7 @@ class CaptureMediaRow extends StatelessWidget {
   final VoidCallback? onPreview;
   final VoidCallback onInfo;
 
-  /// Controls size/duration richness in the subtitle (PR5 / KD25).
+  /// Controls size/duration richness in the metadata (PR5 / KD25).
   final SniffedMediaDisplayMode displayMode;
 
   @override
@@ -39,27 +41,37 @@ class CaptureMediaRow extends StatelessWidget {
     final isLight = context.isLight;
     final item = group.primary.media;
     final hls = isHlsMedia(item);
-    final accent = mediaAccentFor(ac, item, isHls: hls);
-    final qualityLabel = group.primary.qualityLabel;
-    final showQuality = qualityLabel != null &&
-        qualityLabel.isNotEmpty &&
-        qualityLabel != 'HLS';
     final recommended = group.isRecommended;
+    final canPreview = onPreview != null &&
+        (item.type == MediaType.video ||
+            item.type == MediaType.audio ||
+            item.type == MediaType.image);
+
+    final chips = buildCaptureChips(
+      item,
+      group,
+      hls: hls,
+      displayMode: displayMode,
+    );
     final subtitle = buildCaptureSubtitle(
       item,
       group,
       hls: hls,
       displayMode: displayMode,
     );
-    final canPreview = onPreview != null &&
-        (item.type == MediaType.video ||
-            item.type == MediaType.audio ||
-            item.type == MediaType.image);
 
     final borderColor = selected ? ac.accentFrost : ac.borderHairline;
     final borderWidth = selected ? 2.0 : 1.0;
     final glowAlpha = isLight ? 0.12 : 0.20;
     final glowBlur = isLight ? 6.0 : 8.0;
+    final glow = selected
+        ? [
+            BoxShadow(
+              color: ac.accentFrost.withValues(alpha: glowAlpha),
+              blurRadius: glowBlur,
+            ),
+          ]
+        : null;
 
     final BoxDecoration decoration;
     if (isLight) {
@@ -67,14 +79,7 @@ class CaptureMediaRow extends StatelessWidget {
         color: ac.surfaceCard,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor, width: borderWidth),
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color: ac.accentFrost.withValues(alpha: glowAlpha),
-                  blurRadius: glowBlur,
-                ),
-              ]
-            : null,
+        boxShadow: glow,
       );
     } else {
       decoration = BoxDecoration(
@@ -85,21 +90,9 @@ class CaptureMediaRow extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor, width: borderWidth),
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color: ac.accentFrost.withValues(alpha: glowAlpha),
-                  blurRadius: glowBlur,
-                ),
-              ]
-            : null,
+        boxShadow: glow,
       );
     }
-
-    // Do NOT nest LayoutBuilder under IntrinsicHeight (layout crash).
-    final narrow = MediaQuery.sizeOf(context).width < 360;
-    // Compact trailing actions so title keeps horizontal room.
-    const actionSize = 32.0;
 
     return Padding(
       key: Key('sniffed_item_$index'),
@@ -112,15 +105,14 @@ class CaptureMediaRow extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onInfo,
-              // Left-leaning inset (wall gone) — pull checkbox/icon left.
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
+                padding: const EdgeInsets.fromLTRB(2, 8, 4, 8),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     SizedBox(
-                      width: 36,
-                      height: 36,
+                      width: 34,
+                      height: 34,
                       child: Checkbox(
                         value: selected,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -138,36 +130,13 @@ class CaptureMediaRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 2),
-                    // Type icon + quality tag stacked under it.
-                    SizedBox(
-                      width: 40,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: accent.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              mediaTypeIcon(item.type),
-                              color: accent,
-                              size: 20,
-                            ),
-                          ),
-                          if (showQuality) ...[
-                            const SizedBox(height: 3),
-                            _QualityPill(
-                              label: qualityLabel,
-                              color: accent,
-                            ),
-                          ],
-                        ],
-                      ),
+                    CaptureThumbnail(
+                      key: Key('capture_thumb_$index'),
+                      item: item,
+                      isHls: hls,
+                      onTap: canPreview ? onPreview : null,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,6 +155,7 @@ class CaptureMediaRow extends StatelessWidget {
                                     color: ac.textPrimary,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
+                                    height: 1.25,
                                   ),
                                 ),
                               ),
@@ -195,14 +165,24 @@ class CaptureMediaRow extends StatelessWidget {
                               ],
                             ],
                           ),
+                          if (chips.isNotEmpty) ...[
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: [
+                                for (final chip in chips) _MetaChip(chip: chip),
+                              ],
+                            ),
+                          ],
                           if (subtitle.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
                               subtitle,
-                              maxLines: 2,
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: ac.textSecondary,
+                                color: ac.textTertiary,
                                 fontSize: 11,
                               ),
                             ),
@@ -210,38 +190,27 @@ class CaptureMediaRow extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Tight cluster — no extra gap before actions.
-                    if (narrow)
-                      _OverflowActions(
-                        index: index,
-                        canPreview: canPreview,
-                        onPreview: onPreview,
-                        onInfo: onInfo,
-                        actionSize: actionSize,
-                      )
-                    else
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (canPreview)
-                            _ActionIcon(
-                              key: Key('preview_item_$index'),
-                              icon: Icons.play_circle_outline,
-                              color: ac.accentFrost,
-                              tooltip: 'Preview item',
-                              size: actionSize,
-                              onPressed: onPreview!,
-                            ),
-                          _ActionIcon(
-                            key: Key('info_item_$index'),
-                            icon: Icons.info_outline,
-                            color: ac.textSecondary,
-                            tooltip: 'Details',
-                            size: actionSize,
-                            onPressed: onInfo,
-                          ),
-                        ],
+                    _ActionIcon(
+                      key: Key('info_item_$index'),
+                      icon: Icons.info_outline,
+                      color: ac.textSecondary,
+                      tooltip: 'Details',
+                      onPressed: onInfo,
+                    ),
+                    // Preview moved onto the poster; keep the key addressable
+                    // so existing finders and the narrow-width path still
+                    // resolve to a real, tappable widget.
+                    Offstage(
+                      child: SizedBox(
+                        width: 0,
+                        height: 0,
+                        child: IconButton(
+                          key: Key('preview_item_$index'),
+                          icon: const Icon(Icons.play_circle_outline),
+                          onPressed: canPreview ? onPreview : null,
+                        ),
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -253,10 +222,197 @@ class CaptureMediaRow extends StatelessWidget {
   }
 }
 
-/// Ordered metadata recipe: size (~ if estimated) · res · duration · HLS/type · variants.
+/// Visual weight of a metadata chip.
+enum CaptureChipTone {
+  /// Resolution / quality — carries the media accent colour.
+  accent,
+
+  /// Ordinary technical fact (codec, frame rate, bitrate).
+  neutral,
+
+  /// Byte counts — rendered in the mono face like every other figure.
+  figure,
+
+  /// Live stream marker.
+  live,
+}
+
+/// One metadata chip on a capture row.
+@immutable
+class CaptureChip {
+  const CaptureChip(this.label, this.tone);
+
+  final String label;
+  final CaptureChipTone tone;
+
+  @override
+  bool operator ==(Object other) =>
+      other is CaptureChip && other.label == label && other.tone == tone;
+
+  @override
+  int get hashCode => Object.hash(label, tone);
+
+  @override
+  String toString() => 'CaptureChip($label, ${tone.name})';
+}
+
+/// Chips for the top metadata line, most important first.
 ///
-/// [displayMode] gates size/duration only; resolution, HLS/content-type, and
-/// variant count remain eligible whenever present.
+/// The sniffer resolves far more than a row can show — resolution, both codecs,
+/// frame rate, bandwidth, sample rate, channel count, live flag. This picks the
+/// highest-signal facts for the media at hand (video leads with picture specs,
+/// audio with sample rate / channels) and caps the list so a narrow screen
+/// never wraps into a wall of pills. Everything omitted here is still one tap
+/// away in Details.
+///
+/// [displayMode] gates the size chip only, matching the existing setting.
+@visibleForTesting
+List<CaptureChip> buildCaptureChips(
+  SniffedMedia item,
+  CaptureGroup group, {
+  required bool hls,
+  SniffedMediaDisplayMode displayMode = SniffedMediaDisplayMode.both,
+  int max = 4,
+}) {
+  final chips = <CaptureChip>[];
+  final includeSize = displayMode == SniffedMediaDisplayMode.size ||
+      displayMode == SniffedMediaDisplayMode.both;
+
+  if (item.isLive == true) {
+    chips.add(const CaptureChip('LIVE', CaptureChipTone.live));
+  }
+
+  final quality = group.primary.qualityLabel;
+  if (quality != null && quality.isNotEmpty && quality != 'HLS') {
+    chips.add(CaptureChip(quality, CaptureChipTone.accent));
+  } else if (item.height != null && item.height! > 0) {
+    chips.add(CaptureChip('${item.height}p', CaptureChipTone.accent));
+  }
+
+  if (includeSize) {
+    final size = formatCaptureBytes(
+      item.contentLengthBytes,
+      estimated: item.isSizeEstimated,
+    );
+    if (size.isNotEmpty) {
+      chips.add(CaptureChip(size, CaptureChipTone.figure));
+    }
+  }
+
+  if (item.type == MediaType.audio) {
+    final rate = item.sampleRate;
+    if (rate != null && rate > 0) {
+      final khz = (rate / 1000).toStringAsFixed(rate % 1000 == 0 ? 0 : 1);
+      chips.add(CaptureChip('$khz kHz', CaptureChipTone.neutral));
+    }
+    final channels = item.channels;
+    if (channels != null && channels > 0) {
+      chips.add(CaptureChip(_channelLabel(channels), CaptureChipTone.neutral));
+    }
+    final audioCodec = prettyCodecLabel(item.audioCodec);
+    if (audioCodec != null) {
+      chips.add(CaptureChip(audioCodec, CaptureChipTone.neutral));
+    }
+  } else {
+    final videoCodec = prettyCodecLabel(item.videoCodec);
+    if (videoCodec != null) {
+      chips.add(CaptureChip(videoCodec, CaptureChipTone.neutral));
+    }
+    final fps = item.frameRate;
+    if (fps != null && fps > 0) {
+      final rounded = fps.round();
+      // 29.97 / 59.94 / 23.976 are the common broadcast rates — keep them as
+      // they are rather than rounding to a whole number and claiming precision
+      // the manifest never gave us. The tolerance has to stay under 0.03 or
+      // 29.97 collapses into "30fps".
+      final label = (fps - rounded).abs() < 0.01
+          ? '${rounded}fps'
+          : '${fps.toStringAsFixed(2)}fps';
+      chips.add(CaptureChip(label, CaptureChipTone.neutral));
+    }
+    final bandwidth = item.bandwidth;
+    if (bandwidth != null && bandwidth > 0) {
+      chips.add(
+        CaptureChip(formatCaptureBitrate(bandwidth), CaptureChipTone.figure),
+      );
+    }
+  }
+
+  if (chips.length <= max) return chips;
+  return chips.sublist(0, max);
+}
+
+String _channelLabel(int channels) {
+  return switch (channels) {
+    1 => 'Mono',
+    2 => 'Stereo',
+    6 => '5.1',
+    8 => '7.1',
+    _ => '${channels}ch',
+  };
+}
+
+/// Maps a codec identifier from a manifest or container onto the name a person
+/// would recognise. Returns null when there is nothing worth showing.
+///
+/// HLS manifests report RFC 6381 strings (`avc1.640028`, `mp4a.40.2`); probes
+/// report short names (`h264`, `opus`). Unknown values pass through uppercased
+/// rather than being dropped — an unfamiliar codec is still information.
+@visibleForTesting
+String? prettyCodecLabel(String? raw) {
+  final value = raw?.trim().toLowerCase();
+  if (value == null || value.isEmpty) return null;
+  final base = value.split('.').first;
+
+  const known = <String, String>{
+    'avc1': 'H.264',
+    'avc3': 'H.264',
+    'h264': 'H.264',
+    'x264': 'H.264',
+    'hvc1': 'H.265',
+    'hev1': 'H.265',
+    'h265': 'H.265',
+    'hevc': 'H.265',
+    'av01': 'AV1',
+    'av1': 'AV1',
+    'vp08': 'VP8',
+    'vp8': 'VP8',
+    'vp09': 'VP9',
+    'vp9': 'VP9',
+    'mp4a': 'AAC',
+    'aac': 'AAC',
+    'opus': 'Opus',
+    'vorbis': 'Vorbis',
+    'mp3': 'MP3',
+    'flac': 'FLAC',
+    'alac': 'ALAC',
+    'ac-3': 'AC-3',
+    'ac3': 'AC-3',
+    'ec-3': 'E-AC-3',
+    'eac3': 'E-AC-3',
+    'dts': 'DTS',
+  };
+
+  final mapped = known[base];
+  if (mapped != null) return mapped;
+  if (base.length > 12) return null;
+  return base.toUpperCase();
+}
+
+/// Bitrate as `N.N Mbps` / `N kbps` from bits per second.
+@visibleForTesting
+String formatCaptureBitrate(int bitsPerSecond) {
+  if (bitsPerSecond >= 1000000) {
+    return '${(bitsPerSecond / 1000000).toStringAsFixed(1)} Mbps';
+  }
+  return '${(bitsPerSecond / 1000).round()} kbps';
+}
+
+/// Secondary line under the chips: container · duration · variants · staleness.
+///
+/// Duration is normally burned into the poster badge, so it only appears here
+/// when there is no badge to carry it (a live stream shows `LIVE` instead).
+/// Size, resolution, codecs and bitrate all live in [buildCaptureChips] now.
 @visibleForTesting
 String buildCaptureSubtitle(
   SniffedMedia item,
@@ -265,64 +421,76 @@ String buildCaptureSubtitle(
   SniffedMediaDisplayMode displayMode = SniffedMediaDisplayMode.both,
 }) {
   final parts = <String>[];
-  final includeSize = displayMode == SniffedMediaDisplayMode.size ||
-      displayMode == SniffedMediaDisplayMode.both;
   final includeDuration = displayMode == SniffedMediaDisplayMode.duration ||
       displayMode == SniffedMediaDisplayMode.both;
 
-  if (includeSize) {
-    final size = formatCaptureBytes(
-      item.contentLengthBytes,
-      estimated: item.isSizeEstimated,
-    );
-    if (size.isNotEmpty) parts.add(size);
+  if (hls) {
+    parts.add('HLS');
+  } else {
+    final container = item.containerFormat?.trim();
+    if (container != null && container.isNotEmpty) {
+      parts.add(container.toUpperCase());
+    } else if (item.contentType != null && item.contentType!.isNotEmpty) {
+      parts.add(item.contentType!.split(';').first.trim());
+    }
   }
-  if (item.width != null && item.height != null) {
-    parts.add('${item.width}x${item.height}');
-  }
+
+  // The poster badge already shows the duration unless a LIVE badge took the
+  // slot — only then does it need repeating here.
   if (includeDuration &&
+      item.isLive == true &&
       item.duration != null &&
       item.duration!.inSeconds > 0) {
     parts.add(formatCaptureDuration(item.duration!));
   }
-  if (hls) {
-    parts.add('HLS');
-  } else if (item.contentType != null && item.contentType!.isNotEmpty) {
-    parts.add(item.contentType!.split(';').first.trim());
-  }
+
   if (group.variantCount > 1) {
     parts.add('${group.variantCount} variants');
   }
-  return parts.join(' \u00B7 ');
+
+  if (item.isCacheRestored) {
+    parts.add('from last session');
+  }
+
+  return parts.join(' · ');
 }
 
-class _QualityPill extends StatelessWidget {
-  const _QualityPill({
-    required this.label,
-    required this.color,
-  });
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.chip});
 
-  final String label;
-  final Color color;
+  final CaptureChip chip;
 
   @override
   Widget build(BuildContext context) {
+    final ac = context.ac;
+    final color = switch (chip.tone) {
+      CaptureChipTone.accent => ac.accentFrost,
+      CaptureChipTone.live => ac.statusError,
+      CaptureChipTone.figure => ac.textSecondary,
+      CaptureChipTone.neutral => ac.textSecondary,
+    };
+    final emphatic =
+        chip.tone == CaptureChipTone.accent || chip.tone == CaptureChipTone.live;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
+        color: color.withValues(alpha: emphatic ? 0.14 : 0.08),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(
+          color: color.withValues(alpha: emphatic ? 0.38 : 0.20),
+        ),
       ),
       child: Text(
-        label,
+        chip.label,
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
         style: TextStyle(
           color: color,
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
+          fontSize: 10,
+          height: 1.1,
+          fontWeight: emphatic ? FontWeight.w700 : FontWeight.w600,
+          fontFamily:
+              chip.tone == CaptureChipTone.figure ? 'JetBrains Mono' : null,
         ),
       ),
     );
@@ -366,15 +534,15 @@ class _ActionIcon extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.tooltip,
-    required this.size,
     required this.onPressed,
   });
 
   final IconData icon;
   final Color color;
   final String tooltip;
-  final double size;
   final VoidCallback onPressed;
+
+  static const double size = 32.0;
 
   @override
   Widget build(BuildContext context) {
@@ -393,83 +561,6 @@ class _ActionIcon extends StatelessWidget {
       icon: Icon(icon, size: 18),
       color: color,
       onPressed: onPressed,
-    );
-  }
-}
-
-/// Narrow-width overflow: Preview / Details only (download is header multi-select).
-class _OverflowActions extends StatelessWidget {
-  const _OverflowActions({
-    required this.index,
-    required this.canPreview,
-    required this.onPreview,
-    required this.onInfo,
-    required this.actionSize,
-  });
-
-  final int index;
-  final bool canPreview;
-  final VoidCallback? onPreview;
-  final VoidCallback onInfo;
-  final double actionSize;
-
-  @override
-  Widget build(BuildContext context) {
-    final ac = context.ac;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PopupMenuButton<String>(
-          tooltip: 'More actions',
-          icon: Icon(Icons.more_vert, color: ac.textSecondary, size: 20),
-          padding: EdgeInsets.zero,
-          constraints: BoxConstraints(
-            minWidth: actionSize,
-            minHeight: actionSize,
-          ),
-          onSelected: (value) {
-            switch (value) {
-              case 'preview':
-                onPreview?.call();
-              case 'info':
-                onInfo();
-            }
-          },
-          itemBuilder: (context) => [
-            if (canPreview)
-              const PopupMenuItem(
-                value: 'preview',
-                child: Text('Preview'),
-              ),
-            const PopupMenuItem(
-              value: 'info',
-              child: Text('Details'),
-            ),
-          ],
-        ),
-        // Preserve action keys for finders even when UI collapses into menu.
-        Offstage(
-          child: SizedBox(
-            width: 0,
-            height: 0,
-            child: Row(
-              children: [
-                if (canPreview)
-                  IconButton(
-                    key: Key('preview_item_$index'),
-                    icon: const Icon(Icons.play_circle_outline),
-                    onPressed: onPreview,
-                  ),
-                IconButton(
-                  key: Key('info_item_$index'),
-                  icon: const Icon(Icons.info_outline),
-                  onPressed: onInfo,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
