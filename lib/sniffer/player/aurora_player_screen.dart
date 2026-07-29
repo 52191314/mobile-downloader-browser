@@ -10,6 +10,32 @@ import 'playback_engine.dart';
 import 'playback_source.dart';
 import 'playback_state.dart';
 
+/// Which value a vertical drag is adjusting.
+enum _DragMode { none, brightness, volume }
+
+/// Transient overlay pill for a gesture (seek, brightness, volume, speed).
+///
+/// Small and top-anchored on purpose: it sits over the thing the user is
+/// trying to watch, so it stays out of the picture and never explains itself.
+@immutable
+class _GestureHud {
+  const _GestureHud({
+    required this.icon,
+    required this.label,
+    this.value,
+    this.hint,
+  });
+
+  final IconData icon;
+  final String label;
+
+  /// 0..1 for the thin level bar (brightness/volume). Null hides the bar.
+  final double? value;
+
+  /// Extra affordance text, e.g. the 4x escalation hint while holding.
+  final String? hint;
+}
+
 /// Full-screen player built on the [PlaybackEngine] abstraction.
 ///
 /// The screen never touches a decoder. It renders whatever
@@ -86,6 +112,30 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
   bool _inPip = false;
   bool _pipSupported = false;
 
+  // --- Lock / orientation ---
+  bool _locked = false;
+  bool _landscapeForced = false;
+
+  // --- Vertical drag: brightness (left half) / volume (right half) ---
+  _DragMode _dragMode = _DragMode.none;
+  double _dragStartValue = 0;
+  double _dragStartY = 0;
+  double _brightness = 0.5;
+  double _volume = 1.0;
+
+  // --- Hand-rolled double-tap ---
+  // Flutter's onDoubleTap holds the gesture arena open for kDoubleTapTimeout,
+  // which would add ~300ms of lag to every single-tap controls toggle.
+  DateTime? _lastTapAt;
+  Offset? _lastTapPos;
+
+  // --- Transient gesture HUD ---
+  _GestureHud? _hud;
+  Timer? _hudTimer;
+
+  // --- Wall clock in the header ---
+  Timer? _clockTimer;
+
   @override
   void initState() {
     super.initState();
@@ -96,6 +146,22 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     _restartAutoHide();
     _setKeepScreenOn(true);
     _initPip();
+    _seedBrightness();
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  /// Start the brightness drag wherever the device already is, so the first
+  /// swipe does not jump. Failure is non-fatal — the drag still works, it just
+  /// starts from 50%.
+  Future<void> _seedBrightness() async {
+    try {
+      final v = await _windowChannel.invokeMethod<double>('getBrightness');
+      if (v != null && mounted) _brightness = v.clamp(0.0, 1.0);
+    } catch (_) {
+      // Non-Android or channel unavailable.
+    }
   }
 
   Future<void> _setKeepScreenOn(bool on) async {
@@ -142,7 +208,16 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
   void dispose() {
     _autoHide?.cancel();
     _previewDebounce?.cancel();
+    _hudTimer?.cancel();
+    _clockTimer?.cancel();
     _pipChannel.setMethodCallHandler(null);
+    // Hand the brightness override back — it is scoped to this window and
+    // would otherwise persist for the rest of the app session.
+    unawaited(
+      _windowChannel
+          .invokeMethod('setBrightness', {'value': -1.0})
+          .catchError((_) => null),
+    );
     // Hand the display back before the route goes — a stuck KEEP_SCREEN_ON
     // flag would outlive the player and drain the battery silently.
     unawaited(_setKeepScreenOn(false));
@@ -159,8 +234,182 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
   }
 
   void _toggleControls() {
+    if (_locked) return;
     setState(() => _controlsVisible = !_controlsVisible);
-    if (_controlsVisible) _restartAutoHide();
+    if (_controlsVisible) {
+      _restartAutoHide();
+    } else {
+      _autoHide?.cancel();
+    }
+  }
+
+  void _showHud(_GestureHud hud, {bool sticky = false}) {
+    _hudTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _hud = hud);
+    if (sticky) return;
+    _hudTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) setState(() => _hud = null);
+    });
+  }
+
+  void _clearHud() {
+    _hudTimer?.cancel();
+    if (mounted) setState(() => _hud = null);
+  }
+
+  // --- Tap / double-tap ---------------------------------------------------
+
+  void _onTapUp(TapUpDetails d) {
+    final now = DateTime.now();
+    final prevAt = _lastTapAt;
+    final prevPos = _lastTapPos;
+    _lastTapAt = now;
+    _lastTapPos = d.localPosition;
+
+    final isDouble = prevAt != null &&
+        prevPos != null &&
+        now.difference(prevAt) < const Duration(milliseconds: 280) &&
+        (d.localPosition - prevPos).distance < 72;
+
+    if (isDouble) {
+      _lastTapAt = null;
+      _lastTapPos = null;
+      _onDoubleTap(d.localPosition);
+      return;
+    }
+    _toggleControls();
+  }
+
+  void _onDoubleTap(Offset localPosition) {
+    if (_locked) return;
+    final state = _engine.state.value;
+    if (state.status != PlaybackStatus.ready) return;
+
+    final width = context.size?.width ?? MediaQuery.sizeOf(context).width;
+    final third = width / 3;
+    if (localPosition.dx < third) {
+      _seekBy(const Duration(seconds: -10));
+    } else if (localPosition.dx > width - third) {
+      _seekBy(const Duration(seconds: 10));
+    } else {
+      state.isPlaying ? _engine.pause() : _engine.play();
+      _restartAutoHide();
+    }
+  }
+
+  void _seekBy(Duration delta) {
+    final state = _engine.state.value;
+    var target = state.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (state.duration > Duration.zero && target > state.duration) {
+      target = state.duration;
+    }
+    unawaited(_engine.seek(target));
+    _showHud(
+      _GestureHud(
+        icon: delta.isNegative
+            ? Icons.fast_rewind_rounded
+            : Icons.fast_forward_rounded,
+        label: '${delta.isNegative ? '−' : '+'}${delta.inSeconds.abs()}s',
+      ),
+    );
+  }
+
+  // --- Vertical drag: brightness (left) / volume (right) ------------------
+
+  void _onVerticalDragStart(DragStartDetails d) {
+    if (_locked || _inPip) return;
+    final width = context.size?.width ?? MediaQuery.sizeOf(context).width;
+    final isLeft = d.localPosition.dx < width / 2;
+    _dragMode = isLeft ? _DragMode.brightness : _DragMode.volume;
+    _dragStartValue = isLeft ? _brightness : _volume;
+    _dragStartY = d.localPosition.dy;
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails d) {
+    if (_dragMode == _DragMode.none || _locked) return;
+    final height = context.size?.height ?? MediaQuery.sizeOf(context).height;
+    // ~70% of the height covers the full range: enough travel for fine
+    // control without demanding a full-height swipe.
+    final travel = height * 0.7;
+    if (travel <= 0) return;
+    final delta = (_dragStartY - d.localPosition.dy) / travel;
+    final next = (_dragStartValue + delta).clamp(0.0, 1.0);
+    if (_dragMode == _DragMode.brightness) {
+      _applyBrightness(next);
+    } else {
+      _applyVolume(next);
+    }
+  }
+
+  void _endVerticalDrag() => _dragMode = _DragMode.none;
+
+  void _applyBrightness(double value) {
+    _brightness = value;
+    unawaited(
+      _windowChannel
+          .invokeMethod('setBrightness', {'value': value})
+          .catchError((_) => null),
+    );
+    _showHud(
+      _GestureHud(
+        icon: value < 0.34
+            ? Icons.brightness_low_rounded
+            : value < 0.67
+                ? Icons.brightness_medium_rounded
+                : Icons.brightness_high_rounded,
+        label: '${(value * 100).round()}%',
+        value: value,
+      ),
+    );
+  }
+
+  void _applyVolume(double value) {
+    _volume = value;
+    unawaited(_engine.setVolume(value));
+    _showHud(
+      _GestureHud(
+        icon: value <= 0.001
+            ? Icons.volume_off_rounded
+            : value < 0.5
+                ? Icons.volume_down_rounded
+                : Icons.volume_up_rounded,
+        label: '${(value * 100).round()}%',
+        value: value,
+      ),
+    );
+  }
+
+  // --- Lock / orientation -------------------------------------------------
+
+  void _toggleLock() {
+    setState(() {
+      _locked = !_locked;
+      if (_locked) {
+        _controlsVisible = false;
+        _autoHide?.cancel();
+      } else {
+        _controlsVisible = true;
+        _restartAutoHide();
+      }
+    });
+  }
+
+  void _toggleOrientation() {
+    _restartAutoHide();
+    _landscapeForced = !_landscapeForced;
+    unawaited(
+      SystemChrome.setPreferredOrientations(
+        _landscapeForced
+            ? const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ]
+            : DeviceOrientation.values,
+      ),
+    );
+    setState(() {});
   }
 
   /// Rebuilds on the other backend, resuming where the current one got to.
@@ -184,6 +433,7 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
   // --- Hold to speed up ---------------------------------------------------
 
   void _onHoldStart() {
+    if (_locked) return;
     final state = _engine.state.value;
     if (state.status != PlaybackStatus.ready) return;
     _speedBeforeHold = state.speed;
@@ -195,6 +445,7 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     // A hold that silently pauses would be indistinguishable from a stall.
     unawaited(_engine.play());
     unawaited(_engine.setSpeed(_holdSpeedRate));
+    _showSpeedHud();
   }
 
   void _onHoldMove(LongPressMoveUpdateDetails details) {
@@ -204,12 +455,27 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     if (next == _holdSpeedRate) return;
     setState(() => _holdSpeedRate = next);
     unawaited(_engine.setSpeed(next));
+    _showSpeedHud();
   }
 
   void _onHoldEnd() {
     if (!_holdSpeedActive) return;
     setState(() => _holdSpeedActive = false);
     unawaited(_engine.setSpeed(_speedBeforeHold));
+    _clearHud();
+  }
+
+  /// Sticky while the finger is down — this one is a status readout, not a
+  /// transient acknowledgement like seek or volume.
+  void _showSpeedHud() {
+    _showHud(
+      _GestureHud(
+        icon: Icons.fast_forward_rounded,
+        label: '${_holdSpeedRate.toStringAsFixed(0)}×',
+        hint: _holdSpeedRate < 4.0 ? 'slide up for 4×' : null,
+      ),
+      sticky: true,
+    );
   }
 
   // --- Scrub preview ------------------------------------------------------
@@ -281,22 +547,24 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
             children: [
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: _toggleControls,
+                onTapUp: _onTapUp,
                 onLongPressStart: (_) => _onHoldStart(),
                 onLongPressMoveUpdate: _onHoldMove,
                 onLongPressEnd: (_) => _onHoldEnd(),
                 onLongPressCancel: _onHoldEnd,
+                onVerticalDragStart: _onVerticalDragStart,
+                onVerticalDragUpdate: _onVerticalDragUpdate,
+                onVerticalDragEnd: (_) => _endVerticalDrag(),
+                onVerticalDragCancel: _endVerticalDrag,
                 child: Center(
                   child: state.canShowSurface
                       ? _engine.buildSurface(fit: _fit)
                       : const SizedBox.expand(),
                 ),
               ),
-              if (_holdSpeedActive)
-                _SpeedHud(
-                  rate: _holdSpeedRate,
-                  canEscalate: _holdSpeedRate < 4.0,
-                ),
+              if (_hud != null && !_locked) _HudPill(hud: _hud!),
+              // Always reachable, even locked — it is the way back out.
+              _LockButton(locked: _locked, onTap: _toggleLock),
               if (state.status == PlaybackStatus.opening)
                 const Center(child: CircularProgressIndicator()),
               if (state.isBuffering && state.status == PlaybackStatus.ready)
@@ -309,11 +577,13 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
                   onRetry: _retry,
                   onSwitchEngine: () => _switchEngine(_engineKind.other),
                 ),
-              if (_controlsVisible) ...[
+              if (_controlsVisible && !_locked) ...[
                 _TopBar(
                   title: _source.title,
                   engineKind: _engineKind,
                   favorited: _favorited,
+                  landscapeForced: _landscapeForced,
+                  onToggleOrientation: _toggleOrientation,
                   onPip: _pipSupported ? _enterPip : null,
                   onBack: () => Navigator.of(context).maybePop(),
                   onToggleDiagnostics: () =>
@@ -453,6 +723,8 @@ class _TopBar extends StatelessWidget {
     required this.title,
     required this.engineKind,
     required this.favorited,
+    required this.landscapeForced,
+    required this.onToggleOrientation,
     required this.onBack,
     required this.onToggleDiagnostics,
     this.onDownload,
@@ -463,6 +735,8 @@ class _TopBar extends StatelessWidget {
   final String title;
   final PlaybackEngineKind engineKind;
   final bool favorited;
+  final bool landscapeForced;
+  final VoidCallback onToggleOrientation;
   final VoidCallback onBack;
   final VoidCallback onToggleDiagnostics;
   final VoidCallback? onDownload;
@@ -471,6 +745,13 @@ class _TopBar extends StatelessWidget {
   /// Null when the device or build does not support picture-in-picture, so the
   /// button is absent rather than present and inert.
   final VoidCallback? onPip;
+
+  static String _clockLabel() {
+    final now = DateTime.now();
+    final h = now.hour.toString().padLeft(2, '0');
+    final m = now.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -517,6 +798,31 @@ class _TopBar extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            // Wall clock — the reason it belongs in a fullscreen player is
+            // that the status bar is hidden while watching.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                _clockLabel(),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontFamily: 'JetBrains Mono',
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: landscapeForced
+                  ? 'Follow device rotation'
+                  : 'Lock to landscape',
+              icon: Icon(
+                landscapeForced
+                    ? Icons.screen_lock_rotation
+                    : Icons.screen_rotation_rounded,
+                color: landscapeForced ? Colors.amber : Colors.white70,
+              ),
+              onPressed: onToggleOrientation,
             ),
             if (onPip != null)
               IconButton(
@@ -825,13 +1131,11 @@ class _ScrubBubble extends StatelessWidget {
   }
 }
 
-/// Hold-to-speed indicator. Shows the hint to slide up only while 4x is still
-/// reachable, so it stops nagging once the user is already there.
-class _SpeedHud extends StatelessWidget {
-  const _SpeedHud({required this.rate, required this.canEscalate});
+/// One pill for every gesture — seek, brightness, volume, hold-speed.
+class _HudPill extends StatelessWidget {
+  const _HudPill({required this.hud});
 
-  final double rate;
-  final bool canEscalate;
+  final _GestureHud hud;
 
   @override
   Widget build(BuildContext context) {
@@ -848,30 +1152,87 @@ class _SpeedHud extends StatelessWidget {
               color: Colors.black.withValues(alpha: 0.66),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Row(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.fast_forward_rounded,
-                    size: 18, color: ac.accentFrost),
-                const SizedBox(width: 8),
-                Text(
-                  '${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}×',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(hud.icon, size: 18, color: ac.accentFrost),
+                    const SizedBox(width: 8),
+                    Text(
+                      hud.label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    if (hud.hint != null) ...[
+                      const SizedBox(width: 10),
+                      const Icon(Icons.keyboard_arrow_up_rounded,
+                          size: 16, color: Colors.white54),
+                      Text(
+                        hud.hint!,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  ],
                 ),
-                if (canEscalate) ...[
-                  const SizedBox(width: 10),
-                  const Icon(Icons.keyboard_arrow_up_rounded,
-                      size: 16, color: Colors.white54),
-                  const Text(
-                    'slide up for 4×',
-                    style: TextStyle(color: Colors.white54, fontSize: 11),
+                if (hud.value != null) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: 110,
+                    height: 3,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        value: hud.value!.clamp(0.0, 1.0),
+                        backgroundColor: Colors.white24,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(ac.accentFrost),
+                      ),
+                    ),
                   ),
                 ],
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Left-edge lock. Stays hittable while locked — it is the only way out.
+class _LockButton extends StatelessWidget {
+  const _LockButton({required this.locked, required this.onTap});
+
+  final bool locked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 8,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: Colors.black45,
+              borderRadius: BorderRadius.circular(19),
+            ),
+            child: Icon(
+              locked ? Icons.lock_rounded : Icons.lock_open_rounded,
+              color: locked ? Colors.amber : Colors.white70,
+              size: 18,
             ),
           ),
         ),
