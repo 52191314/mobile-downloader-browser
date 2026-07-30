@@ -14,7 +14,10 @@ import 'package:path/path.dart' as p;
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
 import '../downloader/download_rules.dart';
+import '../premium/pro_entitlement.dart';
 import '../premium/pro_features.dart';
+import '../premium/upsell_controller.dart';
+import 'video_library.dart';
 import '../downloader/headless_webview_fetcher.dart';
 import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
@@ -25,6 +28,7 @@ import 'ad_block_engine_native.dart';
 import 'browser_controller.dart';
 import 'browser_library.dart';
 import 'browser_open_request.dart';
+import 'player/playback_engine.dart';
 import '../premium/pro_upsell_sheet.dart';
 import 'controllers/address_bar_controller.dart';
 import 'controllers/element_picker_controller.dart';
@@ -61,6 +65,7 @@ import 'actions/translate_action.dart';
 import 'capture_sort.dart';
 import 'enqueue_download.dart';
 import 'external_scheme.dart';
+import 'sheets/external_app_prompt_sheet.dart';
 import 'filename_utils.dart';
 import 'headless_resniffer.dart';
 import 'token_refresh_service.dart';
@@ -346,6 +351,29 @@ class _SnifferScreenState extends State<SnifferScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Websites that try to open apps (tg:, intent://, …) confirm here first.
+    externalAppPromptHandler = ({
+      required Uri uri,
+      required String appKey,
+      required String displayName,
+      String? pageHost,
+    }) async {
+      if (!mounted) return ExternalAppPromptResult.denyOnce;
+      return showExternalAppPromptSheet(
+        context: context,
+        displayName: displayName,
+        uri: uri,
+        pageHost: pageHost,
+        onOpenSettings: () {
+          final sectionHandler = widget.onOpenSettingsSection;
+          if (sectionHandler != null) {
+            unawaited(sectionHandler(SettingsSection.externalApps));
+          } else {
+            widget.onOpenSettings?.call();
+          }
+        },
+      );
+    };
     _safeBrowsing = widget.safeBrowsing;
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -995,6 +1023,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   void dispose() {
+    externalAppPromptHandler = null;
     if (identical(
       _downloadQueue.browserContextAttacher,
       _attachBrowserContextToTask,
@@ -1159,6 +1188,59 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   String? _baseDir;
   String? _baseTemp;
+
+  /// Saves a played video to the Videos subpage of Favorites.
+  ///
+  /// The free inventory cap lives in [VideoLibrary]; this only turns its
+  /// verdict into feedback. A capped save must say so — silently doing nothing
+  /// after the user taps a star reads as a broken button.
+  Future<void> _saveVideoFavorite(SniffedMedia media) async {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final result = await VideoLibrary.addFavorite(
+      library: _library,
+      tier: tier,
+      url: media.url,
+      title: media.pageTitle?.trim().isNotEmpty == true
+          ? media.pageTitle!.trim()
+          : media.name,
+      thumbnailUrl: media.thumbnailUrl,
+      sourcePageUrl: media.sourcePageUrl,
+    );
+    if (!mounted) return;
+
+    switch (result.outcome) {
+      case VideoSaveOutcome.saved:
+        await _saveLibrary(result.library);
+        if (mounted) _showSnack('Saved to Favorites → Videos');
+      case VideoSaveOutcome.duplicate:
+        _showSnack('Already in your saved videos');
+      case VideoSaveOutcome.capped:
+        unawaited(
+          UpsellController.show(
+            context,
+            feature: ProFeature.videoLibrary,
+            userTier: tier,
+          ),
+        );
+    }
+  }
+
+  /// Appends a playback to the Videos subpage of History. Fire-and-forget:
+  /// failing to record a watch must never interrupt playback.
+  void _recordVideoPlay(SniffedMedia media) {
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final updated = VideoLibrary.recordPlay(
+      library: _library,
+      tier: tier,
+      url: media.url,
+      title: media.pageTitle?.trim().isNotEmpty == true
+          ? media.pageTitle!.trim()
+          : media.name,
+      thumbnailUrl: media.thumbnailUrl,
+      sourcePageUrl: media.sourcePageUrl,
+    );
+    unawaited(_saveLibrary(updated));
+  }
 
   Future<void> _loadLibrary() => _libraryController.load();
 
@@ -1543,6 +1625,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     return null;
   }
 
+
   /// Returns `true` if [incoming] should replace the current [_latestVideoMedia]
   /// used for auto-replace playback. Keeps the best candidate: HLS > large > other.
   bool _shouldReplaceVideo(SniffedMedia incoming) {
@@ -1788,8 +1871,13 @@ class _SnifferScreenState extends State<SnifferScreen>
   }) async {
     // App deep links (tg:, intent://, mailto:, magnet:, …) never enter
     // Chromium — controller.loadRequest routes them externally / to queue.
+    // skipExternalPrompt: user typed/chose this URL (address bar, favorites).
     if (isExternalAppUri(uri)) {
-      await tab.controller.loadRequest(uri, addToHistory: false);
+      await tab.controller.loadRequest(
+        uri,
+        addToHistory: false,
+        skipExternalPrompt: true,
+      );
       return;
     }
 
@@ -2447,7 +2535,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   @override
   Widget build(BuildContext context) {
     final tab = _activeTab;
-    final sniffedCount = tab.snifferEngine.detectedMedia.length;
+
     // Top bar: only the find bar. Suggestions overlay the main Stack above
     // the bottom chrome (not inside the short bottom-bar Stack, which
     // previously clipped the panel to ~one row).
@@ -3150,7 +3238,7 @@ class _SnifferScreenState extends State<SnifferScreen>
   void _attachBrowserContextToTask(DownloadTask task) {
     if (_tabs.isEmpty) return;
     final tab = _findTabForTask(task) ?? _activeTab;
-    final sourcePage = task.sourcePageUrl ?? tab.addressController.text;
+
 
     // Same playlist body path as MediaEnricher/sniffer (not generic
     // fetchViaJavaScript — that path was returning null/network error while
@@ -3563,7 +3651,36 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     },
     onEditFavorite: (favorite) => _editFavoriteFolder(favorite),
+    onPlayVideo: (favorite) => _playLibraryVideo(
+      url: favorite.url,
+      title: favorite.title,
+      sourcePageUrl: favorite.sourcePageUrl,
+      thumbnailUrl: favorite.thumbnailUrl,
+    ),
   );
+
+  /// Replays a video stored in Favorites or History.
+  ///
+  /// The stored URL is a CDN link that has very likely expired, so this goes
+  /// through the normal preview path — which re-resolves cookies and Referer
+  /// from the tab — rather than handing the raw URL straight to the player.
+  Future<void> _playLibraryVideo({
+    required String url,
+    required String title,
+    String? sourcePageUrl,
+    String? thumbnailUrl,
+  }) async {
+    final media = SniffedMedia(
+      url: url,
+      name: title,
+      type: MediaType.video,
+      sourcePageUrl: sourcePageUrl,
+      pageTitle: title,
+      thumbnailUrl: thumbnailUrl,
+      sniffSource: SniffSource.session,
+    );
+    await _showMediaPreview(media);
+  }
 
   Widget _buildFavoritesFolderList(
     BrowserTab tab,
@@ -3687,6 +3804,11 @@ class _SnifferScreenState extends State<SnifferScreen>
         onTap: () => unawaited(openSection(SettingsSection.sniffer)),
       ),
       OverflowMenuEntry(
+        icon: Icons.open_in_new_rounded,
+        label: 'External apps',
+        onTap: () => unawaited(openSection(SettingsSection.externalApps)),
+      ),
+      OverflowMenuEntry(
         icon: Icons.people_outline_rounded,
         label: 'Profiles',
         onTap: () => unawaited(openSection(SettingsSection.profiles)),
@@ -3703,7 +3825,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
       OverflowMenuEntry(
         icon: Icons.auto_awesome,
-        label: 'Aurora Pro',
+        label: 'Aurora Pro & Ultra',
         color: ac.accentAmber,
         onTap: () => unawaited(openSection(SettingsSection.pro)),
       ),
@@ -3906,6 +4028,12 @@ class _SnifferScreenState extends State<SnifferScreen>
         _openNewTab(url: url, switchToTab: false);
       }
     },
+    onPlayVideo: (entry) => _playLibraryVideo(
+      url: entry.url,
+      title: entry.title,
+      sourcePageUrl: entry.sourcePageUrl,
+      thumbnailUrl: entry.thumbnailUrl,
+    ),
   );
 
   void _showLibrarySheet<T>({
@@ -4337,6 +4465,25 @@ class _SnifferScreenState extends State<SnifferScreen>
         refreshM3u8IfNeeded: _refreshM3u8IfNeeded,
         onAddToQueue: (m) async => _showAddQueueDialog(context, m),
         qualityVariants: qualityVariants,
+        onSaveVideoFavorite: _saveVideoFavorite,
+        onRecordVideoPlay: _recordVideoPlay,
+        engine: switch (widget.settings.playbackEngine) {
+          PlaybackEngineSetting.videoPlayer => PlaybackEngineKind.videoPlayer,
+          PlaybackEngineSetting.mediaKit => PlaybackEngineKind.mediaKit,
+        },
+        onEngineChanged: (kind) {
+          // The player offers the switch when a stream will not start; make it
+          // stick so the next video opens on whichever one worked.
+          widget.onSettingsChanged?.call(
+            widget.settings.copyWith(
+              playbackEngine: switch (kind) {
+                PlaybackEngineKind.videoPlayer =>
+                  PlaybackEngineSetting.videoPlayer,
+                PlaybackEngineKind.mediaKit => PlaybackEngineSetting.mediaKit,
+              },
+            ),
+          );
+        },
       );
 
   Future<String> _refreshM3u8IfNeeded(

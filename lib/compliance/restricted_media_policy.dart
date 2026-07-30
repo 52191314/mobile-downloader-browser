@@ -41,7 +41,7 @@ class RestrictedMediaPolicy {
   // Platform group definitions (Wave 1)
   // ---------------------------------------------------------------------------
 
-  static const List<_PlatformGroup> _groups = [
+  static final List<_PlatformGroup> _groups = [
     _PlatformGroup(
       reason: RestrictedMediaReason.youtube,
       surfaceHosts: [
@@ -345,12 +345,11 @@ class _PlatformGroup {
   final RestrictedMediaReason reason;
   final List<String> surfaceHosts;
   final List<String> mediaHosts;
+  final List<String> allHosts;
 
-  const _PlatformGroup({
+  _PlatformGroup({
     required this.reason,
     required this.surfaceHosts,
     required this.mediaHosts,
-  });
-
-  List<String> get allHosts => [...surfaceHosts, ...mediaHosts];
+  }) : allHosts = [...surfaceHosts, ...mediaHosts];
 }

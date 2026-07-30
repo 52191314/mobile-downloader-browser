@@ -1,6 +1,6 @@
 # Privacy Policy — Aurora: Browser & Downloader
 
-**Last updated:** 2026-07-17  
+**Last updated:** 2026-07-29  
 
 **App:** Aurora: Browser & Downloader  
 **Package:** `com.personal.aurora_downloader`  
@@ -12,7 +12,7 @@ This Privacy Policy describes how Aurora: Browser & Downloader (“the App”, �
 
 ## 1. What the App is
 
-Aurora: Browser & Downloader is a **private web browser and download manager**. It lets you browse the web in an in-app browser, detect media and file links, and download files to your device. Optional features include Google Drive backup/sync and a one-time Aurora Pro unlock via Google Play Billing.
+Aurora: Browser & Downloader is a **private web browser and download manager**. It lets you browse the web in an in-app browser, detect media and file links, and download files to your device. Optional features include a one-time Aurora Pro or Ultra unlock via Google Play Billing.
 
 ---
 
@@ -31,27 +31,15 @@ Depending on how you use the App, the following may be stored **locally on your 
 
 We do **not** operate a general-purpose analytics dashboard that harvests this data from your phone by default.
 
-### 2.2 Optional Google account (Drive)
+### 2.2 Purchases & License Verification (Aurora Pro / Ultra)
 
-If you choose to connect **Google Drive**:
+If you buy the optional **Aurora Pro** or **Aurora Ultra** unlock:
 
-- Sign-in is handled by **Google Sign-In**.  
-- We use access tokens to upload/sync backup data **you** enable to your Drive.  
-- Google’s own policies apply to your Google account:  
-  [https://policies.google.com/privacy](https://policies.google.com/privacy)
+- Payment processing is handled by **Google Play Billing**. We do **not** receive your credit card number or full payment details.  
+- For Google Play distribution builds, the App sends purchase receipt tokens (`purchaseToken`) and an app install ID (`installId`) over secure HTTPS to our automated license verification host (`https://aurora-license-server.fly.dev`) to verify active entitlements via the Google Play Developer API and issue signed license keys.  
+- **No browsing history, download URLs, or personal files are ever transmitted to or processed by the license verification host.**
 
-You can disconnect Drive in the App settings. Drive is **optional** and not required for core browsing or downloading.
-
-### 2.3 Purchases (Aurora Pro)
-
-If you buy the optional **Aurora Pro** unlock:
-
-- Payment is processed by **Google Play Billing**.  
-- We do **not** receive your full payment card number.  
-- Google may share purchase status / tokens needed to unlock Pro features.  
-- See Google Play’s terms and privacy for payment processing.
-
-### 2.4 Websites you visit
+### 2.3 Websites you visit
 
 The built-in browser can open third-party websites. Those sites may set cookies or collect data under **their** privacy policies. We do not control third-party websites.
 
@@ -63,8 +51,7 @@ We use the information above only to:
 
 - Provide browser, download, and queue features  
 - Save your preferences and session  
-- Perform optional Drive backup/sync when you enable it  
-- Unlock Pro features after a valid Play purchase  
+- Verify valid Google Play purchases and activate Pro/Ultra features  
 - Improve reliability of downloads (e.g. notifications, foreground service)
 
 We do **not** sell your personal information.  
@@ -90,7 +77,7 @@ The App may request or use:
 
 We share data only as needed to provide the App:
 
-- **Google** — Sign-In and Drive (if you connect them); Play Billing (if you purchase)  
+- **Google Play & License Host** — Play Billing and purchase verification (`https://aurora-license-server.fly.dev`) to confirm purchase receipts and unlock features.  
 - **Websites you visit** — normal browser traffic you initiate  
 
 We do not sell data to data brokers or advertisers.
@@ -100,11 +87,8 @@ We do not sell data to data brokers or advertisers.
 ## 6. Data retention and deletion
 
 - **On device:** data remains until you clear app data, delete files, or uninstall the App.  
-- **Drive:** files you synced remain in your Google Drive until you delete them there.  
-- **Purchases:** retained by Google per Play policies; Pro status may be restored via “Restore purchase.”
-
-To stop optional cloud access: disconnect Google Drive in settings.  
-For questions: use the contact email on this page / Play listing.
+- **License verification records:** stored securely on the verification host to support purchase restoration across app reinstalls and multi-device use.  
+- **Purchases:** retained by Google per Play policies; Pro/Ultra status may be restored via “Restore purchase.”
 
 ---
 

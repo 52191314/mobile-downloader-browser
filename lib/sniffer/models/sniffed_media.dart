@@ -58,6 +58,14 @@ class SniffedMedia {
   /// variants exist. Null for non-variant items and for the master itself.
   final String? masterUrl;
 
+  /// Poster image for this media, harvested from the page DOM — a
+  /// `<video poster>` attribute, a nearby `<img>`, or the page's `og:image` as
+  /// a last resort. Purely cosmetic: the capture sheet renders it as the row
+  /// thumbnail and falls back to a type icon when it is null or fails to load.
+  /// Always an absolute `http`/`https` URL — the JS bridge rejects everything
+  /// else before it reaches here.
+  final String? thumbnailUrl;
+
   SniffedMedia({
     required String url,
     required this.name,
@@ -86,6 +94,7 @@ class SniffedMedia {
     this.isStale = false,
     this.isSizeEstimated = false,
     this.masterUrl,
+    this.thumbnailUrl,
   }) : url = _cleanUrl(url),
        sniffedAt = sniffedAt ?? DateTime.now();
 
@@ -134,6 +143,7 @@ class SniffedMedia {
     bool? isStale,
     bool? isSizeEstimated,
     String? masterUrl,
+    String? thumbnailUrl,
   }) {
     return SniffedMedia(
       url: url ?? this.url,
@@ -163,6 +173,7 @@ class SniffedMedia {
       isStale: isStale ?? this.isStale,
       isSizeEstimated: isSizeEstimated ?? this.isSizeEstimated,
       masterUrl: masterUrl ?? this.masterUrl,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
     );
   }
 }

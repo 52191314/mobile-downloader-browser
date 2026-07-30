@@ -30,6 +30,7 @@ import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import com.google.android.play.core.splitcompat.SplitCompat
 import com.google.android.play.core.splitinstall.SplitInstallManager
 import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
 import com.google.android.play.core.splitinstall.SplitInstallRequest
@@ -53,6 +54,16 @@ import java.nio.ByteBuffer
 import java.util.Locale
 
 class MainActivity : FlutterActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase)
+        // Required so feature-module native libs (FFmpeg) resolve after on-demand install.
+        try {
+            SplitCompat.installActivity(this)
+        } catch (e: Throwable) {
+            Log.w(TAG, "SplitCompat.installActivity failed: ${e.message}")
+        }
+    }
+
     private val channelName = "aurora_downloader/public_downloads"
     private val networkChannelName = "aurora_downloader/network"
     private val fgServiceChannelName = "aurora_downloader/foreground_service"
@@ -243,6 +254,71 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        // Video player window brightness. Scoped to this window only, so the
+        // left-edge brightness drag never changes the device-wide setting and
+        // is dropped automatically when the player closes. Pass a negative
+        // value to hand control back to the system.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/player_window")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setBrightness" -> {
+                        val value = call.argument<Double>("value") ?: -1.0
+                        runOnUiThread {
+                            val lp = window.attributes
+                            lp.screenBrightness = if (value < 0) {
+                                WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                            } else {
+                                // Never fully black — 0 would look like a crash.
+                                value.toFloat().coerceIn(0.01f, 1.0f)
+                            }
+                            window.attributes = lp
+                            result.success(null)
+                        }
+                    }
+                    "getBrightness" -> {
+                        runOnUiThread {
+                            val override = window.attributes.screenBrightness
+                            val value = if (override >= 0f) {
+                                override.toDouble()
+                            } else {
+                                // No window override yet — seed from the system level
+                                // so the first drag starts where the user already is.
+                                try {
+                                    android.provider.Settings.System.getInt(
+                                        contentResolver,
+                                        android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                                    ) / 255.0
+                                } catch (e: android.provider.Settings.SettingNotFoundException) {
+                                    0.5
+                                }
+                            }
+                            result.success(value.coerceIn(0.0, 1.0))
+                        }
+                    }
+                    // Keeps the display awake while a video is on screen.
+                    // Scoped to this window and cleared when the player closes,
+                    // so it can never leak into the rest of the app the way a
+                    // device-wide wake lock would — and it needs no extra
+                    // permission.
+                    "setKeepScreenOn" -> {
+                        val on = call.argument<Boolean>("value") ?: false
+                        runOnUiThread {
+                            if (on) {
+                                window.addFlags(
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                )
+                            } else {
+                                window.clearFlags(
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                )
+                            }
+                            result.success(null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // -------------------------------------------------------------------
         // Play Feature Delivery — on-demand module install for FFmpeg.
         // Uses SplitInstallManager to download the :ffmpeg dynamic feature
@@ -275,24 +351,28 @@ class MainActivity : FlutterActivity() {
                                 SplitInstallManagerFactory.create(applicationContext)
 
                             // Register a listener for install progress.
-                            val listener = SplitInstallStateUpdatedListener { state ->
-                                val statusCode = state.status()
-                                val progress = if (state.totalBytesToDownload() > 0) {
-                                    state.bytesDownloaded().toFloat() / state.totalBytesToDownload().toFloat()
-                                } else {
-                                    0f
-                                }
-                                channel.invokeMethod("onProgress", mapOf(
-                                    "status" to statusCode,
-                                    "progress" to progress,
-                                    "module" to moduleName,
-                                ))
-                                if (statusCode == SplitInstallSessionStatus.INSTALLED ||
-                                    statusCode == SplitInstallSessionStatus.FAILED) {
-                                    manager.unregisterListener(this@MainActivity)
+                            // We use an object expression to avoid the self-reference
+                            // issue (a lambda can't reference its own variable).
+                            val installListener = object : SplitInstallStateUpdatedListener {
+                                override fun onStateUpdate(state: com.google.android.play.core.splitinstall.SplitInstallSessionState) {
+                                    val statusCode = state.status()
+                                    val progress = if (state.totalBytesToDownload() > 0) {
+                                        state.bytesDownloaded().toFloat() / state.totalBytesToDownload().toFloat()
+                                    } else {
+                                        0f
+                                    }
+                                    channel.invokeMethod("onProgress", mapOf(
+                                        "status" to statusCode,
+                                        "progress" to progress,
+                                        "module" to moduleName,
+                                    ))
+                                    if (statusCode == SplitInstallSessionStatus.INSTALLED ||
+                                        statusCode == SplitInstallSessionStatus.FAILED) {
+                                        manager.unregisterListener(this)
+                                    }
                                 }
                             }
-                            manager.registerListener(listener)
+                            manager.registerListener(installListener)
 
                             val request = SplitInstallRequest.newBuilder()
                                 .addModule(moduleName)
@@ -317,7 +397,7 @@ class MainActivity : FlutterActivity() {
                         try {
                             val manager: SplitInstallManager =
                                 SplitInstallManagerFactory.create(applicationContext)
-                            manager.cancelInstall(sessions = setOf(sessionId))
+                            manager.cancelInstall(sessionId)
                             result.success(null)
                         } catch (e: Exception) {
                             result.error("cancel_error", e.message, null)
@@ -1506,6 +1586,13 @@ class MainActivity : FlutterActivity() {
          */
         private val maxGapUs = 1_500_000L
 
+        /**
+         * Largest backwards PTS step still explainable by B-frame reordering
+         * rather than a stream discontinuity. A GOP's reorder depth is a handful
+         * of frames, so 1s is generous even for 4fps-equivalent spacing.
+         */
+        private val maxReorderUs = 1_000_000L
+
         fun next(extractorTrack: Int, rawPtsUs: Long, stepUs: Long): RewriteResult {
             val step = stepUs.coerceIn(1_000L, 200_000L)
             // Missing timestamps (-1) — synthesize from last output + step.
@@ -1530,8 +1617,15 @@ class MainActivity : FlutterActivity() {
             val last = lastOutPtsUs[extractorTrack]
             if (last != null) {
                 val delta = out - last
-                // Backwards PTS, or a gap large enough to freeze the player.
-                if (delta <= 0L || delta > maxGapUs) {
+                // A *small* negative delta is not a discontinuity: with B-frames
+                // MediaExtractor returns presentation times in decode order, so
+                // e.g. I(0) P(120) B(40) B(80) yields deltas +120, -80, +40.
+                // Treating those as resets ratchets globalOffsetUs forward on
+                // every reordered frame, which inflates the output duration and
+                // drags the other track with it through the shared offset.
+                // Only a jump beyond the reorder window is a real PTS reset.
+                val isReorder = delta < 0L && -delta <= maxReorderUs
+                if (!isReorder && (delta <= 0L || delta > maxGapUs)) {
                     val desired = last + step
                     // Shift the global offset so this sample lands on [desired].
                     // desired = raw + globalOffset  →  globalOffset = desired - raw
@@ -1551,12 +1645,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-            // MediaMuxer requires non-decreasing PTS *per track*.
+            // MediaMuxer requires non-decreasing PTS *per track*, so nudge a
+            // reordered frame just past its predecessor. Deliberately does NOT
+            // re-anchor globalOffsetUs: re-anchoring here would push the whole
+            // timeline forward once per B-frame, and over a feature-length video
+            // that compounds into a badly inflated duration (and audio that
+            // drifts out of any relation to the video clock).
             val prev = lastOutPtsUs[extractorTrack]
             if (prev != null && out <= prev) {
-                out = prev + step
-                globalOffsetUs = out - rawPtsUs
-                discontinuity = true
+                out = prev + 1_000L
             }
 
             lastOutPtsUs[extractorTrack] = out
@@ -1814,36 +1911,65 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Matches manual exports (`aurora_backup_<ts>.json`) and auto snapshots (`aurora_backup.json`). */
+    /** Matches any valid backup file (.json, .1dmbak, .bak) from Aurora or 1DM/ADM/IDM. */
     private fun isAuroraBackupFileName(name: String?): Boolean {
         if (name.isNullOrBlank()) return false
         val lower = name.lowercase()
-        if (!lower.endsWith(".json")) return false
-        return lower == "aurora_backup.json" ||
-            lower.startsWith("aurora_backup_") ||
-            lower.startsWith("aurora_auto_backup_")
+        if (lower.endsWith(".1dmbak") || lower.endsWith(".bak")) return true
+        if (lower.endsWith(".json")) {
+            return lower == "aurora_backup.json" ||
+                lower.contains("aurora") ||
+                lower.contains("backup") ||
+                lower.contains("export") ||
+                lower.contains("queue") ||
+                lower.contains("download")
+        }
+        return false
     }
 
     private fun listBackupFiles(call: MethodCall, result: MethodChannel.Result) {
         val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader/Backup/"
         val list = mutableListOf<Map<String, Any>>()
-        val pathPrefix = relativePath.replace('\\', '/').trimEnd('/')
+        val seenKeys = mutableSetOf<String>()
 
+        fun addEntry(uriStr: String, name: String, size: Long, dateModified: Long, relPath: String) {
+            val key = if (uriStr.isNotBlank()) uriStr else name
+            if (seenKeys.add(key)) {
+                val kind = when {
+                    relPath.contains("/Auto Backup", ignoreCase = true) ||
+                        relPath.contains("Auto Backup/", ignoreCase = true) ||
+                        name.lowercase().startsWith("aurora_auto_backup_") -> "auto"
+                    else -> "manual"
+                }
+                list.add(mapOf(
+                    "uri" to uriStr,
+                    "displayName" to name,
+                    "size" to size,
+                    "dateModified" to dateModified,
+                    "kind" to kind,
+                    "relativePath" to relPath
+                ))
+            }
+        }
+
+        // 1. Query MediaStore Downloads collection (API 29+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val resolver = applicationContext.contentResolver
-            val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(
-                MediaStore.MediaColumns._ID,
-                MediaStore.MediaColumns.DISPLAY_NAME,
-                MediaStore.MediaColumns.SIZE,
-                MediaStore.MediaColumns.DATE_MODIFIED,
-                MediaStore.MediaColumns.RELATIVE_PATH
-            )
-            val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("$pathPrefix%")
-
             try {
-                resolver.query(uri, projection, selection, selectionArgs, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
+                val resolver = applicationContext.contentResolver
+                val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATE_MODIFIED,
+                    MediaStore.MediaColumns.RELATIVE_PATH
+                )
+                // Broad selection: any .json, .1dmbak, or .bak file in Downloads
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.json' OR " +
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.1dmbak' OR " +
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.bak'"
+
+                resolver.query(uri, projection, selection, null, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                     val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -1851,91 +1977,58 @@ class MainActivity : FlutterActivity() {
                     val relCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
 
                     while (cursor.moveToNext()) {
-                        val name = cursor.getString(nameCol)
+                        val name = cursor.getString(nameCol) ?: continue
                         if (!isAuroraBackupFileName(name)) continue
                         val id = cursor.getLong(idCol)
                         val size = cursor.getLong(sizeCol)
                         val date = cursor.getLong(dateCol) * 1000
                         val rel = cursor.getString(relCol) ?: ""
                         val contentUri = ContentUris.withAppendedId(uri, id)
-                        // Prefer auto when the MediaStore path is under Auto Backup/
-                        // (consolidated file is always named aurora_backup.json).
-                        val kind = when {
-                            rel.contains("/Auto Backup", ignoreCase = true) ||
-                                rel.contains("Auto Backup/", ignoreCase = true) -> "auto"
-                            name.lowercase().startsWith("aurora_auto_backup_") -> "auto"
-                            else -> "manual"
-                        }
-                        list.add(mapOf(
-                            "uri" to contentUri.toString(),
-                            "displayName" to name,
-                            "size" to size,
-                            "dateModified" to date,
-                            "kind" to kind,
-                            "relativePath" to rel
-                        ))
+                        addEntry(contentUri.toString(), name, size, date, rel)
                     }
                 }
-                if (list.isEmpty()) {
-                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    val underDownloads = if (pathPrefix.startsWith("Download/")) {
-                        pathPrefix.removePrefix("Download/")
-                    } else {
-                        pathPrefix
-                    }
-                    val destDir = File(downloadsDir, underDownloads)
-                    if (destDir.exists() && destDir.canRead()) {
-                        destDir.walkTopDown()
-                            .filter { it.isFile && isAuroraBackupFileName(it.name) }
-                            .sortedByDescending { it.lastModified() }
-                            .forEach { file ->
-                                val kind = if (file.path.contains("${File.separator}Auto Backup") ||
-                                    file.name.lowercase().startsWith("aurora_auto_backup_")
-                                ) "auto" else "manual"
-                                list.add(mapOf(
-                                    "uri" to Uri.fromFile(file).toString(),
-                                    "displayName" to file.name,
-                                    "size" to file.length(),
-                                    "dateModified" to file.lastModified(),
-                                    "kind" to kind,
-                                    "relativePath" to underDownloads
-                                ))
-                            }
-                    }
-                }
-                result.success(list)
             } catch (e: Exception) {
-                result.error("query_failed", e.message, null)
+                Log.w(TAG, "MediaStore query in listBackupFiles failed: ${e.message}")
             }
-        } else {
-            // Pre-Q: map MediaStore-style relative path under public Downloads.
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val underDownloads = if (pathPrefix.startsWith("Download/")) {
-                pathPrefix.removePrefix("Download/")
-            } else {
-                pathPrefix
-            }
-            val destDir = File(downloadsDir, underDownloads)
-            if (destDir.exists()) {
-                destDir.walkTopDown()
-                    .filter { it.isFile && isAuroraBackupFileName(it.name) }
-                    .sortedByDescending { it.lastModified() }
-                    .forEach { file ->
-                        val kind = if (file.path.contains("${File.separator}Auto Backup") ||
-                            file.name.lowercase().startsWith("aurora_auto_backup_")
-                        ) "auto" else "manual"
-                        list.add(mapOf(
-                            "uri" to Uri.fromFile(file).toString(),
-                            "displayName" to file.name,
-                            "size" to file.length(),
-                            "dateModified" to file.lastModified(),
-                            "kind" to kind,
-                            "relativePath" to underDownloads
-                        ))
-                    }
-            }
-            result.success(list)
         }
+
+        // 2. ALWAYS scan filesystem locations (modern & legacy backup directories)
+        try {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val scanDirs = listOf(
+                File(downloadsDir, "Aurora Downloader/Backup"),
+                File(downloadsDir, "Aurora Downloader/Auto Backup"),
+                File(downloadsDir, "Aurora Downloader"),
+                File(downloadsDir, "Aurora Downloads/Backups"),
+                File(downloadsDir, "Aurora Downloads/Backup"),
+                File(downloadsDir, "Aurora Downloads"),
+                File(downloadsDir, "Aurora"),
+                downloadsDir,
+            )
+
+            for (dir in scanDirs) {
+                if (!dir.exists() || !dir.canRead()) continue
+                val files = if (dir == downloadsDir) {
+                    // Immediate children for root Download directory
+                    dir.listFiles()?.filter { it.isFile }?.toList() ?: emptyList()
+                } else {
+                    dir.walkTopDown().maxDepth(3).filter { it.isFile }.toList()
+                }
+                for (file in files) {
+                    if (isAuroraBackupFileName(file.name)) {
+                        val fileUri = Uri.fromFile(file).toString()
+                        val rel = file.parentFile?.name ?: ""
+                        addEntry(fileUri, file.name, file.length(), file.lastModified(), rel)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Filesystem scan in listBackupFiles failed: ${e.message}")
+        }
+
+        // Sort descending by dateModified
+        list.sortByDescending { (it["dateModified"] as? Number)?.toLong() ?: 0L }
+        result.success(list)
     }
 
     private fun deleteBackupFile(call: MethodCall, result: MethodChannel.Result) {
@@ -1950,7 +2043,7 @@ class MainActivity : FlutterActivity() {
                 val deleted = contentResolver.delete(uri, null, null)
                 result.success(deleted > 0)
             } else {
-                val file = File(uri.path ?: "")
+                val file = File(uri.path ?: uriStr)
                 if (file.exists()) {
                     result.success(file.delete())
                 } else {
@@ -1971,11 +2064,21 @@ class MainActivity : FlutterActivity() {
         try {
             val uri = Uri.parse(uriStr)
             val destFile = File(filesDir, "temp_restore_${System.currentTimeMillis()}.json")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(destFile).use { output ->
-                    input.copyTo(output)
+            if (uri.scheme == "file" || uriStr.startsWith("/")) {
+                val filePath = if (uri.scheme == "file") uri.path ?: uriStr else uriStr
+                val srcFile = File(filePath)
+                if (srcFile.exists()) {
+                    srcFile.copyTo(destFile, overwrite = true)
+                } else {
+                    throw IllegalStateException("Backup file not found: $filePath")
                 }
-            } ?: throw IllegalStateException("Could not open input stream.")
+            } else {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                } ?: throw IllegalStateException("Could not open input stream for URI: $uriStr")
+            }
             result.success(destFile.absolutePath)
         } catch (e: Exception) {
             result.error("read_failed", e.message, null)

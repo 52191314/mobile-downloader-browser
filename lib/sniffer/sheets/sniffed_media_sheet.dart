@@ -187,6 +187,26 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
     super.dispose();
   }
 
+  Future<void> _openOptions() {
+    return showCaptureOptionsSheet(
+      context,
+      currentSettings: () => _sheetSettings,
+      currentShowAll: () => widget.mediaCatchController.captureShowAllMedia,
+      onShowAllChanged: (value) {
+        setState(() {
+          widget.mediaCatchController.captureShowAllMedia = value;
+          widget.mediaCatchController.clearSelection();
+          _sheetSettings = _sheetSettings.copyWith(captureShowAllMedia: value);
+        });
+        widget.onSettingsChanged?.call(_sheetSettings);
+      },
+      onSettingsChanged: (next) {
+        setState(() => _sheetSettings = next);
+        widget.onSettingsChanged?.call(next);
+      },
+    );
+  }
+
   Future<void> _runBatchDownload(List<CaptureGroup> selected) async {
     if (selected.isEmpty) return;
 
@@ -473,30 +493,11 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                           widget.mediaCatchController.clearSelection();
                         });
                       },
+                      optionsActive:
+                          captureOptionsAreCustomised(_sheetSettings),
+                      onOpenOptions: _openOptions,
                     ),
                   ),
-                  SliverToBoxAdapter(
-                    child: CaptureOptionsRow(
-                      settings: _sheetSettings,
-                      showAll: widget.mediaCatchController.captureShowAllMedia,
-                      onShowAllChanged: (value) {
-                        setState(() {
-                          widget.mediaCatchController.captureShowAllMedia =
-                              value;
-                          widget.mediaCatchController.clearSelection();
-                          _sheetSettings = _sheetSettings.copyWith(
-                            captureShowAllMedia: value,
-                          );
-                        });
-                        widget.onSettingsChanged?.call(_sheetSettings);
-                      },
-                      onSettingsChanged: (next) {
-                        setState(() => _sheetSettings = next);
-                        widget.onSettingsChanged?.call(next);
-                      },
-                    ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 4)),
                   SliverToBoxAdapter(
                     child: CaptureStatsRow(
                       foundCount: allMedia.length,

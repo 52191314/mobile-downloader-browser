@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'dev/screenshot_fixtures.dart';
 import 'downloader/download_rules.dart';
 import 'downloader/downloader.dart';
 import 'downloader/filename_service.dart';
@@ -21,7 +22,6 @@ import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
 import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
-import 'sync/sync.dart';
 import 'theme/aurora_glass_background.dart';
 import 'theme/aurora_theme.dart';
 import 'theme/aurora_tokens.dart';
@@ -31,6 +31,8 @@ import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
 import 'ui/settings_open_request.dart';
 import 'backup/auto_backup_service.dart';
+import 'premium/build_channel.dart';
+import 'premium/license/license_service.dart';
 import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
 import 'premium/play_billing_service.dart';
@@ -43,6 +45,8 @@ import 'premium/accent_pack.dart';
 import 'premium/vault_service.dart';
 import 'ui/pages/vault_page.dart';
 import 'sniffer/token_refresh_service.dart';
+import 'package:media_kit/media_kit.dart';
+
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
 import 'premium/watcher/watcher_service.dart';
@@ -82,6 +86,10 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      // Registers media_kit's native bindings. Must run before any Player is
+      // constructed; cheap and safe even when the user never opens the player
+      // or has the ExoPlayer backend selected.
+      MediaKit.ensureInitialized();
       await loadSavedAccentPack();
       if (kDebugMode) {
         LogServer.start();
@@ -115,14 +123,12 @@ void main() {
 class MyApp extends StatelessWidget {
   final SnifferBrowserController? browserController;
   final DownloadQueue? downloadQueue;
-  final DriveSyncService? driveSyncService;
   final int initialTabIndex;
 
   const MyApp({
     super.key,
     this.browserController,
     this.downloadQueue,
-    this.driveSyncService,
     this.initialTabIndex = 1,
   });
 
@@ -170,7 +176,6 @@ class MyApp extends StatelessWidget {
           home: AuroraHome(
             browserController: browserController,
             downloadQueue: downloadQueue,
-            driveSyncService: driveSyncService,
             initialTabIndex: initialTabIndex,
           ),
         );
@@ -190,14 +195,12 @@ class MyApp extends StatelessWidget {
 class AuroraHome extends StatefulWidget {
   final SnifferBrowserController? browserController;
   final DownloadQueue? downloadQueue;
-  final DriveSyncService? driveSyncService;
   final int initialTabIndex;
 
   const AuroraHome({
     super.key,
     this.browserController,
     this.downloadQueue,
-    this.driveSyncService,
     this.initialTabIndex = 1,
   });
 
@@ -311,10 +314,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   late final DownloadQueue _downloadQueue;
-  late final DriveSyncService _driveSyncService;
   late final SnifferBrowserController _browserController;
   late final TextEditingController _urlController;
-  late final TextEditingController _folderController;
   late final TextEditingController _adblockSourceController;
   late final TextEditingController _customSearchController;
   late final ValueNotifier<int> _libraryUpdateNotifier;
@@ -323,8 +324,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   /// Last clipboard text we prompted for (clipboardCatch dedup).
   String? _lastCheckedClipboard;
+  late final LicenseService _licenseService =
+      LicenseService(entitlement: _proEntitlement);
   late final PlayBillingService _playBilling =
-      PlayBillingService(_proEntitlement);
+      PlayBillingService(_proEntitlement, licenseService: _licenseService);
   final PublicDownloadsService _publicDownloadsService =
       PublicDownloadsService();
   final VaultService _vaultService = VaultService();
@@ -347,7 +350,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     downloadQueue: _downloadQueue,
   );
   StreamSubscription<DownloadTask>? _queueSubscription;
-  StreamSubscription<DriveSyncState>? _driveSubscription;
   DownloadSettings _settings = DownloadSettings.defaults();
   DownloadRuleEngine? _ruleEngine;
   double _speedLimitKbps = 0;
@@ -403,23 +405,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           useNativeTorrentEngine: true,
           completedDownloadPublisher: _publicDownloadsService,
         );
-    _driveSyncService = widget.driveSyncService ?? DriveSyncService();
     _browserController = widget.browserController ?? _createBrowserController();
     _urlController = TextEditingController();
     _libraryUpdateNotifier = ValueNotifier<int>(0);
-    try {
-      _folderController = TextEditingController(
-        text: _driveSyncService.state.destinationFolderName,
-      );
-    } catch (e, s) {
-      _logError('DriveSync init', e, s);
-      _folderController = TextEditingController(text: 'Aurora Downloader');
-    }
-    try {
-      _driveSyncService.attachQueue(_downloadQueue);
-    } catch (e, s) {
-      _logError('DriveSync attachQueue', e, s);
-    }
     _adblockSourceController = TextEditingController();
     _customSearchController = TextEditingController(
       text: _settings.searchEngine.id == 'custom'
@@ -433,7 +421,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     unawaited(_initNotifications());
     proUpsellBilling = _playBilling;
     proUpsellEntitlement = _proEntitlement;
-    unawaited(_playBilling.init());
+    unawaited(_startEntitlementServices());
     _downloadQueue.onRestrictedMediaBlocked = (message) {
       if (mounted) _showSnack(message);
     };
@@ -547,13 +535,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     // POST_NOTIFICATIONS is requested only after the first-launch tour is
     // finished/skipped (or when the tour was already completed) — see
     // [_requestPostOnboardingPermissions]. Init here must not prompt.
-    _driveSubscription = _driveSyncService.onStateChanged.listen((state) {
-      if (mounted) {
-        setState(() {
-          _folderController.text = state.destinationFolderName;
-        });
-      }
-    });
   }
 
   SnifferBrowserController _createBrowserController() {
@@ -597,6 +578,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   Future<void> _promptBatteryOptIfNeeded({
     Duration delay = Duration.zero,
   }) async {
+    // Play channel: never prompt unsolicited. Google treats proactive
+    // REQUEST_IGNORE_BATTERY_OPTIMIZATIONS prompts as a policy-friction signal,
+    // and downloads already survive via the dataSync foreground service — the
+    // exemption is a reliability nicety, not a requirement. Play users reach it
+    // on demand through the Battery optimisation tile in Settings instead.
+    if (BuildChannel.isPlay) return;
     try {
       if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     } catch (_) {}
@@ -763,8 +750,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => SettingsPage(
-          driveSyncService: _driveSyncService,
-          folderController: _folderController,
           adblockSourceController: _adblockSourceController,
           customSearchController: _customSearchController,
           settings: _settings,
@@ -800,6 +785,27 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
+  /// Cold-start entitlement bring-up, in a fixed order:
+  ///
+  /// 1. Read the cached owned-products file, so the license service can tell
+  ///    whether this install already owned Pro/Ultra before licensing shipped.
+  /// 2. Validate the cached license offline — this decides the tier the UI
+  ///    shows on first frame, with no network round trip.
+  /// 3. Start Play Billing, which reconciles ownership and (on the Play
+  ///    channel) trades purchase tokens for a fresh license.
+  Future<void> _startEntitlementServices() async {
+    _licenseService.onReactivationNeeded =
+        () => _playBilling.reconcileEntitlements(reason: 'license_reactivate');
+    try {
+      await _proEntitlement.loadCachedEntitlement();
+      await _licenseService.load();
+      await _playBilling.init();
+    } catch (e) {
+      // Never block startup on entitlement; gates fail closed to free.
+      debugPrint('[AuroraHome] license/billing load failed: $e');
+    }
+  }
+
   @override
   void dispose() {
     _isDisposed = true;
@@ -807,22 +813,20 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _queueRebuildTimer?.cancel();
     _resniffModeTimer?.cancel();
     _queueSubscription?.cancel();
-    _driveSubscription?.cancel();
     _urlController.dispose();
     _sniffedCountNotifier.dispose();
     _libraryUpdateNotifier.dispose();
-    _folderController.dispose();
     _adblockSourceController.dispose();
     _customSearchController.dispose();
     _notificationService.dispose();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_downloadQueue.dispose());
-    unawaited(_driveSyncService.dispose());
     _autoBackupService.dispose();
     WorkerIsolatePool.instance.dispose();
     _browserOpenRequestBus.dispose();
     _proEntitlement.removeListener(_onProEntitlementChanged);
     unawaited(_playBilling.dispose());
+    _licenseService.dispose();
     _proEntitlement.dispose();
     super.dispose();
   }
@@ -865,6 +869,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       // P9 clipboardCatch: Pro+ auto-prompt on resume if clipboard holds a
       // downloadable URL.
       unawaited(_checkClipboardForUrl());
+      // Re-verify entitlement roughly daily. Self-throttling and silent on
+      // failure — an unreachable host never downgrades a paying user.
+      unawaited(_licenseService.refreshIfDue());
     } else if (state == AppLifecycleState.detached) {
       debugPrint('[AuroraHome] App detached — process likely being killed');
       AuroraLog.instance.warn(
@@ -1514,7 +1521,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _downloadQueue.queuePath = '$path/download_queue.json';
 
       await Future.wait([
-        _driveSyncService.loadSyncedTasks(path),
         LogSettingsStore.instance.load(path).then((verbosity) {
           return AuroraLog.instance.initialize(
             '$path/aurora_logs.json',
@@ -1525,6 +1531,16 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       ]);
       // Free disk from abandoned failed-task segment trees older than 3 days.
       unawaited(_downloadQueue.purgeStaleFailedTemps());
+
+      // Store-screenshot staging. No-op unless built with
+      // --dart-define=AURORA_SCREENSHOT_MODE=true, and always a no-op in
+      // release. Seeded after the real queue loads so a clean install shows
+      // fixtures only. See lib/dev/screenshot_fixtures.dart.
+      ScreenshotFixtures.apply(
+        queue: _downloadQueue,
+        entitlement: _proEntitlement,
+      );
+
       if (mounted) setState(() {});
     } catch (e, s) {
       _logError('Failed to load download queue/logs', e, s);

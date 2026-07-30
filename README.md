@@ -19,32 +19,187 @@ git clone https://github.com/52191314/Aurora-Downloader.git && cd Aurora-Downloa
 
 ---
 
-## 🏗️ Architecture Overview
+## 🏗️ Architecture & Workflows
 
-Aurora Downloader decouples media detection from downloading, running background isolation workers to prevent UI main-thread jank.
+Aurora Downloader decouples media detection from downloading, running background isolation workers to prevent UI main-thread jank and handling complex protocols seamlessly.
+
+### Master Application Workflow
 
 ```mermaid
 flowchart TD
-    subgraph Browser ["In-App Browser & Sniffer"]
-        A[WebView & JS Guard] -->|Intercept Fetch/XHR/DOM| B[Capture Tray & Media Cache]
-        B -->|Extract Headers/Cookies| C[Worker Isolate Prober]
+    subgraph Launch ["1. App Launch & Bootstrapping"]
+        A["App Start main()"] --> B["Initialize Native Bindings & System UI"]
+        B --> C["Load SharedPreferences & Local DB Hive/Isar"]
+        C --> D["Detect Build Channel (Play Store vs GitHub)"]
+        D --> E["Evaluate License & Entitlement Tier (Free / Pro / Ultra)"]
+        E --> F{"First Launch / Onboarding?"}
+        F -- Yes --> G["Show Interactive App Tour"]
+        G --> H["Request System Permissions"]
+        F -- No --> H
+        H --> I["Start Background Services (Watcher, Auto-Backup, Automation API)"]
+        I --> J["Render Core App Shell (AuroraDock)"]
     end
-    
-    subgraph Engine ["Download Engine & Processing"]
-        C --> D{Protocol Type}
-        D -->|Segmented HTTP| E[Multi-Thread HTTP Chunk Downloader]
-        D -->|HLS / DASH| F[AES-128 Decrypt & Segment Fetcher]
-        D -->|Magnet / Torrent| G[Native BitTorrent Engine]
+
+    subgraph Navigation ["2. Core Shell & Page Routing"]
+        J --> K["Queue Page (Tab 1)"]
+        J --> L["Web Browser & Sniffer (Tab 2)"]
+        J --> M["Overflow Menu / Popups"]
+        M --> N["FFmpeg Studio"]
+        M --> O["Secure Vault"]
+        M --> P["Aurora Watcher"]
+        M --> Q["Settings & Diagnostics"]
     end
-    
-    subgraph Output ["Storage & Playback"]
-        E --> H[Collision-Safe Storage Manager]
-        F --> I[Android MediaMuxer TS->MP4 Remux]
-        G --> H
-        I --> H
-        H --> J[Aurora In-App Video Player / Queue]
+
+    subgraph Sniffer ["3. Browsing & Media Sniffing Engine"]
+        L --> R["InAppWebView Navigation"]
+        R --> S["AdBlock Engine Interception (FFI Rust)"]
+        R --> T["Media Capture Analyzer"]
+        T --> U{"Media Stream Detected?"}
+        U -- Yes --> V["Enrich Media Metadata & Parse Playlists"]
+        V --> W["Show Floating Sniffer Badge & Sheet"]
+        W --> X["User Selects Stream Quality / Format"]
+        X --> Y["Enqueue to Download Engine"]
+    end
+
+    subgraph Downloader ["4. Multi-Protocol Download Engine"]
+        Y --> Z["DownloadQueue Task Dispatcher"]
+        Z --> AA{"Classify Protocol / Scheme"}
+        AA -- HTTP Direct --> AB["DownloadSplitter (Multi-segment Range Requests)"]
+        AA -- HLS / m3u8 --> AC["HlsDownloader (ts Segments + Key Decryption)"]
+        AA -- DASH / mpd --> AD["DashPlaylistParser (Video/Audio Muxing)"]
+        AA -- Torrent / Magnet --> AE["TorrentDownloader (Bencode + Peer Swarm)"]
+
+        AB --> AF["File Combiner & Speed Limiter"]
+        AC --> AF
+        AD --> AF
+        AE --> AF
+
+        AF --> AG{"Download State"}
+        AG -- In Progress --> AH["Update Foreground Notification & Speed Meter"]
+        AG -- Error / Expiry --> AI["DownloadErrorClassifier & Dead-Link Revival"]
+        AI --> Z
+        AG -- Completed --> AJ["Notify Completion & Trigger Post-Processing"]
+    end
+
+    subgraph Processing ["5. Media Tools & Storage Vault"]
+        AJ --> AK{"Post-Download Action"}
+        AK -- Encryption --> AL["Move to Encrypted Vault (AES-256)"]
+        AK -- Edit / Transcode --> AM["FFmpeg Studio Module Check"]
+        AK -- Share / PC --> AN["LAN File Server (Send to PC)"]
+        AM --> AO["Execute Native FFmpeg Command"]
     end
 ```
+
+<details>
+<summary><b>🔍 View Detailed Subsystem Diagrams (Bootstrapping, Sniffer, Multi-Protocol Engine, FFmpeg Studio & Vault)</b></summary>
+
+#### Bootstrapping & Tier Entitlement
+```mermaid
+flowchart TD
+    Start(["main() App Entry"]) --> InitFlutter["WidgetsFlutterBinding.ensureInitialized()"]
+    InitFlutter --> LoadTheme["Load ThemeNotifier & Accent Pack"]
+    LoadTheme --> InitDB["Initialize Local DB & Preferences Store"]
+
+    subgraph ChannelResolution ["Build Channel Resolution"]
+        InitDB --> ReadChannel["Read AURORA_BUILD_CHANNEL"]
+        ReadChannel --> IsPlay{"Channel is Play Store?"}
+        IsPlay -- Yes --> PlaySetup["Set Play Store Mode: Play Billing Active, Dynamic FFmpeg Module On-Demand"]
+        IsPlay -- No --> GithubSetup["Set GitHub Mode: Billing Disabled, Fat APK with FFmpeg Included"]
+    end
+
+    subgraph LicenseCheck ["Entitlement & License Evaluation"]
+        PlaySetup --> EvalTier["ProEntitlementStore.evaluateTier()"]
+        GithubSetup --> EvalTier
+        EvalTier --> LicenseServerCheck{"Check Aurora License Server / Play Purchase"}
+        LicenseServerCheck -- Valid License --> TierResult{"Resolved Tier"}
+        LicenseServerCheck -- No License / Free --> TierResult
+
+        TierResult -- Free --> FreeLimits["Apply Free Tier Caps: Capped max parallel downloads, Standard HTTP speed, Basic Sniffer"]
+        TierResult -- Pro --> ProUnlocks["Unlock Pro Features: Turbo Engine, AdBlock Native FFI, Dead-Link Revival, Encrypted Vault"]
+        TierResult -- Ultra --> UltraUnlocks["Unlock Ultra Features: FFmpeg Studio Suite, Aurora Watcher, Automation API, E2EE Vault Sync"]
+    end
+
+    subgraph OnboardingFlow ["First Launch Check"]
+        FreeLimits --> CheckFirstLaunch{"Onboarding Enabled AND First Launch?"}
+        ProUnlocks --> CheckFirstLaunch
+        UltraUnlocks --> CheckFirstLaunch
+
+        CheckFirstLaunch -- Yes --> TourPage["Launch Interactive App Tour"]
+        TourPage --> RequestPermissions["Request Storage & Notification Permissions"]
+        CheckFirstLaunch -- No --> CheckPerms["Check Existing Permissions"]
+        CheckPerms --> RequestPermissions
+        RequestPermissions --> StartServices["Start Background Workers & Automation API"]
+        StartServices --> LaunchShell["Launch Core Navigation Shell"]
+    end
+```
+
+#### Multi-Protocol Download Engine Lifecycle
+```mermaid
+flowchart TD
+    subgraph QueueDispatch ["1. Queue Dispatch & Protocol Handlers"]
+        TaskIn["DownloadQueue.enqueue()"] --> ProtocolRouter{"Classify Protocol & File Type"}
+
+        ProtocolRouter -- Direct HTTP/HTTPS --> HTTPHandler["Direct HTTP Engine"]
+        ProtocolRouter -- HLS (.m3u8) --> HLSHandler["HlsDownloader Engine"]
+        ProtocolRouter -- DASH (.mpd) --> DASHHandler["DashPlaylistParser Engine"]
+        ProtocolRouter -- Torrent / Magnet --> TorrentHandler["TorrentDownloader Engine"]
+    end
+
+    subgraph DirectHTTPEngine ["2. Direct HTTP Segmented Engine"]
+        HTTPHandler --> CheckRange{"Server Supports HTTP Range Headers?"}
+        CheckRange -- Yes --> Splitter["DownloadSplitter: Calculate Chunk Byte Ranges based on Threads"]
+        CheckRange -- No --> SingleThread["Single-Threaded Stream Download"]
+
+        Splitter --> ParallelChunks["Worker Threads Download Chunks Concurrently"]
+        ParallelChunks --> SpeedControl["SpeedLimiter (Rate Limiting if configured)"]
+        SpeedControl --> ChunkWrite["Write Chunks to Temp Storage"]
+        ChunkWrite --> MergeCheck{"All Chunks Complete?"}
+        MergeCheck -- Yes --> FileCombiner["FileCombiner: Stitch Chunks into Final File"]
+    end
+
+    subgraph HLSEngine ["3. HLS Stream Downloader"]
+        HLSHandler --> FetchPlaylist["Fetch Master & Media Playlist"]
+        FetchPlaylist --> CheckEncrypted{"Key Encrypted (#EXT-X-KEY)?"}
+        CheckEncrypted -- Yes --> KeyFetcher["HlsDecryptor: Fetch AES Key & IV"]
+        CheckEncrypted -- No --> ParseSegments["Extract .ts Segment URLs"]
+        KeyFetcher --> ParseSegments
+
+        ParseSegments --> DownloadTS["Fetch .ts Segments Concurrently"]
+        DownloadTS --> DecryptTS["Decrypt AES-128 Segments"]
+        DecryptTS --> StitchTS["Stitch TS Segments / Transcode to .mp4"]
+    end
+
+    subgraph TorrentEngine ["4. BitTorrent Downloader"]
+        TorrentHandler --> ParseBencode["BencodeDecoder / Magnet Parser"]
+        ParseBencode --> FetchMetadata["Fetch Torrent Metadata & Tracker Announcement"]
+        FetchMetadata --> PeerSwarm["Connect to Swarm Peers via DHT"]
+        PeerSwarm --> DownloadPieces["Download & Verify Piece Hashes"]
+        DownloadPieces --> AssembleTorrent["Assemble Files to Storage Directory"]
+    end
+
+    subgraph StateAndRecovery ["5. Execution State & Recovery Loop"]
+        SingleThread --> DownloadProgress["Emit Speed, Percent, ETA & Bytes Received"]
+        FileCombiner --> DownloadProgress
+        StitchTS --> DownloadProgress
+        AssembleTorrent --> DownloadProgress
+
+        DownloadProgress --> StateCheck{"Execution Result"}
+        StateCheck -- Pause Requested --> PausedState["State: PAUSED (Save Byte Checkpoint)"]
+        StateCheck -- Network Error / 403 --> ErrorHandler["DownloadErrorClassifier"]
+
+        ErrorHandler --> ReviveCheck{"Token Refresh Eligible (Pro+)?"}
+        ReviveCheck -- Yes --> HeadlessResniffer["TokenRefreshService: Re-sniff Link Headlessly for Fresh Cookies"]
+        HeadlessResniffer --> UpdateURL["Update Task Headers & Resume Download"]
+        UpdateURL --> ParallelChunks
+        ReviveCheck -- No --> FailedState["State: FAILED (User Action Required)"]
+
+        StateCheck -- Success --> CompleteState["State: COMPLETED"]
+        CompleteState --> MediaScanner["Register File with Android MediaStore / Storage"]
+        MediaScanner --> Notification["Post Completion Notification with Rich Actions"]
+    end
+```
+
+</details>
 
 ---
 

@@ -7,6 +7,7 @@ import '../../downloader/downloader.dart';
 import '../../downloader/filename_service.dart';
 import '../../logging/aurora_log.dart';
 import '../../settings/download_settings.dart';
+import '../bridge_url_guard.dart';
 import '../models/browser_tab.dart';
 import '../models/page_meta.dart';
 import '../models/sniffed_media.dart';
@@ -302,10 +303,12 @@ class TabCallbackBinder {
       'MediaSnifferChannel',
       onMessageReceived: (message) {
         final url = message.trim();
+        final pageUrl = tab.addressController.text;
+        if (!isAllowedBridgeUrl(url, pageUrl: pageUrl)) return;
         _sniffIntakeController.sniffBrowserUrl(
           tab,
           url,
-          sourcePageUrl: tab.addressController.text,
+          sourcePageUrl: pageUrl,
         );
       },
     );
@@ -313,10 +316,12 @@ class TabCallbackBinder {
       'MediaSniffer',
       onMessageReceived: (message) {
         final url = message.trim();
+        final pageUrl = tab.addressController.text;
+        if (!isAllowedBridgeUrl(url, pageUrl: pageUrl)) return;
         _sniffIntakeController.sniffBrowserUrl(
           tab,
           url,
-          sourcePageUrl: tab.addressController.text,
+          sourcePageUrl: pageUrl,
         );
       },
     );
@@ -378,10 +383,17 @@ class TabCallbackBinder {
           if (data == null || !_host.isMounted) return;
           final src = data['src'] as String?;
           if (src != null && src.isNotEmpty) {
+            // The poster is fetched by the app to paint the capture thumbnail,
+            // so it goes through the same guard as any other bridge URL.
+            final poster = data['poster'] as String?;
             _sniffIntakeController.sniffBrowserUrl(
               capturedTab,
               src,
               sourcePageUrl: pageUrl,
+              thumbnailUrl:
+                  (poster != null && isAllowedBridgeUrl(poster, pageUrl: pageUrl))
+                      ? poster
+                      : null,
             );
           }
         });
@@ -431,11 +443,21 @@ class TabCallbackBinder {
                 docTitle,
               ]) ??
               '';
+          final ogImage = data['ogImage'] as String?;
           capturedTab.pageMeta = PageMeta(
             title: resolvedTitle,
             videoWidth: int.tryParse((data['ogVideoWidth'] as String?) ?? ''),
             videoHeight: int.tryParse((data['ogVideoHeight'] as String?) ?? ''),
             structuredName: ldName,
+            // Page-supplied URL that the app will later fetch to paint the
+            // capture-row thumbnail — same guard as every other bridge URL.
+            ogImage: (ogImage != null &&
+                    isAllowedBridgeUrl(
+                      ogImage,
+                      pageUrl: capturedTab.addressController.text,
+                    ))
+                ? ogImage
+                : null,
           );
           if (resolvedTitle.trim().isNotEmpty) {
             final title = resolvedTitle.trim();
@@ -456,7 +478,9 @@ class TabCallbackBinder {
       'IframeSrcChannel',
       onMessageReceived: (message) {
         final url = message.trim();
-        if (url.isNotEmpty) {
+        // Highest-risk channel: this makes the app fetch a page-chosen URL with
+        // app-level network reach. See bridge_url_guard.dart.
+        if (isAllowedBridgeUrl(url, pageUrl: tab.addressController.text)) {
           _host.sniffIframeContent(tab, url);
         }
       },
@@ -499,15 +523,6 @@ class TabCallbackBinder {
         tab,
         url,
         sourcePageUrl: tab.addressController.text,
-      );
-    });
-    tab.controller.setOnHlsPlaylistIntercepted((url, body) async {
-      tab.hlsPlaylistCache[url] = body;
-      AuroraLog.instance.debug(
-        'Captured native HLS playlist body for $url (${body.length} chars)',
-        category: LogCategory.hls,
-        screen: LogScreen.browser,
-        eventType: LogEventType.network,
       );
     });
     tab.controller.setOnDownloadStartRequest((url, suggestedFilename) async {

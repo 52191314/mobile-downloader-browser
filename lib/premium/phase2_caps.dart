@@ -95,8 +95,8 @@ class Phase2Caps {
   // ---------------------------------------------------------------------------
   // Product rule: Pro+ only.
   // Gate check via ProFeatures.allows(webdavBackup, tier) at the Settings
-  // tile and backup trigger.  Appears as an alternative to Drive when
-  // kDriveSyncEnabled is false.
+  // tile and backup trigger.  The Google Drive alternative was removed —
+  // WebDAV is now the only cloud backup target.
   // TODO(P11): WebDAV client (dav: URL, digest auth), folder pick,
   // incremental backup, restore from WebDAV.
 

@@ -210,7 +210,7 @@ Widget _buildBenefitsList(AColors palette, bool ultra) {
           (Icons.auto_awesome, 'Server-grade\nengine'),
         ]
       : [
-          (Icons.filter_alt_outlined, 'All filter lists\n+ tracker pack'),
+          (Icons.filter_alt_outlined, 'All filter lists\n+ extended tracker pack'),
           (Icons.swap_horiz, '16 concurrent\n32 chunks'),
           (Icons.cloud_sync_outlined, 'Drive sync\nAuto-backup'),
           (Icons.group_work_outlined, 'Unlimited tab\ngroups & colors'),

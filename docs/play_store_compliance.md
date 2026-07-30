@@ -171,7 +171,9 @@ Still required for a serious Play launch (not exhaustive):
 |------|------------|
 | Policy sources | Use DDA + Developer Program Policy + DNA / IP / Payments / storage pages. Console + Developer APIs are operational only. |
 | YouTube block | **Mandatory**; domain list must be hardened. **Not** full DNA/IP coverage alone. |
-| Other locked platforms / general unauthorized media | **Not solved** by YouTube-only logic. |
+| ~~Other locked platforms / general unauthorized media~~ | ~~**Not solved** by YouTube-only logic.~~ **Stale — corrected 2026-07-28.** `lib/compliance/restricted_media_policy.dart` now covers **six platform groups** with surface + CDN + Referer + Origin matching, channel-gated. The code is ahead of this doc; see `play_review_audit_2026-07-27.md` "Things that are correct". |
+| Torrent / magnet intake | **Not a policy violation.** No Play rule bans BitTorrent clients. Aurora is transport-only — no search, no indexer, no bundled sites (verified 2026-07-28). Residual risk is reviewer gestalt, not rules — see `play_store_listing.md` §Torrent and Play policy |
+| Content rating | Live is **3+** with `Unrestricted Internet`. **Correct** — IARC rates the app's own content, and a browser ships none. The section that actually matters is Target audience (must be 18+, unverified) |
 | In-app adblock only | **Likely OK** if truly WebView-only. |
 | Listing brands / screenshots | **Correct direction** and high impact. |
 | Play Billing / no external Pro checkout | **Correct** under default Payments rules. |

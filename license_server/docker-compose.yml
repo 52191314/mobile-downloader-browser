@@ -1,0 +1,29 @@
+# Local / small-VPS deployment.
+#   docker compose up -d --build
+#
+# Expects, next to this file:
+#   ./keys/<kid>.key.pem + <kid>.pub.pem   (npm run keys:generate)
+#   ./secrets/service-account.json         (Play Console service account)
+#   ./.env                                 (copied from .env.example)
+services:
+  license:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8080
+      LICENSE_KEY_DIR: /app/keys
+      DB_PATH: /app/data/licenses.db
+      GOOGLE_SERVICE_ACCOUNT_JSON_PATH: /app/secrets/service-account.json
+    ports:
+      # Bind to loopback and terminate TLS in Caddy/nginx/Cloudflare Tunnel.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./keys:/app/keys:ro
+      - ./secrets:/app/secrets:ro
+      - license-data:/app/data
+
+volumes:
+  license-data:

@@ -23,16 +23,15 @@ import '../../settings/onboarding_experiment.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
-import '../../premium/premium_flags.dart';
 import '../../premium/accent_pack.dart';
 import 'user_guide_page.dart';
 import '../../premium/play_billing_service.dart';
 import '../../premium/build_channel.dart';
 import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/controllers/site_profile_runtime.dart';
+import '../../sniffer/external_scheme.dart';
 import '../../sniffer/models/site_profile.dart';
 import '../../sniffer/models/sniffed_media.dart';
-import '../../sync/sync.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../settings_open_request.dart';
@@ -48,8 +47,6 @@ import 'watcher_page.dart';
 import 'webdav_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
-  final DriveSyncService driveSyncService;
-  final TextEditingController folderController;
   final TextEditingController adblockSourceController;
   final TextEditingController customSearchController;
   final DownloadSettings settings;
@@ -73,8 +70,6 @@ class SettingsPage extends StatefulWidget {
 
   const SettingsPage({
     super.key,
-    required this.driveSyncService,
-    required this.folderController,
     required this.adblockSourceController,
     required this.customSearchController,
     required this.settings,
@@ -170,6 +165,8 @@ class _SettingsPageState extends State<SettingsPage> {
         return _buildSearchPage();
       case SettingsSection.sniffer:
         return _buildSnifferPage();
+      case SettingsSection.externalApps:
+        return const ExternalAppsPrefsPage();
       case SettingsSection.profiles:
         return _buildProfilesPage();
       case SettingsSection.appearance:
@@ -391,13 +388,6 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 18),
             _buildSectionTitle('Data & account'),
             _buildNavGroup([
-              if (kDriveSyncEnabled)
-                _NavItem(
-                  icon: Icons.cloud_outlined,
-                  title: 'Google Drive',
-                  subtitle: 'Upcoming — cloud sync & backup',
-                  onTap: () => _openPage(_buildDrivePage()),
-                ),
               _NavItem(
                 icon: Icons.backup_rounded,
                 title: 'Backup',
@@ -408,7 +398,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: isPro
                     ? Icons.auto_awesome
                     : Icons.auto_awesome_outlined,
-                title: 'Aurora Pro',
+                title: 'Aurora Pro & Ultra',
                 subtitle: isPro
                     ? 'Premium features unlocked'
                     : 'Unlock premium features',
@@ -764,13 +754,13 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 20),
               _buildSpeedSection(local, setLocal),
               const Divider(height: 24),
-              // Wi‑Fi only — Pro-gated
+              // Wi-Fi only — Pro-gated
               SwitchListTile(
-                title: const Text('Wi‑Fi only downloads'),
+                title: const Text('Wi-Fi only downloads'),
                 subtitle: Text(
                   local.wifiOnly
-                      ? 'Downloads only proceed on Wi‑Fi. Turn off to use mobile data.'
-                      : 'Enable to restrict downloads to Wi‑Fi networks.',
+                      ? 'Downloads only proceed on Wi-Fi. Turn off to use mobile data.'
+                      : 'Enable to restrict downloads to Wi-Fi networks.',
                   style: TextStyle(
                       fontSize: 12, color: context.ac.textSecondary),
                 ),
@@ -852,8 +842,8 @@ class _SettingsPageState extends State<SettingsPage> {
   // Speed limit — exponential slider embedded in Defaults page
   // ---------------------------------------------------------------------------
 
-  /// Convert MB/s to slider position (0–100).
-  /// 0 = unlimited, 1–20 = 1–20 MB/s (linear), 21–100 = exponential to 500 MB/s.
+  /// Convert MB/s to slider position (0-100).
+  /// 0 = unlimited, 1-20 = 1-20 MB/s (linear), 21-100 = exponential to 500 MB/s.
   int _speedMbpsToPosition(double mbps) {
     if (mbps <= 0) return 0;
     if (mbps <= 20) return mbps.round().clamp(1, 20);
@@ -861,7 +851,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return (21 + t * 80).round().clamp(21, 100);
   }
 
-  /// Convert slider position (0–100) back to MB/s.
+  /// Convert slider position (0-100) back to MB/s.
   double _speedPositionToMbps(int pos) {
     if (pos <= 0) return 0;
     if (pos <= 20) return pos.toDouble();
@@ -1011,8 +1001,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     children: [
                       TextButton(
                         onPressed: () {
-          final isPro = widget.proEntitlement.isPro;
-          final tier = widget.proEntitlement.tier;
+                          final isPro = widget.proEntitlement.isPro;
                           final totalCount = local.adblockFilterSources.length;
                           if (!isPro &&
                               totalCount > ProFeatures.freeFilterListSlots) {
@@ -1242,6 +1231,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildSnifferPage() {
     var localDisabled = Set<MediaType>.from(_settings.disabledMediaTypes);
     var localReplacePlayer = _settings.replaceSitePlayer;
+    var localEngine = _settings.playbackEngine;
     return Scaffold(
       appBar: AppBar(title: const Text('Media Sniffer')),
       body: StatefulBuilder(
@@ -1265,6 +1255,66 @@ class _SettingsPageState extends State<SettingsPage> {
                   _update(_settings.copyWith(replaceSitePlayer: v));
                 },
                 contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            const SizedBox(height: 16),
+            PanelHeader(
+              icon: Icons.memory_rounded,
+              title: 'Playback engine',
+            ),
+            const SizedBox(height: 8),
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'Which decoder plays video. If a stream loads but stays '
+                      'black or silent, switch engines — they use completely '
+                      'different decoders, so one often plays what the other '
+                      'cannot. The player offers this too when playback fails.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.ac.textSecondary,
+                      ),
+                    ),
+                  ),
+                  for (final option in PlaybackEngineSetting.values)
+                    RadioListTile<PlaybackEngineSetting>(
+                      value: option,
+                      // ignore: deprecated_member_use
+                      groupValue: localEngine,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        switch (option) {
+                          PlaybackEngineSetting.videoPlayer =>
+                            'System (ExoPlayer)',
+                          PlaybackEngineSetting.mediaKit => 'libmpv (media_kit)',
+                        },
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      subtitle: Text(
+                        switch (option) {
+                          PlaybackEngineSetting.videoPlayer =>
+                            'Android\'s own player. Lightest on battery and memory.',
+                          PlaybackEngineSetting.mediaKit =>
+                            'Bundled decoders. Handles streams ExoPlayer refuses.',
+                        },
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.ac.textSecondary,
+                        ),
+                      ),
+                      // ignore: deprecated_member_use
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setLocal(() => localEngine = v);
+                        _update(_settings.copyWith(playbackEngine: v));
+                      },
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -1333,62 +1383,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildDrivePage() {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Google Drive Sync')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          PanelHeader(icon: Icons.cloud_outlined, title: 'Google Drive Sync'),
-          const SizedBox(height: 8),
-          Panel(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Icon(Icons.construction_rounded,
-                      size: 48, color: context.ac.accentFrost),
-                  const SizedBox(height: 16),
-                  Text(
-                    'This feature is under consideration.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: context.ac.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Google Drive sync for cloud backup and cross-device '
-                    'downloads is planned but currently unavailable. '
-                    'The required cloud service configuration is not yet provisioned.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.ac.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Use local backup in the meantime — '
-                    'tap "Backup" on the previous screen.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.ac.textTertiary,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1790,7 +1784,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: Icon(Icons.lock_outline,
                 size: 18, color: context.ac.textTertiary),
-            title: Text('Per-site User‑Agent (Pro)',
+            title: Text('Per-site User-Agent (Pro)',
                 style: TextStyle(
                     fontSize: 13, color: context.ac.textSecondary)),
             subtitle: Text(
@@ -2246,8 +2240,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 4),
               Text('v2.4.5', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
-              Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.'
-                  '${kDriveSyncEnabled ? ' Google Drive sync available.' : ''}',
+              Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 24),
               Text('Built with Flutter and the Nord color palette.',
@@ -2315,7 +2308,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildProPage() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Aurora Pro')),
+      appBar: AppBar(title: const Text('Aurora Pro & Ultra')),
       body: ListenableBuilder(
         listenable: widget.proEntitlement,
         builder: (context, _) {
@@ -2425,6 +2418,44 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // Buy / restore (Play channel only for real purchases)
               if (!isPro) ...[
+                // Plan §11: a paying user whose license lapsed must be told
+                // why, not silently dropped to free with no explanation.
+                if (widget.playBilling?.licenseService?.statusMessage
+                    case final String licenseNotice) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.ac.accentAmber.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: context.ac.accentAmber.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 18,
+                          color: context.ac.accentAmber,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            licenseNotice,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              height: 1.35,
+                              color: context.ac.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
@@ -2507,37 +2538,118 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _onRestoreProPressed(BuildContext context) async {
     final billing = widget.playBilling;
     if (!BuildChannel.isPlay || billing == null) return;
+    // Reconcile re-sends the full ownership snapshot to the license host, so
+    // this doubles as the new-device / reinstall activation path.
     await billing.restorePurchases();
+    final license = billing.licenseService;
+    if (license != null && license.isEnabled) {
+      await license.refreshIfDue(force: true);
+    }
     if (!context.mounted) return;
     if (widget.proEntitlement.isPro) {
       AuroraSnackbar.show(context, 'Aurora Pro restored.');
     } else {
       AuroraSnackbar.show(
         context,
-        billing.lastError ?? 'No previous Pro purchase found for this account.',
+        // A license problem explains the failure far better than the generic
+        // "no purchase found" line — e.g. the host being unreachable.
+        license?.statusMessage ??
+            billing.lastError ??
+            'No previous Pro purchase found for this account.',
       );
     }
   }
 
   List<Widget> _buildFeatureRows(EntitlementTier tier) {
     final features = [
-      (ProFeature.extraFilterLists, 'Extra filter lists', '2 free'),
-      (ProFeature.trackerPack, 'Tracker blocking pack', 'Pro only'),
-      (ProFeature.higherConcurrency, 'Concurrent downloads',
-          '${ProFeatures.maxConcurrentFree} free / ${ProFeatures.maxConcurrentPro} Pro'),
-      (ProFeature.higherChunks, 'Chunks per task',
-          '${ProFeatures.chunksPerTaskFree} free / ${ProFeatures.chunksPerTaskPro} Pro'),
-      (ProFeature.unlimitedTabGroups, 'Tab groups',
-          '${ProFeatures.maxFreeTabGroups} free / unlimited Pro'),
-      (ProFeature.autoHostGroups, 'Auto-host groups', 'Pro only'),
-      (ProFeature.unlimitedCosmeticRules, 'Cosmetic rules',
-          '${ProFeatures.maxFreeCosmeticRules} free / unlimited Pro'),
-      if (kDriveSyncEnabled)
-        (ProFeature.driveSync, 'Google Drive sync', 'Pro only'),
-      (ProFeature.scheduledAutoBackup, 'Scheduled auto-backup', 'Pro only'),
-      (ProFeature.proxy, 'HTTP/SOCKS5 proxy', 'Pro only'),
-      (ProFeature.wifiOnly, 'Wi‑Fi only & advanced stall', 'Pro only'),
-      (ProFeature.perSiteUA, 'Per-site User‑Agent', 'Pro only'),
+      // Engine Limits (Tier Breakdown: Free / Pro / Ultra)
+      (
+        ProFeature.higherConcurrency,
+        'Concurrent downloads',
+        '${ProFeatures.maxConcurrentFree} free / ${ProFeatures.maxConcurrentPro} Pro / ${ProFeatures.maxConcurrentUltra} Ultra',
+      ),
+      (
+        ProFeature.higherChunks,
+        'Chunks per task',
+        '${ProFeatures.chunksPerTaskFree} free / ${ProFeatures.chunksPerTaskPro} Pro / ${ProFeatures.chunksPerTaskUltra} Ultra',
+      ),
+      (
+        ProFeature.higherConcurrency,
+        'HLS segments',
+        '${ProFeatures.hlsSegmentCapFree} free / ${ProFeatures.hlsSegmentCapPro} Pro / ${ProFeatures.hlsSegmentCapUltra} Ultra',
+      ),
+
+      // Free-Taste Caps
+      (
+        ProFeature.batchCapture,
+        'Batch / Grab All capture',
+        '${ProFeatures.freeBatchCaptureItems} free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.seriesGrab,
+        'Series auto-grab',
+        '${ProFeatures.freeSeriesGrabEpisodes} free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.audioExtract,
+        'Audio extract',
+        '${ProFeatures.freeAudioExtractPerDay}/day free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.sendToPc,
+        'Send to PC (LAN)',
+        '${ProFeatures.freeSendToPcPerDay}/day free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.privateVault,
+        'Private vault items',
+        '${ProFeatures.freeVaultItems} free / Unlimited Pro+',
+      ),
+
+      // Browser & Adblock Caps
+      (
+        ProFeature.extraFilterLists,
+        'Remote filter lists',
+        '${ProFeatures.freeFilterListSlots} free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.customFilterListUrl,
+        'Custom filter list URLs',
+        'Pro+',
+      ),
+      (
+        ProFeature.unlimitedTabGroups,
+        'Tab groups',
+        '${ProFeatures.maxFreeTabGroups} free / Unlimited Pro+',
+      ),
+      (
+        ProFeature.autoHostGroups,
+        'Auto-host tab groups',
+        'Pro+',
+      ),
+      (
+        ProFeature.unlimitedCosmeticRules,
+        'Cosmetic rules',
+        '${ProFeatures.maxFreeCosmeticRules} free / Unlimited Pro+',
+      ),
+
+      // Pro Features
+      (ProFeature.trackerPack, 'Extended tracker pack', 'Pro+'),
+      (ProFeature.scheduledAutoBackup, 'Scheduled auto-backup', 'Pro+'),
+      (ProFeature.proxy, 'HTTP/SOCKS5 proxy', 'Pro+'),
+      (ProFeature.wifiOnly, 'Wi-Fi only & stall controls', 'Pro+'),
+      (ProFeature.perSiteUA, 'Per-site User-Agent', 'Pro+'),
+      (ProFeature.downloadRules, 'Download rules & automation', 'Pro+'),
+      (ProFeature.deadLinkRevival, 'Auto dead-link revival', 'Pro+'),
+      (ProFeature.themePack, 'Theme & accent pack', 'Pro+'),
+
+      // Ultra Exclusive Features
+      (ProFeature.serverGradeEngine, 'Server-grade engine (64/64)', 'Ultra only'),
+      (ProFeature.ffmpegSuite, 'FFmpeg media suite', 'Ultra only'),
+      (ProFeature.watcher, 'Folder watcher', 'Ultra only'),
+      (ProFeature.automationApi, 'Automation API (localhost)', 'Ultra only'),
+      (ProFeature.vaultSync, 'Vault sync', 'Ultra only'),
+      (ProFeature.ultraExtras, 'Ultra extras bundle', 'Ultra only'),
     ];
 
     final widgets = <Widget>[];
@@ -2714,133 +2826,284 @@ class _NavItem {
   });
 }
 
-/// Detail page for Drive Sync settings with live state subscription.
-class _DriveSyncPageContent extends StatefulWidget {
-  final DriveSyncService driveSyncService;
-  final TextEditingController folderController;
-  final DriveSyncState initialState;
-  final bool initialConnected;
-  final ProEntitlement proEntitlement;
-
-  const _DriveSyncPageContent({
-    required this.driveSyncService,
-    required this.folderController,
-    required this.initialState,
-    required this.initialConnected,
-    required this.proEntitlement,
-  });
+/// Manages remembered "don't ask again" choices for opening external apps
+/// (`tg:`, `intent://`, `market://`, …) from the in-app browser.
+///
+/// Reached from the browser overflow menu, from [SettingsSection.externalApps],
+/// and from the settings affordance on the external-app confirmation sheet.
+/// Apps not listed here are confirmed every time, which is the default.
+class ExternalAppsPrefsPage extends StatefulWidget {
+  const ExternalAppsPrefsPage({super.key});
 
   @override
-  State<_DriveSyncPageContent> createState() => _DriveSyncPageContentState();
+  State<ExternalAppsPrefsPage> createState() => _ExternalAppsPrefsPageState();
 }
 
-class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
-  late DriveSyncState _state;
-  late bool _connected;
-  StreamSubscription<DriveSyncState>? _sub;
+class _ExternalAppsPrefsPageState extends State<ExternalAppsPrefsPage> {
+  /// Sorted saved decisions. Empty means "ask every time for everything".
+  List<(String key, ExternalAppDecision decision)> _entries = const [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _state = widget.initialState;
-    _connected = widget.initialConnected;
-    _sub = widget.driveSyncService.onStateChanged.listen((s) {
-      if (mounted) setState(() {
-        _state = s;
-        _connected = s.status == DriveConnectionStatus.connected;
-      });
+    unawaited(_reload());
+  }
+
+  /// Alphabetical by friendly label, so reordering never depends on the raw key.
+  static List<(String, ExternalAppDecision)> _sorted(
+    Iterable<(String, ExternalAppDecision)> entries,
+  ) =>
+      entries.toList()
+        ..sort((a, b) => externalAppDisplayNameForKey(a.$1)
+            .toLowerCase()
+            .compareTo(externalAppDisplayNameForKey(b.$1).toLowerCase()));
+
+  Future<void> _reload() async {
+    final all = await ExternalAppPreferenceStore.instance.allDecisions();
+    if (!mounted) return;
+    setState(() {
+      _entries = _sorted(all.entries
+          .map((e) => (e.key, e.value))
+          .where((e) => e.$2 != ExternalAppDecision.ask));
+      _loading = false;
     });
   }
 
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
+  /// Applies [decision] locally first, then persists.
+  ///
+  /// The store mutates its in-memory cache synchronously and only *then* awaits
+  /// the disk write, so there is nothing to learn by re-reading it afterwards —
+  /// and waiting on the write would make the list lag behind the tap.
+  Future<void> _setDecision(String key, ExternalAppDecision decision) async {
+    setState(() {
+      _entries = _sorted([
+        ..._entries.where((e) => e.$1 != key),
+        if (decision != ExternalAppDecision.ask) (key, decision),
+      ]);
+    });
+    AuroraSnackbar.show(
+      context,
+      decision == ExternalAppDecision.ask
+          ? '${externalAppDisplayNameForKey(key)} will ask every time.'
+          : '${externalAppDisplayNameForKey(key)} set to '
+              '${_decisionLabel(decision).toLowerCase()}.',
+    );
+    await ExternalAppPreferenceStore.instance.setDecision(key, decision);
   }
+
+  Future<void> _confirmClearAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset all external app choices?'),
+        content: const Text(
+          'Every app will ask for confirmation again the next time a website '
+          'tries to open it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    setState(() => _entries = const []);
+    AuroraSnackbar.show(context, 'All external app choices reset.');
+    await ExternalAppPreferenceStore.instance.clearAll();
+  }
+
+  static String _decisionLabel(ExternalAppDecision d) => switch (d) {
+        ExternalAppDecision.ask => 'Ask every time',
+        ExternalAppDecision.alwaysAllow => 'Always open',
+        ExternalAppDecision.alwaysDeny => 'Never open',
+      };
+
+  static IconData _decisionIcon(ExternalAppDecision d) => switch (d) {
+        ExternalAppDecision.ask => Icons.help_outline_rounded,
+        ExternalAppDecision.alwaysAllow => Icons.check_circle_outline_rounded,
+        ExternalAppDecision.alwaysDeny => Icons.block_rounded,
+      };
+
+  Color _decisionColor(BuildContext context, ExternalAppDecision d) =>
+      switch (d) {
+        ExternalAppDecision.ask => context.ac.textSecondary,
+        ExternalAppDecision.alwaysAllow => context.ac.accentFrost,
+        ExternalAppDecision.alwaysDeny => Colors.redAccent,
+      };
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Drive Sync')),
+      appBar: AppBar(
+        title: const Text('External Apps'),
+        actions: [
+          if (_entries.isNotEmpty)
+            IconButton(
+              tooltip: 'Reset all',
+              icon: const Icon(Icons.restart_alt_rounded),
+              onPressed: () => unawaited(_confirmClearAll()),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           PanelHeader(
-              icon: Icons.cloud_rounded,
-              title: 'Drive Sync',
-              trailing: TextButton(
-                  onPressed: _connected
-                      ? () => widget.driveSyncService.disconnect()
-                      : !widget.proEntitlement.isPro
-                          ? () => showProUpsell(context, ProFeature.driveSync)
-                          : () => widget.driveSyncService.connect(),
-                  child: Text(_connected ? 'Disconnect' : 'Link'))),
+            icon: Icons.open_in_new_rounded,
+            title: 'External Apps',
+          ),
           const SizedBox(height: 8),
           Panel(
-              child: _connected
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Connected as ${_state.account ?? "Unknown"}',
-                            style: TextStyle(
-                                color: context.ac.accentFrost, fontSize: 13)),
-                        if (_state.errorMessage != null) ...[
-                          const SizedBox(height: 8),
-                          Text(_state.errorMessage!,
-                              style: TextStyle(
-                                  color: context.ac.statusError,
-                                  fontSize: 12)),
-                        ],
-                        const SizedBox(height: 16),
-                        Row(children: [
-                          Expanded(
-                              child: TextField(
-                                  controller: widget.folderController,
-                                  decoration: InputDecoration(
-                                      labelText: 'Upload folder',
-                                      isDense: true,
-                                      border: OutlineInputBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8))))),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                              onPressed: () => widget.driveSyncService
-                                  .setDestinationFolder(
-                                      widget.folderController.text),
-                              child: const Text('Set folder')),
-                        ]),
-                        const SizedBox(height: 12),
-                        SwitchListTile(
-                            title: const Text('Auto upload completed files'),
-                            value: _state.autoSyncEnabled,
-                            onChanged: (v) {
-                              if (v && !widget.proEntitlement.isPro) {
-                                showProUpsell(context, ProFeature.driveSync);
-                              } else {
-                                widget.driveSyncService.setAutoSyncEnabled(v);
-                              }
-                            },
-                            contentPadding: EdgeInsets.zero),
-                      ],
-                    )
-                  : Column(children: [
-                      Text('Link Google Drive to auto-upload completed downloads.',
-                          style: TextStyle(
-                              color: context.ac.textSecondary, fontSize: 13)),
-                      const SizedBox(height: 16),
-                          SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.link),
-                                  label: const Text('Link Google Drive'),
-                                  onPressed: () {
-                                    if (!widget.proEntitlement.isPro) {
-                                      showProUpsell(context, ProFeature.driveSync);
-                                    } else {
-                                      widget.driveSyncService.connect();
-                                    }
-                                  })),
-                    ])),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'When a website tries to open another app, Aurora asks first. '
+                'Choices you saved with "Don\'t ask again" appear here and can '
+                'be changed at any time.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.ac.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            _buildEmptyState(context)
+          else
+            Panel(
+              child: Column(
+                children: [
+                  for (var i = 0; i < _entries.length; i++) ...[
+                    if (i > 0)
+                      Divider(
+                        height: 1,
+                        color: context.ac.textSecondary.withValues(alpha: 0.12),
+                      ),
+                    _buildRow(context, _entries[i].$1, _entries[i].$2),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Panel(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
+        child: Column(
+          children: [
+            Icon(
+              Icons.task_alt_rounded,
+              size: 44,
+              color: context.ac.accentFrost,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Every app asks first',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: context.ac.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'No saved choices yet. This is the safest setting — nothing '
+              'opens another app without asking you.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: context.ac.textSecondary,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(
+    BuildContext context,
+    String key,
+    ExternalAppDecision decision,
+  ) {
+    final subtitle = externalAppSubtitleForKey(key);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Icon(
+        _decisionIcon(decision),
+        color: _decisionColor(context, decision),
+      ),
+      title: Text(
+        externalAppDisplayNameForKey(key),
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: context.ac.textPrimary,
+        ),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (subtitle != null)
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: context.ac.textTertiary,
+                fontFamily: 'JetBrainsMono',
+              ),
+            ),
+          Text(
+            _decisionLabel(decision),
+            style: TextStyle(
+              fontSize: 12.5,
+              color: _decisionColor(context, decision),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+      trailing: PopupMenuButton<ExternalAppDecision>(
+        tooltip: 'Change',
+        icon: Icon(Icons.more_vert_rounded, color: context.ac.textSecondary),
+        onSelected: (d) => unawaited(_setDecision(key, d)),
+        itemBuilder: (_) => [
+          for (final d in ExternalAppDecision.values)
+            PopupMenuItem<ExternalAppDecision>(
+              value: d,
+              child: Row(
+                children: [
+                  Icon(_decisionIcon(d), size: 18),
+                  const SizedBox(width: 10),
+                  Text(_decisionLabel(d)),
+                  if (d == decision) ...[
+                    const Spacer(),
+                    const Icon(Icons.check_rounded, size: 16),
+                  ],
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -2907,7 +3170,7 @@ class _BackupPageState extends State<BackupPage> {
       final root = DownloadSettings.mediaStoreRelativeFromDisplay(
         widget.settings.downloadDestination,
       );
-      // Manual exports land in …/Backup; scheduled/one-shot auto in …/Auto Backup.
+      // Manual exports land in .../Backup; scheduled/one-shot auto in .../Auto Backup.
       // Also scan legacy roots so old installs remain restorable.
       final roots = <String>{
         '$root/Backup',
@@ -3809,7 +4072,7 @@ class _BackupPageState extends State<BackupPage> {
                         const SizedBox(height: 6),
                         Text(
                           'Pick an Aurora backup (.json) or a 1DM export (.1dmbak). '
-                          'In the system picker, choose “All files” / browse storage if the file is hidden.',
+                          'In the system picker, choose "All files" / browse storage if the file is hidden.',
                           style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                         ),
                         const SizedBox(height: 16),
@@ -4231,7 +4494,7 @@ class _RulesPageState extends State<_RulesPage> {
                         const SizedBox(height: 8),
                         Text(
                           'Rules let you auto-rename files, route downloads '
-                          'to custom folders, and set conditions like Wi‑Fi only.',
+                          'to custom folders, and set conditions like Wi-Fi only.',
                           style: TextStyle(
                             fontSize: 13,
                             color: context.ac.textSecondary,
@@ -4282,7 +4545,7 @@ class _RulesPageState extends State<_RulesPage> {
               const SizedBox(height: 8),
               Text(
                 'Download rules let you auto-rename files, organize by host, '
-                'and set download conditions like Wi‑Fi or time windows.',
+                'and set download conditions like Wi-Fi or time windows.',
                 style: TextStyle(
                   fontSize: 13,
                   color: context.ac.textSecondary,
@@ -4490,7 +4753,7 @@ class _RulesPageState extends State<_RulesPage> {
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
-                      title: const Text('Require Wi‑Fi'),
+                      title: const Text('Require Wi-Fi'),
                       value: requireWifi,
                       onChanged: (v) =>
                           setDialogState(() => requireWifi = v),
@@ -4509,7 +4772,7 @@ class _RulesPageState extends State<_RulesPage> {
                       title: const Text('Time window'),
                       subtitle: timeWindowEnabled
                           ? Text(
-                              '$timeWindowStart:00 – $timeWindowEnd:00',
+                              '$timeWindowStart:00 - $timeWindowEnd:00',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: context.ac.accentFrost,
@@ -5694,7 +5957,7 @@ class _DownloadDestinationEditorState
                   'shared Downloads collection only (and subfolders you name here). '
                   'You cannot choose DCIM, arbitrary SD-card roots, or other apps\' '
                   'folders without using a one-time system folder picker for a single file. '
-                  'With auto-classify on, files also go into Videos / Audio / Images / … '
+                  'With auto-classify on, files also go into Videos / Audio / Images / ... '
                   'under this folder.',
                   style: TextStyle(
                     fontSize: 12,
@@ -5718,7 +5981,7 @@ class _DownloadDestinationEditorState
         ),
         Text(
           'Publishes to: $saved'
-          '${widget.autoClassifyEnabled ? '/Videos|Audio|…' : ''}',
+          '${widget.autoClassifyEnabled ? '/Videos|Audio|...' : ''}',
           style: TextStyle(
             fontSize: 12,
             color: context.ac.textSecondary,

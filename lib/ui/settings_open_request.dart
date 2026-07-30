@@ -11,6 +11,7 @@ enum SettingsSection {
   adblock,
   search,
   sniffer,
+  externalApps,
   profiles,
   appearance,
   backup,

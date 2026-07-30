@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>Privacy Policy — Aurora: Browser & Downloader</h1>
-  <p><strong>Last updated:</strong> 2026-07-17</p>
+  <p><strong>Last updated:</strong> 2026-07-29</p>
   <p>
     <strong>App:</strong> Aurora: Browser & Downloader<br />
     <strong>Package:</strong> com.personal.aurora_downloader<br />
@@ -26,8 +26,7 @@
   <p>
     Aurora: Browser & Downloader is a private web browser and download manager. It lets you browse the web
     in an in-app browser, detect media and file links, and download files to your device.
-    Optional features include Google Drive backup/sync and a one-time Aurora Pro unlock via
-    Google Play Billing.
+    Optional features include a one-time Aurora Pro or Ultra unlock via Google Play Billing.
   </p>
 
   <h2>2. Information we process</h2>
@@ -43,29 +42,23 @@
   </ul>
   <p>We do not operate a default cloud analytics product that harvests this data from your phone.</p>
 
-  <h3>2.2 Optional Google account (Drive)</h3>
+  <h3>2.2 Purchases & License Verification (Aurora Pro / Ultra)</h3>
   <p>
-    If you connect Google Drive, sign-in is handled by Google Sign-In. We use access tokens only
-    to sync backup data you enable. Google’s privacy policy applies to your Google account:
-    <a href="https://policies.google.com/privacy">https://policies.google.com/privacy</a>.
-    Drive is optional and not required for core browsing or downloading.
+    Optional Aurora Pro or Ultra is sold through Google Play Billing. We do not receive your full payment card details.
+    For Google Play distribution builds, the App sends purchase receipt tokens (<code>purchaseToken</code>) and an app install ID (<code>installId</code>) over secure HTTPS to our automated license verification host (<code>https://aurora-license-server.fly.dev</code>) to verify active entitlements via the Google Play Developer API and issue signed license keys.
+  </p>
+  <p>
+    <strong>No browsing history, download URLs, or personal files are ever transmitted to or processed by the license verification host.</strong>
   </p>
 
-  <h3>2.3 Purchases (Aurora Pro)</h3>
-  <p>
-    Optional Aurora Pro is sold through Google Play Billing. We do not receive your full payment
-    card details. Google may share purchase status needed to unlock Pro.
-  </p>
-
-  <h3>2.4 Websites you visit</h3>
+  <h3>2.3 Websites you visit</h3>
   <p>
     The built-in browser can open third-party sites. Those sites may collect data under their own
     policies. We do not control third-party websites.
   </p>
 
   <h2>3. How we use information</h2>
-  <p>Only to provide browser and download features, save preferences, optional Drive sync,
-    unlock Pro after a valid purchase, and run downloads reliably (notifications / foreground service).</p>
+  <p>Only to provide browser and download features, save preferences, verify valid Google Play purchases and activate Pro/Ultra features, and run downloads reliably (notifications / foreground service).</p>
   <p>We do <strong>not</strong> sell your personal information. We do <strong>not</strong> show third-party ads in the App.</p>
 
   <h2>4. Permissions</h2>
@@ -80,15 +73,13 @@
 
   <h2>5. Data sharing</h2>
   <p>
-    Shared only as needed: Google (Sign-In/Drive if you connect them; Play Billing if you purchase);
-    websites you choose to visit. We do not sell data to brokers or advertisers.
+    Shared only as needed: Google Play & License Host (<code>https://aurora-license-server.fly.dev</code>) to confirm purchase receipts and unlock features; websites you choose to visit. We do not sell data to brokers or advertisers.
   </p>
 
   <h2>6. Retention and deletion</h2>
   <p>
     On-device data remains until you clear app data, delete files, or uninstall.
-    Drive files remain in your Drive until you delete them there.
-    Disconnect Drive in settings to stop cloud access.
+    License verification records are stored securely on the verification host to support purchase restoration across app reinstalls and multi-device use.
   </p>
 
   <h2>7. Children</h2>

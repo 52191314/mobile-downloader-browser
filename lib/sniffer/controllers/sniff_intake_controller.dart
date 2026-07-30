@@ -155,6 +155,7 @@ class SniffIntakeController {
     String? sourcePageUrl,
     String? contentType,
     int? contentLength,
+    String? thumbnailUrl,
   }) {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
@@ -178,6 +179,7 @@ class SniffIntakeController {
         sourcePageUrl: sourcePageUrl,
         contentType: contentType,
         contentLength: contentLength,
+        thumbnailUrl: thumbnailUrl,
       ),
     );
   }
@@ -229,6 +231,7 @@ class SniffIntakeController {
           sourcePageUrl: request.sourcePageUrl,
           contentType: request.contentType,
           contentLength: request.contentLength,
+          thumbnailUrl: request.thumbnailUrl,
         ).whenComplete(() {
           _activeLiveHeaderSniffs--;
           _drainLiveHeaderSniffs();
@@ -255,6 +258,7 @@ class SniffIntakeController {
     String? sourcePageUrl,
     String? contentType,
     int? contentLength,
+    String? thumbnailUrl,
   }) async {
     try {
       final currentUrl = await tab.controller.currentUrl();
@@ -318,6 +322,15 @@ class SniffIntakeController {
               ? structured
               : (tabTitle.isNotEmpty ? tabTitle : null));
 
+      // Poster: prefer the one the DOM scan attached to this exact element,
+      // then the page's og:image. Only playable types get the page-level
+      // fallback — an og:image on every sniffed PDF/zip row would be a lie.
+      final ogImage = tab.pageMeta.ogImage?.trim();
+      final poster = firstNonEmpty([
+        thumbnailUrl,
+        if (_acceptsPageLevelPoster(url, contentType)) ogImage,
+      ]);
+
       tab.snifferEngine.sniff(
         url,
         sourcePageUrl: pageUrl,
@@ -325,6 +338,7 @@ class SniffIntakeController {
         headers: liveHeaders,
         contentType: contentType,
         contentLength: contentLength,
+        thumbnailUrl: poster,
       );
     } catch (e) {
       AuroraLog.instance.error(
@@ -334,6 +348,25 @@ class SniffIntakeController {
         eventType: LogEventType.error,
       );
     }
+  }
+
+  /// True when a page-level `og:image` is a reasonable stand-in poster for
+  /// [url]. Video/audio/playlist captures on a watch page share that page's
+  /// artwork; images already are their own thumbnail, and documents/archives
+  /// would just be mislabelled by it.
+  static bool _acceptsPageLevelPoster(String url, String? contentType) {
+    final ct = contentType?.toLowerCase().split(';').first.trim() ?? '';
+    if (ct.startsWith('video/') || ct.startsWith('audio/')) return true;
+    if (ct.contains('mpegurl') || ct == 'application/dash+xml') return true;
+    if (ct.startsWith('image/')) return false;
+    if (ct.isNotEmpty && !ct.startsWith('application/octet-stream')) {
+      return false;
+    }
+    return RegExp(
+      r'\.(mp4|m3u8|mpd|webm|mkv|avi|flv|mov|m4v|ts|mp3|m4a|aac|flac|opus|ogg|wav)'
+      r'(\?|$)',
+      caseSensitive: false,
+    ).hasMatch(url);
   }
 
   // ---------------------------------------------------------------------------
@@ -549,6 +582,7 @@ class _QueuedSniff {
   final String? sourcePageUrl;
   final String? contentType;
   final int? contentLength;
+  final String? thumbnailUrl;
 
   const _QueuedSniff(
     this.tab,
@@ -556,6 +590,7 @@ class _QueuedSniff {
     this.sourcePageUrl,
     this.contentType,
     this.contentLength,
+    this.thumbnailUrl,
   });
 
   String get key =>

@@ -464,7 +464,8 @@ Aurora Downloader features a hybrid ad blocking engine: native C++ (domain trie 
 | **Enable adblock** | Master switch for all ad blocking. |
 | **Block popups** | Block unexpected popup windows. |
 | **Block invisible redirects** | Intercept invisible redirect chains. |
-| **Block trackers** (Pro) | Block tracking scripts and analytics. |
+| **Block trackers** | Block tracking scripts and analytics using EasyPrivacy. |
+| **Extended tracker pack** (Pro) | Enable extended curated tracker lists & auto-updates. |
 
 ### Filter Lists
 
@@ -954,7 +955,7 @@ Sync your download queue to Google Drive for access across devices.
 | Batch capture / Grab All | 5 items | Unlimited | Unlimited |
 | Series auto-grab | 5 eps | Unlimited | Unlimited |
 | Send to PC (LAN) | 20/day | Unlimited | Unlimited |
-| Tracker blocking pack | — | ✅ | ✅ |
+| Extended tracker lists & auto-updates | — | ✅ | ✅ |
 | Advanced stall controls | — | ✅ | ✅ |
 | Clipboard URL catch | — | ✅ | ✅ |
 | Rich notifications | — | ✅ | ✅ |

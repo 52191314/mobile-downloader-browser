@@ -1,16 +1,5 @@
 import '../../downloader/downloader.dart';
 import '../../downloader/models.dart';
-import '../../sync/sync.dart';
-
-String driveStatusText(DriveConnectionStatus status) {
-  return switch (status) {
-    DriveConnectionStatus.connected => 'Google Drive linked',
-    DriveConnectionStatus.syncing => 'Syncing to Google Drive',
-    DriveConnectionStatus.error => 'Google Drive needs attention',
-    DriveConnectionStatus.connecting => 'Connecting to Google Drive',
-    DriveConnectionStatus.disconnected => 'Google Drive disconnected',
-  };
-}
 
 // --- Download speed / size / name formatters ---
 // Shared across queue_page.dart and download_task_row.dart.

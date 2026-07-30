@@ -3,6 +3,23 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+/// Whether a library entry points at a page or at a media stream.
+///
+/// Favourites and history were page-only until video favouriting existed, so
+/// every entry written before this field must read back as [site] — see the
+/// `fromJson` fallbacks. Never reorder: the names are persisted.
+enum LibraryEntryKind { site, video }
+
+LibraryEntryKind _kindFromJson(Object? raw) {
+  if (raw is String) {
+    for (final k in LibraryEntryKind.values) {
+      if (k.name == raw) return k;
+    }
+  }
+  // Absent or unrecognised: everything written before the split was a page.
+  return LibraryEntryKind.site;
+}
+
 class BrowserFavorite {
   final String id;
   final String title;
@@ -12,6 +29,18 @@ class BrowserFavorite {
   final String? folderId;
   final List<String> tags;
 
+  /// Page bookmark or saved video. Drives which subpage this appears under.
+  final LibraryEntryKind kind;
+
+  /// Poster for a video entry, harvested by the sniffer. Null for sites and
+  /// for videos whose page exposed no artwork.
+  final String? thumbnailUrl;
+
+  /// The page the video was found on. Kept so a saved stream whose signed URL
+  /// has expired can still be re-opened at its source rather than being a dead
+  /// link — the single most likely failure for a stored CDN link.
+  final String? sourcePageUrl;
+
   const BrowserFavorite({
     required this.id,
     required this.title,
@@ -20,7 +49,12 @@ class BrowserFavorite {
     this.faviconUrl,
     this.folderId,
     this.tags = const [],
+    this.kind = LibraryEntryKind.site,
+    this.thumbnailUrl,
+    this.sourcePageUrl,
   });
+
+  bool get isVideo => kind == LibraryEntryKind.video;
 
   BrowserFavorite copyWith({
     String? title,
@@ -29,6 +63,9 @@ class BrowserFavorite {
     String? folderId,
     bool clearFolder = false,
     List<String>? tags,
+    LibraryEntryKind? kind,
+    String? thumbnailUrl,
+    String? sourcePageUrl,
   }) {
     return BrowserFavorite(
       id: id,
@@ -38,6 +75,9 @@ class BrowserFavorite {
       faviconUrl: faviconUrl ?? this.faviconUrl,
       folderId: clearFolder ? null : (folderId ?? this.folderId),
       tags: tags ?? this.tags,
+      kind: kind ?? this.kind,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      sourcePageUrl: sourcePageUrl ?? this.sourcePageUrl,
     );
   }
 
@@ -49,6 +89,9 @@ class BrowserFavorite {
     'faviconUrl': faviconUrl,
     'folderId': folderId,
     'tags': tags,
+    'kind': kind.name,
+    'thumbnailUrl': thumbnailUrl,
+    'sourcePageUrl': sourcePageUrl,
   };
 
   factory BrowserFavorite.fromJson(Map<String, dynamic> json) {
@@ -66,6 +109,9 @@ class BrowserFavorite {
           .map((tag) => tag.trim())
           .where((tag) => tag.isNotEmpty)
           .toList(growable: false),
+      kind: _kindFromJson(json['kind']),
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      sourcePageUrl: json['sourcePageUrl'] as String?,
     );
   }
 }
@@ -139,16 +185,33 @@ class BrowserHistoryEntry {
   final String url;
   final DateTime visitedAt;
 
+  /// Page visit or video playback. See [LibraryEntryKind].
+  final LibraryEntryKind kind;
+
+  /// Poster for a video entry. Null for page visits.
+  final String? thumbnailUrl;
+
+  /// Page the video played from, so an expired stream URL still has a way back.
+  final String? sourcePageUrl;
+
   const BrowserHistoryEntry({
     required this.title,
     required this.url,
     required this.visitedAt,
+    this.kind = LibraryEntryKind.site,
+    this.thumbnailUrl,
+    this.sourcePageUrl,
   });
+
+  bool get isVideo => kind == LibraryEntryKind.video;
 
   Map<String, dynamic> toJson() => {
     'title': title,
     'url': url,
     'visitedAt': visitedAt.toIso8601String(),
+    'kind': kind.name,
+    'thumbnailUrl': thumbnailUrl,
+    'sourcePageUrl': sourcePageUrl,
   };
 
   factory BrowserHistoryEntry.fromJson(Map<String, dynamic> json) {
@@ -158,6 +221,9 @@ class BrowserHistoryEntry {
       visitedAt:
           DateTime.tryParse(json['visitedAt'] as String? ?? '') ??
           DateTime.now(),
+      kind: _kindFromJson(json['kind']),
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      sourcePageUrl: json['sourcePageUrl'] as String?,
     );
   }
 }
@@ -196,11 +262,40 @@ class BrowserLibrary {
     );
   }
 
-  /// Returns folders that exist on at least one favorite. Used to migrate
-  /// legacy libraries and to seed the "Unsorted" pseudo-folder view.
+  /// Page bookmarks, newest first. Folders apply only to these.
+  List<BrowserFavorite> get siteFavorites => favorites
+      .where((f) => f.kind == LibraryEntryKind.site)
+      .toList(growable: false);
+
+  /// Saved videos, newest first. Deliberately flat — folders are a page-
+  /// organising idea, and forcing videos through them would mean every saved
+  /// video landing in "Unsorted".
+  List<BrowserFavorite> get videoFavorites {
+    final list = favorites
+        .where((f) => f.kind == LibraryEntryKind.video)
+        .toList();
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List.unmodifiable(list);
+  }
+
+  List<BrowserHistoryEntry> get siteHistory => history
+      .where((h) => h.kind == LibraryEntryKind.site)
+      .toList(growable: false);
+
+  List<BrowserHistoryEntry> get videoHistory {
+    final list =
+        history.where((h) => h.kind == LibraryEntryKind.video).toList();
+    list.sort((a, b) => b.visitedAt.compareTo(a.visitedAt));
+    return List.unmodifiable(list);
+  }
+
+  /// Page bookmarks in [folderId]. Videos are excluded — they live on their
+  /// own subpage, and letting them fall into "Unsorted" would have silently
+  /// mixed streams into the user's site bookmarks.
   List<BrowserFavorite> favoritesInFolder(String? folderId) {
     return favorites
-        .where((fav) => fav.folderId == folderId)
+        .where((fav) =>
+            fav.kind == LibraryEntryKind.site && fav.folderId == folderId)
         .toList(growable: false);
   }
 

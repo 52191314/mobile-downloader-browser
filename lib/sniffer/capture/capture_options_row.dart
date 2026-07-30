@@ -4,11 +4,88 @@ import 'package:aurora_downloader/settings/download_settings.dart';
 import 'package:aurora_downloader/sniffer/capture/capture_group_sort.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
+/// True when any capture option differs from its default, i.e. the results the
+/// user is looking at are being sorted or filtered in a non-obvious way.
+///
+/// Drives the highlight on the options button so a non-default view is never
+/// silent now that the controls themselves live behind it.
+bool captureOptionsAreCustomised(DownloadSettings settings) {
+  return settings.captureShowAllMedia ||
+      settings.sniffedMediaSort != SniffedMediaSort.newest ||
+      settings.sniffedMediaDisplayMode != SniffedMediaDisplayMode.both;
+}
+
+/// Presents the capture options as a modal sheet over the capture sheet.
+///
+/// [onSettingsChanged] fires on every change so the list behind updates live;
+/// the sheet keeps its own copy of [settings] between rebuilds via
+/// [currentSettings], which the caller re-reads from its own state.
+Future<void> showCaptureOptionsSheet(
+  BuildContext context, {
+  required DownloadSettings Function() currentSettings,
+  required bool Function() currentShowAll,
+  required ValueChanged<bool> onShowAllChanged,
+  required ValueChanged<DownloadSettings> onSettingsChanged,
+}) {
+  final ac = context.ac;
+  return showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    showDragHandle: true,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: ac.surfacePanel,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (builderContext, setSheetState) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                    child: Text(
+                      'Capture options',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: ac.textPrimary,
+                      ),
+                    ),
+                  ),
+                  CaptureOptionsRow(
+                    settings: currentSettings(),
+                    showAll: currentShowAll(),
+                    onShowAllChanged: (value) {
+                      onShowAllChanged(value);
+                      setSheetState(() {});
+                    },
+                    onSettingsChanged: (next) {
+                      onSettingsChanged(next);
+                      setSheetState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
 /// Capture Options zone: show-all toggle + sort + display-mode dropdowns.
 ///
 /// Persists via [onSettingsChanged] into existing [DownloadSettings] fields
 /// (`captureShowAllMedia`, `sniffedMediaSort`, `sniffedMediaDisplayMode`).
 /// Show-all copy is fixed (Key Decision 26).
+///
+/// Presented by [showCaptureOptionsSheet] rather than inline in the capture
+/// sheet — see [CaptureFilterBar] for why.
 class CaptureOptionsRow extends StatelessWidget {
   const CaptureOptionsRow({
     super.key,

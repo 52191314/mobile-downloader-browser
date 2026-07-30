@@ -197,9 +197,6 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
       return const Scaffold(body: SizedBox.shrink());
     }
 
-    final isRunning = widget.ffmpegService.isRunning;
-    final currentJob = widget.ffmpegService.current;
-
     if (widget.items.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: const Text('FFmpeg Studio')),

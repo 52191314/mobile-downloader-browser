@@ -37,6 +37,7 @@ abstract interface class SnifferBrowserController {
     Uri uri, {
     Map<String, String>? headers,
     bool addToHistory = true,
+    bool skipExternalPrompt = false,
   });
   Future<void> loadFile(String path);
   Future<String?> currentUrl();
@@ -155,15 +156,7 @@ abstract interface class SnifferBrowserController {
     WebResourceRequest request,
   );
 
-  /// Called when a native HLS playlist (m3u8) request is intercepted, so the
-  /// caller can capture the playlist body (which our JS hooks cannot see when
-  /// the page uses Android WebView's built-in HLS player). The callback
-  /// receives the request URL and should return the captured body string, or
-  /// null if it could not be captured. Returning a non-null body lets the
-  /// downloader use the real playlist instead of falling back to Dart HTTP.
-  void setOnHlsPlaylistIntercepted(
-    Future<void> Function(String url, String body)? callback,
-  );
+
   Map<String, String> get currentHeaders;
   HlsPlaylist? get lastMasterPlaylist;
   void setOnIframeMediaDetected(void Function(String url) callback);
@@ -330,7 +323,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Uri? _currentUri;
   String _currentHost = '';
   HlsPlaylist? _lastMasterPlaylist;
-  Future<void> Function(String url, String body)? _onHlsPlaylistIntercepted;
+
   bool _webViewCreated = false;
   Timer? _loadResourceTimer;
   final Set<String> _pendingResourceUrls = {};
@@ -398,7 +391,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   static final RegExp _mediaUrlRegExp = RegExp(
-    // .ts is excluded â€” HLS segments are not discoverable media; the
+    // .ts is excluded — HLS segments are not discoverable media; the
     // playlist (.m3u8) is what the downloader needs.
     r'\.(mp4|m3u8|webm|mkv|avi|flv|mov|mp3|wav|aac|ogg|m4a|flac|mpd|f4m|smil)(\?.*)?$',
     caseSensitive: false,
@@ -731,43 +724,12 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
   }
 
-  @override
-  void setOnHlsPlaylistIntercepted(
-    Future<void> Function(String url, String body)? callback,
-  ) {
-    _onHlsPlaylistIntercepted = callback;
-  }
+
 
   @override
   Future<WebResourceResponse?> shouldInterceptRequestCallback(
     WebResourceRequest request,
   ) async {
-    // Capture native HLS playlist (m3u8) bodies. When the page uses Android
-    // WebView's built-in HLS player, the playlist is fetched by native code
-    // (not JS fetch/XHR), so our browser_guard.js hooks never see it. We
-    // detect the request here, fetch the body ourselves via native HTTP
-    // (with browser cookies, no CORS restriction), and hand it to the
-    // downloader so it uses the REAL playlist instead of a Dart-HTTP fallback
-    // that may receive a decoy. We let the WebView's own request proceed
-    // (return null) so playback is unaffected.
-    if (_onHlsPlaylistIntercepted != null &&
-        request.isForMainFrame != true &&
-        request.method == 'GET') {
-      final reqUrl = request.url.toString();
-      // Play: no HLS body capture on restricted pages or restricted CDN URLs.
-      final hardOff =
-          RestrictedMediaPolicy.shouldHardOffSniffing(_currentUrl);
-      final urlBlocked = RestrictedMediaPolicy.isBlocked(
-        mediaUrl: reqUrl,
-        sourcePageUrl: _currentUrl,
-      );
-      // HLS body capture removed — JS channel (browser_guard.js) fills
-      // hlsPlaylistCache on every playlist fetch with live cookies, and the
-      // enricher's 4-tier ladder (cache → WebView JS → Dart HTTP → headless)
-      // handles everything else. The old native _captureHlsPlaylistBody had
-      // no cookies and added a redundant GET for every m3u8.
-    }
-
     if (!_adBlockerEnabled) return null;
 
     // Skip main frame — already handled by shouldOverrideUrlLoading
@@ -973,6 +935,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
 
     // External / custom schemes: never load inside the WebView.
     // Main-frame only — subresources with exotic schemes are just cancelled.
+    // Prompt the user (unless they chose "don't ask again" for this app).
     if (url.isNotEmpty &&
         requestUri != null &&
         isExternalAppUri(requestUri)) {
@@ -981,6 +944,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
           handleExternalAppUri(
             requestUri,
             onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+            pageHost: _currentHost.isNotEmpty ? _currentHost : null,
           ),
         );
       }
@@ -1105,6 +1069,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       handleExternalAppUri(
         uri,
         onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+        pageHost: _currentHost.isNotEmpty ? _currentHost : null,
       ),
     );
   }
@@ -1127,7 +1092,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
   }
 
-  /// Called by InAppWebView onLoadResource â€” this is the KEY callback for Beeg24.
+  /// Called by InAppWebView onLoadResource — this is the KEY callback for Beeg24.
   /// It fires for ALL subresource loads including cross-origin iframes.
   /// Note: LoadedResource only exposes url + initiatorType (no MIME/headers),
   /// so we classify by URL extension and initiator type.
@@ -1255,6 +1220,8 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     Uri uri, {
     Map<String, String>? headers,
     bool addToHistory = true,
+    /// Skip the external-app confirmation (typed address bar / explicit user action).
+    bool skipExternalPrompt = false,
   }) async {
     if (_isDisposed) return;
     final urlStr = uri.toString();
@@ -1270,6 +1237,8 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       await handleExternalAppUri(
         uri,
         onMagnet: (u) => _onDownloadStartRequest?.call(u, null),
+        skipPrompt: skipExternalPrompt,
+        pageHost: _currentHost.isNotEmpty ? _currentHost : null,
       );
       return;
     }
@@ -1999,10 +1968,7 @@ class MockBrowserController implements SnifferBrowserController {
 
   @override
   void setOnIframeMediaDetected(void Function(String url) callback) {}
-  @override
-  void setOnHlsPlaylistIntercepted(
-    Future<void> Function(String url, String body)? callback,
-  ) {}
+
   @override
   void setOnDownloadStartRequest(
     void Function(String url, String? suggestedFilename) callback,
@@ -2166,6 +2132,7 @@ class MockBrowserController implements SnifferBrowserController {
     Uri uri, {
     Map<String, String>? headers,
     bool addToHistory = true,
+    bool skipExternalPrompt = false,
   }) async {
     _currentHeaders = headers ?? const {};
     final urlStr = uri.toString();

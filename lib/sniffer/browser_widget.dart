@@ -42,8 +42,11 @@ class BrowserWidget extends StatelessWidget {
             useOnDownloadStart: true,
             useShouldInterceptRequest: true,
             supportMultipleWindows: false,
-            allowFileAccess: true,
-            allowContentAccess: true,
+            // This WebView renders arbitrary untrusted pages. Neither flag has a
+            // use case for a general-purpose browser, and both widen the blast
+            // radius of the JS-bridge surface in browser_controller.dart.
+            allowFileAccess: false,
+            allowContentAccess: false,
             domStorageEnabled: true,
             databaseEnabled: true,
             mediaPlaybackRequiresUserGesture: false,

@@ -134,11 +134,28 @@ Complete the **IARC questionnaire** honestly.
 | Gambling / simulated gambling? | **No** |
 | Can users purchase digital items? | **Yes** — one-time Pro unlock (if questionnaire asks) |
 
-**Expected outcome:** often **Teen** or **Mature 17+** because of **unrestricted web access**, even if the UI is clean. Do not under-rate.
+**Actual outcome (live, verified in Console 2026-07-28): `Rated for 3+`,
+interactive elements `Unrestricted Internet, In-App Purchases`. This is correct.
+Do not re-take the questionnaire to "fix" it.**
+
+~~Expected outcome: often Teen or Mature 17+ because of unrestricted web access.~~
+**That prediction was wrong** and is corrected here.
+
+IARC rates the app's **own packaged content**, and a browser ships none.
+`Unrestricted Internet` is an *interactive element* descriptor — disclosed
+separately on the listing, and it does not raise the age rating by itself.
+Chrome, Firefox, Opera and Samsung Internet all carry Everyone/3+ with exactly
+this descriptor. A low content rating for a browser is normal, not under-rating.
 
 ---
 
 ## 6. Target audience and content
+
+**This — not the content rating — is the section that carries real risk.**
+
+A 3+ content rating combined with a child-inclusive target audience pulls the app
+into **Families policy**, which an unrestricted browser cannot satisfy. Chrome's
+configuration is 3+ content rating **with an adult target audience**; match it.
 
 | Field | Answer |
 |-------|--------|
@@ -148,6 +165,10 @@ Complete the **IARC questionnaire** honestly.
 | News app? | **No** (if asked as separate form) |
 
 Rationale: unrestricted browser + downloads is inappropriate as a children’s primary app.
+
+⚠️ **Unverified in Console as of 2026-07-28.** Target audience is not visible on
+the public listing page. Check Policy → App content → Target audience and content
+before promoting to production, and record the result here with a date.
 
 ---
 

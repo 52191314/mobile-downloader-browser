@@ -71,11 +71,52 @@ class ProEntitlement extends ChangeNotifier {
   DateTime? _lastReconcileAt;
   bool _lastReconcileOk = false;
 
+  /// Tier granted by a verified server license, or null when there is none.
+  EntitlementTier? _licensedTier;
+
+  /// True once [LicenseService] confirms server-side licensing is configured
+  /// for this build. While false, [tier] keeps its pre-licensing meaning.
+  bool _licenseGating = false;
+
   /// Serializes owned-set writes so concurrent stream + reconcile cannot
   /// interleave partial writes.
   Future<void>? _writeChain;
 
-  EntitlementTier get tier => _debugOverride ?? _tier;
+  /// Effective tier — what every feature gate reads.
+  ///
+  /// When server-side licensing is active, a tier is only real if the license
+  /// host signed for it: editing `pro_entitlement.json` no longer grants
+  /// anything, because [_tier] is not consulted. Debug overrides still win in
+  /// debug/profile builds.
+  EntitlementTier get tier {
+    final override = _debugOverride;
+    if (override != null) return override;
+    if (_licenseGating) return _licensedTier ?? EntitlementTier.free;
+    return _tier;
+  }
+
+  /// Tier implied by the Play purchases this device knows about, independent of
+  /// the license.
+  ///
+  /// Purchase UX reads this — a Pro owner must still see the upgrade CTA while
+  /// the license host is unreachable, and the migration grace window needs to
+  /// know what the user owned before licensing shipped.
+  EntitlementTier get storeTier => _tier;
+
+  /// True when the effective tier comes from a verified license.
+  bool get isLicenseGated => _licenseGating;
+
+  /// Apply (or clear) the tier granted by a verified license.
+  ///
+  /// [gating] turns license enforcement on; it stays false for GitHub builds
+  /// and for Play builds with no license host configured, which keeps their
+  /// behaviour identical to before this system existed.
+  void applyLicensedTier(EntitlementTier? tier, {required bool gating}) {
+    if (_licensedTier == tier && _licenseGating == gating) return;
+    _licensedTier = tier;
+    _licenseGating = gating;
+    notifyListeners();
+  }
 
   /// Back-compat shim: Pro or Ultra counts as "Pro".
   bool get isPro => tier.isAtLeastPro;

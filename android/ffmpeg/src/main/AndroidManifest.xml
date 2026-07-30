@@ -21,7 +21,6 @@
     package="com.personal.aurora_downloader.ffmpeg">
 
     <dist:module
-        dist:onDemand="true"
         dist:title="@string/feature_ffmpeg_title">
         <dist:delivery>
             <dist:on-demand />

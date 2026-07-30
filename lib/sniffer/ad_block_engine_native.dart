@@ -635,19 +635,63 @@ class AdBlockEngine {
     return result;
   }
 
-  /// Returns combined cosmetic CSS for the given [host], including
-  /// both standard cosmetic selectors and CSS injection rules.
+  String? _genericCosmeticCssCache;
+
+  /// Builds `display:none` CSS for [selectors], in small batches.
+  ///
+  /// CSS discards an *entire* selector list if any single selector in it fails
+  /// to parse, so emitting every selector as one comma-separated list means one
+  /// malformed filter-list rule takes down all cosmetic hiding on the page.
+  /// Batching caps the blast radius while staying far smaller than one rule per
+  /// selector.
+  static String _buildHideCss(List<String> selectors) {
+    const batchSize = 25;
+    final buffer = StringBuffer();
+    for (var i = 0; i < selectors.length; i += batchSize) {
+      final end =
+          (i + batchSize < selectors.length) ? i + batchSize : selectors.length;
+      buffer.write(selectors.sublist(i, end).join(','));
+      buffer.write('{display:none!important}');
+    }
+    return buffer.toString();
+  }
+
+  /// Host-independent cosmetic CSS — rules written as `##selector` with no
+  /// domain, which is the bulk of EasyList's element hiding.
+  ///
+  /// Installed once as a document_start user script rather than pushed over the
+  /// platform channel on every navigation: the full lists carry thousands of
+  /// generic rules, and re-sending that per page load would cost more than the
+  /// ads it hides. Cached because the result never varies by host, and the
+  /// engine is rebuilt (new instance) whenever the user's filter sources change.
+  String getGenericCosmeticCss() {
+    if (!enabled) return '';
+    final cached = _genericCosmeticCssCache;
+    if (cached != null) return cached;
+    final selectors = <String>[];
+    for (final rule in cosmeticRules) {
+      if (rule.host.isEmpty) selectors.add(rule.selector);
+    }
+    final built = selectors.isEmpty ? '' : _buildHideCss(selectors);
+    _genericCosmeticCssCache = built;
+    return built;
+  }
+
+  /// Returns cosmetic CSS specific to [host]. Generic (hostless) rules are
+  /// deliberately excluded — see [getGenericCosmeticCss].
   String getCosmeticCssForHost(String host) {
     if (!enabled) return '';
     final normalizedHost = host.toLowerCase();
     final selectors = <String>[];
     final cssInjections = <String>[];
 
-    // Collect standard cosmetic rules
+    // Collect standard cosmetic rules. Generic (hostless) rules are excluded
+    // here — they go out once via [getGenericCosmeticCss] as a document_start
+    // user script instead of crossing the platform channel on every page load.
     for (final rule in cosmeticRules) {
       final ruleHost = rule.host.toLowerCase();
-      if (ruleHost.isEmpty ||
-          normalizedHost == ruleHost ||
+      if (ruleHost.isEmpty) continue;
+      if (normalizedHost == ruleHost ||
           normalizedHost.endsWith('.$ruleHost')) {
         selectors.add(rule.selector);
       }
@@ -665,7 +709,7 @@ class AdBlockEngine {
 
     final parts = <String>[];
     if (selectors.isNotEmpty) {
-      parts.add('${selectors.join(",")}{display:none!important}');
+      parts.add(_buildHideCss(selectors));
     }
     if (cssInjections.isNotEmpty) {
       parts.addAll(cssInjections);
@@ -783,12 +827,49 @@ class AdBlockEngine {
     return AdBlockRule(type: AdBlockRuleType.domain, pattern: host);
   }
 
+  /// Selector fragments that are procedural/extended-CSS syntax rather than
+  /// real CSS. They are common in EasyList and uBlock lists but a browser
+  /// rejects them, and because selectors are emitted as one comma-separated
+  /// list, a single invalid entry silently voids *every* cosmetic rule on the
+  /// page. Filtering them here keeps the rest of the list working.
+  static const List<String> _proceduralSelectorTokens = [
+    '+js(',
+    ':has-text(',
+    ':-abp-has(',
+    ':-abp-contains(',
+    ':xpath(',
+    ':matches-css(',
+    ':matches-attr(',
+    ':matches-path(',
+    ':min-text-length(',
+    ':upward(',
+    ':watch-attr(',
+    ':remove(',
+    ':style(',
+    ':others(',
+    ':if(',
+    ':if-not(',
+  ];
+
+  static bool _isSupportedSelector(String selector) {
+    final lower = selector.toLowerCase();
+    for (final token in _proceduralSelectorTokens) {
+      if (lower.contains(token)) return false;
+    }
+    return true;
+  }
+
   static CosmeticAdRule? _parseCosmeticLine(String line) {
     final index = line.indexOf('##');
-    if (index <= 0 || index >= line.length - 2) return null;
+    // index == 0 is a *generic* rule (`##.ad`) that applies to every host —
+    // that is the bulk of EasyList's element hiding, so it must not be dropped.
+    if (index < 0 || index >= line.length - 2) return null;
     final host = line.substring(0, index).trim();
     final selector = line.substring(index + 2).trim();
-    if (host.isEmpty || selector.isEmpty || host.contains(',')) return null;
+    if (selector.isEmpty || host.contains(',')) return null;
+    if (!_isSupportedSelector(selector)) return null;
+    // An empty host means "all hosts"; getCosmeticCssForHost already treats
+    // CosmeticAdRule.host == '' that way.
     return CosmeticAdRule(host: host, selector: selector);
   }
 
