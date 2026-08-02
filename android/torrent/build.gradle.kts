@@ -84,7 +84,7 @@ val extractTorrentJni by tasks.registering {
 
         // Fallback Attempt 4: Download prebuilt native zips if not found in pub cache
         if (copied == 0) {
-            val version = "1.9.1"
+            val version = "1.9.2"
             abis.forEach { abi ->
                 val abiDestDir = File(destRoot, "jni/$abi")
                 abiDestDir.mkdirs()

@@ -41,7 +41,7 @@ dependencies:
   path: ^1.9.1
   flutter_inappwebview: ^6.1.5
   dynamic_color: ^1.7.0
-  libtorrent_flutter: ^1.8.5
+  libtorrent_flutter: ^1.9.2
   google_sign_in: ^6.2.2
   googleapis: ^16.0.0
   extension_google_sign_in_as_googleapis_auth: ^2.0.1
