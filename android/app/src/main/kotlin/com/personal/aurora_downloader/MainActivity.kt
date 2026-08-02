@@ -140,6 +140,7 @@ class MainActivity : FlutterActivity() {
                     "writeExportFileToDirectory" -> writeExportFileToDirectory(call, result)
                     "listAutoBackups" -> listAutoBackups(result)
                     "restoreAutoBackupFile" -> restoreAutoBackupFile(call, result)
+                    "copyContentUriToFile" -> copyContentUriToFile(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -757,6 +758,37 @@ class MainActivity : FlutterActivity() {
             }
         }
         return null
+    }
+
+    /**
+     * Copies a content:// URI (MediaStore published download) into a real file
+     * at [destPath]. Used by FFmpeg Studio: after a download is published the
+     * private copy at [DownloadTask.savePath] is deleted, so editing a just-
+     * downloaded file needs the file materialized back to a local path first.
+     */
+    private fun copyContentUriToFile(call: MethodCall, result: MethodChannel.Result) {
+        val uriStr = call.argument<String>("uri") ?: ""
+        val destPath = call.argument<String>("destPath") ?: ""
+        if (uriStr.isEmpty() || destPath.isEmpty()) {
+            result.error("bad_args", "uri and destPath are required", null)
+            return
+        }
+        try {
+            val dest = File(destPath)
+            dest.parentFile?.mkdirs()
+            val resolver = applicationContext.contentResolver
+            resolver.openInputStream(Uri.parse(uriStr))?.use { input ->
+                FileOutputStream(dest).use { output -> input.copyTo(output) }
+            } ?: run {
+                result.error("open_failed", "Cannot open content URI: $uriStr", null)
+                return
+            }
+            Log.d(TAG, "copyContentUriToFile -> $destPath (${dest.length()} bytes)")
+            result.success(destPath)
+        } catch (e: Exception) {
+            Log.w(TAG, "copyContentUriToFile failed: ${e.message}")
+            result.error("copy_failed", e.message, null)
+        }
     }
 
     /**

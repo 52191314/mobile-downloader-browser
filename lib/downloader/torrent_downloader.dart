@@ -178,7 +178,12 @@ class TorrentDownloader implements BaseDownloader {
   Duration get tickInterval => const Duration(milliseconds: 500);
 
   Future<void> _startNative() async {
-    if (task.state == DownloadState.downloading && !_isPaused) return;
+    // NOTE: do NOT early-return on `task.state == downloading` here. The queue
+    // (_schedule) sets the state to `downloading` BEFORE calling start(), so a
+    // state-based guard would skip native init entirely — torrent tasks would
+    // hang at 0% and the :torrent on-demand module would never install. Re-entry
+    // is already safe: LibtorrentFlutter.isInitialized skips init and
+    // _nativeTorrentId != null resumes instead of re-adding.
 
     _isPaused = false;
     task.state = DownloadState.downloading;

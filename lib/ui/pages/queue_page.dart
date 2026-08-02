@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../downloader/downloader.dart';
 import '../../premium/ffmpeg/ffmpeg_module_loader.dart';
@@ -1708,24 +1709,35 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   Future<void> _openFfmpegStudioForTask(DownloadTask task) async {
-    final path = task.savePath;
+    String? path = task.savePath;
     if (path.isEmpty || !File(path).existsSync()) {
+      // After a successful download the private copy at [task.savePath] is
+      // deleted once the file is published to MediaStore ([task.publicUri]).
+      // Materialize it back to a local path so FFmpeg Studio can read it
+      // (and write the output next to it).
+      final uri = task.publicUri?.trim();
+      if (uri != null && uri.isNotEmpty) {
+        path = await _materializePublishedSource(uri, task);
+      }
+    }
+    if (path == null || path.isEmpty || !File(path).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('File path is missing or file does not exist.')),
       );
       return;
     }
+    final resolvedPath = path;
 
     // Ensure the FFmpeg on-demand module is installed (Play) or ready (GitHub).
     final loader = FeatureModuleLoader.instance;
     final moduleReady = await _ensureFfmpegModule(context, loader);
     if (!moduleReady) return;
 
-    final name = path.replaceAll('\\', '/').split('/').last;
+    final name = resolvedPath.replaceAll('\\', '/').split('/').last;
     final item = FfmpegStudioItem(
       id: task.id,
       name: name,
-      filePath: path,
+      filePath: resolvedPath,
       fileSizeBytes: task.totalBytes,
     );
     if (!context.mounted) return;
@@ -1739,6 +1751,38 @@ class _QueuePageState extends State<QueuePage> {
         ),
       ),
     );
+  }
+
+  /// Copies a published content:// URI back into a private workspace so
+  /// FFmpeg can operate on a real local path. Returns the local path or null.
+  Future<String?> _materializePublishedSource(
+    String uri,
+    DownloadTask task,
+  ) async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory(p.join(docs.path, 'ffmpeg_sources'));
+      await dir.create(recursive: true);
+      var baseName = p.basename(task.savePath);
+      if (baseName.isEmpty || baseName == '.') {
+        baseName = 'download';
+      }
+      // Ensure an extension so FFmpeg can sniff the container; the original
+      // name already carries one in normal flows.
+      final dest = p.join(dir.path, baseName);
+      final copied = await const MethodChannel('aurora_downloader/public_downloads')
+          .invokeMethod<String>('copyContentUriToFile', {
+            'uri': uri,
+            'destPath': dest,
+          });
+      if (copied == null || copied.isEmpty || !File(copied).existsSync()) {
+        return null;
+      }
+      return copied;
+    } catch (e, s) {
+      debugPrint('[QueuePage] materialize published source failed: $e\n$s');
+      return null;
+    }
   }
 
   /// Checks FFmpeg module availability and prompts Play install if needed.
