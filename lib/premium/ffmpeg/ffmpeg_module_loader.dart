@@ -29,6 +29,31 @@ const _kFeatureDeliveryChannel = 'aurora_downloader/feature_delivery';
 /// Method channel name for install progress events.
 const _kFeatureDeliveryProgress = 'aurora_downloader/feature_delivery_progress';
 
+/// Registers the native plugin that backs an on-demand module in the current
+/// process, regardless of build channel.
+///
+/// The ffmpeg-kit / media_kit_libs plugins are forked without an Android
+/// `pluginClass`, so they are never registered by GeneratedPluginRegistrant.
+/// This tells the native side to `flutterEngine.getPlugins().add(...)`:
+/// - Play builds: called by [PlayModuleLoader] AFTER the on-demand module is
+///   installed (SplitCompat has made its .so loadable).
+/// - Fat builds (GitHub / debug APK): called by [GitHubModuleLoader] — the
+///   natives are already in the APK, so registration succeeds immediately.
+/// Idempotent and never throws to the caller.
+Future<void> _registerPluginOnPlatform(String moduleId) async {
+  try {
+    await const MethodChannel(_kFeatureDeliveryChannel)
+        .invokeMethod<bool>('registerPlugin', {
+          'module': moduleId,
+        });
+  } on MissingPluginException {
+    // Non-Android platform, or no feature-delivery handler — plugin already
+    // registered or not applicable; no-op.
+  } catch (e) {
+    debugPrint('[FeatureModuleLoader] registerPlugin($moduleId) failed: $e');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Status enum
 // ---------------------------------------------------------------------------
@@ -138,6 +163,12 @@ class GitHubModuleLoader extends FeatureModuleLoader {
     ModuleProgressCallback? onProgress,
   }) async {
     // Always ready — no download required.
+    //
+    // The ffmpeg-kit / media_kit_libs plugins are forked WITHOUT an Android
+    // pluginClass, so even on fat builds GeneratedPluginRegistrant never
+    // registers them. Register them at runtime here (idempotent) so their
+    // method channels and static native loading work on GitHub/debug builds too.
+    await _registerPluginOnPlatform(moduleId);
     return true;
   }
 
@@ -280,17 +311,7 @@ class PlayModuleLoader extends FeatureModuleLoader {
   /// made its .so loadable), this tells the native side to
   /// `flutterEngine.getPlugins().add(...)` so the plugin's method channel and
   /// static native loading run with the libs present.
-  Future<void> _registerPlugin(String moduleId) async {
-    try {
-      await _channel.invokeMethod<bool>('registerPlugin', {
-        'module': moduleId,
-      });
-    } on MissingPluginException {
-      // Fat APK / emulator — plugin already registered at launch; no-op.
-    } catch (e) {
-      debugPrint('[FeatureModuleLoader] registerPlugin($moduleId) failed: $e');
-    }
-  }
+  Future<void> _registerPlugin(String moduleId) => _registerPluginOnPlatform(moduleId);
 
   /// Registers the progress event listener if not already registered.
   void _ensureProgressListener(ModuleProgressCallback? onProgress) {
