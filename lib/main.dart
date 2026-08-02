@@ -22,6 +22,7 @@ import 'settings/download_settings.dart';
 import 'sniffer/browser_controller.dart';
 import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
+import 'sniffer/sniffer_url_utils.dart';
 import 'theme/aurora_glass_background.dart';
 import 'theme/aurora_theme.dart';
 import 'theme/aurora_tokens.dart';
@@ -31,7 +32,9 @@ import 'ui/notifications/aurora_snackbar.dart';
 import 'ui/pages/settings_page.dart';
 import 'ui/settings_open_request.dart';
 import 'backup/auto_backup_service.dart';
+import 'premium/premium_flags.dart';
 import 'premium/build_channel.dart';
+import 'sync/sync.dart';
 import 'premium/license/license_service.dart';
 import 'premium/pro_entitlement.dart';
 import 'premium/pro_features.dart';
@@ -45,7 +48,6 @@ import 'premium/accent_pack.dart';
 import 'premium/vault_service.dart';
 import 'ui/pages/vault_page.dart';
 import 'sniffer/token_refresh_service.dart';
-import 'package:media_kit/media_kit.dart';
 
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
@@ -86,13 +88,22 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
-      // Registers media_kit's native bindings. Must run before any Player is
-      // constructed; cheap and safe even when the user never opens the player
-      // or has the ExoPlayer backend selected.
-      MediaKit.ensureInitialized();
-      await loadSavedAccentPack();
+      try {
+        await loadSavedAccentPack();
+      } catch (e, s) {
+        debugPrint('[AccentPackInitError] $e\n$s');
+      }
+      try {
+        await initSystemUserAgent();
+      } catch (e, s) {
+        debugPrint('[InitSystemUAError] $e\n$s');
+      }
       if (kDebugMode) {
-        LogServer.start();
+        try {
+          LogServer.start();
+        } catch (e, s) {
+          debugPrint('[LogServerInitError] $e\n$s');
+        }
       }
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
@@ -105,7 +116,61 @@ void main() {
         );
         debugPrint('[AuroraFlutterError] ${details.exceptionAsString()}');
       };
-      runApp(const MyApp());
+      // In release mode, ErrorWidget shows a blank grey box by default
+      // (invisible on a white/dark background). Override it so any build()
+      // exception surfaces a visible diagnostic instead of a silent
+      // white screen.
+      if (!kDebugMode) {
+        ErrorWidget.builder = (FlutterErrorDetails details) {
+          return MaterialApp(
+            home: Scaffold(
+              backgroundColor: const Color(0xFF0A0F14),
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Aurora startup error:\n\n'
+                    '${details.exceptionAsString()}\n\n'
+                    '${details.stack?.toString().split('\n').take(15).join('\n') ?? ''}',
+                    style: const TextStyle(
+                      color: Color(0xFFFF6B6B),
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        };
+      }
+      try {
+        runApp(const MyApp());
+      } catch (e, s) {
+        debugPrint('[AuroraFatalStartup] $e\n$s');
+        // Show a minimal diagnostic app so the screen isn't blank.
+        runApp(
+          MaterialApp(
+            home: Scaffold(
+              backgroundColor: const Color(0xFF0A0F14),
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Aurora failed to start:\n\n$e\n\n'
+                    '${s.toString().split('\n').take(20).join('\n')}',
+                    style: const TextStyle(
+                      color: Color(0xFFFF6B6B),
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
     },
     (error, stack) {
       AuroraLog.instance.fatal(
@@ -318,6 +383,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final TextEditingController _urlController;
   late final TextEditingController _adblockSourceController;
   late final TextEditingController _customSearchController;
+  late final TextEditingController _folderController;
+  late final DriveSyncService _driveSyncService = DriveSyncService(
+    getTierCallback: () => _proEntitlement.tier,
+  );
+  StreamSubscription<DriveSyncState>? _driveSubscription;
   late final ValueNotifier<int> _libraryUpdateNotifier;
   final DownloadSettingsStore _settingsStore = const DownloadSettingsStore();
   final ProEntitlement _proEntitlement = ProEntitlement();
@@ -414,6 +484,28 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           ? _settings.searchEngine.templateUrl
           : '',
     );
+    _folderController = TextEditingController(
+      text: 'Aurora Downloader',
+    );
+    if (kDriveSyncEnabled) {
+      try {
+        _folderController.text = _driveSyncService.state.destinationFolderName;
+      } catch (e, s) {
+        _logError('DriveSync init', e, s);
+      }
+      try {
+        _driveSyncService.attachQueue(_downloadQueue);
+      } catch (e, s) {
+        _logError('DriveSync attachQueue', e, s);
+      }
+      _driveSubscription = _driveSyncService.onStateChanged.listen((state) {
+        if (mounted) {
+          setState(() {
+            _folderController.text = state.destinationFolderName;
+          });
+        }
+      });
+    }
     _sniffedCountNotifier = ValueNotifier<int>(0);
     _startAdblockAutoRefresh();
     _proEntitlement.addListener(_onProEntitlementChanged);
@@ -750,6 +842,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => SettingsPage(
+          driveSyncService: kDriveSyncEnabled ? _driveSyncService : null,
+          folderController: kDriveSyncEnabled ? _folderController : null,
           adblockSourceController: _adblockSourceController,
           customSearchController: _customSearchController,
           settings: _settings,
@@ -813,14 +907,19 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _queueRebuildTimer?.cancel();
     _resniffModeTimer?.cancel();
     _queueSubscription?.cancel();
+    _driveSubscription?.cancel();
     _urlController.dispose();
     _sniffedCountNotifier.dispose();
     _libraryUpdateNotifier.dispose();
+    _folderController.dispose();
     _adblockSourceController.dispose();
     _customSearchController.dispose();
     _notificationService.dispose();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_downloadQueue.dispose());
+    if (kDriveSyncEnabled) {
+      unawaited(_driveSyncService.dispose());
+    }
     _autoBackupService.dispose();
     WorkerIsolatePool.instance.dispose();
     _browserOpenRequestBus.dispose();
@@ -1521,6 +1620,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _downloadQueue.queuePath = '$path/download_queue.json';
 
       await Future.wait([
+        if (kDriveSyncEnabled) _driveSyncService.loadSyncedTasks(path),
         LogSettingsStore.instance.load(path).then((verbosity) {
           return AuroraLog.instance.initialize(
             '$path/aurora_logs.json',

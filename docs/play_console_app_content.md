@@ -184,8 +184,7 @@ Declare **what the app actually does**. Approximate form answers:
 | Web browsing history | **Yes — on device** | No | App functionality | Required for browser features | HTTPS for network | Uninstall / clear app data |
 | Files and docs (downloads) | **Yes — on device** | No | App functionality | User-initiated | — | User deletes files / uninstall |
 | App info and performance (crash) | Only if you add a crash SDK later → today **No** third-party crash service assumed | No | — | — | — | — |
-| Device or other IDs | Advertising ID: **No**. Purchase token handled by Play | No | — | — | — | — |
-| ~~Personal info — name/email~~ | ~~Only via **Google Sign-In** if user connects Drive~~ (Cancelled) | — | — | — | — | — |
+| Personal info — name/email | **Optional** — via Google Sign-In if user connects Drive for cloud sync | To Google APIs authorized by user | Cloud backup & sync | Optional | Yes (HTTPS) | Disconnect in app / Google Account settings |
 | Financial info | **No** card data in app; Play handles purchase | Google Play | — | — | — | — |
 | Photos/videos | User-downloaded media stored as files they chose | No | App functionality | User-initiated | — | User control |
 

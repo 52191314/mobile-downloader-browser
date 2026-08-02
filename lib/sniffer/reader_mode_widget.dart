@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../theme/aurora_palette.dart';
@@ -17,6 +18,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
   String? _content;
   bool _loading = true;
   String? _error;
+  double _fontSize = 16.0;
 
   @override
   void initState() {
@@ -66,13 +68,12 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
           _title = title ?? 'Reader';
           if (result != null) {
             final str = result.toString();
-            if (str.startsWith('"') && str.endsWith('"')) {
-              try {
-                final decoded = _jsonDecodeSafe(str);
-                _content = decoded['html']?.toString().replaceAll('\\n', '\n');
-                _title = decoded['title']?.toString() ?? _title;
-              } catch (_) {
-                _content = str;
+            final decoded = _jsonDecodeSafe(str);
+            if (decoded.isNotEmpty) {
+              _content = decoded['html']?.toString();
+              final decodedTitle = decoded['title']?.toString();
+              if (decodedTitle != null && decodedTitle.trim().isNotEmpty) {
+                _title = decodedTitle;
               }
             } else {
               _content = str;
@@ -94,17 +95,20 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
   }
 
   Map<String, dynamic> _jsonDecodeSafe(String raw) {
-    // Simple JSON decode for the JS result
-    final s = raw.substring(1, raw.length - 1);
-    final result = <String, dynamic>{};
-    for (final part in s.split('","')) {
-      final colonIndex = part.indexOf('":"');
-      if (colonIndex == -1) continue;
-      final key = part.substring(0, colonIndex).replaceAll('"', '');
-      final value = part.substring(colonIndex + 2);
-      result[key] = value;
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return <String, dynamic>{};
+    try {
+      dynamic decoded = jsonDecode(trimmed);
+      if (decoded is String) {
+        decoded = jsonDecode(decoded.trim());
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      // Fallback for non-JSON strings
     }
-    return result;
+    return <String, dynamic>{};
   }
 
   @override
@@ -115,12 +119,26 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
       appBar: AppBar(
         title: Text(_title ?? 'Reader'),
         actions: [
-          if (_content != null)
+          if (_content != null) ...[
+            IconButton(
+              icon: const Icon(Icons.text_decrease),
+              tooltip: 'Smaller text',
+              onPressed: _fontSize > 12.0
+                  ? () => setState(
+                        () => _fontSize = (_fontSize - 2.0).clamp(12.0, 28.0),
+                      )
+                  : null,
+            ),
             IconButton(
               icon: const Icon(Icons.text_increase),
               tooltip: 'Larger text',
-              onPressed: () {},
+              onPressed: _fontSize < 28.0
+                  ? () => setState(
+                        () => _fontSize = (_fontSize + 2.0).clamp(12.0, 28.0),
+                      )
+                  : null,
             ),
+          ],
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () => Navigator.pop(context),
@@ -158,7 +176,14 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
         widgets.add(
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(trimmed),
+            child: Text(
+              trimmed,
+              style: TextStyle(
+                fontSize: _fontSize,
+                height: 1.6,
+                color: ac.textPrimary,
+              ),
+            ),
           ),
         );
         continue;
@@ -175,6 +200,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               child: Text(
                 text,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontSize: _fontSize * 1.5,
                   fontWeight: FontWeight.w700,
                   color: ac.textPrimary,
                 ),
@@ -189,6 +215,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               child: Text(
                 text,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontSize: _fontSize * 1.3,
                   fontWeight: FontWeight.w700,
                   color: ac.textPrimary,
                 ),
@@ -204,6 +231,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               child: Text(
                 text,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: _fontSize * 1.15,
                   fontWeight: FontWeight.w600,
                   color: ac.textPrimary,
                 ),
@@ -224,6 +252,7 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               child: Text(
                 text,
                 style: TextStyle(
+                  fontSize: _fontSize,
                   fontStyle: FontStyle.italic,
                   color: ac.textSecondary,
                 ),
@@ -242,9 +271,9 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               ),
               child: Text(
                 text,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'JetBrainsMono',
-                  fontSize: 13,
+                  fontSize: _fontSize * 0.85,
                   height: 1.5,
                 ),
               ),
@@ -257,7 +286,11 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
                 text,
-                style: TextStyle(height: 1.6, color: ac.textPrimary),
+                style: TextStyle(
+                  fontSize: _fontSize,
+                  height: 1.6,
+                  color: ac.textPrimary,
+                ),
               ),
             ),
           );
@@ -273,3 +306,4 @@ class _ReaderModeWidgetState extends State<ReaderModeWidget> {
     );
   }
 }
+

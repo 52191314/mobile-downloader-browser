@@ -90,18 +90,21 @@ no competitor app named, no Drive references, benefit-led headings, and every
 number matches `lib/premium/pro_features.dart`.
 
 ```text
-Aurora Downloader is a private web browser with a serious download manager built in.
+Aurora Downloader is a web browser with a serious download manager built in.
 
 BROWSE WITHOUT THE JUNK
 • Ad and popup blocking built in, so pages load faster and cleaner
 • Multi-tab browsing with tab groups, and your session comes back after a restart
-• Reader mode, find in page, save a page for offline, and hide any element you don't want
+• Reader mode, find in page, save a page for offline, and hide page elements you
+  don't want
 
 FIND THE FILE
 • Aurora spots downloadable media and file links while you browse, and keeps finding
   them on pages where simpler tools come up empty
-• Grab a whole batch in one tap instead of one file at a time
+• Grab a batch in one tap — up to 5 files per tap on free, unlimited with Pro
 • Streaming playlists are reassembled into a single playable file when the site allows it
+• Preview a video before you commit to downloading it, in a built-in player with
+  gesture seek, speed control and picture-in-picture
 • Filenames get cleaned up and sorted into folders for you
 
 DOWNLOADS THAT ACTUALLY FINISH
@@ -109,27 +112,31 @@ DOWNLOADS THAT ACTUALLY FINISH
   on most servers
 • Pause anything and pick it up later. Downloads survive app restarts, low memory,
   and Android's background limits
-• Dead links are retried and revived automatically
+• Refresh a link that has gone stale, and let Pro revive dead links automatically
 • Progress, speed, and status for the whole queue at a glance
 
 MOVING IN FROM ANOTHER APP
 • Import your existing download list from other Android download managers, so you
   start with your library intact instead of from zero
 • Restore from your own backups — including inside Samsung Secure Folder and other
-  dual-app and work-profile spaces, where backup tools are known to fail silently
+  dual-app and work-profile spaces
 
 YOUR FILES STAY YOURS
 • Browsing and downloads stay on your device
 • Finished files land in your normal Downloads folder
-• Send files to your computer over your own Wi-Fi, with nothing routed through a server
+• Send files to your computer over your own Wi-Fi, with nothing routed through a
+  server — 20 files a day on free, unlimited with Pro
 • No account required. No ads.
 
 AURORA PRO — one-time unlock
 • 16 downloads at once and 32 parts per file (free tier: 3 and 8)
-• Unlimited ad-block filter lists, your own custom lists, and the tracker pack
+• Unlimited ad-block filter lists, your own custom lists, unlimited element-hiding
+  rules, and the tracker pack
 • Download rules, schedules, night mode, and per-site profiles
+• Automatic dead-link revival and unlimited batch capture
 • Proxy support, Wi-Fi-only mode, and unlimited tab groups
 • Scheduled automatic backups and duplicate finding
+• Unlimited audio extraction, series auto-grab, clipboard capture, and private vault
 
 AURORA ULTRA — everything in Pro, plus
 • 64 downloads at once and 64 parts per file
@@ -164,6 +171,30 @@ Not affiliated with Google, YouTube, or any third-party media service.
 | **WHAT AURORA DOES NOT DO** as a headed section | Turns three compliance disclaimers into a trust signal instead of fine print |
 | Removed "unless you enable cloud features" | No cloud features remain after the Drive removal — the caveat now describes nothing |
 
+#### Revision 2026-07-30 — tier-accuracy pass
+
+The claim above that "every number matches `pro_features.dart`" held for the raw
+numbers but not for which *tier* three features sit in. Each of these advertised a
+Pro feature as though it were base, which is what generates refund requests and
+"advertised feature is paywalled" reviews.
+
+| Change | Reason |
+|---|---|
+| "Dead links are retried and revived automatically" → "Refresh a link that has gone stale, and let Pro revive dead links automatically" | `ProFeature.deadLinkRevival` is `EntitlementTier.pro`; its own doc says "Free: manual refresh only" |
+| "Grab a whole batch in one tap" → "up to 5 files per tap on free, unlimited with Pro" | `batchCapture` is pro, `freeBatchCaptureItems = 5` |
+| Send-to-PC bullet gained "20 files a day on free, unlimited with Pro" | `sendToPc` is pro, `freeSendToPcPerDay = 20` |
+| Pro block gained dead-link revival, unlimited batch capture, element-hiding rules, audio extraction, series grab, clipboard capture, private vault | These were gated in code but sold nowhere — the Pro block understated what the unlock buys |
+| Dropped "where backup tools are known to fail silently" | A reliability claim about competitors' software. Play's metadata policy is unfriendly to disparaging comparisons, and the Secure Folder differentiator survives without it |
+| "hide any element you don't want" → "hide page elements you don't want" | `maxFreeCosmeticRules = 25`, so "any" overclaims. Pro's bullet now states unlimited |
+| Added the built-in player to FIND THE FILE | Not a `ProFeature` at all, so free — and shot 4 now leads on it, so the copy should too |
+| Opening line dropped "private" | "Not a VPN" is admitted three sections later; leading on "private" invites the reading the disclaimer then walks back |
+
+The count script's `Select-String` pattern was updated with the opening line — it
+keys off that literal string and would otherwise have silently measured nothing.
+
+Still unsold, gated in code, deliberately omitted for density: `videoLibrary`
+(pro, `freeVideoLibraryItems = 10`), `themePack`, `richNotifications`, `noNag`.
+
 **Open call for you:** naming the competitor directly would help discovery for
 people searching migration terms, but puts a trademarked app name in your listing
 on a downloader — the exact category where Play's IP enforcement is discretionary.
@@ -177,14 +208,14 @@ search traffic is worth the first-review risk.
 | Short description (primary) | 77 | 80 | OK |
 | Short description (alt 1) | 71 | 80 | OK |
 | Short description (alt 2) | 72 | 80 | OK |
-| Full description | 2,899 | 4,000 | OK |
+| Full description | 3,270 | 4,000 | OK |
 | App name `Aurora Downloader` | 17 | 30 | OK |
 
 Re-run after any edit:
 
 ```powershell
 $lines = Get-Content docs/play_store_listing.md
-$start = ($lines | Select-String 'Aurora Downloader is a private web browser with a serious' | Select-Object -First 1).LineNumber
+$start = ($lines | Select-String 'Aurora Downloader is a web browser with a serious' | Select-Object -First 1).LineNumber
 $end = $start; while ($lines[$end] -notmatch '^```$') { $end++ }
 (($lines[($start-1)..($end-1)] -join "`r`n")).Length
 ```
@@ -221,14 +252,38 @@ decision. Caption is a top banner: **headline ~48–56 px bold, subhead ~28–32
 at ~70% opacity, banner ≈22% of frame height**, app screen framed below in a
 device bezel on a dark gradient matching the app's own palette.
 
-| # | Screen to capture | Headline | Subhead |
-|---|---|---|---|
-| 1 | Queue with 3–4 downloads **actively running** — visible progress bars, real speeds, mixed file sizes | **Big files, finished fast** | Every download split into parallel parts |
-| 2 | Capture sheet open on a clean test page, several distinct media rows, correct MIME labels, **Torrent chip scrolled out of frame** | **Finds the file when others can't** | Media and links spotted as you browse |
-| 3 | Browser on a content-heavy but unbranded page, adblock shield showing a non-zero blocked count | **Browse clean, load fast** | Ads and popups blocked inside Aurora |
-| 4 | Import / restore screen mid-import, showing a populated list | **Bring your whole library with you** | Import from your old download manager |
-| 5 | Settings → Rules or Schedule, Pro badges visible | **Downloads on your terms** | Rules, schedules, night mode, per-site profiles |
-| 6 | Backup/restore screen, ideally captured inside Secure Folder | **Backups that survive Secure Folder** | Where other backup tools quietly fail |
+Captions live in `tools/make_store_screenshots.py` (`CAPTIONS`), paid-tier
+disclosure in `BADGES` beside it. That file is the source of truth; this table
+mirrors it.
+
+| # | Screen to capture | Headline | Subhead | Disclosure |
+|---|---|---|---|---|
+| 1 | Queue with 3–4 downloads **actively running** — visible progress bars, real speeds, mixed file sizes | **Big files, finished fast** | Every download split into parallel parts | — free |
+| 2 | Capture sheet open on a clean test page, several distinct media rows, correct MIME labels, **Torrent chip scrolled out of frame** | **Finds the file when others can't** | Media and links spotted as you browse | — free |
+| 3 | Browser on a content-heavy but unbranded page, adblock shield showing a non-zero blocked count | **Browse clean, load fast** | Ads and popups blocked inside Aurora | — free |
+| 4 | Video player on a landscape clip, controls visible | **Watch it before you download** | Gestures, speed control and picture-in-picture | — free |
+| 5 | Settings → Rules or Schedule, Pro badges visible | **Downloads on your terms** | Rules, schedules, night mode, per-site profiles | in-app `[Pro]` labels — free-tier capture |
+| 6 | Backup/restore screen, ideally captured inside Secure Folder | **Never lose your queue** | Full backup and restore, kept on your device | caption badge: *Auto backup requires Aurora Pro* |
+
+**Why 5 and 6 disclose differently.** Shot 5 gets its labels from the app: on a
+non-Pro account Settings already renders `Rules [Pro]` / `Schedule [Pro]`, so the
+free-tier run below produces the disclosure for free and no caption badge is
+needed. Shot 6 cannot do that — `autoBackupEnabled` is Pro-gated, so a free-tier
+capture shows the toggle *off*, which undersells a feature that does exist. The
+caption badge is what lets that shot show the feature working while still saying
+it is paid.
+
+**Shot 4 changed subject.** It was specified as the import/restore screen with
+"Bring your whole library with you". It is now the video player — the player is
+free (not in `ProFeature` at all) and is a stronger third-or-fourth impression
+than an import list. Import is no longer in the six.
+
+**Shot 6's old caption was dropped on policy grounds.** It read "Backups that
+survive Secure Folder / Where other backup tools quietly fail". That is a
+reliability claim about competitors, and Play's metadata policy is unfriendly to
+disparaging comparisons — the same reason the equivalent sentence came out of the
+full description in the 2026-07-30 tier-accuracy pass. The Secure Folder
+differentiator still belongs in the description, just not as a swipe at rivals.
 
 ### Screenshot build — staged state
 

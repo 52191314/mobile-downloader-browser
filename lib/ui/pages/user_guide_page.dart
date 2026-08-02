@@ -361,12 +361,14 @@ Process and edit completed video and audio downloads directly on device without 
       ),
       _GuideSectionData(
         number: 14,
-        title: 'WebDAV Backup & Vault Sync',
+        title: 'Backup & Database Transfer',
         icon: Icons.cloud_sync_rounded,
-        keywords: ['webdav', 'backup', 'vault sync', 'cloud', 'e2ee', 'synology', 'nextcloud'],
-        badge: 'PRO',
+        keywords: ['backup', 'database', '1dm', '1dmbak', 'restore', 'webdav', 'vault sync', 'cloud', 'e2ee', 'synology', 'nextcloud'],
+        badge: null,
         content: '''
-### Remote Cloud Backups & Sync
+### Database Backups & Cloud Sync
+• Transactional Database Backup (Solution B): Export and restore full app state (download queues, history, bookmarks, saved pages, and tabs) into an atomic, zero-freeze transactional database snapshot off-thread.
+• 1DM (.1dmbak / .1dm) Import Migration: Import legacy 1DM and 1DM+ backup archives directly off-thread into Aurora's unified database.
 • WebDAV Backup (Pro): Backup and restore app settings, rules, and download queues to personal WebDAV servers (Nextcloud, Synology, ownCloud).
 • Encrypted Vault Cloud Sync (Ultra): End-to-end PBKDF2-SHA256 + AES-GCM encrypted backup of vault files over WebDAV for multi-device security.
 ''',

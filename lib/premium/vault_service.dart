@@ -81,8 +81,10 @@ class VaultService {
   /// Returns true if biometric/device credential passes or session is still
   /// unlocked.
   ///
-  /// **Fails closed** when the device has no PIN/pattern/biometric — vault
-  /// must not open on open emulators / unsecured devices.
+  /// **Fails closed** when the device has no enrolled PIN/pattern/biometric or auth fails.
+  /// Note: On Android `isDeviceSupported()` verifies enrolled device credentials; on iOS
+  /// local_auth_darwin handles enrolled checks during `authenticate()`. The outcome is
+  /// strictly fail-closed across both platforms.
   Future<bool> authenticate({required String reason}) async {
     if (_sessionKey != null &&
         _unlockedAt != null &&
@@ -267,15 +269,29 @@ class VaultService {
       if (blob.length > 16) {
         final iv = enc.IV(Uint8List.sublistView(blob, 0, 16));
         final ct = Uint8List.sublistView(blob, 16);
-        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc, padding: null));
         final decrypted =
             encrypter.decryptBytes(enc.Encrypted(ct), iv: iv);
-        return Uint8List.fromList(decrypted);
+        final raw = Uint8List.fromList(decrypted);
+        return _unpadPkcs7(raw);
       }
     } catch (e) {
       if (kDebugMode) debugPrint('[Vault] decrypt failed: $e');
     }
     return null;
+  }
+
+  /// Strips PKCS#7 padding from [bytes] decrypted with CBC mode.
+  ///
+  /// Returns `null` if the padding bytes are invalid or inconsistent.
+  static Uint8List? _unpadPkcs7(Uint8List bytes) {
+    if (bytes.isEmpty) return null;
+    final pad = bytes.last;
+    if (pad < 1 || pad > 16 || pad > bytes.length) return null;
+    for (var i = bytes.length - pad; i < bytes.length; i++) {
+      if (bytes[i] != pad) return null;
+    }
+    return Uint8List.sublistView(bytes, 0, bytes.length - pad);
   }
 
   // ---------------------------------------------------------------------------

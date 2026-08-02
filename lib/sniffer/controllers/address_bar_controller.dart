@@ -212,7 +212,12 @@ class AddressBarController {
       }
     }
 
+    // Both loops stop at three. They used to scan every entry even after the
+    // list was full, which with an unbounded history meant lower-casing the
+    // whole record on each keystroke. History is newest-first, so stopping early
+    // also picks the most recent matches rather than an arbitrary three.
     for (final fav in library.favorites) {
+      if (out.length >= 3) break;
       if (fav.title.toLowerCase().contains(q) ||
           fav.url.toLowerCase().contains(q)) {
         add(
@@ -223,6 +228,7 @@ class AddressBarController {
       }
     }
     for (final entry in library.history) {
+      if (out.length >= 3) break;
       if (entry.title.toLowerCase().contains(q) ||
           entry.url.toLowerCase().contains(q)) {
         add(

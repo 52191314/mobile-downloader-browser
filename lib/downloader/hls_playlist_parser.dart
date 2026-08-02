@@ -62,11 +62,10 @@ class HlsPlaylistParser {
         continue;
       }
       if (line.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
-        mediaSequence =
-            int.tryParse(
-              line.substring('#EXT-X-MEDIA-SEQUENCE:'.length).trim(),
-            ) ??
-            0;
+        final prefixLen = '#EXT-X-MEDIA-SEQUENCE:'.length;
+        mediaSequence = line.length >= prefixLen
+            ? (int.tryParse(line.substring(prefixLen).trim()) ?? 0)
+            : 0;
         continue;
       }
       if (line.startsWith('#EXT-X-MAP')) {
@@ -86,14 +85,22 @@ class HlsPlaylistParser {
         continue;
       }
       if (line.startsWith('#EXTINF')) {
-        final value = line.substring('#EXTINF:'.length).split(',').first.trim();
-        pendingDuration = double.tryParse(value) ?? 0;
+        final prefixLen = '#EXTINF:'.length;
+        if (line.length >= prefixLen) {
+          final value = line.substring(prefixLen).split(',').first.trim();
+          pendingDuration = double.tryParse(value) ?? 0;
+        } else {
+          pendingDuration = 0;
+        }
         continue;
       }
       if (line.startsWith('#EXT-X-BYTERANGE')) {
-        final val = line.substring('#EXT-X-BYTERANGE:'.length).trim();
-        final lenStr = val.split('@').first;
-        pendingByteRangeLength = int.tryParse(lenStr);
+        final prefixLen = '#EXT-X-BYTERANGE:'.length;
+        if (line.length >= prefixLen) {
+          final val = line.substring(prefixLen).trim();
+          final lenStr = val.split('@').first;
+          pendingByteRangeLength = int.tryParse(lenStr);
+        }
         continue;
       }
       if (line.startsWith('#')) continue;

@@ -28,29 +28,52 @@ if (keystorePropertiesFile.exists()) {
 // See: AGENTS.md, docs/play_on_demand_modules_plan.md
 // ---------------------------------------------------------------------------
 fun isPlayBuildChannel(): Boolean {
-    // Primary: check AURORA_BUILD_CHANNEL environment variable.
-    // Set before building:
-    //   $env:AURORA_BUILD_CHANNEL="play"
-    //   flutter build appbundle --release
+    // 1. Env var (CI / shell): highest priority.
+    //    $env:AURORA_BUILD_CHANNEL="play"   → Play (on-demand modules)
+    //    $env:AURORA_BUILD_CHANNEL="github" → GitHub fat APK
     val envChannel = System.getenv("AURORA_BUILD_CHANNEL")?.lowercase()
     if (envChannel == "play") return true
-    // Fallback 1: direct Gradle project property -PauroraBuildChannel=play.
+    if (envChannel == "github") return false
+
+    // 2. --dart-define=AURORA_BUILD_CHANNEL=play (documented in AGENTS.md).
+    //    Flutter passes these to Gradle as `-Pdart-defines=<base64 comma-joined
+    //    list>`. These MUST be checked before the `auroraBuildChannel` gradle
+    //    property because android/gradle.properties sets that to `github` by
+    //    default, which would otherwise shadow the explicit dart-define.
+    if (project.hasProperty("dart-defines")) {
+        val defines = project.property("dart-defines") as String
+        val decodedDefines = defines.split(',').mapNotNull { raw ->
+            runCatching {
+                String(Base64.getDecoder().decode(raw))
+            }.getOrNull()
+        }
+        if (decodedDefines.contains("AURORA_BUILD_CHANNEL=play") ||
+            defines.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")
+        ) {
+            return true
+        }
+        if (decodedDefines.contains("AURORA_BUILD_CHANNEL=github")) return false
+    }
+    if (project.hasProperty("dart-defines-encoded")) {
+        val encoded = project.property("dart-defines-encoded") as String
+        val decoded = runCatching {
+            String(Base64.getDecoder().decode(encoded))
+        }.getOrNull()
+        if (decoded?.contains("AURORA_BUILD_CHANNEL=play") == true) return true
+        if (decoded?.contains("AURORA_BUILD_CHANNEL=github") == true) return false
+    }
+
+    // 3. -PauroraBuildChannel=play / github (android/gradle.properties default: github).
     if (project.hasProperty("auroraBuildChannel")) {
         val channel = project.property("auroraBuildChannel")
         if (channel is String && channel.lowercase() == "play") return true
+        if (channel is String && channel.lowercase() == "github") return false
     }
-    // Fallback 2: Flutter dart-defines properties passed via flutter build
-    if (project.hasProperty("dart-defines-encoded")) {
-        val encoded = project.property("dart-defines-encoded") as String
-        runCatching {
-            val decoded = String(Base64.getDecoder().decode(encoded))
-            if (decoded.contains("AURORA_BUILD_CHANNEL=play") || decoded.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")) return true
-        }
-    }
-    if (project.hasProperty("dart-defines")) {
-        val defines = project.property("dart-defines") as String
-        if (defines.contains("AURORA_BUILD_CHANNEL=play") || defines.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")) return true
-    }
+
+    // 4. Default: GitHub fat APK. Do NOT special-case bundle tasks here — doing
+    //    so silently turned every `flutter build appbundle` into a Play build
+    //    that stripped the FFmpeg/libmpv/libtorrent natives from the base and
+    //    crashed on launch (builds 38–44).
     return false
 }
 // Set the env var before building Play AAB:
@@ -83,7 +106,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
@@ -108,14 +131,15 @@ android {
 
     // Play Store AAB builds use dynamic feature modules for on-demand delivery.
     // GitHub / sideload APK builds are fat — everything in one APK.
-    // The `:ffmpeg` dynamic feature module ships FFmpeg native libs separately.
+    // Dynamic feature modules (:ffmpeg, :torrent, :mediakit) ship native libs separately.
     if (isPlayChannel) {
-        dynamicFeatures += listOf(":ffmpeg")
+        dynamicFeatures += listOf(":ffmpeg", ":torrent", ":mediakit")
     }
 
-    // Play only & AAB only: keep FFmpeg .so out of the *base* module. The same natives are
-    // packaged into :ffmpeg (see android/ffmpeg/build.gradle.kts). APK builds (debug/profile/release)
-    // omit this block so the Flutter plugin libs remain in the APK.
+    // Play only & AAB only: keep FFmpeg, BitTorrent, and MediaKit .so out of the *base* module.
+    // The same natives are packaged into their respective dynamic feature modules
+    // (:ffmpeg, :torrent, :mediakit). APK builds (debug/profile/release) omit this block
+    // so the Flutter plugin libs remain in the APK.
     val isBundleTask = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
     if (isPlayChannel && isBundleTask) {
         packaging {
@@ -140,23 +164,23 @@ android {
                     "**/libswresample_neon.so",
                     "**/libswscale.so",
                     "**/libswscale_neon.so",
+                    // BitTorrent dynamic feature module (:torrent)
+                    "**/liblibtorrent_flutter.so",
+                    "**/libtorrent*.so",
+                    // MediaKit dynamic feature module (:mediakit)
+                    "**/libmpv.so",
+                    "**/libmpv*.so",
+                    "**/libmediakitandroidhelper.so",
+                    "**/libmediakitandroidhelper*.so",
                 )
             }
         }
     }
 
-    // defaultConfig.ndk.abiFilters only constrains ABIs we *build* (CMake).
-    // It does not filter prebuilt .so files that arrive inside AAR
-    // dependencies — ffmpeg-kit ships armeabi-v7a and x86_64 payloads, and
-    // those were being packaged despite this app being arm64-only, costing
-    // ~55 MB of natives for ABIs we do not support. Applies to every variant.
+
     packaging {
         jniLibs {
             excludes += listOf(
-                "**/armeabi-v7a/**",
-                "**/armeabi/**",
-                "**/x86/**",
-                "**/x86_64/**",
                 "**/mips/**",
                 "**/mips64/**",
             )
@@ -199,6 +223,8 @@ dependencies {
     // GitHub fat APK builds don't include this but it's harmless (no-op).
     implementation("com.google.android.play:feature-delivery:2.1.0")
     implementation("com.google.android.play:feature-delivery-ktx:2.1.0")
+    implementation("androidx.webkit:webkit:1.12.0")
+    implementation("androidx.browser:browser:1.8.0")
 }
 
 // Native payload for :ffmpeg is extracted in android/ffmpeg/build.gradle.kts.

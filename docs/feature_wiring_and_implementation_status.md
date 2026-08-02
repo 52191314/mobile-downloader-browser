@@ -68,7 +68,7 @@ Side effect of the locked model: anything still only linked from the unused hub 
 | **`ultraExtras`** | Enum + gate only — no product behavior |
 | **Audio extract (Media3)** | Primarily notification action; not a queue / card overflow item |
 | **Vault Sync (E2EE)** | Wired inside Vault page (once Vault is open via overflow Settings) |
-| **Google Drive** | Hidden by design: `kDriveSyncEnabled = false` in `premium_flags.dart` |
+| **Google Drive** | Active: `kDriveSyncEnabled = true` in `premium_flags.dart` — cloud sync and auto-upload |
 
 ### Ultra UX gaps (U0 incomplete)
 

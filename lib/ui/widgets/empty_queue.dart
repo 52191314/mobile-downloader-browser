@@ -74,6 +74,7 @@ class _EmptyQueueState extends State<EmptyQueue>
               const SizedBox(height: 16),
               Text(
                 widget.message,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 14,

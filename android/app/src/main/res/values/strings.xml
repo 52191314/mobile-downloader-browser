@@ -11,6 +11,8 @@
     <!-- Deferred component module name — required by Flutter build validation -->
     <string name="ffmpegName">ffmpeg</string>
 
-    <!-- Title for the :ffmpeg on-demand dynamic feature module -->
+    <!-- Title for on-demand dynamic feature modules -->
     <string name="feature_ffmpeg_title">FFmpeg Media Tools</string>
+    <string name="feature_torrent_title">BitTorrent Engine</string>
+    <string name="feature_mediakit_title">MediaKit mpv Engine</string>
 </resources>

@@ -11,3 +11,8 @@ add_library(aurora_adblock SHARED
 
 # Standard libraries
 target_compile_features(aurora_adblock PRIVATE cxx_std_17)
+
+# Size & symbol optimization flags
+target_compile_options(aurora_adblock PRIVATE -Os -fdata-sections -ffunction-sections -fvisibility=hidden)
+target_link_options(aurora_adblock PRIVATE -Wl,--gc-sections -Wl,-s)
+

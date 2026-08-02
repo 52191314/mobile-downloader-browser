@@ -23,6 +23,7 @@ import 'package:aurora_downloader/sniffer/capture/capture_stats_row.dart';
 import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/capture/media_filter.dart';
 import 'package:aurora_downloader/sniffer/controllers/media_catch_controller.dart';
+import 'package:aurora_downloader/sniffer/controllers/sniff_intake_controller.dart';
 import 'package:aurora_downloader/sniffer/media_capture_analyzer.dart';
 import 'package:aurora_downloader/sniffer/models/browser_tab.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
@@ -30,6 +31,35 @@ import 'package:aurora_downloader/sniffer/series_grab_detector.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
 export 'package:aurora_downloader/sniffer/capture/media_filter.dart';
+
+/// The page's `og:image`, but only when it is a fair stand-in for a capture's
+/// own poster — that is, when the page holds exactly one playable capture.
+///
+/// On a watch page the artwork really is the video's own frame, and is the best
+/// thumbnail available when the element carries no `poster` attribute. On a
+/// gallery page it is the site's social card, which belongs to none of the
+/// files listed; painting it on every row produced a column of identical
+/// images that read as a rendering fault rather than a thumbnail.
+///
+/// Groups are the right unit to count: HLS variants of one stream collapse into
+/// a single group, so a watch page offering 240p–4K still counts as one.
+@visibleForTesting
+String? pagePosterFor(List<CaptureGroup> groups, String? ogImage) {
+  final poster = ogImage?.trim();
+  if (poster == null || poster.isEmpty) return null;
+
+  var playable = 0;
+  for (final group in groups) {
+    final type = group.primary.media.type;
+    if (type == MediaType.video ||
+        type == MediaType.audio ||
+        type == MediaType.playlist) {
+      // Bail on the second one rather than counting the whole list.
+      if (++playable > 1) return null;
+    }
+  }
+  return playable == 1 ? poster : null;
+}
 
 MediaType? _mediaTypeForFilter(MediaFilter filter) {
   return switch (filter) {
@@ -350,6 +380,7 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
     final sheetH = screenH * 0.88;
 
     List<CaptureGroup> displayedGroups = const [];
+    String? pagePoster;
     var selectedCount = 0;
     var allMedia = <SniffedMedia>[];
     var videoCount = 0;
@@ -365,6 +396,13 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
 
       final captureResult = widget.mediaCatchController.analyze(allMedia);
       filteredCount = captureResult.hiddenCount;
+
+      // Judged against the unfiltered groups, so switching the filter tabs
+      // cannot turn thumbnails on and off under the user.
+      pagePoster = pagePosterFor(
+        captureResult.groups,
+        widget.activeTab.pageMeta.ogImage,
+      );
 
       widget.mediaCatchController.activeFilter = _mediaTypeForFilter(_segment);
 
@@ -545,6 +583,16 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                               selected: isSelected,
                               displayMode:
                                   _sheetSettings.sniffedMediaDisplayMode,
+                              // Page artwork suits playable media only — an
+                              // og:image stamped on a sniffed PDF or zip would
+                              // just be mislabelling it.
+                              pagePoster:
+                                  SniffIntakeController.acceptsPageLevelPoster(
+                                item.url,
+                                item.contentType,
+                              )
+                                      ? pagePoster
+                                      : null,
                               onSelectedChanged: (_) {
                                 setState(() {
                                   widget.mediaCatchController

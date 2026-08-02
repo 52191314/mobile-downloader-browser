@@ -311,6 +311,15 @@ class DownloadRulesStore {
     final dir = await getApplicationSupportDirectory();
     final file = File('${dir.path}/download_rules.json');
     final contents = jsonEncode(rules.map((r) => r.toJson()).toList());
-    await file.writeAsString(contents);
+    final tempFile = File('${file.path}.tmp');
+    await tempFile.writeAsString(contents, flush: true);
+    try {
+      await tempFile.rename(file.path);
+    } catch (_) {
+      await tempFile.copy(file.path);
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
   }
 }

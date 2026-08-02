@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play Feature Delivery — on-demand BitTorrent dynamic feature module (:torrent).
+
+  Installed on demand when the user initiates BitTorrent operations.
+  Not included in base APK for Play Store AAB builds.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:dist="http://schemas.android.com/apk/distribution"
+    package="com.personal.aurora_downloader.torrent">
+
+    <dist:module
+        dist:title="@string/feature_torrent_title">
+        <dist:delivery>
+            <dist:on-demand />
+        </dist:delivery>
+        <dist:fusing dist:include="true" />
+    </dist:module>
+
+    <application />
+</manifest>

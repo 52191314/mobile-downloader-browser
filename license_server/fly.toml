@@ -1,0 +1,47 @@
+# fly.toml app configuration file for Aurora License Server
+
+app = 'aurora-license-server'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  PORT = '8080'
+  HOST = '0.0.0.0'
+  TRUST_PROXY = '1'
+  NODE_ENV = 'production'
+  PLAY_VERIFY_MODE = 'google'
+  ALLOWED_PACKAGE_NAMES = 'com.personal.aurora_downloader'
+  LICENSE_ACTIVE_KID = 'aurora-20260725'
+  LICENSE_KEY_DIR = '/app/data/keys'
+  DB_PATH = '/app/data/licenses.db'
+  LICENSE_TTL_DAYS = '30'
+  LOG_LEVEL = 'info'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[mounts]]
+  source = 'aurora_license_data'
+  destination = '/app/data'
+
+[[checks]]
+  name = "health"
+  type = "http"
+  grace_period = '15s'
+  interval = '30s'
+  method = 'GET'
+  path = '/v1/health'
+  port = 8080
+  protocol = 'http'
+  timeout = '5s'

@@ -791,6 +791,11 @@ class _TopBar extends StatelessWidget {
                   ),
                   Text(
                     engineKind.label,
+                    // Without these the label wraps and hyphenates mid-word
+                    // ("System (ExoPlay / er)") as soon as the trailing icon
+                    // cluster squeezes this column on a narrow screen.
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white54,
                       fontSize: 11,
@@ -825,36 +830,76 @@ class _TopBar extends StatelessWidget {
               onPressed: onToggleOrientation,
             ),
             if (onPip != null)
-              IconButton(
+              _CompactIcon(
                 tooltip: 'Picture-in-picture',
-                icon: const Icon(Icons.picture_in_picture_alt_rounded,
-                    color: Colors.white70),
-                onPressed: onPip,
+                icon: Icons.picture_in_picture_alt_rounded,
+                onPressed: onPip!,
               ),
             if (onFavorite != null)
-              IconButton(
+              _CompactIcon(
                 tooltip: 'Add to favourites',
-                icon: Icon(
-                  favorited ? Icons.star_rounded : Icons.star_border_rounded,
-                  color: favorited ? Colors.amber : Colors.white70,
+                icon: favorited
+                    ? Icons.star_rounded
+                    : Icons.star_border_rounded,
+                color: favorited ? Colors.amber : Colors.white70,
+                onPressed: onFavorite!,
+              ),
+            // Download and diagnostics live in the overflow: six controls plus
+            // a clock left the title column ~30dp wide, which is how the
+            // header ended up rendering as "164…".
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert, color: Colors.white70),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onSelected: (v) {
+                if (v == 'diagnostics') onToggleDiagnostics();
+                if (v == 'download') onDownload?.call();
+              },
+              itemBuilder: (_) => [
+                if (onDownload != null)
+                  const PopupMenuItem(
+                    value: 'download',
+                    child: Text('Download'),
+                  ),
+                const PopupMenuItem(
+                  value: 'diagnostics',
+                  child: Text('Playback diagnostics'),
                 ),
-                onPressed: onFavorite,
-              ),
-            IconButton(
-              tooltip: 'Playback diagnostics',
-              icon: const Icon(Icons.monitor_heart_outlined,
-                  color: Colors.white70),
-              onPressed: onToggleDiagnostics,
+              ],
             ),
-            if (onDownload != null)
-              IconButton(
-                tooltip: 'Download',
-                icon: const Icon(Icons.download, color: Colors.white70),
-                onPressed: onDownload,
-              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Tight icon button — the default 48dp IconButton footprint is what starved
+/// the title column in the header.
+class _CompactIcon extends StatelessWidget {
+  const _CompactIcon({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.color = Colors.white70,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon, size: 20),
+      color: color,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 38, height: 38),
+      onPressed: onPressed,
     );
   }
 }

@@ -112,7 +112,6 @@ abstract class TabCallbackHost {
   // ---- Page-level lifecycle helpers (onPageFinished) ----
 
   Future<void> refreshPageInfo(BrowserTab tab, {bool recordHistory = false});
-  Future<void> applyCosmeticRules(BrowserTab tab);
   Future<void> saveTabs();
   void startVideoPoll(BrowserTab tab);
   void applyZoomForPage(BrowserTab tab, String url);
@@ -121,6 +120,7 @@ abstract class TabCallbackHost {
     BrowserTab tab,
     Uri uri, {
     bool addToHistory = false,
+    bool forceInApp = false,
   });
 
   // ---- Media / playback helpers ----
@@ -256,7 +256,6 @@ class TabCallbackBinder {
       }
       _host.updateTabNavState(tab);
       unawaited(_host.refreshPageInfo(tab, recordHistory: true));
-      unawaited(_host.applyCosmeticRules(tab));
       unawaited(_host.saveTabs());
       _host.startVideoPoll(tab);
       _host.applyZoomForPage(tab, url);
@@ -280,8 +279,17 @@ class TabCallbackBinder {
     tab.controller.setOnRecreated(() {
       final url = tab.currentUrl ?? tab.addressController.text;
       if (url.isNotEmpty && url != 'about:blank') {
+        // forceInApp: recreation is an internal state restore, not a user
+        // navigation. Without this flag, resuming from a CCT on a WAF-blocked
+        // host (externalBrowserHosts) re-routes to CCT → platform views
+        // recreate on resume → loop.
         unawaited(
-          _host.loadUrlWithHostSettings(tab, Uri.parse(url), addToHistory: false),
+          _host.loadUrlWithHostSettings(
+            tab,
+            Uri.parse(url),
+            addToHistory: false,
+            forceInApp: true,
+          ),
         );
       }
     });

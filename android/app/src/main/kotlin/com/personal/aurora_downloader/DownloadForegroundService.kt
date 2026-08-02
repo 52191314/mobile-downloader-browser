@@ -147,7 +147,7 @@ class DownloadForegroundService : Service() {
         return NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
             .setAutoCancel(false)
             .setShowWhen(false)
@@ -155,10 +155,6 @@ class DownloadForegroundService : Service() {
             .setSilent(true)
             .build()
     }
-
-    // ─── WakeLock ───────────────────────────────────────────────────
-
-    /// Acquire a PARTIAL_WAKE_LOCK so the CPU stays awake for the Dart
     /// isolate while the screen is off.  Released in [handleStop].
     private fun acquireWakeLock() {
         if (wakeLock != null) return // already held

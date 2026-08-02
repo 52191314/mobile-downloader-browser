@@ -12,6 +12,7 @@ class BrowserWidget extends StatelessWidget {
   /// page starts loading even if a deferred [loadRequest] races with
   /// platform-view creation.
   final String? initialUrl;
+  final String? userAgent;
 
   const BrowserWidget({
     super.key,
@@ -19,6 +20,7 @@ class BrowserWidget extends StatelessWidget {
     this.onSwipeForward,
     this.onRefresh,
     this.initialUrl,
+    this.userAgent,
   });
 
   @override
@@ -28,7 +30,8 @@ class BrowserWidget extends StatelessWidget {
       final seed = initialUrl?.trim();
       final initialRequest = (seed != null &&
               seed.isNotEmpty &&
-              seed != 'about:blank')
+              seed != 'about:blank' &&
+              !ctrl.cloudflareStealthEnabled)
           ? URLRequest(url: WebUri(seed))
           : null;
       return _GestureWrappedWebView(
@@ -42,6 +45,8 @@ class BrowserWidget extends StatelessWidget {
             useOnDownloadStart: true,
             useShouldInterceptRequest: true,
             supportMultipleWindows: false,
+            userAgent: userAgent,
+            applicationNameForUserAgent: '',
             // This WebView renders arbitrary untrusted pages. Neither flag has a
             // use case for a general-purpose browser, and both widen the blast
             // radius of the JS-bridge surface in browser_controller.dart.

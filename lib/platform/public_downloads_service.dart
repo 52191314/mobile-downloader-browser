@@ -298,6 +298,19 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     }
   }
 
+  /// Opens [url] with Chrome directly (when preferChrome is true) or system chooser.
+  static Future<bool> openUrlInChrome(String url, {bool preferChrome = true}) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('openUrlInChrome', {
+        'url': url,
+        'preferChrome': preferChrome,
+      });
+      return res == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Opens [url] with the system resolver (browser, Telegram, market, …).
   /// Throws [PlatformException] when no handler is installed.
   static Future<void> openUrl(String url) async {

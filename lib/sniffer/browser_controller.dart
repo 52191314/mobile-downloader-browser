@@ -11,6 +11,8 @@ import '../settings/download_settings.dart';
 import 'ad_block_engine_native.dart';
 import 'adblock_injector.dart';
 import 'browser_guard_installer.dart';
+import 'stealth_injector.dart';
+import 'stealth_metadata_channel.dart';
 import 'external_scheme.dart';
 import 'sniffer_url_utils.dart';
 import 'webview_fetch_delegate.dart';
@@ -118,6 +120,11 @@ abstract interface class SnifferBrowserController {
   /// When true, injected JS intercepts site media `play()` and routes
   /// playback to Aurora's in-app player instead.
   Future<void> setReplaceSitePlayer(bool enabled);
+
+  /// Enable or disable Cloudflare Stealth Mode (overrides Sec-CH-UA, UA, and navigator.userAgentData).
+  bool get cloudflareStealthEnabled;
+  Future<void> setCloudflareStealthEnabled(bool enabled);
+  void setOnCloudflareBlockDetected(void Function(String host, bool retrying)? callback);
 
   /// Enable or disable WebView incognito (private browsing) mode.
   /// When on, cookies/cache/history for this WebView are not persisted.
@@ -369,6 +376,10 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     controller: _controller,
   );
 
+  late final StealthInjector _stealthInjector = StealthInjector(
+    controller: _controller,
+  );
+
   // Cosmetic filter + scriptlet injector (shared default engine — see above).
   final AdblockInjector _adblockInjector = AdblockInjector(
     controller: null,
@@ -397,6 +408,31 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     caseSensitive: false,
   );
 
+  bool _cloudflareStealthEnabled = true;
+  void Function(String host, bool retrying)? _onCloudflareBlockDetected;
+  final Set<String> _cfBlockRetriedHosts = {};
+
+  @override
+  bool get cloudflareStealthEnabled => _cloudflareStealthEnabled;
+
+  @override
+  void setOnCloudflareBlockDetected(
+    void Function(String host, bool retrying)? callback,
+  ) {
+    _onCloudflareBlockDetected = callback;
+  }
+
+  @override
+  Future<void> setCloudflareStealthEnabled(bool enabled) async {
+    _cloudflareStealthEnabled = enabled;
+    if (enabled) {
+      await _stealthInjector.installAsUserScript(enabled: true);
+      await _applyStealthClientHints();
+    } else {
+      await _stealthInjector.removeUserScript();
+    }
+  }
+
   /// Called by BrowserWidget when InAppWebView creates its controller.
   void onWebViewCreated(InAppWebViewController controller) {
     final isRecreation = _webViewCreated;
@@ -404,22 +440,45 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     _webViewCreated = true;
     _fetchDelegate.setController(controller);
     _guardInstaller.setController(controller);
-    // Register the guard as a user script that runs AT_DOCUMENT_START,
-    // before any page JavaScript.  This is the primary fix for the
-    // sniffing race where the page's HLS player fetches the playlist
-    // before `evaluateJavascript` can install the fetch/XHR hooks.
-    unawaited(_guardInstaller.installAsUserScript());
+    _stealthInjector.setController(controller);
     _adblockInjector.setController(controller);
-    // Register the cosmetic + scriptlet scripts as user scripts that
-    // run AT_DOCUMENT_START, before any page JavaScript executes.
+
+    unawaited(_guardInstaller.installAsUserScript());
     unawaited(_adblockInjector.installAsUserScript());
     _registerPendingChannels();
     unawaited(_syncPopupBlockingFlag());
-    if (!_ready.isCompleted) _ready.complete();
+
+    // Apply stealth BEFORE completing _ready so deferred loadRequest calls wait.
+    unawaited(() async {
+      if (_cloudflareStealthEnabled) {
+        await _stealthInjector.installAsUserScript(enabled: true);
+        int attempts = 0;
+        while (attempts < 10) {
+          final count = await _applyStealthClientHints();
+          if (count != 0) break; // >0 patched, -1 unsupported
+          await Future.delayed(const Duration(milliseconds: 50));
+          attempts++;
+        }
+      }
+      if (!_ready.isCompleted) _ready.complete();
+    }());
 
     if (isRecreation) {
       _onRecreated?.call();
     }
+  }
+
+  /// Calls the native platform channel to override the WebView's Sec-CH-UA
+  /// Client Hints metadata, replacing "Android WebView" with "Google Chrome".
+  Future<int> _applyStealthClientHints() async {
+    final fullVersion = StealthMetadataChannel.extractFullChromeVersion(
+          systemUserAgent,
+        ) ??
+        StealthMetadataChannel.extractChromeVersion(systemUserAgent) ??
+        '131.0.6778.135';
+    return await StealthMetadataChannel.applyStealthMetadata(
+      chromeVersion: fullVersion,
+    );
   }
 
   @override
@@ -744,6 +803,14 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
 
     final requestUri = request.url;
+    final reqHost = requestUri.host.toLowerCase();
+    // Never block Cloudflare Turnstile / Challenge assets or scripts
+    if (reqHost == 'challenges.cloudflare.com' ||
+        reqHost.endsWith('.challenges.cloudflare.com') ||
+        requestUri.path.contains('/cdn-cgi/challenge-platform/')) {
+      return null;
+    }
+
     if (pageUri != null && requestUri.host == pageUri.host) {
       return null;
     }
@@ -874,7 +941,45 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       _setCurrentUrl(urlStr);
     }
     _scheduleGuardReinstall();
+    unawaited(_checkCloudflareBlockPage(urlStr));
     _onPageFinished?.call(urlStr);
+  }
+
+  Future<void> _checkCloudflareBlockPage(String urlStr) async {
+    if (!_cloudflareStealthEnabled || _controller == null || _isDisposed) return;
+    final host = _currentHost;
+    if (host.isEmpty) return;
+
+    try {
+      final res = await _controller?.evaluateJavascript(source: '''
+        (function() {
+          var title = document.title || '';
+          var body = (document.body && document.body.innerText) ? document.body.innerText : '';
+          var isBlocked = title.indexOf('Blocked') !== -1 ||
+                          body.indexOf('Sorry, you have been blocked') !== -1 ||
+                          body.indexOf('Cloudflare Ray ID') !== -1;
+          return isBlocked;
+        })();
+      ''');
+      if (res == true) {
+        if (_cfBlockRetriedHosts.contains(host)) {
+          _onCloudflareBlockDetected?.call(host, false);
+        } else {
+          final patchCount = await _applyStealthClientHints();
+          if (patchCount > 0 || patchCount == -1) {
+            _cfBlockRetriedHosts.add(host);
+            _onCloudflareBlockDetected?.call(host, true);
+            await _stealthInjector.installAsUserScript(enabled: true);
+            await clearSiteData(urlStr);
+            await reload();
+          } else {
+            _onCloudflareBlockDetected?.call(host, false);
+          }
+        }
+      } else {
+        _cfBlockRetriedHosts.remove(host);
+      }
+    } catch (_) {}
   }
 
   /// Called by InAppWebView onUpdateVisitedHistory
@@ -2117,6 +2222,21 @@ class MockBrowserController implements SnifferBrowserController {
       cosmeticRules: [...builtIn.cosmeticRules, ...cosmeticRules],
     );
   }
+
+  bool _cloudflareStealthEnabled = true;
+
+  @override
+  bool get cloudflareStealthEnabled => _cloudflareStealthEnabled;
+
+  @override
+  Future<void> setCloudflareStealthEnabled(bool enabled) async {
+    _cloudflareStealthEnabled = enabled;
+  }
+
+  @override
+  void setOnCloudflareBlockDetected(
+    void Function(String host, bool retrying)? callback,
+  ) {}
 
   MockBrowserController({String? initialUrl}) {
     if (initialUrl != null) {

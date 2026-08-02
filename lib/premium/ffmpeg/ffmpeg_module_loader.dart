@@ -18,6 +18,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../build_channel.dart';
@@ -145,6 +146,10 @@ class GitHubModuleLoader extends FeatureModuleLoader {
     switch (moduleId) {
       case 'ffmpeg':
         return 'FFmpeg media tools';
+      case 'torrent':
+        return 'BitTorrent engine';
+      case 'mediakit':
+        return 'Media player engine';
       default:
         return moduleId;
     }
@@ -212,6 +217,7 @@ class PlayModuleLoader extends FeatureModuleLoader {
     if (installed) {
       _cache[moduleId] = FeatureModuleStatus.ready;
       _emit(moduleId, FeatureModuleStatus.ready);
+      await _registerPlugin(moduleId);
       return true;
     }
 
@@ -235,6 +241,9 @@ class PlayModuleLoader extends FeatureModuleLoader {
 
       // Wait for completion via the progress stream.
       final success = await _waitForModule(moduleId);
+      if (success) {
+        await _registerPlugin(moduleId);
+      }
       return success;
     } on MissingPluginException {
       // Feature delivery not available (debug APK, emulator, etc.).
@@ -260,6 +269,26 @@ class PlayModuleLoader extends FeatureModuleLoader {
       return true; // Feature delivery not available — assume present.
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Registers the native plugin for [moduleId] in the current process.
+  ///
+  /// The ffmpeg-kit / media_kit_libs plugins are forked without an Android
+  /// `pluginClass`, so they are never registered by GeneratedPluginRegistrant
+  /// at launch. After the on-demand module is installed (and SplitCompat has
+  /// made its .so loadable), this tells the native side to
+  /// `flutterEngine.getPlugins().add(...)` so the plugin's method channel and
+  /// static native loading run with the libs present.
+  Future<void> _registerPlugin(String moduleId) async {
+    try {
+      await _channel.invokeMethod<bool>('registerPlugin', {
+        'module': moduleId,
+      });
+    } on MissingPluginException {
+      // Fat APK / emulator — plugin already registered at launch; no-op.
+    } catch (e) {
+      debugPrint('[FeatureModuleLoader] registerPlugin($moduleId) failed: $e');
     }
   }
 
@@ -339,6 +368,10 @@ class PlayModuleLoader extends FeatureModuleLoader {
     switch (moduleId) {
       case 'ffmpeg':
         return 'FFmpeg media tools';
+      case 'torrent':
+        return 'BitTorrent engine';
+      case 'mediakit':
+        return 'Media player engine';
       default:
         return moduleId;
     }
@@ -350,6 +383,12 @@ class PlayModuleLoader extends FeatureModuleLoader {
       case 'ffmpeg':
         // Stripped arm64 suite is ~15–20 MB; show an upper-bound estimate.
         return 18 * 1024 * 1024;
+      case 'torrent':
+        // libtorrent native lib ~4–6 MB.
+        return 6 * 1024 * 1024;
+      case 'mediakit':
+        // libmpv + mediakitandroidhelper ~12–15 MB.
+        return 15 * 1024 * 1024;
       default:
         return null;
     }

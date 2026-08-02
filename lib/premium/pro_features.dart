@@ -176,8 +176,28 @@ enum ProFeature {
 // Cap constants
 // ---------------------------------------------------------------------------
 
-/// Static helper: feature gate matrix + tier-aware caps.
+// Static helper: feature gate matrix + tier-aware caps.
 class ProFeatures {
+  /// Daily Drive upload file cap for Free tier.
+  static const int driveSyncDailyLimitFree = 15;
+
+  /// Daily Drive upload file cap for Pro tier.
+  static const int driveSyncDailyLimitPro = 50;
+
+  /// Daily Drive upload file cap for Ultra tier.
+  static const int driveSyncDailyLimitUltra = 1000;
+
+  /// Gets daily Google Drive upload cap for a given tier.
+  static int driveSyncDailyLimit(EntitlementTier tier) {
+    switch (tier) {
+      case EntitlementTier.free:
+        return driveSyncDailyLimitFree;
+      case EntitlementTier.pro:
+        return driveSyncDailyLimitPro;
+      case EntitlementTier.ultra:
+        return driveSyncDailyLimitUltra;
+    }
+  }
   ProFeatures._();
 
   // -- Download limits (tier-aware) --

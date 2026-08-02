@@ -120,34 +120,59 @@ class ElementPickerController {
 
       DownloadSettings? updated;
       final resourceUri = Uri.tryParse(srcOrHref);
-      if (resourceUri != null && resourceUri.host.isNotEmpty) {
-        // Network rule — block by host
-        final host = resourceUri.host.toLowerCase();
+      final resourceHost = resourceUri?.host.toLowerCase() ?? '';
+
+      // A third-party host is safe to block wholesale. The page's own host is
+      // not: blocking it takes out the site's own images and scripts, which
+      // looks like Aurora broke the page. Fall through to a cosmetic rule,
+      // which hides exactly the element the user pointed at.
+      final isThirdParty = resourceHost.isNotEmpty &&
+          resourceHost != pageHost &&
+          !resourceHost.endsWith('.$pageHost') &&
+          !pageHost.endsWith('.$resourceHost');
+
+      if (isThirdParty) {
+        final alreadyBlocked = settings.manualAdBlockRules
+            .any((r) => r.pattern.toLowerCase() == resourceHost);
+        if (alreadyBlocked) {
+          _showSnack('$resourceHost is already blocked.');
+          return null;
+        }
         updated = settings.copyWith(
           manualAdBlockRules: [
             ...settings.manualAdBlockRules,
-            ManualAdBlockRule(pattern: host, domainRule: true),
+            ManualAdBlockRule(
+              pattern: resourceHost,
+              domainRule: true,
+              // Provenance, so "Reset element blocks" on this page can find it.
+              addedForHost: pageHost,
+            ),
           ],
         );
         _onSettingsChanged?.call(updated);
-      } else if (selector != null) {
+      } else if (selector != null && pageHost.isNotEmpty) {
         // Cosmetic rule — hide by selector
-        if (pageHost.isNotEmpty) {
-          if (_maxRules != null &&
-              settings.manualCosmeticRules.length >= _maxRules!) {
-            _showSnack(
-              'Cosmetic rule limit ($_maxRules) reached. Upgrade to Pro for unlimited rules.',
-            );
-            return null;
-          }
-          updated = settings.copyWith(
-            manualCosmeticRules: [
-              ...settings.manualCosmeticRules,
-              CosmeticAdRule(host: pageHost, selector: selector),
-            ],
-          );
-          _onSettingsChanged?.call(updated);
+        final alreadyHidden = settings.manualCosmeticRules
+            .any((r) => r.host == pageHost && r.selector == selector);
+        if (alreadyHidden) {
+          _showSnack('That element is already hidden on $pageHost.');
+          return null;
         }
+        final maxRules = _maxRules;
+        if (maxRules != null &&
+            settings.manualCosmeticRules.length >= maxRules) {
+          _showSnack(
+            'Cosmetic rule limit ($_maxRules) reached. Upgrade to Pro for unlimited rules.',
+          );
+          return null;
+        }
+        updated = settings.copyWith(
+          manualCosmeticRules: [
+            ...settings.manualCosmeticRules,
+            CosmeticAdRule(host: pageHost, selector: selector),
+          ],
+        );
+        _onSettingsChanged?.call(updated);
       }
 
       try {
@@ -163,39 +188,14 @@ class ElementPickerController {
     }
   }
 
-  /// Apply cosmetic rules to the given tab.
-  Future<void> applyCosmeticRules(
-    BrowserTab tab, {
-    DownloadSettings? settings,
-  }) async {
-    final s = settings;
-    if (s == null) return;
-    if (s.manualCosmeticRules.isEmpty) return;
-
-    try {
-      final currentUrl = await tab.controller.currentUrl();
-      final pageHost = Uri.tryParse(currentUrl ?? '')?.host ?? '';
-      final rulesForHost = s.manualCosmeticRules
-          .where((r) => r.host == pageHost)
-          .toList(growable: false);
-      if (rulesForHost.isEmpty) return;
-
-      final cssSelectors =
-          rulesForHost.map((r) => r.selector).join(',\n');
-      final js = '''
-(function() {
-  var style = document.getElementById('aurora-manual-cosmetic-rules');
-  if (!style) {
-    style = document.createElement('style');
-    style.id = 'aurora-manual-cosmetic-rules';
-    document.head.appendChild(style);
-  }
-  style.textContent = '$cssSelectors { display: none !important; }';
-})();
-''';
-      await tab.controller.evaluateJavaScript(js);
-    } catch (_) {}
-  }
+  // NOTE: an `applyCosmeticRules` helper used to live here that injected a
+  // <style> tag directly. It had no callers -- cosmetic rules reach the page
+  // through AdBlockEngine, which serialises them to ABP `host##selector` and
+  // lets the native matcher handle subdomains. It was also broken: selectors
+  // were joined with a newline and then embedded in a single-quoted JS string
+  // literal, so the injected script raised a SyntaxError and applied *nothing*
+  // as soon as a host had two rules. Removed rather than fixed, so there is one
+  // cosmetic path instead of two that disagree.
 
   /// Reset all manual block rules for the current host and reload.
   Future<void> resetPageElementBlocks(DownloadSettings settings) async {
@@ -204,9 +204,15 @@ class ElementPickerController {
       final currentUrl = await tab.controller.currentUrl();
       final pageHost = Uri.tryParse(currentUrl ?? '')?.host ?? '';
 
+      // Network rules are keyed by the resource host, so matching `pattern`
+      // against the page host cleared almost nothing. Match on provenance
+      // instead, keeping the old `pattern == pageHost` test so rules saved
+      // before addedForHost existed are still resettable.
       final updated = settings.copyWith(
         manualAdBlockRules: settings.manualAdBlockRules
-            .where((r) => r.pattern != pageHost)
+            .where((r) =>
+                r.addedForHost != pageHost &&
+                !(r.addedForHost == null && r.pattern == pageHost))
             .toList(growable: false),
         manualCosmeticRules: settings.manualCosmeticRules
             .where((r) => r.host != pageHost)

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -278,6 +279,46 @@ class BrowserLibrary {
     return List.unmodifiable(list);
   }
 
+  /// This library with a visit to [url] recorded at the front of history.
+  ///
+  /// Any earlier entry for the same URL is dropped rather than duplicated, so a
+  /// site visited fifty times occupies one row. Both callers that record visits
+  /// share this, so the dedupe rule cannot drift between them.
+  ///
+  /// **History is unbounded by default.** [limit] exists for callers that want a
+  /// bounded view (and for tests), but truncating on write would silently
+  /// destroy the user's browsing record, and it was never what made a large
+  /// history expensive — re-serialising the entire library on every visit was.
+  /// That is fixed in [BrowserLibraryStore], not here.
+  ///
+  /// Note this is lossy in a way a real browser's history is not: Firefox and
+  /// Chromium keep one row per *visit* alongside one row per URL, so they can
+  /// show visit counts and a full timeline. Collapsing to the newest entry per
+  /// URL is a consequence of the flat JSON shape, and is the thing a proper
+  /// `urls` + `visits` schema would fix.
+  BrowserLibrary withVisit(
+    String url,
+    String title, {
+    DateTime? at,
+    int? limit,
+  }) {
+    final kept = <BrowserHistoryEntry>[
+      BrowserHistoryEntry(
+        title: title,
+        url: url,
+        visitedAt: at ?? DateTime.now(),
+      ),
+    ];
+    for (final existing in history) {
+      // Stops walking once full, so a bounded caller does not copy the whole
+      // list just to discard the tail.
+      if (limit != null && kept.length >= limit) break;
+      if (existing.url == url) continue;
+      kept.add(existing);
+    }
+    return copyWith(history: kept);
+  }
+
   List<BrowserHistoryEntry> get siteHistory => history
       .where((h) => h.kind == LibraryEntryKind.site)
       .toList(growable: false);
@@ -361,12 +402,20 @@ class BrowserLibraryStore {
     final file = await _libraryFile();
     try {
       if (!await file.exists()) return BrowserLibrary.empty();
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) {
+      // Decoded off-thread for the same reason encoding is: with history
+      // unbounded this parse grows without limit, and on the root isolate it
+      // would land as a stall during cold start.
+      final raw = await file.readAsString();
+      final library = await Isolate.run(() {
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) return null;
+        return BrowserLibrary.fromJson(Map<String, dynamic>.from(decoded));
+      });
+      if (library == null) {
         await _preserveCorruptLibraryFile(file, 'Library file was not a Map.');
         return BrowserLibrary.empty();
       }
-      return BrowserLibrary.fromJson(Map<String, dynamic>.from(decoded));
+      return library;
     } catch (e) {
       await _preserveCorruptLibraryFile(file, e.toString());
       return BrowserLibrary.empty();
@@ -392,7 +441,24 @@ class BrowserLibraryStore {
     if (!await file.parent.exists()) {
       await file.parent.create(recursive: true);
     }
-    await file.writeAsString(jsonEncode(library.toJson()));
+    // Serialising a few thousand history entries is tens of milliseconds of
+    // synchronous CPU, and this runs on every recorded visit. On the root
+    // isolate that surfaces as dropped frames mid-navigation, so the string
+    // building happens off-thread. Only the plain JSON tree crosses the
+    // boundary, which is always sendable.
+    final json = library.toJson();
+    final encoded = await Isolate.run(() => jsonEncode(json));
+
+    final tempFile = File('${file.path}.tmp');
+    await tempFile.writeAsString(encoded, flush: true);
+    try {
+      await tempFile.rename(file.path);
+    } catch (_) {
+      await tempFile.copy(file.path);
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
   }
 
   Future<Directory> savedPagesDirectory() async {
@@ -458,7 +524,17 @@ class BrowserLibraryStore {
       exportData.addAll(extraJson);
     }
 
-    await file.writeAsString(jsonEncode(exportData));
+    final encoded = await Isolate.run(() => jsonEncode(exportData));
+    final tempFile = File('${file.path}.tmp');
+    await tempFile.writeAsString(encoded, flush: true);
+    try {
+      await tempFile.rename(file.path);
+    } catch (_) {
+      await tempFile.copy(file.path);
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
     return file;
   }
 

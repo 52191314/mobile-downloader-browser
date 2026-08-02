@@ -5,8 +5,10 @@ import 'worker_isolate_pool.dart';
 
 import 'package:http/http.dart' as http;
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'models/site_profile.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -16,6 +18,7 @@ import '../downloader/downloader.dart';
 import '../downloader/download_rules.dart';
 import '../premium/pro_entitlement.dart';
 import '../premium/pro_features.dart';
+import '../premium/premium_flags.dart';
 import '../premium/upsell_controller.dart';
 import 'video_library.dart';
 import '../downloader/headless_webview_fetcher.dart';
@@ -56,6 +59,10 @@ import 'session_recovery.dart';
 import 'autofill_store.dart';
 import 'safe_browsing_service.dart';
 import 'sniffer_url_utils.dart';
+import 'sniffer_url_utils.dart' as url_utils;
+import 'native_html_media_extractor.dart';
+import 'cct_browser.dart';
+import 'sheets/download_prompt_sheet.dart';
 import '../theme/aurora_palette.dart';
 import 'package:aurora_downloader/ui/widgets/dock_order_store.dart';
 
@@ -173,6 +180,14 @@ class SnifferScreen extends StatefulWidget {
            (isRunningInTest()
                ? FakeSafeBrowsingService()
                : SafeBrowsingService());
+
+  static String normalizeMenuEntryKey(String label) {
+    if (label.startsWith('Stealth Mode:')) return 'Stealth Mode';
+    if (label.startsWith('Incognito:')) return 'Incognito';
+    if (label.startsWith('Adblock:')) return 'Adblock';
+    if (label == 'Ads allowed') return 'Adblock';
+    return label;
+  }
 
   @override
   State<SnifferScreen> createState() => _SnifferScreenState();
@@ -520,7 +535,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     }
     if (oldWidget.settings.userAgentProfile !=
-        widget.settings.userAgentProfile) {
+            widget.settings.userAgentProfile ||
+        oldWidget.settings.customUserAgent !=
+            widget.settings.customUserAgent) {
       final ua = uaForProfile(widget.settings.userAgentProfile);
       for (final tab in _tabs) {
         tab.controller.setUserAgent(ua);
@@ -620,7 +637,145 @@ class _SnifferScreenState extends State<SnifferScreen>
     await tab.controller.setReplaceSitePlayer(
       widget.settings.replaceSitePlayer,
     );
-    await _applyCosmeticRules(tab);
+    await tab.controller.setCloudflareStealthEnabled(
+      widget.settings.cloudflareStealthEnabled,
+    );
+    tab.controller.setOnCloudflareBlockDetected((host, retrying) {
+      if (!mounted) return;
+      if (retrying) {
+        AuroraSnackbar.show(
+          context,
+          'Cloudflare block detected on $host — re-applying stealth & retrying...',
+        );
+      } else {
+        _showCloudflareBlockSheet(host, tab.currentUrl);
+      }
+    });
+  }
+
+  void _showCloudflareBlockSheet(String host, String? currentUrl) {
+    if (!mounted) return;
+    final targetUrl = currentUrl ?? 'https://$host';
+    // If the user already chose "always open in CCT" for this host, don't
+    // re-show the sheet — the CCT should already be open. Re-prompting here
+    // creates the "xchina.co → CCT → sheet → CCT" loop.
+    final lowerHost = host.toLowerCase();
+    final alreadyExternal = widget.settings.externalBrowserHosts
+        .map((e) => e.toLowerCase())
+        .contains(lowerHost);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.shield_outlined, color: Colors.orangeAccent, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Cloudflare Blocked $host',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This site blocks in-app Android WebViews (same engine class as 1DM). '
+                'Full browsers like Chrome or UC Browser bypass this block.',
+                style: TextStyle(color: Colors.grey[300], fontSize: 14, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              // When the host is already marked external-only, only show a
+              // "done" row — re-opening CCT again is the loop the user sees.
+              if (alreadyExternal) ...[
+                Text(
+                  'This site is set to always open in Chrome Custom Tab.',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.check_rounded),
+                  label: const Text('Close'),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ] else ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.tab),
+                  label: const Text('Open in Chrome Custom Tab'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    unawaited(CctBrowser.openCustomTab(targetUrl));
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('Open in System Browser'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    unawaited(PublicDownloadsService.openUrlInChrome(targetUrl, preferChrome: false));
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.orangeAccent,
+                  ),
+                  icon: const Icon(Icons.star_outline),
+                  label: Text('Always open $host in Custom Tab'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    final updatedHosts = List<String>.from(widget.settings.externalBrowserHosts);
+                    final lowerHost = host.toLowerCase();
+                    if (!updatedHosts.contains(lowerHost)) {
+                      updatedHosts.add(lowerHost);
+                      final updated = widget.settings.copyWith(externalBrowserHosts: updatedHosts);
+                      widget.onSettingsChanged?.call(updated);
+                    }
+                    unawaited(CctBrowser.openCustomTab(targetUrl));
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+      },
+    );
   }
 
   void _cancelPickerIfActive({String reason = 'tab change'}) {
@@ -782,18 +937,20 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   @override
   String uaForProfile(String profile) =>
-      uaProfiles[profile] ?? snifferMobileUserAgent;
+      url_utils.uaForProfile(profile, customUserAgent: widget.settings.customUserAgent);
 
   @override
   Future<void> loadUrlWithHostSettings(
     BrowserTab tab,
     Uri uri, {
     bool addToHistory = true,
-  }) => _loadUrlWithHostSettings(tab, uri, addToHistory: addToHistory);
-
-  @override
-  Future<void> applyCosmeticRules([BrowserTab? tab]) =>
-      _applyCosmeticRules(tab!);
+    bool forceInApp = false,
+  }) => _loadUrlWithHostSettings(
+        tab,
+        uri,
+        addToHistory: addToHistory,
+        forceInApp: forceInApp,
+      );
 
   @override
   Future<void> configureTabAdblock(BrowserTab tab) => _configureTabAdblock(tab);
@@ -931,6 +1088,50 @@ class _SnifferScreenState extends State<SnifferScreen>
       return;
     }
     final tab = _activeTab;
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+
+    // If this host is configured to open in CCT (WAF-blocked), do NOT
+    // load the page into the internal WebView — that just hard-blocks and
+    // loops. Instead only run the native HTML sniffer intake and notify.
+    final routeToCct = host.isNotEmpty &&
+        widget.settings.externalBrowserHosts.contains(host);
+    if (routeToCct) {
+      AuroraLog.instance.info(
+        '_navigateActiveTabToExternalUrl: host=$host is external-only, '
+        'running native intake only (no WebView load)',
+        category: LogCategory.browser,
+        screen: LogScreen.browser,
+        eventType: LogEventType.navigation,
+      );
+      tab.addressController.text = url;
+      tab.currentUrl = url;
+      if (mounted) setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_tabs.contains(tab)) return;
+        unawaited(() async {
+          final mediaUrls =
+              await NativeHtmlMediaExtractor.extractMediaFromUrl(url);
+          if (!mounted || mediaUrls.isEmpty) return;
+          for (final mediaUrl in mediaUrls) {
+            tab.snifferEngine.sniff(
+              mediaUrl,
+              sourcePageUrl: url,
+              pageTitle: tab.title,
+              sniffSource: SniffSource.javascript,
+            );
+          }
+          if (mounted && mediaUrls.isNotEmpty) {
+            AuroraSnackbar.show(
+              context,
+              'Found ${mediaUrls.length} stream(s) from $host — tap the capture FAB to download.',
+            );
+          }
+        }());
+      });
+      return;
+    }
+
     // Ensure this tab's WebView is in the live set before loadRequest.
     _builtWebViewTabIds.add(tab.id);
     tab.addressController.text = url;
@@ -948,11 +1149,27 @@ class _SnifferScreenState extends State<SnifferScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_tabs.contains(tab)) return;
       unawaited(() async {
+        // Run native HTML extraction in parallel via native HttpURLConnection
+        // to bypass Cloudflare WAF WebView blocks on incoming shared URLs.
+        unawaited(
+          NativeHtmlMediaExtractor.extractMediaFromUrl(url).then((mediaUrls) {
+            if (!mounted || mediaUrls.isEmpty) return;
+            for (final mediaUrl in mediaUrls) {
+              tab.snifferEngine.sniff(
+                mediaUrl,
+                sourcePageUrl: url,
+                pageTitle: tab.title,
+                sniffSource: SniffSource.javascript,
+              );
+            }
+          }),
+        );
+
         try {
           await tab.controller.resumeWebView();
         } catch (_) {}
         try {
-          await _loadUrlWithHostSettings(tab, Uri.parse(url));
+          await _loadUrlWithHostSettings(tab, Uri.parse(url), forceInApp: true);
           AuroraLog.instance.info(
             'external open loadRequest finished for "$url"',
             category: LogCategory.browser,
@@ -1090,6 +1307,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// active tab — that freezes the visible page while the scrollbar still
   /// moves (Android compositor stuck).
   Future<void> _pauseBrowserShell({bool includeGlobalTimers = true}) async {
+    // Backgrounding is the point at which Android may kill the process, so a
+    // coalesced history write cannot be left waiting on its timer.
+    try {
+      await _libraryController.flushPendingSave();
+    } catch (_) {}
     for (final tab in _tabs) {
       tab.videoPollTimer?.cancel();
       tab.videoPollTimer = null;
@@ -1500,15 +1722,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     onSetState: () => setState(() {}),
   );
 
-  Future<void> _recordHistory(String url, String title) async {
-    if (_privateMode) return;
-    final existing = _library.history.where((entry) => entry.url != url);
-    final history = [
-      BrowserHistoryEntry(title: title, url: url, visitedAt: DateTime.now()),
-      ...existing,
-    ].toList();
-    await _saveLibrary(_library.copyWith(history: history));
-  }
+  /// Delegates so the dedupe rule, the cap and the debounce live in exactly one
+  /// place. This used to be a second, immediate-write copy of
+  /// [LibraryController.recordHistory] that had neither a cap nor coalescing.
+  Future<void> _recordHistory(String url, String title) =>
+      _libraryController.recordHistory(url, title, privateMode: _privateMode);
 
   void _setupTabCallbacks(BrowserTab tab) => _tabCallbackBinder.attach(tab);
 
@@ -1868,6 +2086,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     Uri uri, {
     Map<String, String>? extraHeaders,
     bool addToHistory = true,
+    bool forceInApp = false,
   }) async {
     // App deep links (tg:, intent://, mailto:, magnet:, …) never enter
     // Chromium — controller.loadRequest routes them externally / to queue.
@@ -1882,6 +2101,25 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
 
     final host = uri.host.toLowerCase();
+    if (!forceInApp && host.isNotEmpty && widget.settings.externalBrowserHosts.contains(host)) {
+      unawaited(CctBrowser.openCustomTab(uri.toString()));
+      return;
+    }
+
+    // Trigger native HTML media extraction in background (bypasses Cloudflare WAF on WebView)
+    unawaited(
+      NativeHtmlMediaExtractor.extractMediaFromUrl(uri.toString()).then((mediaUrls) {
+        if (!mounted || mediaUrls.isEmpty) return;
+        for (final mediaUrl in mediaUrls) {
+          tab.snifferEngine.sniff(
+            mediaUrl,
+            sourcePageUrl: uri.toString(),
+            pageTitle: tab.title,
+            sniffSource: SniffSource.javascript,
+          );
+        }
+      }),
+    );
     SafeBrowsingResult safety;
     try {
       safety = await _safeBrowsing.check(uri.toString());
@@ -2402,28 +2640,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
     // Apply the new rule immediately so the user sees the element disappear.
     if (updatedSettings != null && mounted) {
-      // Check whether we added a cosmetic rule vs a network rule.
-      final hasNewCosmeticRule =
-          updatedSettings.manualCosmeticRules.length >
-          previousSettings.manualCosmeticRules.length;
-      final hasNewNetworkRule =
-          updatedSettings.manualAdBlockRules.length >
-          previousSettings.manualAdBlockRules.length;
-
-      if (hasNewCosmeticRule) {
-        // Inject CSS to hide the element right away.
-        await _applyCosmeticRules(tab, settings: updatedSettings);
-      }
-      if (hasNewNetworkRule) {
-        // Reconfigure the adblock engine to block the new domain.
-        await tab.controller.configureAdBlock(
-          enabled: widget.settings.adblockEnabled,
-          popupBlockingEnabled: widget.settings.popupBlockingEnabled,
-          filterSources: widget.settings.adblockFilterSources,
-          manualRules: updatedSettings.manualAdBlockRules,
-          cosmeticRules: updatedSettings.manualCosmeticRules,
-        );
-      }
+      await tab.controller.configureAdBlock(
+        enabled: widget.settings.adblockEnabled,
+        popupBlockingEnabled: widget.settings.popupBlockingEnabled,
+        filterSources: widget.settings.adblockFilterSources,
+        manualRules: updatedSettings.manualAdBlockRules,
+        cosmeticRules: updatedSettings.manualCosmeticRules,
+      );
     }
     // Undo snackbar
     if (mounted) {
@@ -2436,21 +2659,21 @@ class _SnifferScreenState extends State<SnifferScreen>
             label: 'Undo',
             onPressed: () {
               widget.onSettingsChanged?.call(previousSettings);
-              unawaited(_applyCosmeticRules(tab, settings: previousSettings));
+              unawaited(
+                tab.controller.configureAdBlock(
+                  enabled: widget.settings.adblockEnabled,
+                  popupBlockingEnabled: widget.settings.popupBlockingEnabled,
+                  filterSources: widget.settings.adblockFilterSources,
+                  manualRules: previousSettings.manualAdBlockRules,
+                  cosmeticRules: previousSettings.manualCosmeticRules,
+                ),
+              );
             },
           ),
         ),
       );
     }
   }
-
-  Future<void> _applyCosmeticRules(
-    BrowserTab tab, {
-    DownloadSettings? settings,
-  }) => _elementPickerController.applyCosmeticRules(
-    tab,
-    settings: settings ?? widget.settings,
-  );
 
   Future<void> _resetPageElementBlocks() =>
       _elementPickerController.resetPageElementBlocks(widget.settings);
@@ -2866,6 +3089,8 @@ class _SnifferScreenState extends State<SnifferScreen>
                             key: ValueKey(t.id),
                             controller: t.controller,
                             initialUrl: seedUrl,
+                            userAgent: t.userAgent ??
+                                uaForProfile(widget.settings.userAgentProfile),
                             onSwipeForward: () {
                               // Forward navigation via right-edge swipe.
                               // No debounce needed — there is only one forward
@@ -3519,8 +3744,8 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// overrides.
   Future<void> _showUserAgentSelector() async {
     final current = widget.settings.userAgentProfile;
-    final profiles = uaProfiles.keys.toList();
-    final labels = profiles.map((k) => uaProfileLabels[k] ?? k).toList();
+    final profiles = url_utils.uaProfiles.keys.toList();
+    final labels = profiles.map((k) => url_utils.uaProfileLabels[k] ?? k).toList();
 
     final result = await showDialog<String>(
       context: context,
@@ -3761,13 +3986,9 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     }
 
+    // NOTE: When adding or updating a Settings entry, update both settings_page.dart (_buildSettingsHub) and sniffer_screen.dart (rawSettingsEntries).
     final rawSettingsEntries = [
-      OverflowMenuEntry(
-        icon: Icons.menu_book_rounded,
-        label: 'User Guide',
-        color: ac.accentFrost,
-        onTap: () => unawaited(openSection(SettingsSection.userGuide)),
-      ),
+      // 1. Downloads & Core Behavior
       OverflowMenuEntry(
         icon: Icons.download_rounded,
         label: 'Defaults',
@@ -3788,6 +4009,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         label: 'Schedule',
         onTap: () => unawaited(openSection(SettingsSection.schedule)),
       ),
+      // 2. Security, Privacy & Sniffing
       OverflowMenuEntry(
         icon: Icons.shield_rounded,
         label: 'Adblock',
@@ -3803,10 +4025,11 @@ class _SnifferScreenState extends State<SnifferScreen>
         label: 'Sniffer',
         onTap: () => unawaited(openSection(SettingsSection.sniffer)),
       ),
+      // 3. Customization & Profiles
       OverflowMenuEntry(
-        icon: Icons.open_in_new_rounded,
-        label: 'External apps',
-        onTap: () => unawaited(openSection(SettingsSection.externalApps)),
+        icon: Icons.palette_outlined,
+        label: 'Theme',
+        onTap: () => unawaited(openSection(SettingsSection.appearance)),
       ),
       OverflowMenuEntry(
         icon: Icons.people_outline_rounded,
@@ -3814,30 +4037,38 @@ class _SnifferScreenState extends State<SnifferScreen>
         onTap: () => unawaited(openSection(SettingsSection.profiles)),
       ),
       OverflowMenuEntry(
-        icon: Icons.palette_outlined,
-        label: 'Theme',
-        onTap: () => unawaited(openSection(SettingsSection.appearance)),
+        icon: Icons.open_in_new_rounded,
+        label: 'External apps',
+        onTap: () => unawaited(openSection(SettingsSection.externalApps)),
       ),
+      // 4. Sync & Backup
       OverflowMenuEntry(
         icon: Icons.backup_rounded,
         label: 'Backup',
         onTap: () => unawaited(openSection(SettingsSection.backup)),
       ),
+      if (kDriveSyncEnabled)
+        OverflowMenuEntry(
+          icon: Icons.cloud_outlined,
+          label: 'Google Drive',
+          onTap: () => unawaited(openSection(SettingsSection.drive)),
+        ),
       OverflowMenuEntry(
-        icon: Icons.auto_awesome,
-        label: 'Aurora Pro & Ultra',
-        color: ac.accentAmber,
-        onTap: () => unawaited(openSection(SettingsSection.pro)),
+        icon: Icons.cloud_outlined,
+        label: 'WebDAV Backup',
+        onTap: () => unawaited(openSection(SettingsSection.webdav)),
       ),
       OverflowMenuEntry(
         icon: Icons.shield_outlined,
         label: 'Private Vault',
         onTap: () => unawaited(openSection(SettingsSection.vault)),
       ),
+      // 5. Advanced & Automation
       OverflowMenuEntry(
-        icon: Icons.cloud_outlined,
-        label: 'WebDAV Backup',
-        onTap: () => unawaited(openSection(SettingsSection.webdav)),
+        icon: Icons.auto_awesome,
+        label: 'Aurora Pro & Ultra',
+        color: ac.accentAmber,
+        onTap: () => unawaited(openSection(SettingsSection.pro)),
       ),
       OverflowMenuEntry(
         icon: Icons.rss_feed,
@@ -3849,6 +4080,13 @@ class _SnifferScreenState extends State<SnifferScreen>
         label: 'Automation API',
         onTap: () => unawaited(openSection(SettingsSection.automation)),
       ),
+      // 6. Help & Info
+      OverflowMenuEntry(
+        icon: Icons.menu_book_rounded,
+        label: 'User Guide',
+        color: ac.accentFrost,
+        onTap: () => unawaited(openSection(SettingsSection.userGuide)),
+      ),
       OverflowMenuEntry(
         icon: Icons.info_outline_rounded,
         label: 'About',
@@ -3858,10 +4096,34 @@ class _SnifferScreenState extends State<SnifferScreen>
 
     final rawToolEntries = [
       OverflowMenuEntry(
+        icon: settings.cloudflareStealthEnabled
+            ? Icons.security_rounded
+            : Icons.security_outlined,
+        label: settings.cloudflareStealthEnabled
+            ? 'Stealth Mode: On'
+            : 'Stealth Mode: Off',
+        color: settings.cloudflareStealthEnabled
+            ? ac.accentFrost
+            : ac.textPrimary,
+
+        onTap: _toggleStealthMode,
+      ),
+      OverflowMenuEntry(
         icon: _privateMode ? Icons.security_rounded : Icons.shield_outlined,
         label: _privateMode ? 'Incognito: On' : 'Incognito: Off',
         color: _privateMode ? Colors.purpleAccent : ac.textPrimary,
         onTap: _toggleIncognitoMode,
+      ),
+      OverflowMenuEntry(
+        icon: Icons.tab_rounded,
+        label: 'Open in Custom Tab',
+        color: ac.accentFrost,
+        onTap: () {
+          final url = _activeTab.currentUrl;
+          if (url != null && url.isNotEmpty) {
+            unawaited(CctBrowser.openCustomTab(url));
+          }
+        },
       ),
       OverflowMenuEntry(
         icon: Icons.history_rounded,
@@ -3900,16 +4162,6 @@ class _SnifferScreenState extends State<SnifferScreen>
         onTap: () => unawaited(_showReaderMode()),
       ),
       OverflowMenuEntry(
-        icon: Icons.ads_click,
-        label: 'Block element',
-        onTap: () => unawaited(_startElementPicker()),
-      ),
-      OverflowMenuEntry(
-        icon: Icons.undo,
-        label: 'Reset blocks',
-        onTap: _resetPageElementBlocks,
-      ),
-      OverflowMenuEntry(
         icon: !settings.adblockEnabled
             ? Icons.shield
             : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
@@ -3920,6 +4172,16 @@ class _SnifferScreenState extends State<SnifferScreen>
             ? Colors.redAccent
             : (isAllowlisted ? ac.textSecondary : Colors.green),
         onTap: () => _showAdblockPopup(_activeTab),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.ads_click,
+        label: 'Block element',
+        onTap: () => unawaited(_startElementPicker()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.undo,
+        label: 'Reset blocks',
+        onTap: _resetPageElementBlocks,
       ),
       OverflowMenuEntry(
         icon: Icons.refresh_rounded,
@@ -3974,12 +4236,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  String _menuEntryKey(String label) {
-    if (label.startsWith('Incognito:')) return 'Incognito';
-    if (label.startsWith('Adblock:')) return 'Adblock';
-    if (label == 'Ads allowed') return 'Adblock';
-    return label;
-  }
+  String _menuEntryKey(String label) => SnifferScreen.normalizeMenuEntryKey(label);
 
   List<OverflowMenuEntry> _sortOverflowEntries(
     List<OverflowMenuEntry> entries,
@@ -4013,6 +4270,22 @@ class _SnifferScreenState extends State<SnifferScreen>
     }
     final updated = widget.settings.copyWith(privateMode: nextState);
     widget.onSettingsChanged?.call(updated);
+  }
+
+  void _toggleStealthMode() {
+    final nextState = !widget.settings.cloudflareStealthEnabled;
+    final updated = widget.settings.copyWith(cloudflareStealthEnabled: nextState);
+    widget.onSettingsChanged?.call(updated);
+    for (final tab in _tabs) {
+      unawaited(tab.controller.setCloudflareStealthEnabled(nextState));
+    }
+    AuroraSnackbar.show(
+      context,
+      nextState
+          ? 'Cloudflare Stealth Mode: ON'
+          : 'Cloudflare Stealth Mode: OFF',
+    );
+    unawaited(_activeTab.controller.reload());
   }
 
   void _showHistorySheet() => showHistorySheet(
@@ -4635,7 +4908,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         .where((m) => m.url == url)
         .lastOrNull;
 
-    return enqueueDirectDownload(
+    await enqueueDirectDownload(
       context: context,
       tab: tab,
       url: url,
@@ -4653,19 +4926,75 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  /// Shows a dialog when the user clicks a download link in [ask] mode.
+  /// Shows a modern Firefox-style bottom sheet when a download link is triggered.
   void _showDownloadBehaviorPrompt(
     BrowserTab tab,
     String url,
     String? suggestedFilename,
-  ) {
-    showDownloadBehaviorPrompt(
+  ) async {
+    final media = tab.snifferEngine.detectedMedia.firstWhereOrNull((m) => m.url == url);
+    final rawName = (suggestedFilename != null && suggestedFilename.trim().isNotEmpty)
+        ? suggestedFilename.trim()
+        : (media?.name ?? url.split('/').last.split('?').first);
+    final filename = rawName.isNotEmpty ? rawName : 'download';
+    final sourceHost = (tab.addressController.text.trim().isNotEmpty
+            ? Uri.tryParse(tab.addressController.text.trim())?.host
+            : Uri.tryParse(url)?.host) ??
+        '';
+
+    final result = await showDownloadPromptSheet(
       context: context,
-      tab: tab,
       url: url,
-      suggestedFilename: suggestedFilename,
-      onDownload: (t, u, s) => _enqueueDirectDownload(t, u, s),
+      suggestedFilename: filename,
+      contentLengthBytes: media?.contentLengthBytes,
+      contentType: media?.contentType,
+      sourceHost: sourceHost.isNotEmpty ? sourceHost : null,
     );
+
+    if (result == null || result.action == DownloadPromptAction.cancel) {
+      return;
+    }
+
+    if (result.rememberHost && sourceHost.isNotEmpty) {
+      final store = const SiteProfileStore();
+      final profiles = List<SiteProfile>.from(await store.load());
+      final existingIndex = profiles.indexWhere((p) => p.hostPattern == sourceHost);
+      final updatedProfile = (existingIndex >= 0
+              ? profiles[existingIndex]
+              : SiteProfile(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  name: sourceHost,
+                  hostPattern: sourceHost,
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                ))
+          .copyWith(downloadLinkBehavior: 'autoDownload');
+
+      if (existingIndex >= 0) {
+        profiles[existingIndex] = updatedProfile;
+      } else {
+        profiles.add(updatedProfile);
+      }
+      await store.save(profiles);
+    }
+
+    if (result.action == DownloadPromptAction.downloadAndOpen) {
+      await _enqueueDirectDownload(tab, url, filename);
+      final existingTask = _downloadQueue.getTaskByUrl(url);
+      if (existingTask != null) {
+        StreamSubscription? sub;
+        sub = _downloadQueue.onTaskUpdated.listen((updated) {
+          if (updated.id == existingTask.id && updated.state == DownloadState.completed) {
+            sub?.cancel();
+            PublicDownloadsService().open(updated).catchError((_) {});
+          } else if (updated.id == existingTask.id && updated.state == DownloadState.failed) {
+            sub?.cancel();
+          }
+        });
+      }
+    } else if (result.action == DownloadPromptAction.download) {
+      await _enqueueDirectDownload(tab, url, filename);
+    }
   }
 
   /// Returns `true` when the user confirmed enqueue (or link update),

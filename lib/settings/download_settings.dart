@@ -396,15 +396,27 @@ class ManualAdBlockRule {
   final bool domainRule;
   final DateTime createdAt;
 
+  /// Page host this rule was created from, when it came from the element
+  /// picker.
+  ///
+  /// Needed because [pattern] is the *resource* host (`ads.example-cdn.net`),
+  /// which usually has nothing to do with the page the user was on. Without
+  /// this, "Reset element blocks" on a page could never find the network rules
+  /// that page created, so they silently accumulated forever. Null for rules
+  /// typed by hand in settings and for anything saved before this field.
+  final String? addedForHost;
+
   ManualAdBlockRule({
     required this.pattern,
     this.domainRule = false,
+    this.addedForHost,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
     'pattern': pattern,
     'domainRule': domainRule,
+    'addedForHost': addedForHost,
     'createdAt': createdAt.toIso8601String(),
   };
 
@@ -412,6 +424,7 @@ class ManualAdBlockRule {
     return ManualAdBlockRule(
       pattern: json['pattern'] as String? ?? '',
       domainRule: json['domainRule'] as bool? ?? false,
+      addedForHost: json['addedForHost'] as String?,
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
@@ -520,6 +533,7 @@ class DownloadSettings {
   final String downloadDestination;
   final SearchEngine searchEngine;
   final bool adblockEnabled;
+  final bool cloudflareStealthEnabled;
   final bool popupBlockingEnabled;
   final bool invisibleRedirectBlockingEnabled;
   final List<AdblockFilterSource> adblockFilterSources;
@@ -538,6 +552,7 @@ class DownloadSettings {
   /// 'desktop_firefox', 'safari'. Controls the global UA sent by both
   /// the WebView and the Dart HTTP download client.
   final String userAgentProfile;
+  final String customUserAgent;
   final bool privateMode;
   final bool wifiOnly;
   final bool readerMode;
@@ -552,6 +567,7 @@ class DownloadSettings {
   final bool trackerBlockingEnabled;
   final List<String> adblockAllowlist;
   final List<String> customVideoHosts;
+  final List<String> externalBrowserHosts;
   final DarkModePreference darkModePreference;
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
@@ -617,6 +633,7 @@ class DownloadSettings {
     required this.downloadDestination,
     required this.searchEngine,
     required this.adblockEnabled,
+    this.cloudflareStealthEnabled = true,
     this.popupBlockingEnabled = true,
     this.invisibleRedirectBlockingEnabled = true,
     required this.adblockFilterSources,
@@ -628,6 +645,7 @@ class DownloadSettings {
     required this.browserToolbarPosition,
     this.desktopMode = false,
     this.userAgentProfile = 'mobile',
+    this.customUserAgent = '',
     this.privateMode = false,
     this.wifiOnly = false,
     this.readerMode = false,
@@ -639,10 +657,11 @@ class DownloadSettings {
     this.maxDetectedMedia = 200,
     this.disabledMediaTypes = const {},
     this.doNotTrackEnabled = true,
-    this.downloadLinkBehavior = DownloadLinkBehavior.capture,
+    this.downloadLinkBehavior = DownloadLinkBehavior.ask,
     this.trackerBlockingEnabled = true,
     this.adblockAllowlist = const [],
     this.customVideoHosts = const [],
+    this.externalBrowserHosts = const [],
     this.darkModePreference = DarkModePreference.system,
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
@@ -713,6 +732,7 @@ class DownloadSettings {
     String? downloadDestination,
     SearchEngine? searchEngine,
     bool? adblockEnabled,
+    bool? cloudflareStealthEnabled,
     bool? popupBlockingEnabled,
     bool? invisibleRedirectBlockingEnabled,
     List<AdblockFilterSource>? adblockFilterSources,
@@ -724,6 +744,7 @@ class DownloadSettings {
     BrowserToolbarPosition? browserToolbarPosition,
     bool? desktopMode,
     String? userAgentProfile,
+    String? customUserAgent,
     bool? privateMode,
     bool? wifiOnly,
     bool? readerMode,
@@ -736,6 +757,7 @@ class DownloadSettings {
     bool? trackerBlockingEnabled,
     List<String>? adblockAllowlist,
     List<String>? customVideoHosts,
+    List<String>? externalBrowserHosts,
     DarkModePreference? darkModePreference,
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
@@ -805,6 +827,8 @@ class DownloadSettings {
           : this.downloadDestination,
       searchEngine: searchEngine ?? this.searchEngine,
       adblockEnabled: adblockEnabled ?? this.adblockEnabled,
+      cloudflareStealthEnabled:
+          cloudflareStealthEnabled ?? this.cloudflareStealthEnabled,
       popupBlockingEnabled: popupBlockingEnabled ?? this.popupBlockingEnabled,
       invisibleRedirectBlockingEnabled: invisibleRedirectBlockingEnabled ?? this.invisibleRedirectBlockingEnabled,
       adblockFilterSources: adblockFilterSources ?? this.adblockFilterSources,
@@ -818,6 +842,7 @@ class DownloadSettings {
           browserToolbarPosition ?? this.browserToolbarPosition,
       desktopMode: desktopMode ?? this.desktopMode,
       userAgentProfile: userAgentProfile ?? this.userAgentProfile,
+      customUserAgent: customUserAgent ?? this.customUserAgent,
       privateMode: privateMode ?? this.privateMode,
       wifiOnly: wifiOnly ?? this.wifiOnly,
       readerMode: readerMode ?? this.readerMode,
@@ -832,6 +857,7 @@ class DownloadSettings {
           trackerBlockingEnabled ?? this.trackerBlockingEnabled,
       adblockAllowlist: adblockAllowlist ?? this.adblockAllowlist,
       customVideoHosts: customVideoHosts ?? this.customVideoHosts,
+      externalBrowserHosts: externalBrowserHosts ?? this.externalBrowserHosts,
       darkModePreference: darkModePreference ?? this.darkModePreference,
       translateTargetLang:
           translateTargetLang ?? this.translateTargetLang,
@@ -853,6 +879,7 @@ class DownloadSettings {
     'downloadDestination': downloadDestination,
     'searchEngine': searchEngine.toJson(),
     'adblockEnabled': adblockEnabled,
+    'cloudflareStealthEnabled': cloudflareStealthEnabled,
     'popupBlockingEnabled': popupBlockingEnabled,
     'invisibleRedirectBlockingEnabled': invisibleRedirectBlockingEnabled,
     'adblockFilterSources': [
@@ -870,6 +897,7 @@ class DownloadSettings {
     'browserToolbarPosition': browserToolbarPosition.name,
     'desktopMode': desktopMode,
     'userAgentProfile': userAgentProfile,
+    'customUserAgent': customUserAgent,
     'privateMode': privateMode,
     'wifiOnly': wifiOnly,
     'readerMode': readerMode,
@@ -881,7 +909,8 @@ class DownloadSettings {
       'downloadLinkBehavior': downloadLinkBehavior.name,
     'trackerBlockingEnabled': trackerBlockingEnabled,
       'adblockAllowlist': adblockAllowlist,
-      'customVideoHosts': customVideoHosts,
+    'customVideoHosts': customVideoHosts,
+    'externalBrowserHosts': externalBrowserHosts,
       'darkModePreference': darkModePreference.name,
     'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
@@ -935,6 +964,8 @@ class DownloadSettings {
           : defaults.searchEngine,
       adblockEnabled:
           json['adblockEnabled'] as bool? ?? defaults.adblockEnabled,
+      cloudflareStealthEnabled:
+          json['cloudflareStealthEnabled'] as bool? ?? true,
       popupBlockingEnabled:
           json['popupBlockingEnabled'] as bool? ??
           defaults.popupBlockingEnabled,
@@ -972,6 +1003,7 @@ class DownloadSettings {
       ),
       desktopMode: json['desktopMode'] as bool? ?? false,
       userAgentProfile: json['userAgentProfile'] as String? ?? 'mobile',
+      customUserAgent: json['customUserAgent'] as String? ?? '',
       privateMode: json['privateMode'] as bool? ?? false,
       wifiOnly: json['wifiOnly'] as bool? ?? false,
       readerMode: json['readerMode'] as bool? ?? false,
@@ -993,7 +1025,13 @@ class DownloadSettings {
       adblockAllowlist: (json['adblockAllowlist'] as List?)
           ?.cast<String>() ?? defaults.adblockAllowlist,
       customVideoHosts: (json['customVideoHosts'] as List?)
-          ?.cast<String>() ?? defaults.customVideoHosts,
+              ?.map((e) => e.toString())
+              .toList() ??
+          defaults.customVideoHosts,
+      externalBrowserHosts: (json['externalBrowserHosts'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          defaults.externalBrowserHosts,
       darkModePreference: DarkModePreference.values.byName(
         json['darkModePreference'] as String? ??
             defaults.darkModePreference.name,
@@ -1200,7 +1238,17 @@ class DownloadSettingsStore {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    await file.writeAsString(jsonEncode(settings.toJson()));
+    final encoded = jsonEncode(settings.toJson());
+    final tempFile = File('${file.path}.tmp');
+    await tempFile.writeAsString(encoded, flush: true);
+    try {
+      await tempFile.rename(file.path);
+    } catch (_) {
+      await tempFile.copy(file.path);
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
   }
 
   Future<File> _settingsFile() async {

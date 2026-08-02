@@ -116,8 +116,7 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
   Future<void> _export(VaultEntry entry) async {
     final docs = await getApplicationDocumentsDirectory();
     final safe = VaultService.sanitizeVaultName(entry.name) ?? 'export.vault';
-    // Export as .bin so we never write a path-controlled name with separators.
-    final dest = p.join(docs.path, 'vault_export', '$safe.bin');
+    final dest = p.join(docs.path, 'vault_export', safe);
     final ok = await widget.vault.export(entry.name, dest, authed: true);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

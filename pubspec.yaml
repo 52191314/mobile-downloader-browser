@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.4.5+29
+version: 3.1.0+44
 
 environment:
   sdk: ^3.8.1
@@ -42,6 +42,10 @@ dependencies:
   flutter_inappwebview: ^6.1.5
   dynamic_color: ^1.7.0
   libtorrent_flutter: ^1.8.5
+  google_sign_in: ^6.2.2
+  googleapis: ^16.0.0
+  extension_google_sign_in_as_googleapis_auth: ^2.0.1
+  googleapis_auth: ^2.0.0
   video_player: ^2.9.3
   chewie: ^1.10.0
   connectivity_plus: ^7.3.0
@@ -56,10 +60,16 @@ dependencies:
   pointycastle: ^3.9.1
   local_auth: ^3.0.2
   flutter_secure_storage: ^10.3.1
-  ffmpeg_kit_flutter_new_min_gpl: ^2.5.3
+  # Local forks: the Android pluginClass is removed so the plugins are NOT
+  # registered at launch (their native libs live in Play on-demand modules).
+  # They are registered at runtime after SplitInstall — see MainActivity.kt
+  # registerPlugin() and ffmpeg_module_loader.dart.
+  ffmpeg_kit_flutter_new_min_gpl:
+    path: packages/ffmpeg_kit_flutter_new_min_gpl
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
-  media_kit_libs_android_video: ^1.3.8
+  media_kit_libs_android_video:
+    path: packages/media_kit_libs_android_video
 
 dev_dependencies:
   flutter_test:
@@ -89,8 +99,9 @@ flutter:
   #   - images/a_dot_ham.jpeg
   assets:
     - assets/browser_guard.js
-    - assets/brand/aurora-logo-master.png
-    - assets/brand/aurora-logo-red.png
+    - assets/brand/aurora-logo-master.webp
+    - assets/brand/aurora-logo-red.webp
+
 
   # Custom fonts — bundled locally (no network dependency) so the app works
   # fully offline. Inter is the UI typeface; JetBrains Mono is used for
@@ -103,21 +114,3 @@ flutter:
       fonts:
         - asset: assets/fonts/JetBrainsMono.ttf
 
-  # ---------------------------------------------------------------------------
-  # Deferred (on-demand) components — Play Store AAB only.
-  # GitHub / sideload builds ignore this and ship everything in a fat APK.
-  #
-  # The `ffmpeg` component defers ~8–12 MB of native FFmpeg libraries until
-  # the user's first Ultra-gated FFmpeg Studio operation. The Dart loading
-  # code is in [FeatureModuleLoader] (lib/premium/ffmpeg/).
-  #
-  # Flutter deferred components guide:
-  #   https://docs.flutter.dev/perf/deferred-components
-  # Plan:
-  #   docs/play_on_demand_modules_plan.md
-  # ---------------------------------------------------------------------------
-  deferred-components:
-    - name: ffmpeg
-      libraries:
-        - lib/premium/ffmpeg/ffmpeg_runtime.dart
-      android-dynamic-module: ffmpeg

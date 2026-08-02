@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import '../../sniffer/browser_library.dart';
 import '../../sniffer/idm_backup_parser.dart';
 import '../../backup/auto_backup_service.dart';
 import '../../backup/auto_backup_models.dart';
+import '../../backup/unified_backup_database.dart';
 
 import '../../settings/download_settings.dart';
 import '../../settings/onboarding_experiment.dart';
@@ -44,9 +46,13 @@ import '../../premium/watcher/watcher_service.dart';
 import '../../premium/automation/automation_api_service.dart';
 import 'vault_page.dart';
 import 'watcher_page.dart';
+import '../../premium/premium_flags.dart';
+import '../../sync/sync.dart';
 import 'webdav_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
+  final DriveSyncService? driveSyncService;
+  final TextEditingController? folderController;
   final TextEditingController adblockSourceController;
   final TextEditingController customSearchController;
   final DownloadSettings settings;
@@ -70,6 +76,8 @@ class SettingsPage extends StatefulWidget {
 
   const SettingsPage({
     super.key,
+    this.driveSyncService,
+    this.folderController,
     required this.adblockSourceController,
     required this.customSearchController,
     required this.settings,
@@ -173,6 +181,8 @@ class _SettingsPageState extends State<SettingsPage> {
         return _buildAppearancePage();
       case SettingsSection.backup:
         return _buildBackupPage();
+      case SettingsSection.drive:
+        return _buildDrivePage();
       case SettingsSection.pro:
         return _buildProPage();
       case SettingsSection.vault:
@@ -307,6 +317,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ---------------------------------------------------------------------------
   // Hub: grouped navigation rows (replaces uneven 2-col card grid)
+  // NOTE: When adding or updating a Settings entry, update both settings_page.dart (_buildSettingsHub) and sniffer_screen.dart (rawSettingsEntries).
   // ---------------------------------------------------------------------------
 
   Widget _buildSettingsHub() {
@@ -386,37 +397,13 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ]),
             const SizedBox(height: 18),
-            _buildSectionTitle('Data & account'),
+            _buildSectionTitle('Tools & Sync'),
             _buildNavGroup([
               _NavItem(
                 icon: Icons.backup_rounded,
                 title: 'Backup',
                 subtitle: 'Save and restore app data',
                 onTap: () => _openPage(_buildBackupPage()),
-              ),
-              _NavItem(
-                icon: isPro
-                    ? Icons.auto_awesome
-                    : Icons.auto_awesome_outlined,
-                title: 'Aurora Pro & Ultra',
-                subtitle: isPro
-                    ? 'Premium features unlocked'
-                    : 'Unlock premium features',
-                onTap: () => _openPage(_buildProPage()),
-              ),
-              _NavItem(
-                icon: Icons.shield_outlined,
-                title: 'Private Vault',
-                subtitle: isPro
-                    ? 'Encrypted file storage'
-                    : 'Secure private storage — Pro feature',
-                onTap: () {
-                  if (!isPro) {
-                    showProUpsell(context, ProFeature.privateVault);
-                    return;
-                  }
-                  _openPage(_buildVaultPage());
-                },
               ),
               _NavItem(
                 icon: Icons.cloud_outlined,
@@ -430,6 +417,35 @@ class _SettingsPageState extends State<SettingsPage> {
                     return;
                   }
                   _openPage(const WebdavSettingsPage());
+                },
+              ),
+              if (kDriveSyncEnabled)
+                _NavItem(
+                  icon: Icons.cloud_outlined,
+                  title: 'Google Drive Sync',
+                  subtitle: isPro
+                      ? 'Cloud sync and auto-upload'
+                      : 'Cloud sync — Pro feature',
+                  onTap: () {
+                    if (!isPro) {
+                      showProUpsell(context, ProFeature.driveSync);
+                      return;
+                    }
+                    _openPage(_buildDrivePage());
+                  },
+                ),
+              _NavItem(
+                icon: Icons.shield_outlined,
+                title: 'Private Vault',
+                subtitle: isPro
+                    ? 'Encrypted file storage'
+                    : 'Secure private storage — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.privateVault);
+                    return;
+                  }
+                  _openPage(_buildVaultPage());
                 },
               ),
               if (widget.watcherService != null)
@@ -452,6 +468,34 @@ class _SettingsPageState extends State<SettingsPage> {
                     );
                   },
                 ),
+            ]),
+            const SizedBox(height: 18),
+            _buildSectionTitle('Advanced'),
+            _buildNavGroup([
+              _NavItem(
+                icon: Icons.api_rounded,
+                title: 'Automation API',
+                subtitle: isPro
+                    ? 'Local REST server for scripts'
+                    : 'REST API & Tasker integration — Pro feature',
+                onTap: () {
+                  if (!isPro) {
+                    showProUpsell(context, ProFeature.automationApi);
+                    return;
+                  }
+                  _openPage(_buildAutomationPage());
+                },
+              ),
+              _NavItem(
+                icon: isPro
+                    ? Icons.auto_awesome
+                    : Icons.auto_awesome_outlined,
+                title: 'Aurora Pro & Ultra',
+                subtitle: isPro
+                    ? 'Premium features unlocked'
+                    : 'Unlock premium features',
+                onTap: () => _openPage(_buildProPage()),
+              ),
             ]),
             const SizedBox(height: 18),
             _buildSectionTitle('About'),
@@ -1609,6 +1653,7 @@ class _SettingsPageState extends State<SettingsPage> {
     var localProxyUser = _settings.proxyUsername;
     var localProxyPass = _settings.proxyPassword;
     var localUaProfile = _settings.userAgentProfile;
+    var localCustomUa = _settings.customUserAgent;
     // Mutable copy of per-site UA overrides for the list editor.
     final localSiteUas = Map<String, String>.from(_settings.siteUserAgents);
 
@@ -1751,6 +1796,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),
                   DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),
                   DropdownMenuItem(value: 'safari', child: Text('Safari')),
+                  DropdownMenuItem(value: 'custom', child: Text('Custom User-Agent')),
                 ],
                 onChanged: (v) {
                   localUaProfile = v ?? 'mobile';
@@ -1759,6 +1805,24 @@ class _SettingsPageState extends State<SettingsPage> {
                   ));
                 },
               ),
+              if (localUaProfile == 'custom') ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  initialValue: localCustomUa,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom User-Agent string',
+                    hintText: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)...',
+                    isDense: true,
+                  ),
+                  onChanged: (v) {
+                    localCustomUa = v;
+                    _update(_settings.copyWith(
+                      userAgentProfile: 'custom',
+                      customUserAgent: localCustomUa,
+                    ));
+                  },
+                ),
+              ],
               const SizedBox(height: 16),
               // Per-site UA overrides — Pro feature
               _buildPerSiteUaSection(localSiteUas),
@@ -2314,6 +2378,7 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (context, _) {
           final isPro = widget.proEntitlement.isPro;
           final tier = widget.proEntitlement.tier;
+          final isUltra = tier == EntitlementTier.ultra;
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -2321,21 +2386,27 @@ class _SettingsPageState extends State<SettingsPage> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: isPro
-                      ? context.ac.statusSuccess.withOpacity(0.12)
-                      : context.ac.accentFrost.withOpacity(0.10),
+                  color: isUltra
+                      ? context.ac.accentPurple.withValues(alpha: 0.14)
+                      : (isPro
+                          ? context.ac.statusSuccess.withValues(alpha: 0.12)
+                          : context.ac.accentFrost.withValues(alpha: 0.10)),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isPro
-                        ? context.ac.statusSuccess.withOpacity(0.3)
-                        : context.ac.accentFrost.withOpacity(0.25),
+                    color: isUltra
+                        ? context.ac.accentPurple.withValues(alpha: 0.4)
+                        : (isPro
+                            ? context.ac.statusSuccess.withValues(alpha: 0.3)
+                            : context.ac.accentFrost.withValues(alpha: 0.25)),
                   ),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       isPro ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-                      color: isPro ? context.ac.statusSuccess : context.ac.accentFrost,
+                      color: isUltra
+                          ? context.ac.accentPurple
+                          : (isPro ? context.ac.statusSuccess : context.ac.accentFrost),
                       size: 36,
                     ),
                     const SizedBox(width: 16),
@@ -2344,7 +2415,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isPro ? 'Aurora Pro — Active' : 'Aurora Pro',
+                            isUltra
+                                ? 'Aurora Ultra — Active'
+                                : (isPro ? 'Aurora Pro — Active' : 'Aurora Pro'),
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -2353,9 +2426,11 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            isPro
-                                ? 'All premium features are unlocked.'
-                                : 'Unlock premium features with a one-time purchase.',
+                            isUltra
+                                ? 'All Pro & Ultra features are unlocked.'
+                                : (isPro
+                                    ? 'Pro features unlocked. Upgrade to Ultra for FFmpeg studio & advanced tools.'
+                                    : 'Unlock premium features with a one-time purchase.'),
                             style: TextStyle(
                               fontSize: 13,
                               color: context.ac.textSecondary,
@@ -2416,8 +2491,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
 
-              // Buy / restore (Play channel only for real purchases)
-              if (!isPro) ...[
+              // Buy / upgrade / restore
+              if (!isUltra) ...[
                 // Plan §11: a paying user whose license lapsed must be told
                 // why, not silently dropped to free with no explanation.
                 if (widget.playBilling?.licenseService?.statusMessage
@@ -2457,27 +2532,54 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => _onGetProPressed(context),
-                    icon: const Icon(Icons.shopping_cart_outlined, size: 18),
-                    label: Text(
-                      BuildChannel.isPlay
-                          ? (widget.playBilling?.localizedProPrice != null
-                              ? 'Get Aurora Pro — ${widget.playBilling!.localizedProPrice}'
-                              : 'Get Aurora Pro')
-                          : 'Get Aurora Pro on Google Play',
-                    ),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      textStyle: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                if (isPro) ...[
+                  // Pro tier -> Upgrade to Ultra button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _onGetUltraPressed(context),
+                      icon: const Icon(Icons.bolt, size: 18),
+                      label: Text(
+                        BuildChannel.isPlay
+                            ? ((widget.playBilling?.localizedUltraUpgradePrice ?? widget.playBilling?.localizedUltraPrice) != null
+                                ? 'Upgrade to Aurora Ultra — ${widget.playBilling?.localizedUltraUpgradePrice ?? widget.playBilling!.localizedUltraPrice}'
+                                : 'Upgrade to Aurora Ultra')
+                            : 'Get Aurora Ultra on Google Play',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: context.ac.accentPurple,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        textStyle: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ] else ...[
+                  // Free tier -> Get Pro button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _onGetProPressed(context),
+                      icon: const Icon(Icons.shopping_cart_outlined, size: 18),
+                      label: Text(
+                        BuildChannel.isPlay
+                            ? (widget.playBilling?.localizedProPrice != null
+                                ? 'Get Aurora Pro — ${widget.playBilling!.localizedProPrice}'
+                                : 'Get Aurora Pro')
+                            : 'Get Aurora Pro on Google Play',
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        textStyle: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 if (BuildChannel.isPlay) ...[
                   const SizedBox(height: 8),
                   Center(
@@ -2511,6 +2613,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           );
         },
+
       ),
     );
   }
@@ -2534,6 +2637,39 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     }
   }
+
+  Future<void> _onGetUltraPressed(BuildContext context) async {
+    final billing = widget.playBilling;
+    if (!BuildChannel.isPlay || billing == null) {
+      if (!context.mounted) return;
+      AuroraSnackbar.show(
+        context,
+        'Aurora Ultra is available as a one-time unlock in the Google Play edition of this app.',
+      );
+      return;
+    }
+    final isPro = widget.proEntitlement.tier == EntitlementTier.pro;
+    final ok = isPro ? await billing.buyUltraUpgrade() : await billing.buyUltra();
+    if (!context.mounted) return;
+    if (!ok) {
+      if (isPro && billing.showUltraFull) {
+        final fallbackOk = await billing.buyUltra();
+        if (!context.mounted) return;
+        if (!fallbackOk) {
+          AuroraSnackbar.show(
+            context,
+            billing.lastError ?? 'Could not start purchase.',
+          );
+        }
+      } else {
+        AuroraSnackbar.show(
+          context,
+          billing.lastError ?? 'Could not start purchase.',
+        );
+      }
+    }
+  }
+
 
   Future<void> _onRestoreProPressed(BuildContext context) async {
     final billing = widget.playBilling;
@@ -2801,6 +2937,26 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildDrivePage() {
+    final ds = widget.driveSyncService;
+    final fc = widget.folderController;
+    if (ds == null || fc == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Google Drive Sync')),
+        body: const Center(
+          child: Text('Drive sync unavailable'),
+        ),
+      );
+    }
+    return _DriveSyncPageContent(
+      driveSyncService: ds,
+      folderController: fc,
+      initialState: ds.state,
+      initialConnected: ds.isConnected,
+      proEntitlement: widget.proEntitlement,
+    );
+  }
+
   Widget _buildRulesPage() {
     return _RulesPage(
       proEntitlement: widget.proEntitlement,
@@ -2824,6 +2980,234 @@ class _NavItem {
     required this.onTap,
     this.badge,
   });
+}
+
+/// Detail page for Drive Sync settings with live state subscription.
+class _DriveSyncPageContent extends StatefulWidget {
+  final DriveSyncService driveSyncService;
+  final TextEditingController folderController;
+  final DriveSyncState initialState;
+  final bool initialConnected;
+  final ProEntitlement proEntitlement;
+
+  const _DriveSyncPageContent({
+    required this.driveSyncService,
+    required this.folderController,
+    required this.initialState,
+    required this.initialConnected,
+    required this.proEntitlement,
+  });
+
+  @override
+  State<_DriveSyncPageContent> createState() => _DriveSyncPageContentState();
+}
+
+class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
+  late DriveSyncState _state;
+  late bool _connected;
+  StreamSubscription<DriveSyncState>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _state = widget.initialState;
+    _connected = widget.initialConnected;
+    _sub = widget.driveSyncService.onStateChanged.listen((s) {
+      if (mounted) {
+        setState(() {
+          _state = s;
+          _connected = s.status == DriveConnectionStatus.connected;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Drive Sync')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PanelHeader(
+            icon: Icons.cloud_rounded,
+            title: 'Drive Sync',
+            trailing: TextButton(
+              onPressed: _connected
+                  ? () => widget.driveSyncService.disconnect()
+                  : !widget.proEntitlement.isPro
+                      ? () => showProUpsell(context, ProFeature.driveSync)
+                      : () => widget.driveSyncService.connect(),
+              child: Text(_connected ? 'Disconnect' : 'Link'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Panel(
+            child: _connected
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Connected as ${_state.account ?? "Unknown"}',
+                        style: TextStyle(
+                          color: context.ac.accentFrost,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Daily usage: ${_state.dailyUploadCount} / ${_state.dailyUploadLimit} files synced today (${widget.proEntitlement.tier.name.toUpperCase()} tier)',
+                        style: TextStyle(
+                          color: context.ac.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (_state.errorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _state.errorMessage!,
+                          style: TextStyle(
+                            color: context.ac.statusError,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: widget.folderController,
+                              decoration: InputDecoration(
+                                labelText: 'Upload folder',
+                                isDense: true,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: () => widget.driveSyncService
+                                .setDestinationFolder(
+                                  widget.folderController.text,
+                                ),
+                            child: const Text('Set folder'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        title: const Text('Auto upload completed files'),
+                        value: _state.autoSyncEnabled,
+                        onChanged: (v) {
+                          if (v && !widget.proEntitlement.isPro) {
+                            showProUpsell(context, ProFeature.driveSync);
+                          } else {
+                            widget.driveSyncService.setAutoSyncEnabled(v);
+                          }
+                        },
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      if (_state.autoSyncEnabled) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Text(
+                              'Upload Schedule',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: context.ac.textPrimary,
+                              ),
+                            ),
+                            const Spacer(),
+                            DropdownButton<DriveUploadInterval>(
+                              value: _state.uploadInterval,
+                              underline: const SizedBox.shrink(),
+                              items: DriveUploadInterval.values
+                                  .map((interval) => DropdownMenuItem(
+                                        value: interval,
+                                        child: Text(
+                                          interval.label,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: context.ac.textPrimary,
+                                          ),
+                                        ),
+                                      ))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  widget.driveSyncService.setUploadInterval(val);
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          if (_state.pendingUploadCount > 0)
+                            Expanded(
+                              child: Text(
+                                '${_state.pendingUploadCount} task(s) queued for sync',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.ac.accentFrost,
+                                ),
+                              ),
+                            )
+                          else
+                            const Spacer(),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.sync_rounded, size: 18),
+                            label: const Text('Sync now'),
+                            onPressed: () => widget.driveSyncService.syncNow(),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Column(
+                    children: [
+                      Text(
+                        'Link Google Drive to auto-upload completed downloads.',
+                        style: TextStyle(
+                          color: context.ac.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.link),
+                          label: const Text('Link Google Drive'),
+                          onPressed: () {
+                            if (!widget.proEntitlement.isPro) {
+                              showProUpsell(context, ProFeature.driveSync);
+                            } else {
+                              widget.driveSyncService.connect();
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Manages remembered "don't ask again" choices for opening external apps
@@ -3136,7 +3520,6 @@ class BackupPage extends StatefulWidget {
 
 class _BackupPageState extends State<BackupPage> {
   BrowserLibrary? _library;
-  bool _loading = true;
 
   bool exportFavorites = true;
   bool exportHistory = true;
@@ -3147,49 +3530,22 @@ class _BackupPageState extends State<BackupPage> {
   bool exportRules = true;
 
   List<Map<String, dynamic>> _localBackups = [];
+  bool _isExporting = false;
 
   @override
   void initState() {
     super.initState();
-    _loadLibrary();
     _loadLocalBackups();
-  }
-
-  Future<void> _loadLibrary() async {
-    final lib = await const BrowserLibraryStore().load();
-    if (mounted) {
-      setState(() {
-        _library = lib;
-        _loading = false;
-      });
-    }
   }
 
   Future<void> _loadLocalBackups() async {
     try {
-      final root = DownloadSettings.mediaStoreRelativeFromDisplay(
-        widget.settings.downloadDestination,
-      );
-      // Manual exports land in .../Backup; scheduled/one-shot auto in .../Auto Backup.
-      // Also scan legacy roots so old installs remain restorable.
-      final roots = <String>{
-        '$root/Backup',
-        '$root/Auto Backup',
-        'Download/Aurora Downloader/Backup',
-        'Download/Aurora Downloader/Auto Backup',
-        'Download/Aurora Downloads/Backups',
-        'Download/Aurora Downloads/Backup',
-      };
+      final items = await PublicDownloadsService.listBackupFiles();
       final seen = <String>{};
       final files = <Map<String, dynamic>>[];
-      for (final relativePath in roots) {
-        final items = await PublicDownloadsService.listBackupFiles(
-          relativePath: relativePath,
-        );
-        for (final item in items) {
-          final key = (item['uri'] ?? item['displayName'] ?? item).toString();
-          if (seen.add(key)) files.add(item);
-        }
+      for (final item in items) {
+        final key = (item['uri'] ?? item['displayName'] ?? item).toString();
+        if (seen.add(key)) files.add(item);
       }
       files.sort((a, b) {
         final da = (a['dateModified'] as num?)?.toInt() ?? 0;
@@ -3219,6 +3575,8 @@ class _BackupPageState extends State<BackupPage> {
   }
 
   Future<void> _exportBackup() async {
+    if (_isExporting) return;
+    setState(() => _isExporting = true);
     try {
       final List<Map<String, dynamic>>? downloadQueueJson = exportQueue
           ? widget.downloadQueue.allTasks.map((t) => t.toJson()).toList()
@@ -3236,7 +3594,8 @@ class _BackupPageState extends State<BackupPage> {
         try {
           final tabsFile = File('$baseDir/browser_tabs.json');
           if (await tabsFile.exists()) {
-            final decodedTabs = jsonDecode(await tabsFile.readAsString());
+            final raw = await tabsFile.readAsString();
+            final decodedTabs = await Isolate.run(() => jsonDecode(raw));
             if (decodedTabs is List) {
               tabsJson = decodedTabs.whereType<Map<String, dynamic>>().toList();
             }
@@ -3250,20 +3609,21 @@ class _BackupPageState extends State<BackupPage> {
           if (await rulesFile.exists()) {
             final content = await rulesFile.readAsString();
             if (content.trim().isNotEmpty) {
-              downloadRulesJson = jsonDecode(content);
+              downloadRulesJson = await Isolate.run(() => jsonDecode(content));
             }
           }
         } catch (_) {}
       }
 
-      // Include extra app JSON files if present
+      // Include extra app JSON files if present (skipping caches and temp files)
       try {
         final dir = Directory(baseDir);
         if (await dir.exists()) {
-          await for (final entity in dir.list()) {
+          final entities = await dir.list().toList();
+          for (final entity in entities) {
             if (entity is! File || !entity.path.endsWith('.json')) continue;
             final name = p.basename(entity.path);
-            if (name.startsWith('sniffed_media_cache_')) continue;
+            if (name.startsWith('sniffed_media_cache_') || name.startsWith('temp_')) continue;
             final key = p.basenameWithoutExtension(name);
             if (const [
               'download_queue',
@@ -3278,22 +3638,38 @@ class _BackupPageState extends State<BackupPage> {
             try {
               final content = await entity.readAsString();
               if (content.trim().isNotEmpty) {
-                extraJson[key] = jsonDecode(content);
+                final decoded = await Isolate.run(() => jsonDecode(content));
+                extraJson[key] = decoded;
               }
             } catch (_) {}
           }
         }
       } catch (_) {}
 
-      final file = await const BrowserLibraryStore().exportToFile(
-        exportFavorites: exportFavorites,
-        exportHistory: exportHistory,
-        exportSavedPages: exportSavedPages,
-        downloadQueueJson: downloadQueueJson,
-        settingsJson: settingsJson,
-        tabsJson: tabsJson,
-        downloadRulesJson: downloadRulesJson,
-        extraJson: extraJson.isNotEmpty ? extraJson : null,
+      final library = await const BrowserLibraryStore().load();
+      final favoritesJson = exportFavorites
+          ? library.favorites.map((f) => f.toJson()).toList()
+          : null;
+      final foldersJson = exportFavorites
+          ? library.folders.map((f) => f.toJson()).toList()
+          : null;
+      final historyJson = exportHistory
+          ? library.history.map((h) => h.toJson()).toList()
+          : null;
+      final savedPagesJson = exportSavedPages
+          ? library.savedPages.map((p) => p.toJson()).toList()
+          : null;
+
+      final file = await UnifiedBackupDatabase.exportTransactionalDatabase(
+        downloadQueue: downloadQueueJson,
+        settings: settingsJson,
+        favorites: favoritesJson,
+        folders: foldersJson,
+        history: historyJson,
+        savedPages: savedPagesJson,
+        tabs: tabsJson,
+        downloadRules: downloadRulesJson,
+        extra: extraJson.isNotEmpty ? extraJson : null,
       );
 
       final root = DownloadSettings.mediaStoreRelativeFromDisplay(
@@ -3320,6 +3696,10 @@ class _BackupPageState extends State<BackupPage> {
       _showSnack('Done \u2014 backup saved as ${p.basename(file.path)}');
     } catch (error) {
       _showSnack('Couldn\'t export backup. $error. Check storage and try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isExporting = false);
+      }
     }
   }
 
@@ -3328,12 +3708,8 @@ class _BackupPageState extends State<BackupPage> {
       final actualPath = filePath ?? await PublicDownloadsService.pickImportFile();
       if (actualPath == null) return;
 
-      final Map<String, dynamic> decoded;
-      if (actualPath.toLowerCase().endsWith('.1dmbak')) {
-        decoded = await IdmBackupParser.parse(actualPath);
-      } else {
-        decoded = await const BrowserLibraryStore().readImportMap(actualPath);
-      }
+      final Map<String, dynamic> decoded =
+          await UnifiedBackupDatabase.parseBackupFileTransactional(actualPath);
 
       final hasFavorites = decoded.containsKey('favorites') && (decoded['favorites'] is List) && (decoded['favorites'] as List).isNotEmpty;
       final hasHistory = decoded.containsKey('history') && (decoded['history'] is List) && (decoded['history'] as List).isNotEmpty;
@@ -3520,7 +3896,7 @@ class _BackupPageState extends State<BackupPage> {
       bool importedRules = false;
       String? activeTabUrlToReopen;
 
-      BrowserLibrary updatedLibrary = _library ?? BrowserLibrary.empty();
+      BrowserLibrary updatedLibrary = await const BrowserLibraryStore().load();
 
       // 1. App Settings
       if (importSettings && decoded.containsKey('settings')) {
@@ -3871,7 +4247,6 @@ class _BackupPageState extends State<BackupPage> {
       }
 
       widget.libraryUpdateNotifier.value++;
-      await _loadLibrary();
 
       // Open active restored tab in browser view if requested
       final targetUrl = activeTabUrlToReopen;
@@ -3947,9 +4322,7 @@ class _BackupPageState extends State<BackupPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Backup & Restore')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
+      body: SafeArea(
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
@@ -3973,7 +4346,7 @@ class _BackupPageState extends State<BackupPage> {
                           activeColor: context.ac.accentFrost,
                           title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            '${_library?.favorites.length ?? 0} favorites, ${_library?.folders.length ?? 0} folders',
+                            'Saved bookmarks and folders',
                             style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportFavorites,
@@ -3983,7 +4356,7 @@ class _BackupPageState extends State<BackupPage> {
                           activeColor: context.ac.accentFrost,
                           title: Text('Web History', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            '${_library?.history.length ?? 0} entries',
+                            'Browser history entries',
                             style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportHistory,
@@ -3993,7 +4366,7 @@ class _BackupPageState extends State<BackupPage> {
                           activeColor: context.ac.accentFrost,
                           title: Text('Saved Pages', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            '${_library?.savedPages.length ?? 0} pages',
+                            'Offline saved pages',
                             style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportSavedPages,
@@ -4041,19 +4414,29 @@ class _BackupPageState extends State<BackupPage> {
                         ),
                         const SizedBox(height: 12),
                         ElevatedButton.icon(
-                          icon: const Icon(Icons.share_rounded),
-                          label: const Text('Export backup file'),
+                          icon: _isExporting
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: context.ac.surfaceField,
+                                  ),
+                                )
+                              : const Icon(Icons.share_rounded),
+                          label: Text(_isExporting ? 'Exporting...' : 'Export backup file'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: context.ac.accentFrost,
                             foregroundColor: context.ac.surfaceField,
                           ),
-                          onPressed: (!exportFavorites &&
-                                  !exportHistory &&
-                                  !exportSavedPages &&
-                                  !exportQueue &&
-                                  !exportSettings &&
-                                  !exportTabs &&
-                                  !exportRules)
+                          onPressed: (_isExporting ||
+                                  (!exportFavorites &&
+                                      !exportHistory &&
+                                      !exportSavedPages &&
+                                      !exportQueue &&
+                                      !exportSettings &&
+                                      !exportTabs &&
+                                      !exportRules))
                               ? null
                               : _exportBackup,
                         ),

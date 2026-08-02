@@ -24,6 +24,7 @@ class SiteProfile {
   // Download settings overrides
   final String? downloadFolder; // override download destination
   final Map<String, String>? customHeaders; // extra HTTP headers
+  final String? downloadLinkBehavior; // override download link behavior ("ask", "autoDownload", "capture", "block")
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -39,6 +40,7 @@ class SiteProfile {
     this.replaceSitePlayer,
     this.downloadFolder,
     this.customHeaders,
+    this.downloadLinkBehavior,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -53,6 +55,7 @@ class SiteProfile {
     Object? replaceSitePlayer = _sentinel,
     Object? downloadFolder = _sentinel,
     Object? customHeaders = _sentinel,
+    Object? downloadLinkBehavior = _sentinel,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -79,6 +82,9 @@ class SiteProfile {
       customHeaders: identical(customHeaders, _sentinel)
           ? this.customHeaders
           : customHeaders as Map<String, String>?,
+      downloadLinkBehavior: identical(downloadLinkBehavior, _sentinel)
+          ? this.downloadLinkBehavior
+          : downloadLinkBehavior as String?,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -97,6 +103,8 @@ class SiteProfile {
         if (downloadFolder != null) 'downloadFolder': downloadFolder,
         if (customHeaders != null && customHeaders!.isNotEmpty)
           'customHeaders': customHeaders,
+        if (downloadLinkBehavior != null)
+          'downloadLinkBehavior': downloadLinkBehavior,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -119,6 +127,7 @@ class SiteProfile {
       replaceSitePlayer: json['replaceSitePlayer'] as bool?,
       downloadFolder: json['downloadFolder'] as String?,
       customHeaders: headers,
+      downloadLinkBehavior: json['downloadLinkBehavior'] as String?,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
       updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??

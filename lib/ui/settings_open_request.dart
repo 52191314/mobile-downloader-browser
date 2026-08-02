@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// Sections opened from the browser overflow Settings list (full-screen pages).
 /// There is no separate Settings hub tab — each section is pushed over Browser.
 enum SettingsSection {
@@ -15,6 +13,7 @@ enum SettingsSection {
   profiles,
   appearance,
   backup,
+  drive,
   pro,
   vault,
   webdav,

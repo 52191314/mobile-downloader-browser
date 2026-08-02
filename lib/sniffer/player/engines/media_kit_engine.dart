@@ -1,12 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:media_kit/media_kit.dart' as media_kit;
+import 'package:media_kit_video/media_kit_video.dart' as media_kit_video;
 
 import '../playback_engine.dart';
 import '../playback_source.dart';
 import '../playback_state.dart';
+import '../../../premium/ffmpeg/ffmpeg_module_loader.dart';
 
 /// `media_kit` / libmpv backend.
 ///
@@ -14,17 +15,42 @@ import '../playback_state.dart';
 /// when ExoPlayer opens a stream and renders nothing. It also reports real
 /// error strings from mpv rather than one opaque PlatformException.
 class MediaKitEngine extends PlaybackEngineBase {
-  Player? _player;
-  VideoController? _videoController;
+  dynamic _player;
+  dynamic _videoController;
   final List<StreamSubscription<dynamic>> _subs = [];
+  bool _isLoaded = false;
 
   int _generation = 0;
 
   @override
   PlaybackEngineKind get kind => PlaybackEngineKind.mediaKit;
 
+  Future<bool> _ensureLoaded() async {
+    if (_isLoaded) return true;
+    try {
+      // Download the :mediakit on-demand module from Play Store if needed.
+      final installed =
+          await FeatureModuleLoader.instance.ensureInstalled('mediakit');
+      if (!installed) {
+        debugPrint('[MediaKitEngine] mediakit module not available');
+        return false;
+      }
+      media_kit.MediaKit.ensureInitialized();
+      _isLoaded = true;
+      return true;
+    } catch (e, s) {
+      debugPrint('[MediaKitInitError] $e\n$s');
+      return false;
+    }
+  }
+
   @override
   Future<void> open(PlaybackSource source) async {
+    final loaded = await _ensureLoaded();
+    if (!loaded) {
+      fail('MediaKit native library is unavailable.');
+      return;
+    }
     currentSource = source;
     emit(const PlaybackState(status: PlaybackStatus.opening));
 
@@ -47,13 +73,13 @@ class MediaKitEngine extends PlaybackEngineBase {
     final generation = ++_generation;
 
     try {
-      final player = Player();
+      final player = media_kit.Player();
       _player = player;
-      _videoController = VideoController(player);
+      _videoController = media_kit_video.VideoController(player);
       _wireStreams(player, generation);
 
       await player.open(
-        Media(source.url, httpHeaders: source.headers),
+        media_kit.Media(source.url, httpHeaders: source.headers),
         play: true,
       );
       if (isDisposed || generation != _generation) return;
@@ -73,7 +99,7 @@ class MediaKitEngine extends PlaybackEngineBase {
     }
   }
 
-  void _wireStreams(Player player, int generation) {
+  void _wireStreams(dynamic player, int generation) {
     bool stale() => isDisposed || generation != _generation;
 
     _subs.addAll([
@@ -157,11 +183,11 @@ class MediaKitEngine extends PlaybackEngineBase {
   Widget buildSurface({BoxFit fit = BoxFit.contain}) {
     final controller = _videoController;
     if (controller == null) return const SizedBox.expand();
-    return Video(
+    return media_kit_video.Video(
       controller: controller,
       fit: fit,
       // The screen owns every control; the packaged ones would double up.
-      controls: NoVideoControls,
+      controls: media_kit_video.NoVideoControls,
       fill: const Color(0xFF000000),
       // AuroraPlayerScreen owns keep-awake for both backends via the
       // player_window channel. Leaving this on would make media_kit the only
@@ -172,8 +198,8 @@ class MediaKitEngine extends PlaybackEngineBase {
 
   // --- Scrub preview ---------------------------------------------------
 
-  Player? _previewPlayer;
-  VideoController? _previewController;
+  dynamic _previewPlayer;
+  dynamic _previewController;
   bool _previewStarting = false;
   bool _previewReady = false;
 
@@ -192,10 +218,12 @@ class MediaKitEngine extends PlaybackEngineBase {
 
     _previewStarting = true;
     try {
-      final player = Player();
-      final controller = VideoController(player);
+      final loaded = await _ensureLoaded();
+      if (!loaded) return;
+      final player = media_kit.Player();
+      final controller = media_kit_video.VideoController(player);
       await player.open(
-        Media(source.url, httpHeaders: source.headers),
+        media_kit.Media(source.url, httpHeaders: source.headers),
         play: false,
       );
       await player.setVolume(0);
@@ -233,10 +261,10 @@ class MediaKitEngine extends PlaybackEngineBase {
   Widget? buildScrubPreview() {
     final controller = _previewController;
     if (controller == null || !_previewReady) return null;
-    return Video(
+    return media_kit_video.Video(
       controller: controller,
       fit: BoxFit.cover,
-      controls: NoVideoControls,
+      controls: media_kit_video.NoVideoControls,
       fill: const Color(0xFF000000),
       wakelock: false,
     );

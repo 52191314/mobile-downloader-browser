@@ -144,6 +144,20 @@ Future<void> showMediaPreview(
         buildSniffedDownloadHeaders: buildSniffedDownloadHeaders,
       );
     }
+    // Automatically pause onsite webpage HTML5 video & audio elements before
+    // launching custom player to prevent dual playback, dual audio, and data waste.
+    try {
+      await activeTab.controller.evaluateJavaScript('''
+(function() {
+  try {
+    var media = document.querySelectorAll('video, audio');
+    for (var i = 0; i < media.length; i++) {
+      try { media[i].pause(); } catch(e) {}
+    }
+  } catch(e) {}
+})();
+''');
+    } catch (_) {}
 
     final result = await Navigator.push<String>(
       context,

@@ -7,9 +7,11 @@ import android.content.ContentUris
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.media.MediaScannerConnection
 import android.Manifest
@@ -40,9 +42,26 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+// Play on-demand plugin runtime registration (forked plugins omit pluginClass
+// so they are NOT registered at launch — see packages/ffmpeg_kit_flutter_new_min_gpl
+// and packages/media_kit_libs_android_video).
+import com.antonkarpenko.ffmpegkit.FFmpegKitFlutterPlugin
+import com.alexmercerind.media_kit_libs_android_video.MediaKitLibsAndroidVideoPlugin
 import android.provider.DocumentsContract
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebView
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.browser.customtabs.CustomTabsClient
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.app.PendingIntent
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -52,6 +71,8 @@ import java.net.URL
 import java.net.URLEncoder
 import java.nio.ByteBuffer
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     override fun attachBaseContext(newBase: Context) {
@@ -78,6 +99,10 @@ class MainActivity : FlutterActivity() {
     private var pendingPickDirectoryResult: MethodChannel.Result? = null
     private lateinit var nativeDownloadEngine: NativeDownloadEngine
 
+    /// Feature-module plugins registered at runtime after SplitInstall
+    /// (module names tracked so we never double-register in one process).
+    private val _registeredFeaturePlugins = mutableSetOf<String>()
+
     companion object {
         private const val TAG = "AuroraMain"
         private const val PICK_IMPORT_FILE = 1001
@@ -102,6 +127,7 @@ class MainActivity : FlutterActivity() {
                     "shareContentUri" -> shareContentUri(call, result)
                     "pickImportFile" -> pickImportFile(result)
                     "openUrl" -> openUrl(call, result)
+                    "openUrlInChrome" -> openUrlInChrome(call, result)
                     "shareUrl" -> shareUrl(call, result)
                     "remuxTsToMp4" -> remuxTsToMp4(call, result)
                     "listBackupFiles" -> listBackupFiles(call, result)
@@ -231,6 +257,19 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "extractAudio" -> extractAudio(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Capture-sheet video thumbnails: decode one frame out of a remote
+        // stream. The scraped-poster paths (a <video poster> attribute, a
+        // nearby <img>, the page's og:image) only cover pages that happen to
+        // publish artwork, and none of them is a frame of the file the user is
+        // about to download. This is.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/media_thumbnail")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "frameAt" -> videoFrameAt(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -414,6 +453,15 @@ class MainActivity : FlutterActivity() {
                             result.error("deferred_error", e.message, null)
                         }
                     }
+                    "registerPlugin" -> {
+                        // Registers the native plugin for an on-demand module in
+                        // THIS process, after SplitInstall completed and
+                        // SplitCompat made the module's .so loadable. Without this
+                        // the plugin classes are never registered (they were
+                        // stripped from GeneratedPluginRegistrant via the fork).
+                        val moduleName = call.argument<String>("module") ?: "ffmpeg"
+                        result.success(registerFeaturePlugin(moduleName))
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -433,6 +481,82 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // -------------------------------------------------------------------
+        // WebView Stealth — override Sec-CH-UA Client Hints to replace
+        // "Android WebView" with "Google Chrome" in the brand list.
+        // Uses AndroidX WebKit's WebSettingsCompat.setUserAgentMetadata().
+        // -------------------------------------------------------------------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/webview_stealth")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "applyStealthMetadata" -> {
+                        val chromeVersion = call.argument<String>("chromeVersion") ?: "131.0.6778.135"
+                        runOnUiThread {
+                            val count = applyStealthMetadataToAllWebViews(chromeVersion)
+                            Log.d(TAG, "applyStealthMetadata: applied to $count WebView(s), chromeVersion=$chromeVersion")
+                            result.success(count > 0)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // -------------------------------------------------------------------
+        // Chrome Custom Tabs — in-app browser overlay with "Sniff & Download"
+        // toolbar button for WAF-blocked hosts (xchina.co).
+        // -------------------------------------------------------------------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/cct")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "openCustomTab" -> openCustomTab(call, result)
+                    "isCustomTabSupported" -> result.success(isCustomTabSupported())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * Registers the native plugin that backs an on-demand feature module in the
+     * current process.
+     *
+     * The `ffmpeg_kit` and `media_kit_libs_android_video` plugins are forked
+     * locally WITHOUT an Android `pluginClass`, so the base app never registers
+     * them at launch (their static `System.loadLibrary(...)` calls would crash
+     * before the on-demand module is installed). After [SplitInstallManager]
+     * reports the module installed, the Dart side calls back through
+     * `aurora_downloader/feature_delivery` → `registerPlugin`, which:
+     *   1. Re-runs [SplitCompat.install] so the module's native libs become
+     *      loadable via System.loadLibrary in this process.
+     *   2. Adds the plugin instance to the Flutter engine, triggering
+     *      `onAttachedToEngine` — which now finds its native libs present.
+     */
+    private fun registerFeaturePlugin(moduleName: String): Boolean {
+        return try {
+            val engine = flutterEngine ?: return false
+            // Make the just-installed split's native libs loadable now.
+            SplitCompat.install(this)
+            if (!_registeredFeaturePlugins.add(moduleName)) {
+                return true // Already registered in this process.
+            }
+            when (moduleName) {
+                "ffmpeg" -> {
+                    engine.plugins.add(FFmpegKitFlutterPlugin())
+                    true
+                }
+                "mediakit" -> {
+                    engine.plugins.add(MediaKitLibsAndroidVideoPlugin())
+                    true
+                }
+                else -> {
+                    Log.w(TAG, "registerPlugin: unknown module $moduleName")
+                    false
+                }
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "registerPlugin($moduleName) failed", e)
+            false
+        }
     }
 
     /**
@@ -445,6 +569,114 @@ class MainActivity : FlutterActivity() {
      *
      * Returns the output path on success, or an error on failure.
      */
+    /**
+     * Two threads, because [MediaMetadataRetriever] on a remote URL is a
+     * network read followed by a hardware decode. More would put a list scroll
+     * in competition with itself for the same decoder; fewer would make a
+     * screenful of rows resolve one at a time. Dart also caps its own in-flight
+     * requests, so this is the second of two bounds, not the only one.
+     */
+    private val thumbnailExecutor: ExecutorService by lazy {
+        Executors.newFixedThreadPool(2)
+    }
+
+    /**
+     * Decodes a single frame of the video at `url` and returns it as JPEG bytes,
+     * or null when the source cannot be read.
+     *
+     * `headers` matters as much as the URL: these links come out of a browsing
+     * session, so without the referer and cookies the sniffer captured, most
+     * CDNs answer 403 and no frame exists to decode.
+     *
+     * Failure is reported as a null success rather than an error. A CDN that
+     * refuses range requests, a `blob:` URL that was never a real stream, a
+     * codec the device cannot decode -- none of these are faults worth
+     * surfacing, and the caller simply keeps its type icon.
+     */
+    private fun videoFrameAt(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")?.trim() ?: ""
+        if (url.isEmpty()) {
+            result.error("bad_args", "url is required", null)
+            return
+        }
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        val atMs = (call.argument<Int>("atMs") ?: 0).toLong()
+        val maxWidth = (call.argument<Int>("maxWidth") ?: 320).coerceIn(64, 1080)
+
+        thumbnailExecutor.execute {
+            var bytes: ByteArray? = null
+            val retriever = MediaMetadataRetriever()
+            try {
+                if (headers.isEmpty()) {
+                    retriever.setDataSource(url)
+                } else {
+                    retriever.setDataSource(url, headers)
+                }
+
+                // t=0 is a black frame, a fade-in or a distributor logo on a
+                // great many files. Sample a tenth of the way in instead, and
+                // cap that so a two-hour film is not read minutes deep.
+                val durationMs = retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                val targetUs = 1000L * when {
+                    atMs > 0 -> atMs
+                    durationMs > 0 -> (durationMs / 10).coerceAtMost(10_000L)
+                    else -> 0L
+                }
+
+                val frame: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    // Scales during decode, so a 4K keyframe never exists at
+                    // full size in memory (3840x2160 ARGB_8888 is ~33 MB).
+                    retriever.getScaledFrameAtTime(
+                        targetUs,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        maxWidth,
+                        maxWidth * 9 / 16
+                    )
+                } else {
+                    // API 24-26 has no scaling variant. Downscale immediately
+                    // and drop the full-size bitmap.
+                    val full = retriever.getFrameAtTime(
+                        targetUs,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                    )
+                    if (full == null) null else {
+                        try {
+                            if (full.width <= maxWidth) full else {
+                                val h = (full.height.toLong() * maxWidth / full.width)
+                                    .toInt().coerceAtLeast(1)
+                                Bitmap.createScaledBitmap(full, maxWidth, h, true)
+                            }
+                        } finally {
+                            // createScaledBitmap can hand back the original.
+                            if (full.width > maxWidth) full.recycle()
+                        }
+                    }
+                }
+
+                if (frame != null) {
+                    val out = ByteArrayOutputStream()
+                    frame.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                    bytes = out.toByteArray()
+                    frame.recycle()
+                }
+            } catch (e: Throwable) {
+                // Includes OutOfMemoryError on a hostile frame size, which is
+                // still not a reason to take the app down over a thumbnail.
+                Log.d(TAG, "Frame decode failed for $url: ${e.message}")
+            } finally {
+                try {
+                    retriever.release()
+                } catch (_: Throwable) {
+                }
+            }
+
+            val payload = bytes
+            runOnUiThread { result.success(payload) }
+        }
+    }
+
     private fun extractAudio(call: MethodCall, result: MethodChannel.Result) {
         val inputPath = call.argument<String>("inputPath") ?: ""
         val outputPath = call.argument<String>("outputPath") ?: ""
@@ -509,14 +741,19 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun getInitialUrl(): String? {
-        val intent = intent
-        if (intent != null && Intent.ACTION_VIEW == intent.action) {
-            val data = intent.data
-            if (data != null) {
-                val url = data.toString()
+        val intent = intent ?: return null
+        if (Intent.ACTION_VIEW == intent.action || "aurora.ACTION_SNIFF_AND_DOWNLOAD" == intent.action) {
+            val url = intent.getStringExtra("url") ?: intent.data?.toString()
+            if (url != null) {
                 intent.action = null
                 intent.data = null
                 return url
+            }
+        } else if (Intent.ACTION_SEND == intent.action) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!text.isNullOrBlank()) {
+                intent.action = null
+                return text
             }
         }
         return null
@@ -1105,9 +1342,81 @@ class MainActivity : FlutterActivity() {
                 "No app found to open this link.",
                 null
             )
+        }
+    }
+
+    private fun openUrlInChrome(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        val preferChrome = call.argument<Boolean>("preferChrome") ?: true
+        if (url.isNullOrBlank()) {
+            result.error("bad_args", "url is required.", null)
+            return
+        }
+        val uri = Uri.parse(url)
+        try {
+            if (preferChrome) {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        setPackage("com.android.chrome")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                    result.success(true)
+                    return
+                } catch (_: ActivityNotFoundException) {
+                    // Chrome not installed — fall back to default browser chooser
+                }
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(true)
         } catch (e: Exception) {
             result.error("open_failed", e.message, null)
         }
+    }
+
+    private fun openCustomTab(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        if (url.isNullOrBlank()) {
+            result.error("bad_args", "url is required.", null)
+            return
+        }
+        val uri = Uri.parse(url)
+        try {
+            val sniffIntent = Intent(this, MainActivity::class.java).apply {
+                action = "aurora.ACTION_SNIFF_AND_DOWNLOAD"
+                putExtra("url", url)
+                data = uri
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                url.hashCode(),
+                sniffIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val iconBitmap = BitmapFactory.decodeResource(resources, android.R.drawable.ic_menu_save)
+            val builder = CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setShareState(CustomTabsIntent.SHARE_STATE_ON)
+                .setToolbarColor(Color.parseColor("#1E1E2E"))
+                .setActionButton(iconBitmap, "Sniff & Download", pendingIntent, true)
+
+            val customTabsIntent = builder.build()
+            customTabsIntent.launchUrl(this, uri)
+            result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching Chrome Custom Tab: ${e.message}", e)
+            result.error("cct_failed", e.message, null)
+        }
+    }
+
+    private fun isCustomTabSupported(): Boolean {
+        val packageName = CustomTabsClient.getPackageName(this, null)
+        return !packageName.isNullOrEmpty()
     }
 
     /**
@@ -1918,117 +2227,117 @@ class MainActivity : FlutterActivity() {
         if (lower.endsWith(".1dmbak") || lower.endsWith(".bak")) return true
         if (lower.endsWith(".json")) {
             return lower == "aurora_backup.json" ||
-                lower.contains("aurora") ||
-                lower.contains("backup") ||
-                lower.contains("export") ||
-                lower.contains("queue") ||
-                lower.contains("download")
+                lower.startsWith("aurora_auto_backup_") ||
+                lower.startsWith("aurora_backup_") ||
+                lower.contains("aurora_backup") ||
+                lower.contains("aurora_auto_backup") ||
+                lower.contains("1dm_backup") ||
+                lower.contains("idm_backup")
         }
         return false
     }
 
     private fun listBackupFiles(call: MethodCall, result: MethodChannel.Result) {
         val relativePath = call.argument<String>("relativePath") ?: "Download/Aurora Downloader/Backup/"
-        val list = mutableListOf<Map<String, Any>>()
-        val seenKeys = mutableSetOf<String>()
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-        fun addEntry(uriStr: String, name: String, size: Long, dateModified: Long, relPath: String) {
-            val key = if (uriStr.isNotBlank()) uriStr else name
-            if (seenKeys.add(key)) {
-                val kind = when {
-                    relPath.contains("/Auto Backup", ignoreCase = true) ||
-                        relPath.contains("Auto Backup/", ignoreCase = true) ||
-                        name.lowercase().startsWith("aurora_auto_backup_") -> "auto"
-                    else -> "manual"
+        Thread {
+            val list = mutableListOf<Map<String, Any>>()
+            val seenKeys = mutableSetOf<String>()
+
+            fun addEntry(uriStr: String, name: String, size: Long, dateModified: Long, relPath: String) {
+                val key = if (uriStr.isNotBlank()) uriStr else name
+                if (seenKeys.add(key)) {
+                    val kind = when {
+                        relPath.contains("/Auto Backup", ignoreCase = true) ||
+                            relPath.contains("Auto Backup/", ignoreCase = true) ||
+                            name.lowercase().startsWith("aurora_auto_backup_") -> "auto"
+                        else -> "manual"
+                    }
+                    list.add(mapOf(
+                        "uri" to uriStr,
+                        "displayName" to name,
+                        "size" to size,
+                        "dateModified" to dateModified,
+                        "kind" to kind,
+                        "relativePath" to relPath
+                    ))
                 }
-                list.add(mapOf(
-                    "uri" to uriStr,
-                    "displayName" to name,
-                    "size" to size,
-                    "dateModified" to dateModified,
-                    "kind" to kind,
-                    "relativePath" to relPath
-                ))
             }
-        }
 
-        // 1. Query MediaStore Downloads collection (API 29+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // 1. Query MediaStore Downloads collection (API 29+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    val resolver = applicationContext.contentResolver
+                    val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    val projection = arrayOf(
+                        MediaStore.MediaColumns._ID,
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.SIZE,
+                        MediaStore.MediaColumns.DATE_MODIFIED,
+                        MediaStore.MediaColumns.RELATIVE_PATH
+                    )
+                    val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.json' OR " +
+                        "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.1dmbak' OR " +
+                        "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.bak'"
+
+                    resolver.query(uri, projection, selection, null, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                        val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                        val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                        val relCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+
+                        while (cursor.moveToNext()) {
+                            val name = cursor.getString(nameCol) ?: continue
+                            if (!isAuroraBackupFileName(name)) continue
+                            val id = cursor.getLong(idCol)
+                            val size = cursor.getLong(sizeCol)
+                            val date = cursor.getLong(dateCol) * 1000
+                            val rel = cursor.getString(relCol) ?: ""
+                            val contentUri = ContentUris.withAppendedId(uri, id)
+                            addEntry(contentUri.toString(), name, size, date, rel)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "MediaStore query in listBackupFiles failed: ${e.message}")
+                }
+            }
+
+            // 2. Scan dedicated filesystem backup folders (avoiding deep recursive scan of entire root Downloads)
             try {
-                val resolver = applicationContext.contentResolver
-                val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(
-                    MediaStore.MediaColumns._ID,
-                    MediaStore.MediaColumns.DISPLAY_NAME,
-                    MediaStore.MediaColumns.SIZE,
-                    MediaStore.MediaColumns.DATE_MODIFIED,
-                    MediaStore.MediaColumns.RELATIVE_PATH
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val scanDirs = listOf(
+                    File(downloadsDir, "Aurora Downloader/Backup"),
+                    File(downloadsDir, "Aurora Downloader/Auto Backup"),
+                    File(downloadsDir, "Aurora Downloader"),
+                    File(downloadsDir, "Aurora Downloads/Backups"),
+                    File(downloadsDir, "Aurora Downloads/Backup"),
+                    File(downloadsDir, "Aurora Downloads"),
+                    File(downloadsDir, "Aurora"),
                 )
-                // Broad selection: any .json, .1dmbak, or .bak file in Downloads
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.json' OR " +
-                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.1dmbak' OR " +
-                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.bak'"
 
-                resolver.query(uri, projection, selection, null, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-                    val relCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-
-                    while (cursor.moveToNext()) {
-                        val name = cursor.getString(nameCol) ?: continue
-                        if (!isAuroraBackupFileName(name)) continue
-                        val id = cursor.getLong(idCol)
-                        val size = cursor.getLong(sizeCol)
-                        val date = cursor.getLong(dateCol) * 1000
-                        val rel = cursor.getString(relCol) ?: ""
-                        val contentUri = ContentUris.withAppendedId(uri, id)
-                        addEntry(contentUri.toString(), name, size, date, rel)
+                for (dir in scanDirs) {
+                    if (!dir.exists() || !dir.canRead()) continue
+                    val files = dir.listFiles()?.filter { it.isFile } ?: emptyList()
+                    for (file in files) {
+                        if (isAuroraBackupFileName(file.name)) {
+                            val fileUri = Uri.fromFile(file).toString()
+                            val rel = file.parentFile?.name ?: ""
+                            addEntry(fileUri, file.name, file.length(), file.lastModified(), rel)
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "MediaStore query in listBackupFiles failed: ${e.message}")
+                Log.w(TAG, "Filesystem scan in listBackupFiles failed: ${e.message}")
             }
-        }
 
-        // 2. ALWAYS scan filesystem locations (modern & legacy backup directories)
-        try {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val scanDirs = listOf(
-                File(downloadsDir, "Aurora Downloader/Backup"),
-                File(downloadsDir, "Aurora Downloader/Auto Backup"),
-                File(downloadsDir, "Aurora Downloader"),
-                File(downloadsDir, "Aurora Downloads/Backups"),
-                File(downloadsDir, "Aurora Downloads/Backup"),
-                File(downloadsDir, "Aurora Downloads"),
-                File(downloadsDir, "Aurora"),
-                downloadsDir,
-            )
-
-            for (dir in scanDirs) {
-                if (!dir.exists() || !dir.canRead()) continue
-                val files = if (dir == downloadsDir) {
-                    // Immediate children for root Download directory
-                    dir.listFiles()?.filter { it.isFile }?.toList() ?: emptyList()
-                } else {
-                    dir.walkTopDown().maxDepth(3).filter { it.isFile }.toList()
-                }
-                for (file in files) {
-                    if (isAuroraBackupFileName(file.name)) {
-                        val fileUri = Uri.fromFile(file).toString()
-                        val rel = file.parentFile?.name ?: ""
-                        addEntry(fileUri, file.name, file.length(), file.lastModified(), rel)
-                    }
-                }
+            // Sort descending by dateModified
+            list.sortByDescending { (it["dateModified"] as? Number)?.toLong() ?: 0L }
+            mainHandler.post {
+                result.success(list)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Filesystem scan in listBackupFiles failed: ${e.message}")
-        }
-
-        // Sort descending by dateModified
-        list.sortByDescending { (it["dateModified"] as? Number)?.toLong() ?: 0L }
-        result.success(list)
+        }.start()
     }
 
     private fun deleteBackupFile(call: MethodCall, result: MethodChannel.Result) {
@@ -2398,5 +2707,104 @@ class MainActivity : FlutterActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+    }
+
+    // -----------------------------------------------------------------
+    // Stealth: override Sec-CH-UA Client Hints on all live WebViews.
+    // -----------------------------------------------------------------
+
+    /**
+     * Walks the Activity's view hierarchy, finds all [WebView] instances,
+     * and calls [WebSettingsCompat.setUserAgentMetadata] on each to replace
+     * the default `"Android WebView"` brand with `"Google Chrome"`.
+     *
+     * Returns the number of WebViews that were successfully patched.
+     */
+    private fun applyStealthMetadataToAllWebViews(chromeVersionInput: String): Int {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            Log.w(TAG, "USER_AGENT_METADATA feature not supported on this device")
+            return -1
+        }
+
+        val fullVer = if (chromeVersionInput.contains(".")) chromeVersionInput else "$chromeVersionInput.0.0.0"
+        val majorVer = chromeVersionInput.split(".")[0]
+        val releaseVersion = Build.VERSION.RELEASE ?: "14.0.0"
+
+        fun doApply(): Int {
+            val webViews = mutableListOf<WebView>()
+            val rootView = window?.decorView
+            if (rootView != null) {
+                collectWebViews(rootView, webViews)
+            }
+
+            Log.i(TAG, "collectWebViews found ${webViews.size} WebViews (decorView=${rootView != null})")
+
+            var patchedCount = 0
+            for (wv in webViews) {
+                try {
+                    val metadata = UserAgentMetadata.Builder()
+                        .setBrandVersionList(
+                            listOf(
+                                UserAgentMetadata.BrandVersion.Builder()
+                                    .setBrand("Not_A Brand")
+                                    .setMajorVersion("99")
+                                    .setFullVersion("99.0.0.0")
+                                    .build(),
+                                UserAgentMetadata.BrandVersion.Builder()
+                                    .setBrand("Chromium")
+                                    .setMajorVersion(majorVer)
+                                    .setFullVersion(fullVer)
+                                    .build(),
+                                UserAgentMetadata.BrandVersion.Builder()
+                                    .setBrand("Google Chrome")
+                                    .setMajorVersion(majorVer)
+                                    .setFullVersion(fullVer)
+                                    .build(),
+                            )
+                        )
+                        .setFullVersion(fullVer)
+                        .setPlatform("Android")
+                        .setPlatformVersion(releaseVersion)
+                        .setModel("K")
+                        .setMobile(true)
+                        .build()
+
+                    WebSettingsCompat.setUserAgentMetadata(wv.settings, metadata)
+                    patchedCount++
+                    Log.i(TAG, "Stealth metadata successfully applied to WebView@${wv.hashCode()}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to apply stealth metadata to WebView: ${e.message}")
+                }
+            }
+            return patchedCount
+        }
+
+        var count = doApply()
+        if (count == 0) {
+            // Post delayed retries in case PlatformView hasn't finished attaching to decorView
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val delays = listOf(100L, 300L, 700L)
+            for (delay in delays) {
+                handler.postDelayed({
+                    val retryCount = doApply()
+                    if (retryCount > 0) {
+                        Log.i(TAG, "Delayed stealth metadata applied successfully ($retryCount WebViews)")
+                    }
+                }, delay)
+            }
+        }
+        return count
+    }
+
+    /** Recursively collects all [WebView] instances from the view tree. */
+    private fun collectWebViews(view: View, out: MutableList<WebView>) {
+        if (view is WebView) {
+            out.add(view)
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                collectWebViews(view.getChildAt(i), out)
+            }
+        }
     }
 }

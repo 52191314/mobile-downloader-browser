@@ -14,14 +14,15 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY scripts ./scripts
+COPY entrypoint.sh ./entrypoint.sh
 
-# Keys, service account JSON and the SQLite file are mounted, never baked in.
-VOLUME ["/app/keys", "/app/data", "/app/secrets"]
+# Persistent SQLite database and RS256 signing keys volume
+VOLUME ["/app/data"]
 
-USER node
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/index.js"]
+ENTRYPOINT ["/bin/sh", "/app/entrypoint.sh"]

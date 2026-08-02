@@ -7,8 +7,8 @@ import 'package:path/path.dart' as p;
 
 import '../../downloader/downloader.dart';
 import '../../settings/download_settings.dart';
+import '../../backup/unified_backup_database.dart';
 import '../browser_library.dart';
-import '../idm_backup_parser.dart';
 import '../models/browser_tab.dart';
 import '../models/favorite_selection.dart';
 
@@ -50,28 +50,75 @@ class LibraryController {
     onLibraryChanged?.call();
   }
 
+  Timer? _saveDebounce;
+  BrowserLibrary? _pendingSave;
+
+  /// Default coalescing window for [saveDebounced].
+  static const Duration saveDebounceDelay = Duration(milliseconds: 900);
+
+  /// Writes [newLibrary] immediately.
+  ///
+  /// Use for anything the user did on purpose — bookmarking, importing,
+  /// deleting — where losing the write would be noticed. Any coalesced write is
+  /// dropped first: it is superseded by definition, and letting its timer fire
+  /// afterwards would clobber this newer state with older data.
   Future<void> save(BrowserLibrary newLibrary) async {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    _pendingSave = null;
     library = newLibrary;
     onLibraryChanged?.call();
     await _libraryStore.save(newLibrary);
+  }
+
+  /// Publishes [newLibrary] in memory now and writes it once the burst settles.
+  ///
+  /// History is recorded on every page load, so activating three unloaded tabs
+  /// in a row previously rewrote the entire library file three times in as many
+  /// hundred milliseconds. In-memory state updates immediately either way, so
+  /// the UI is unaffected by the delay.
+  void saveDebounced(
+    BrowserLibrary newLibrary, {
+    Duration delay = saveDebounceDelay,
+  }) {
+    library = newLibrary;
+    onLibraryChanged?.call();
+    _pendingSave = newLibrary;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(delay, () {
+      _saveDebounce = null;
+      final pending = _pendingSave;
+      _pendingSave = null;
+      if (pending != null) unawaited(_libraryStore.save(pending));
+    });
+  }
+
+  /// Flushes a coalesced write now. Call when the screen is going away, so a
+  /// visit recorded in the last instant is not lost.
+  Future<void> flushPendingSave() async {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    final pending = _pendingSave;
+    _pendingSave = null;
+    if (pending != null) await _libraryStore.save(pending);
   }
 
   // ---------------------------------------------------------------------------
   // History
   // ---------------------------------------------------------------------------
 
+  /// Records a visit, deduped by [BrowserLibrary.withVisit]. Nothing is dropped.
+  ///
+  /// Debounced, not immediate: this fires on every page load, and it is the one
+  /// write frequent enough that rewriting the whole file each time was the cause
+  /// of the tab-switch freeze on large histories.
   Future<void> recordHistory(
     String url,
     String title, {
     required bool privateMode,
   }) async {
     if (privateMode) return;
-    final existing = library.history.where((entry) => entry.url != url);
-    final history = [
-      BrowserHistoryEntry(title: title, url: url, visitedAt: DateTime.now()),
-      ...existing,
-    ].toList();
-    await save(library.copyWith(history: history));
+    saveDebounced(library.withVisit(url, title));
   }
 
   // ---------------------------------------------------------------------------
@@ -237,15 +284,8 @@ class LibraryController {
         return const LibraryImportResult();
       }
 
-      Map<String, dynamic> decoded;
-      if (filePath.endsWith('.1dmbak')) {
-        decoded = await IdmBackupParser.parse(filePath);
-      } else {
-        final content = await file.readAsString();
-        decoded = Map<String, dynamic>.from(
-          jsonDecode(content) as Map,
-        );
-      }
+      final Map<String, dynamic> decoded =
+          await UnifiedBackupDatabase.parseBackupFileTransactional(filePath);
 
       var favoritesCount = 0;
       var historyCount = 0;
@@ -377,6 +417,13 @@ class LibraryController {
   }
 
   void dispose() {
+    // Fire-and-forget rather than dropped: dispose cannot await, but losing the
+    // last recorded visit would be a silent data loss.
+    final pending = _pendingSave;
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    _pendingSave = null;
+    if (pending != null) unawaited(_libraryStore.save(pending));
     onLibraryChanged = null;
   }
 }

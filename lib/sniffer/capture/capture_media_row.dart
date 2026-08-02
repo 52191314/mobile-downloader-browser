@@ -23,6 +23,7 @@ class CaptureMediaRow extends StatelessWidget {
     required this.onPreview,
     required this.onInfo,
     this.displayMode = SniffedMediaDisplayMode.both,
+    this.pagePoster,
   });
 
   final int index;
@@ -31,6 +32,10 @@ class CaptureMediaRow extends StatelessWidget {
   final ValueChanged<bool> onSelectedChanged;
   final VoidCallback? onPreview;
   final VoidCallback onInfo;
+
+  /// Page artwork to fall back on when this row's media has no poster of its
+  /// own. Null when the sheet judged the page's `og:image` unrepresentative.
+  final String? pagePoster;
 
   /// Controls size/duration richness in the metadata (PR5 / KD25).
   final SniffedMediaDisplayMode displayMode;
@@ -58,6 +63,7 @@ class CaptureMediaRow extends StatelessWidget {
       group,
       hls: hls,
       displayMode: displayMode,
+      chips: chips,
     );
 
     final borderColor = selected ? ac.accentFrost : ac.borderHairline;
@@ -135,6 +141,7 @@ class CaptureMediaRow extends StatelessWidget {
                       item: item,
                       isHls: hls,
                       onTap: canPreview ? onPreview : null,
+                      pagePoster: pagePoster,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -319,7 +326,11 @@ List<CaptureChip> buildCaptureChips(
       chips.add(CaptureChip(videoCodec, CaptureChipTone.neutral));
     }
     final fps = item.frameRate;
-    if (fps != null && fps > 0) {
+    // Below ~5 is not a real playback rate — it is what a failed probe leaves
+    // behind. Rows whose enrichment did not complete were rendering "1fps"
+    // next to a filename that said 60fps, which reads as the app being wrong
+    // rather than the data being missing. Say nothing instead.
+    if (fps != null && fps >= 5) {
       final rounded = fps.round();
       // 29.97 / 59.94 / 23.976 are the common broadcast rates — keep them as
       // they are rather than rounding to a whole number and claiming precision
@@ -413,12 +424,16 @@ String formatCaptureBitrate(int bitsPerSecond) {
 /// Duration is normally burned into the poster badge, so it only appears here
 /// when there is no badge to carry it (a live stream shows `LIVE` instead).
 /// Size, resolution, codecs and bitrate all live in [buildCaptureChips] now.
+///
+/// Pass the row's [chips] so the container is dropped when a chip already says
+/// it — see [_containerIsRedundant].
 @visibleForTesting
 String buildCaptureSubtitle(
   SniffedMedia item,
   CaptureGroup group, {
   required bool hls,
   SniffedMediaDisplayMode displayMode = SniffedMediaDisplayMode.both,
+  Iterable<CaptureChip> chips = const [],
 }) {
   final parts = <String>[];
   final includeDuration = displayMode == SniffedMediaDisplayMode.duration ||
@@ -428,10 +443,16 @@ String buildCaptureSubtitle(
     parts.add('HLS');
   } else {
     final container = item.containerFormat?.trim();
+    final String? label;
     if (container != null && container.isNotEmpty) {
-      parts.add(container.toUpperCase());
+      label = container.toUpperCase();
     } else if (item.contentType != null && item.contentType!.isNotEmpty) {
-      parts.add(item.contentType!.split(';').first.trim());
+      label = item.contentType!.split(';').first.trim();
+    } else {
+      label = null;
+    }
+    if (label != null && !_containerIsRedundant(label, chips)) {
+      parts.add(label);
     }
   }
 
@@ -453,6 +474,20 @@ String buildCaptureSubtitle(
   }
 
   return parts.join(' · ');
+}
+
+/// True when [container] restates a fact one of [chips] already carries.
+///
+/// `qualityLabel` falls back to the content type when a capture has no
+/// resolution resolved yet, so an unenriched MP4 rendered a `video/mp4` chip
+/// *and* an `MP4` subtitle — the same fact twice, on every row. Comparison is
+/// on the subtype so `video/mp4` and `MP4` collapse onto each other.
+bool _containerIsRedundant(String container, Iterable<CaptureChip> chips) {
+  final needle = container.toLowerCase().split('/').last;
+  for (final chip in chips) {
+    if (chip.label.toLowerCase().split('/').last == needle) return true;
+  }
+  return false;
 }
 
 class _MetaChip extends StatelessWidget {

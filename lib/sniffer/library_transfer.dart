@@ -7,8 +7,8 @@ import 'package:path/path.dart' as p;
 import '../downloader/downloader.dart';
 import '../platform/public_downloads_service.dart';
 import '../settings/download_settings.dart';
+import '../backup/unified_backup_database.dart';
 import 'browser_library.dart';
-import 'idm_backup_parser.dart';
 import 'models/browser_tab.dart';
 import 'sheets/library_transfer_sheets.dart';
 
@@ -119,12 +119,8 @@ class LibraryTransfer {
       final filePath = await PublicDownloadsService.pickImportFile();
       if (filePath == null) return null;
 
-      final Map<String, dynamic> decoded;
-      if (filePath.toLowerCase().endsWith('.1dmbak')) {
-        decoded = await IdmBackupParser.parse(filePath);
-      } else {
-        decoded = await libraryStore.readImportMap(filePath);
-      }
+      final Map<String, dynamic> decoded =
+          await UnifiedBackupDatabase.parseBackupFileTransactional(filePath);
 
       final hasFavorites = decoded.containsKey('favorites') &&
           (decoded['favorites'] is List) &&

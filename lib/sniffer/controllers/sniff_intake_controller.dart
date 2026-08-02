@@ -322,14 +322,14 @@ class SniffIntakeController {
               ? structured
               : (tabTitle.isNotEmpty ? tabTitle : null));
 
-      // Poster: prefer the one the DOM scan attached to this exact element,
-      // then the page's og:image. Only playable types get the page-level
-      // fallback — an og:image on every sniffed PDF/zip row would be a lie.
-      final ogImage = tab.pageMeta.ogImage?.trim();
-      final poster = firstNonEmpty([
-        thumbnailUrl,
-        if (_acceptsPageLevelPoster(url, contentType)) ogImage,
-      ]);
+      // Poster: only what the DOM scan attached to this exact element. The
+      // page's og:image is *not* folded in here — whether it is a fair stand-in
+      // depends on how many playable captures the page turns out to have, which
+      // is not knowable yet at sniff time. The capture sheet applies it at paint
+      // time instead, where it can see the whole list.
+      final trimmedPoster = thumbnailUrl?.trim();
+      final poster =
+          (trimmedPoster == null || trimmedPoster.isEmpty) ? null : trimmedPoster;
 
       tab.snifferEngine.sniff(
         url,
@@ -354,7 +354,14 @@ class SniffIntakeController {
   /// [url]. Video/audio/playlist captures on a watch page share that page's
   /// artwork; images already are their own thumbnail, and documents/archives
   /// would just be mislabelled by it.
-  static bool _acceptsPageLevelPoster(String url, String? contentType) {
+  ///
+  /// Called by the capture sheet rather than from this class: the page-level
+  /// poster is resolved at paint time, not at sniff time. Two reasons. The
+  /// guard is injected at document start, so its first `og:image` read is empty
+  /// and the real value only lands on a later re-post; and a page's artwork is
+  /// only a fair stand-in when the page holds a single playable capture, which
+  /// is not yet known while captures are still arriving.
+  static bool acceptsPageLevelPoster(String url, String? contentType) {
     final ct = contentType?.toLowerCase().split(';').first.trim() ?? '';
     if (ct.startsWith('video/') || ct.startsWith('audio/')) return true;
     if (ct.contains('mpegurl') || ct == 'application/dash+xml') return true;

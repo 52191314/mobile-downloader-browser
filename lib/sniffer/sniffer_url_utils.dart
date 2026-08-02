@@ -1,3 +1,4 @@
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'models/browser_tab.dart';
 import 'models/sniffed_media.dart';
 
@@ -29,6 +30,7 @@ const Map<String, String> uaProfileLabels = <String, String>{
   'desktop_chrome': 'Desktop Chrome',
   'desktop_firefox': 'Desktop Firefox',
   'safari': 'Safari (macOS)',
+  'custom': 'Custom User-Agent',
 };
 
 /// Regex matching common media file extensions for fast-path detection.
@@ -45,9 +47,31 @@ final RegExp mediaFastPathRegExp = RegExp(
   caseSensitive: false,
 );
 
+String? _systemUserAgent;
+
+/// The raw native system User-Agent fetched at startup, or null if not yet
+/// initialised. Used by [StealthMetadataChannel] to extract the Chrome version.
+String? get systemUserAgent => _systemUserAgent;
+
+/// Asynchronously fetches the native system User-Agent. Should be called
+/// once at app startup so [uaForProfile] can synchronously return a clean
+/// User-Agent that perfectly matches the engine's Sec-CH-UA headers.
+Future<void> initSystemUserAgent() async {
+  try {
+    _systemUserAgent = await InAppWebViewController.getDefaultUserAgent();
+  } catch (_) {}
+}
+
 /// Returns the User-Agent string for a given profile key.
-String uaForProfile(String profile) =>
-    uaProfiles[profile] ?? snifferMobileUserAgent;
+String uaForProfile(String profile, {String customUserAgent = ''}) {
+  if (profile == 'custom' && customUserAgent.isNotEmpty) {
+    return customUserAgent;
+  }
+  if (profile == 'mobile' && _systemUserAgent != null) {
+    return stripWebViewUaMarkers(_systemUserAgent!);
+  }
+  return uaProfiles[profile] ?? stripWebViewUaMarkers(_systemUserAgent) ?? snifferMobileUserAgent;
+}
 
 /// Aggressive UA rewrite for callers that want a desktop-like fingerprint.
 /// Prefer [stripWebViewUaMarkers] for download requests (Cloudflare-safe).

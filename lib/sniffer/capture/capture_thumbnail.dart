@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/sniffer/capture/capture_frame_cache.dart';
 import 'package:aurora_downloader/sniffer/capture/media_accent.dart';
 import 'package:aurora_downloader/sniffer/models/sniffed_media.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
@@ -32,11 +35,16 @@ Map<String, String> _posterHeaders(SniffedMedia item) {
 /// Images are their own thumbnail; everything else needs a poster harvested
 /// from the page. `blob:` and `data:` never render here — the bridge guard
 /// rejects them upstream, and this is a second line of defence.
+///
+/// [pagePoster] is the page's `og:image`, and is only consulted when the item
+/// carries no poster of its own. The caller decides whether page artwork is
+/// honest for this page at all; by the time it arrives here it is trusted.
 @visibleForTesting
-String? posterUrlFor(SniffedMedia item) {
-  final candidate = item.type == MediaType.image
+String? posterUrlFor(SniffedMedia item, {String? pagePoster}) {
+  final own = item.type == MediaType.image
       ? (item.thumbnailUrl ?? item.url)
       : item.thumbnailUrl;
+  final candidate = (own != null && own.trim().isNotEmpty) ? own : pagePoster;
   final trimmed = candidate?.trim();
   if (trimmed == null || trimmed.isEmpty) return null;
   final uri = Uri.tryParse(trimmed);
@@ -48,35 +56,117 @@ String? posterUrlFor(SniffedMedia item) {
 
 /// 16:9 poster well for a capture row.
 ///
-/// Paints the page's own artwork when the sniffer harvested one, and the
-/// accent-tinted type icon when it did not — the slot keeps the same footprint
-/// either way so rows stay aligned in a mixed list. The duration (or `LIVE`)
-/// badge is burned into the corner in both states.
-class CaptureThumbnail extends StatelessWidget {
+/// Four sources, in descending order of how specific they are to this file:
+///
+/// 1. the element's own `<video poster>` — curated by the site, and free;
+/// 2. a frame decoded out of the stream itself, via [CaptureFrameCache];
+/// 3. the page's `og:image`, when the sheet judged it representative;
+/// 4. the accent-tinted type icon.
+///
+/// The decode is skipped entirely when (1) is available, since a still the site
+/// chose is at least as good as one picked a tenth of the way in and costs no
+/// network. The slot keeps the same footprint in all four states so rows stay
+/// aligned in a mixed list, and the duration (or `LIVE`) badge is burned into
+/// the corner regardless.
+class CaptureThumbnail extends StatefulWidget {
   const CaptureThumbnail({
     super.key,
     required this.item,
     required this.isHls,
     this.width = 84,
     this.onTap,
+    this.pagePoster,
+    this.frameCache,
   });
 
   final SniffedMedia item;
   final bool isHls;
   final double width;
 
+  /// The page's `og:image`, or null when the caller judged it an unfair
+  /// stand-in for this page. Used only when [item] has no poster of its own.
+  final String? pagePoster;
+
   /// Tapping the poster previews the media. Null renders it non-interactive
   /// (documents, archives, torrents — nothing to play).
   final VoidCallback? onTap;
 
-  double get _height => width * 9 / 16;
+  /// Overridable so widget tests can supply frames without a platform channel.
+  @visibleForTesting
+  final CaptureFrameCache? frameCache;
+
+  @override
+  State<CaptureThumbnail> createState() => _CaptureThumbnailState();
+}
+
+class _CaptureThumbnailState extends State<CaptureThumbnail> {
+  Uint8List? _frame;
+
+  CaptureFrameCache get _cache =>
+      widget.frameCache ?? CaptureFrameCache.instance;
+
+  double get _height => widget.width * 9 / 16;
+
+  /// The site's own still for this element, ignoring page-level artwork.
+  String? get _elementPoster => posterUrlFor(widget.item);
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveFrame();
+  }
+
+  @override
+  void didUpdateWidget(CaptureThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Rows are recycled as the list scrolls, so one State can be handed a
+    // different capture. Without this the previous row's frame would linger.
+    if (oldWidget.item.url != widget.item.url) {
+      _frame = null;
+      _resolveFrame();
+    }
+  }
+
+  void _resolveFrame() {
+    // A curated poster already beats anything a decode would produce.
+    if (_elementPoster != null) return;
+
+    final item = widget.item;
+    final ready = _cache.cached(item.url);
+    if (ready != null) {
+      _frame = ready;
+      return;
+    }
+    if (_cache.hasFailed(item.url) || !CaptureFrameCache.canDecode(item)) return;
+
+    final requestedUrl = item.url;
+    _cache.frameFor(item).then((bytes) {
+      if (!mounted || bytes == null) return;
+      // The row may have been recycled onto a different capture while the
+      // decode was in flight.
+      if (widget.item.url != requestedUrl) return;
+      setState(() => _frame = bytes);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
+    final width = widget.width;
+    final onTap = widget.onTap;
+
     final ac = context.ac;
-    final accent = mediaAccentFor(ac, item, isHls: isHls);
-    final poster = posterUrlFor(item);
+    final accent = mediaAccentFor(ac, item, isHls: widget.isHls);
     final badge = _badgeLabel();
+
+    // A decoded frame is this file's own content, so it outranks page artwork;
+    // the element's own poster outranks both.
+    final elementPoster = _elementPoster;
+    final frame = elementPoster == null ? _frame : null;
+    final poster = elementPoster ??
+        (frame != null
+            ? null
+            : posterUrlFor(item, pagePoster: widget.pagePoster));
 
     return SizedBox(
       width: width,
@@ -87,6 +177,14 @@ class CaptureThumbnail extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             _Fallback(item: item, accent: accent),
+            if (frame != null)
+              Image.memory(
+                frame,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                // Already decoded to ~maxWidth natively; nothing more to cap.
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
             if (poster != null)
               Image.network(
                 poster,
@@ -144,6 +242,7 @@ class CaptureThumbnail extends StatelessWidget {
   /// `(label, isLive)` for the corner badge, or null when there is nothing
   /// meaningful to stamp.
   (String, bool)? _badgeLabel() {
+    final item = widget.item;
     if (item.isLive == true) return ('LIVE', true);
     final d = item.duration;
     if (d != null && d.inSeconds > 0) return (formatCaptureDuration(d), false);

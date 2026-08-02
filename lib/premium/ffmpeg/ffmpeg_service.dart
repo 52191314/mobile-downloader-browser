@@ -19,8 +19,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'ffmpeg_job.dart';
+import 'ffmpeg_module_loader.dart';
 import 'ffmpeg_ops.dart';
-import 'ffmpeg_runtime.dart';
+import 'ffmpeg_runtime.dart' as ffmpeg_runtime;
 
 /// Maximum execution time per FFmpeg job (seconds).
 const kFfmpegMaxExecutionSeconds = 1800; // 30 minutes
@@ -81,7 +82,12 @@ class FfmpegService extends ChangeNotifier {
   }
 
   Future<FfmpegVersion> _ffprobeVersion() async {
-    final probe = await FfmpegRuntime.probeVersion();
+    final installed =
+        await FeatureModuleLoader.instance.ensureInstalled('ffmpeg');
+    if (!installed) {
+      return const FfmpegVersion(rawOutput: '', available: false);
+    }
+    final probe = await ffmpeg_runtime.FfmpegRuntime.probeVersion();
     return FfmpegVersion(
       rawOutput: probe?.rawOutput ?? '',
       available: probe?.available ?? false,
@@ -170,12 +176,21 @@ class FfmpegService extends ChangeNotifier {
         return;
       }
 
-      final session = await FfmpegRuntime.execute(cmd);
+      final installed =
+          await FeatureModuleLoader.instance.ensureInstalled('ffmpeg');
+      if (!installed) {
+        job.state = FfmpegJobState.failed;
+        job.errorMessage = 'FFmpeg module dynamic feature not installed';
+        job.completedAt = DateTime.now();
+        return;
+      }
+
+      final session = await ffmpeg_runtime.FfmpegRuntime.execute(cmd);
       final returnCode = await session.getReturnCode();
-      if (ReturnCode.isSuccess(returnCode)) {
+      if (ffmpeg_runtime.ReturnCode.isSuccess(returnCode)) {
         job.state = FfmpegJobState.completed;
         job.progress = 1.0;
-      } else if (ReturnCode.isCancel(returnCode)) {
+      } else if (ffmpeg_runtime.ReturnCode.isCancel(returnCode)) {
         job.state = FfmpegJobState.cancelled;
       } else {
         job.state = FfmpegJobState.failed;
@@ -221,7 +236,7 @@ class FfmpegService extends ChangeNotifier {
     job.completedAt = DateTime.now();
 
     if (job.sessionHandle != null) {
-      FfmpegRuntime.cancel(job.sessionHandle as int);
+      ffmpeg_runtime.FfmpegRuntime.cancel(job.sessionHandle as int);
     }
   }
 

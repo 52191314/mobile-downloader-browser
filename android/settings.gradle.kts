@@ -25,3 +25,5 @@ plugins {
 
 include(":app")
 include(":ffmpeg")
+include(":torrent")
+include(":mediakit")

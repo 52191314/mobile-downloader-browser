@@ -219,6 +219,11 @@ void showElementContextMenu(
             'Translate',
             () => unawaited(onTranslateText(selectedText)),
           ),
+          item(
+            Icons.share,
+            'Share text',
+            () => unawaited(PublicDownloadsService.shareUrl(selectedText)),
+          ),
         ],
       ];
 
@@ -235,10 +240,21 @@ void showElementContextMenu(
             'Open in background tab',
             () => onOpenNewTab(url: href, switchToTab: false),
           ),
+          if (text != null && text.trim().isNotEmpty && text.trim() != href.trim())
+            item(
+              Icons.short_text,
+              'Copy link text',
+              () => unawaited(onCopyText(text, 'Link text copied.')),
+            ),
           item(
             Icons.copy,
             'Copy link URL',
             () => unawaited(onCopyText(href, 'Link URL copied.')),
+          ),
+          item(
+            Icons.share,
+            'Share link',
+            () => unawaited(PublicDownloadsService.shareUrl(href)),
           ),
           item(Icons.open_in_new, 'Open in system browser', () {
             PublicDownloadsService.openUrl(href);
@@ -262,6 +278,27 @@ void showElementContextMenu(
             'Copy media URL',
             () => unawaited(onCopyText(src, 'Media URL copied.')),
           ),
+          item(
+            Icons.share,
+            'Share media URL',
+            () => unawaited(PublicDownloadsService.shareUrl(src)),
+          ),
+          item(
+            Icons.image_search,
+            'Search image (Google Lens)',
+            () => onOpenNewTab(
+              url: 'https://lens.google.com/uploadbyurl?url=${Uri.encodeComponent(src)}',
+              switchToTab: true,
+            ),
+          ),
+          item(
+            Icons.travel_explore,
+            'Search image (Yandex)',
+            () => onOpenNewTab(
+              url: 'https://yandex.com/images/search?rpt=imageview&url=${Uri.encodeComponent(src)}',
+              switchToTab: true,
+            ),
+          ),
           item(Icons.download, 'Download media', () {
             onAddToQueue(src, text ?? pageTitle);
           }),
@@ -274,6 +311,12 @@ void showElementContextMenu(
           'Copy page URL',
           () => unawaited(onCopyCurrentUrl()),
         ),
+        if (pageUrl != null && pageUrl.isNotEmpty)
+          item(
+            Icons.share,
+            'Share page URL',
+            () => unawaited(PublicDownloadsService.shareUrl(pageUrl)),
+          ),
         item(
           isFavorite ? Icons.star : Icons.star_border,
           isFavorite ? 'Remove favorite' : 'Add favorite',

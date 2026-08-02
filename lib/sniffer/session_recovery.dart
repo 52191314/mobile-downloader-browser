@@ -58,7 +58,17 @@ class SessionRecovery {
       if (!await file.parent.exists()) {
         await file.parent.create(recursive: true);
       }
-      await file.writeAsString(jsonEncode(current));
+      final encoded = jsonEncode(current);
+      final tempFile = File('${file.path}.tmp');
+      await tempFile.writeAsString(encoded, flush: true);
+      try {
+        await tempFile.rename(file.path);
+      } catch (_) {
+        await tempFile.copy(file.path);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
     } catch (_) {}
   }
 
@@ -71,13 +81,21 @@ class SessionRecovery {
       if (!await file.parent.exists()) {
         await file.parent.create(recursive: true);
       }
-      await file.writeAsString(
-        jsonEncode({
-          'cleanExit': cleanExit,
-          'tabs': tabs.map((t) => t.toJson()).toList(),
-          'timestamp': DateTime.now().toIso8601String(),
-        }),
-      );
+      final encoded = jsonEncode({
+        'cleanExit': cleanExit,
+        'tabs': tabs.map((t) => t.toJson()).toList(),
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      final tempFile = File('${file.path}.tmp');
+      await tempFile.writeAsString(encoded, flush: true);
+      try {
+        await tempFile.rename(file.path);
+      } catch (_) {
+        await tempFile.copy(file.path);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
     } catch (_) {}
   }
 

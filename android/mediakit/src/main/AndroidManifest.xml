@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play Feature Delivery — on-demand MediaKit dynamic feature module (:mediakit).
+
+  Installed on demand when the user selects libmpv playback engine.
+  Not included in base APK for Play Store AAB builds.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:dist="http://schemas.android.com/apk/distribution"
+    package="com.personal.aurora_downloader.mediakit">
+
+    <dist:module
+        dist:title="@string/feature_mediakit_title">
+        <dist:delivery>
+            <dist:on-demand />
+        </dist:delivery>
+        <dist:fusing dist:include="true" />
+    </dist:module>
+
+    <application />
+</manifest>

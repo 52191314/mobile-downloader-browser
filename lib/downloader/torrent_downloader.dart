@@ -4,17 +4,40 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:libtorrent_flutter/libtorrent_flutter.dart' as lt;
+import 'package:libtorrent_flutter/libtorrent_flutter.dart' as lt hide TorrentStateX;
 import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'magnet_link.dart';
 import 'torrent_metadata.dart';
 import 'download_logger.dart';
+import '../premium/ffmpeg/ffmpeg_module_loader.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[TorrentDownloader] $context: $error';
   debugPrint(message);
   DownloadLogger.instance.error(message);
+}
+
+// The Dart code itself lives in the base module; only the native lib
+// (liblibtorrent_flutter.so) is on-demand via the :torrent module.
+bool _isLtLoaded = false;
+
+Future<bool> _ensureLtLoaded() async {
+  if (_isLtLoaded) return true;
+  try {
+    // Download the :torrent on-demand module from Play Store if needed.
+    final installed =
+        await FeatureModuleLoader.instance.ensureInstalled('torrent');
+    if (!installed) {
+      debugPrint('[TorrentDownloader] torrent module not available');
+      return false;
+    }
+    _isLtLoaded = true;
+    return true;
+  } catch (e) {
+    debugPrint('[TorrentDownloader] torrent module install error: $e');
+    return false;
+  }
 }
 
 class TorrentDownloader implements BaseDownloader {
@@ -26,7 +49,7 @@ class TorrentDownloader implements BaseDownloader {
   final Set<int> corruptPieceIndices;
 
   Timer? _timer;
-  StreamSubscription<Map<int, lt.TorrentInfo>>? _nativeSubscription;
+  StreamSubscription<dynamic>? _nativeSubscription;
   int? _nativeTorrentId;
   bool _isPaused = false;
   DateTime? _startTime;
@@ -47,8 +70,8 @@ class TorrentDownloader implements BaseDownloader {
     Set<int>? corruptPieceIndices,
   }) : corruptPieceIndices = Set<int>.from(corruptPieceIndices ?? <int>{});
 
-  static void setNativeDownloadLimit(int bytesPerSecond) {
-    if (lt.LibtorrentFlutter.isInitialized) {
+  static Future<void> setNativeDownloadLimit(int bytesPerSecond) async {
+    if (_isLtLoaded && lt.LibtorrentFlutter.isInitialized) {
       lt.LibtorrentFlutter.instance.setDownloadLimit(bytesPerSecond);
     }
   }
@@ -118,7 +141,7 @@ class TorrentDownloader implements BaseDownloader {
     _timer?.cancel();
     await _nativeSubscription?.cancel();
     _nativeSubscription = null;
-    if (_nativeTorrentId != null && lt.LibtorrentFlutter.isInitialized) {
+    if (_isLtLoaded && _nativeTorrentId != null && lt.LibtorrentFlutter.isInitialized) {
       lt.LibtorrentFlutter.instance.pauseTorrent(_nativeTorrentId!);
     }
     task.state = targetState;
@@ -164,6 +187,11 @@ class TorrentDownloader implements BaseDownloader {
     _taskUpdateController.add(task);
 
     try {
+      final loaded = await _ensureLtLoaded();
+      if (!loaded) {
+        _failNativeRequired();
+        return;
+      }
       final saveDirectory = _nativeSaveDirectory();
       await Directory(saveDirectory).create(recursive: true);
       if (!lt.LibtorrentFlutter.isInitialized) {
@@ -207,7 +235,7 @@ class TorrentDownloader implements BaseDownloader {
     }
   }
 
-  void _handleNativeUpdate(Map<int, lt.TorrentInfo> torrents) {
+  void _handleNativeUpdate(Map<int, dynamic> torrents) {
     final nativeId = _nativeTorrentId;
     if (nativeId == null) return;
 
@@ -231,11 +259,12 @@ class TorrentDownloader implements BaseDownloader {
       ];
     }
 
-    task.state = switch (info.state) {
-      lt.TorrentState.error => DownloadState.failed,
-      lt.TorrentState.finished ||
-      lt.TorrentState.seeding => DownloadState.completed,
-      _ when info.isPaused => DownloadState.paused,
+    final stateStr = info.state.toString();
+    task.state = switch (stateStr) {
+      'TorrentState.error' => DownloadState.failed,
+      'TorrentState.finished' ||
+      'TorrentState.seeding' => DownloadState.completed,
+      _ when info.isPaused == true => DownloadState.paused,
       _ => DownloadState.downloading,
     };
 

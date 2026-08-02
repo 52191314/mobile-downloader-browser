@@ -25,8 +25,10 @@ Create `android/key.properties` from the example with the passwords you chose.
 ## Build Play AAB
 
 ```bash
-flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
+flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play --obfuscate --split-debug-info=build/app/outputs/symbols
 ```
+*Note: Upload the generated de-obfuscation symbol map from `build/app/outputs/symbols` to Play Console (under App bundle explorer > Downloads > De-obfuscation file) to keep crash reports symbolicated.*
+
 
 Output:
 

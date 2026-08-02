@@ -56,10 +56,8 @@ abstract class TabLifecycleHost {
     BrowserTab tab,
     Uri uri, {
     bool addToHistory,
+    bool forceInApp,
   });
-
-  /// Re-runs the cosmetic CSS for the tab.
-  Future<void> applyCosmeticRules([BrowserTab? tab]);
 
   /// Configures adblock rules and cosmetic CSS for the tab.
   Future<void> configureTabAdblock(BrowserTab tab);
@@ -296,7 +294,17 @@ class TabLifecycleController {
           )
           .toList(growable: false);
       final file = File('$baseDir/browser_tabs.json');
-      await file.writeAsString(jsonEncode(list));
+      final encoded = jsonEncode(list);
+      final tempFile = File('${file.path}.tmp');
+      await tempFile.writeAsString(encoded, flush: true);
+      try {
+        await tempFile.rename(file.path);
+      } catch (_) {
+        await tempFile.copy(file.path);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
       unawaited(
         sessionRecovery.updateTabs(
           list
@@ -326,7 +334,8 @@ class TabLifecycleController {
         final decoded = jsonDecode(await file.readAsString());
         if (decoded is List) {
           final groups = decoded
-              .map((e) => TabGroup.fromJson(e as Map<String, dynamic>))
+              .whereType<Map>()
+              .map((e) => TabGroup.fromJson(Map<String, dynamic>.from(e)))
               .toList();
           tabManager.replaceGroups(groups);
         }
@@ -340,7 +349,18 @@ class TabLifecycleController {
       final dir = Directory(baseDir!);
       if (!await dir.exists()) await dir.create(recursive: true);
       final data = tabManager.tabGroups.map((g) => g.toJson()).toList();
-      await File('$baseDir/tab_groups.json').writeAsString(jsonEncode(data));
+      final file = File('$baseDir/tab_groups.json');
+      final encoded = jsonEncode(data);
+      final tempFile = File('${file.path}.tmp');
+      await tempFile.writeAsString(encoded, flush: true);
+      try {
+        await tempFile.rename(file.path);
+      } catch (_) {
+        await tempFile.copy(file.path);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
     } catch (_) {}
   }
 

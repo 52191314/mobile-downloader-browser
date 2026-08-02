@@ -660,52 +660,60 @@ class _QueuePageState extends State<QueuePage> {
 
   Widget _buildEmptyHint(BuildContext context) {
     if (_searchQuery.isNotEmpty || _stateFilter != null) {
-      return SizedBox(
-        height: 200,
+      return ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 200),
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              EmptyQueue(
-                icon: Icons.search_off,
-                message: _searchQuery.isNotEmpty
-                    ? 'Nothing matches "$_searchQuery"'
-                    : 'No downloads match this filter',
-              ),
-              const SizedBox(height: 4),
-              TextButton.icon(
-                icon: const Icon(Icons.clear_all, size: 16),
-                label: const Text('Reset filters'),
-                onPressed: () {
-                  setState(() {
-                    _searchQuery = '';
-                    _searchController.clear();
-                    _stateFilter = null;
-                    _sortBy = TaskSortField.date;
-                    _sortDescending = true;
-                  });
-                },
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                EmptyQueue(
+                  icon: Icons.search_off,
+                  message: _searchQuery.isNotEmpty
+                      ? 'Nothing matches "$_searchQuery"'
+                      : 'No downloads match this filter',
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  icon: const Icon(Icons.clear_all, size: 16),
+                  label: const Text('Reset filters'),
+                  onPressed: () {
+                    setState(() {
+                      _searchQuery = '';
+                      _searchController.clear();
+                      _stateFilter = null;
+                      _sortBy = TaskSortField.date;
+                      _sortDescending = true;
+                    });
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       );
     }
-    return SizedBox(
-      height: 280,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const EmptyQueue(),
-          if (widget.onOpenBrowser != null) ...[
-            const SizedBox(height: 16),
-            TextButton.icon(
-              icon: const Icon(Icons.travel_explore, size: 18),
-              label: const Text('Open Browser'),
-              onPressed: widget.onOpenBrowser,
-            ),
-          ],
-        ],
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 240),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const EmptyQueue(),
+              if (widget.onOpenBrowser != null) ...[
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  icon: const Icon(Icons.travel_explore, size: 18),
+                  label: const Text('Open Browser'),
+                  onPressed: widget.onOpenBrowser,
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1016,6 +1024,7 @@ class _QueuePageState extends State<QueuePage> {
     final ac = context.ac;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: ac.surfaceCard,
       shape: const RoundedRectangleBorder(
@@ -1023,95 +1032,97 @@ class _QueuePageState extends State<QueuePage> {
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Sort by',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: ac.textPrimary,
-                    )),
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                for (final field in TaskSortField.values)
-                  InkWell(
-                    onTap: () {
-                      final sameField = _sortBy == field;
-                      setState(() {
-                        if (sameField) {
-                          _sortDescending = !_sortDescending;
-                        } else {
-                          _sortBy = field;
-                          _sortDescending = true;
-                        }
-                      });
-                      Navigator.pop(ctx);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _sortLabel(field),
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 13,
-                                color: _sortBy == field
-                                    ? ac.accentFrost
-                                    : ac.textPrimary,
-                                fontWeight: _sortBy == field
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Sort by',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: ac.textPrimary,
+                      )),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  for (final field in TaskSortField.values)
+                    InkWell(
+                      onTap: () {
+                        final sameField = _sortBy == field;
+                        setState(() {
+                          if (sameField) {
+                            _sortDescending = !_sortDescending;
+                          } else {
+                            _sortBy = field;
+                            _sortDescending = true;
+                          }
+                        });
+                        Navigator.pop(ctx);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _sortLabel(field),
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  color: _sortBy == field
+                                      ? ac.accentFrost
+                                      : ac.textPrimary,
+                                  fontWeight: _sortBy == field
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                ),
                               ),
                             ),
-                          ),
-                          if (_sortBy == field)
-                            Icon(
-                              _sortDescending
-                                  ? Icons.arrow_downward_rounded
-                                  : Icons.arrow_upward_rounded,
-                              size: 16,
-                              color: ac.accentFrost,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Flat list (no sections)',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 13,
-                            color: ac.textPrimary,
-                          ),
+                            if (_sortBy == field)
+                              Icon(
+                                _sortDescending
+                                    ? Icons.arrow_downward_rounded
+                                    : Icons.arrow_upward_rounded,
+                                size: 16,
+                                color: ac.accentFrost,
+                              ),
+                          ],
                         ),
                       ),
-                      Switch(
-                        value: _flatList,
-                        activeColor: ac.accentFrost,
-                        onChanged: (v) {
-                          setState(() => _flatList = v);
-                          Navigator.pop(ctx);
-                        },
-                      ),
-                    ],
+                    ),
+                  const SizedBox(height: 8),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Flat list (no sections)',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 13,
+                              color: ac.textPrimary,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: _flatList,
+                          activeThumbColor: ac.accentFrost,
+                          onChanged: (v) {
+                            setState(() => _flatList = v);
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );

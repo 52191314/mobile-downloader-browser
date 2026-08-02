@@ -24,6 +24,10 @@ import 'package:path_provider/path_provider.dart';
 
 import 'pro_entitlement.dart';
 import 'pro_features.dart';
+import '../backup/unified_backup_database.dart';
+import '../downloader/download_rules.dart';
+import '../settings/download_settings.dart';
+import '../sniffer/browser_library.dart';
 
 /// Max restore JSON size (8 MiB) — blocks oversized hostile backups.
 const int _kMaxRestoreBytes = 8 * 1024 * 1024;
@@ -341,18 +345,19 @@ class WebdavBackupService {
 
       // Parse Multi-Status XML to find backup files.
       final backupNames = <String>[];
-      final hrefRegex = RegExp(r'<d:href>([^<]+)</d:href>');
-      final displayNameRegex = RegExp(r'<d:displayname>([^<]+)</d:displayname>');
+      final hrefRegex = RegExp(r'<(?:\w+:)?href>([^<]+)</(?:\w+:)?href>', caseSensitive: false);
+      final displayNameRegex = RegExp(r'<(?:\w+:)?displayname>([^<]+)</(?:\w+:)?displayname>', caseSensitive: false);
 
       final hrefMatches = hrefRegex.allMatches(body);
       final nameMatches = displayNameRegex.allMatches(body);
 
       for (var i = 0; i < hrefMatches.length; i++) {
-        final name = i < nameMatches.length
+        final rawName = i < nameMatches.length
             ? nameMatches.elementAt(i).group(1)!
             : hrefMatches.elementAt(i).group(1)!.split('/').last;
+        final name = Uri.decodeComponent(rawName);
         final safe = sanitizeBackupRemoteName(name);
-        if (safe != null) backupNames.add(safe);
+        if (safe != null && !backupNames.contains(safe)) backupNames.add(safe);
       }
       return backupNames;
     } catch (e) {
@@ -376,59 +381,44 @@ class WebdavBackupService {
   /// - settings export (JSON)
   ///
   /// TODO(P11): add vault metadata and settings export streams.
-  static Future<String?> uploadBackup(
-      WebdavSettings settings) async {
+  static Future<String?> uploadBackup(WebdavSettings settings) async {
     if (validateWebdavUrl(settings.url) != null) return null;
     try {
-      // Create a temporary backup archive.
       final tempDir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-      final archiveName = 'aurora_backup_$timestamp.zip';
-      final archivePath = '${tempDir.path}/$archiveName';
 
-      // Collect backup data.
-      final backupData = <String, dynamic>{};
-      final appDir = await getApplicationSupportDirectory();
+      final settingsObj = await const DownloadSettingsStore().load();
+      final libraryObj = await const BrowserLibraryStore().load();
+      final rulesObj = await const DownloadRulesStore().load();
 
-      // Read queue.json if it exists.
-      final queueFile = File('${appDir.path}/queue.json');
-      if (await queueFile.exists()) {
-        backupData['queue'] = jsonDecode(await queueFile.readAsString());
-      }
+      final backupFile = await UnifiedBackupDatabase.exportTransactionalDatabase(
+        downloadQueue: null,
+        settings: settingsObj.toJson(),
+        favorites: libraryObj.favorites.map((f) => f.toJson()).toList(),
+        folders: libraryObj.folders.map((f) => f.toJson()).toList(),
+        history: libraryObj.history.map((h) => h.toJson()).toList(),
+        savedPages: libraryObj.savedPages.map((p) => p.toJson()).toList(),
+        tabs: null,
+        downloadRules: rulesObj.map((r) => r.toJson()).toList(),
+        extra: null,
+        targetDirectory: tempDir,
+      );
 
-      // Read free_caps.json.
-      final capsFile = File('${appDir.path}/free_caps.json');
-      if (await capsFile.exists()) {
-        backupData['free_caps'] = jsonDecode(await capsFile.readAsString());
-      }
+      if (!await backupFile.exists()) return null;
 
-      // Read upsell_state.json.
-      final upsellFile = File('${appDir.path}/upsell_state.json');
-      if (await upsellFile.exists()) {
-        backupData['upsell_state'] =
-            jsonDecode(await upsellFile.readAsString());
-      }
-
-      // Write archive as JSON (ZIP would need a dependency; JSON is portable).
-      // TODO(P11): replace with proper ZIP archive using archive package.
-      final archiveFile = File(archivePath);
-      await archiveFile.writeAsString(jsonEncode(backupData));
-
-      // Upload via PUT.
+      final archiveName = p.basename(backupFile.path);
       final client = _client(settings);
       final uri = _resolveUri(settings.url, archiveName);
       final request = http.Request('PUT', uri);
-      request.bodyBytes = await archiveFile.readAsBytes();
+      request.bodyBytes = await backupFile.readAsBytes();
 
       final response = await client.send(request);
       client.close();
 
-      // Clean up temp file.
       try {
-        await archiveFile.delete();
+        await backupFile.delete();
       } catch (_) {}
 
-      if (response.statusCode == 201 || response.statusCode == 204) {
+      if (response.statusCode == 201 || response.statusCode == 204 || response.statusCode == 200) {
         debugPrint('[WebDAV] Backup uploaded: $archiveName');
         return archiveName;
       }

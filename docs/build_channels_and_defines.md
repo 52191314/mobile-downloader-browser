@@ -140,7 +140,7 @@ and you do not want testers hitting a product-not-found path.
 
 | Define | Purpose |
 |--------|---------|
-| `AURORA_LICENSE_URL` | Base URL of the license host, e.g. `https://license.example.com`. Empty disables licensing. |
+| `AURORA_LICENSE_URL` | Base URL of the license host, e.g. `https://aurora-license-server.fly.dev`. Empty disables licensing. |
 | `AURORA_LICENSE_KID` / `_KEY_N` / `_KEY_E` | Inject one trusted RSA public key without editing source. `npm run keys:generate` prints these. |
 | `AURORA_LICENSE_ISSUER` | Must match the server's `LICENSE_ISSUER` (default `aurora-license`). |
 | `AURORA_LICENSE_AUDIENCE` | Must match the server's `LICENSE_AUDIENCE` (default `aurora-app`). |
@@ -158,7 +158,7 @@ For production, prefer baking keys into `_bakedKeys` in `license_config.dart`
 ```bash
 flutter build appbundle --release \
   --dart-define=AURORA_BUILD_CHANNEL=play \
-  --dart-define=AURORA_LICENSE_URL=https://license.example.com \
+  --dart-define=AURORA_LICENSE_URL=https://aurora-license-server.fly.dev \
   --dart-define=AURORA_LICENSE_KID=aurora-20260725 \
   --dart-define=AURORA_LICENSE_KEY_N=<modulus from keys:generate> \
   --dart-define=AURORA_LICENSE_KEY_E=AQAB

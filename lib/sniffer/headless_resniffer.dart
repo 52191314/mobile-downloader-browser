@@ -89,10 +89,14 @@ class HeadlessPageResniffer {
       _headless = HeadlessInAppWebView(
         initialUrlRequest: URLRequest(url: WebUri(sourcePageUrl)),
         initialSettings: InAppWebViewSettings(
+          incognito: true,
           javaScriptEnabled: true,
           domStorageEnabled: true,
           databaseEnabled: true,
           mediaPlaybackRequiresUserGesture: false,
+          useShouldOverrideUrlLoading: true,
+          useOnLoadResource: false,
+          useShouldInterceptRequest: true,
         ),
         onLoadStop: (controller, url) {
           if (!loadCompleter.isCompleted) {

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 class IdmBackupParser {
-  /// Parses a .1dmbak file and returns a map compatible with Aurora Downloader's import format.
+  /// Parses a .1dmbak or .1dm file and returns a map compatible with Aurora Downloader's import format.
   static Future<Map<String, dynamic>> parse(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) {
@@ -14,7 +14,7 @@ class IdmBackupParser {
     final filesMap = <String, List<int>>{};
     int idx = 0;
 
-    // 1. Extract all files from the ZIP-like stream sequentially
+    // 1. Extract all files from the ZIP-like stream sequentially without writing temp files
     while (idx < data.length) {
       if (!_checkSignature(data, idx, const [0x50, 0x4b, 0x03, 0x04])) {
         // Search for the next local file header signature
@@ -27,6 +27,7 @@ class IdmBackupParser {
 
       final headerData = ByteData.sublistView(data, idx, idx + 30);
       final compMethod = headerData.getUint16(8, Endian.little);
+      final compSize = headerData.getUint32(18, Endian.little);
       final fnLen = headerData.getUint16(26, Endian.little);
       final extraLen = headerData.getUint16(28, Endian.little);
 
@@ -35,22 +36,36 @@ class IdmBackupParser {
       final fn = utf8.decode(fnBytes, allowMalformed: true);
 
       final startData = idx + 30 + fnLen + extraLen;
+      if (startData > data.length) break;
 
-      // Find the corresponding data descriptor signature PK\x07\x08
-      final ddIdx = _findSignature(data, startData, const [0x50, 0x4b, 0x07, 0x08]);
-      if (ddIdx == -1) break;
+      List<int>? compBytes;
+      int nextEntryIdx = startData;
 
-      final compBytes = data.sublist(startData, ddIdx);
+      if (compSize > 0 && startData + compSize <= data.length) {
+        compBytes = data.sublist(startData, startData + compSize);
+        nextEntryIdx = startData + compSize;
+        if (_checkSignature(data, nextEntryIdx, const [0x50, 0x4b, 0x07, 0x08])) {
+          nextEntryIdx += 16;
+        }
+      } else {
+        // Find the corresponding data descriptor signature PK\x07\x08
+        final ddIdx = _findSignature(data, startData, const [0x50, 0x4b, 0x07, 0x08]);
+        if (ddIdx == -1) {
+          break;
+        }
+        compBytes = data.sublist(startData, ddIdx);
+        nextEntryIdx = ddIdx + 16; // Skip PK\x07\x08 (4) + CRC (4) + CompSize (4) + UncompSize (4)
+      }
 
       List<int>? decomp;
-      if (compMethod == 8) {
+      if (compMethod == 8 && compBytes != null) {
         try {
           // Decompress using raw deflate (no zlib headers)
           decomp = ZLibDecoder(raw: true).convert(compBytes);
         } catch (_) {
           // Skip file if decompression fails
         }
-      } else if (compMethod == 0) {
+      } else if (compMethod == 0 && compBytes != null) {
         decomp = compBytes;
       }
 
@@ -58,7 +73,7 @@ class IdmBackupParser {
         filesMap[fn] = decomp;
       }
 
-      idx = ddIdx + 16; // Skip past PK\x07\x08 signature (4 bytes) + CRC (4) + CompSize (4) + UncompSize (4)
+      idx = nextEntryIdx;
     }
 
     final downloadQueue = <Map<String, dynamic>>[];
@@ -73,10 +88,10 @@ class IdmBackupParser {
         try {
           final decodedJson = json.decode(utf8.decode(entry.value));
           final String xmlStr = decodedJson is String ? decodedJson : json.encode(decodedJson);
-          
+
           final tag = _extractTag(xmlStr, 'tag') ?? '';
           final uri = _extractTag(xmlStr, 'uri') ?? '';
-          String name = _extractTag(xmlStr, 'name') ?? '';
+          String rawName = _extractTag(xmlStr, 'name') ?? '';
           final dirPath = _extractTag(xmlStr, 'dir') ?? '';
           final referer = _extractTag(xmlStr, 'referer') ?? '';
           final userAgent = _extractTag(xmlStr, 'userAgent') ?? '';
@@ -87,17 +102,27 @@ class IdmBackupParser {
           final stateStr = _extractTag(xmlStr, 'state') ?? '0';
           final contentType = _extractTag(xmlStr, 'contentType') ?? '';
 
-          if (uri.isEmpty || uri.toLowerCase() == 'none') continue;
+          if (!_isSafeUri(uri)) continue;
 
-          if (name.isEmpty || name.toLowerCase() == 'none') {
-            try {
-              name = Uri.parse(uri).pathSegments.last;
-            } catch (_) {
-              name = 'download';
-            }
+          String name = '';
+          if (rawName.isNotEmpty && rawName.toLowerCase() != 'none') {
+            name = _sanitizeFilename(rawName);
           }
 
-          final subfolder = _getSubfolder(dirPath);
+          if (name.isEmpty) {
+            try {
+              final parsedUri = Uri.parse(uri);
+              if (parsedUri.pathSegments.isNotEmpty) {
+                name = _sanitizeFilename(parsedUri.pathSegments.last);
+              }
+            } catch (_) {}
+          }
+
+          if (name.isEmpty) {
+            name = 'download';
+          }
+
+          final subfolder = _sanitizeSubfolder(dirPath);
           final savePath = subfolder.isNotEmpty ? 'completed/$subfolder/$name' : 'completed/$name';
 
           final addedOn = int.tryParse(addedOnStr) ?? 0;
@@ -177,7 +202,7 @@ class IdmBackupParser {
             final uuid = (map['uuid'] as String? ?? '').trim();
             final modifiedDate = map['modifiedDate'] as int? ?? 0;
 
-            if (mUrl.isEmpty || mUrl.toLowerCase() == 'none') continue;
+            if (!_isSafeUri(mUrl)) continue;
 
             final favId = uuid.isNotEmpty ? uuid : 'fav_$mUrl';
             final createdAt = modifiedDate > 0
@@ -186,16 +211,19 @@ class IdmBackupParser {
 
             String? folderId;
             if (mFolder.isNotEmpty) {
-              if (!folderNameToId.containsKey(mFolder)) {
-                final fId = 'folder_${folderNameToId.length + 1}';
-                folderNameToId[mFolder] = fId;
-                folders.add({
-                  "id": fId,
-                  "name": mFolder,
-                  "createdAt": DateTime.now().toUtc().toIso8601String()
-                });
+              final cleanFolder = _sanitizeFilename(mFolder);
+              if (cleanFolder.isNotEmpty) {
+                if (!folderNameToId.containsKey(cleanFolder)) {
+                  final fId = 'folder_${folderNameToId.length + 1}';
+                  folderNameToId[cleanFolder] = fId;
+                  folders.add({
+                    "id": fId,
+                    "name": cleanFolder,
+                    "createdAt": DateTime.now().toUtc().toIso8601String()
+                  });
+                }
+                folderId = folderNameToId[cleanFolder];
               }
-              folderId = folderNameToId[mFolder];
             }
 
             favorites.add({
@@ -226,7 +254,7 @@ class IdmBackupParser {
             final mTitle = (map['mTitle'] as String? ?? '').trim();
             final modifiedDate = map['modifiedDate'] as int? ?? 0;
 
-            if (mUrl.isEmpty || mUrl.toLowerCase() == 'none') continue;
+            if (!_isSafeUri(mUrl)) continue;
 
             final visitedAt = modifiedDate > 0
                 ? DateTime.fromMillisecondsSinceEpoch(modifiedDate, isUtc: true).toIso8601String()
@@ -296,5 +324,48 @@ class IdmBackupParser {
       }
     }
     return "";
+  }
+
+  static bool _isSafeUri(String uriStr) {
+    if (uriStr.isEmpty || uriStr.toLowerCase() == 'none') return false;
+    final uri = Uri.tryParse(uriStr);
+    if (uri == null) return false;
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'file' || scheme == 'content' || scheme == 'javascript' || scheme == 'data') {
+      return false;
+    }
+    return true;
+  }
+
+  static String _sanitizeFilename(String input) {
+    var s = input.replaceAll('\x00', '').trim();
+    s = s.replaceAll('\\', '/');
+    if (s.contains('/')) {
+      s = s.split('/').last.trim();
+    }
+    while (s.startsWith('../') || s.startsWith('..\\')) {
+      s = s.substring(3).trim();
+    }
+    if (s == '..' || s == '.') {
+      s = '';
+    }
+    s = s.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
+    s = s.replaceAll(RegExp(r'[\s.]+$'), '');
+    return s;
+  }
+
+  static String _sanitizeSubfolder(String dirPath) {
+    if (dirPath.isEmpty || dirPath.toLowerCase() == 'none') return "";
+    final rawSub = _getSubfolder(dirPath);
+    if (rawSub.isEmpty) return "";
+    final parts = rawSub.replaceAll('\\', '/').split('/');
+    final cleanParts = <String>[];
+    for (final part in parts) {
+      final cleanPart = _sanitizeFilename(part);
+      if (cleanPart.isNotEmpty && cleanPart != '.' && cleanPart != '..') {
+        cleanParts.add(cleanPart);
+      }
+    }
+    return cleanParts.join('/');
   }
 }

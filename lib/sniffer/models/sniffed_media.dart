@@ -58,12 +58,17 @@ class SniffedMedia {
   /// variants exist. Null for non-variant items and for the master itself.
   final String? masterUrl;
 
-  /// Poster image for this media, harvested from the page DOM — a
-  /// `<video poster>` attribute, a nearby `<img>`, or the page's `og:image` as
-  /// a last resort. Purely cosmetic: the capture sheet renders it as the row
-  /// thumbnail and falls back to a type icon when it is null or fails to load.
-  /// Always an absolute `http`/`https` URL — the JS bridge rejects everything
-  /// else before it reaches here.
+  /// Poster image for *this element*, harvested from the page DOM — a
+  /// `<video poster>` attribute or a nearby `<img>`. Purely cosmetic: the
+  /// capture sheet renders it as the row thumbnail and falls back to a type
+  /// icon when it is null or fails to load. Always an absolute `http`/`https`
+  /// URL — the JS bridge rejects everything else before it reaches here.
+  ///
+  /// Deliberately excludes the page's `og:image`. That is page artwork, not
+  /// this file's own frame, so it is applied at paint time and only on pages
+  /// with a single playable capture — see `pagePosterFor` in the capture sheet.
+  /// Folding it in here made every row of a gallery page show one identical
+  /// image, which reads as a rendering fault rather than a thumbnail.
   final String? thumbnailUrl;
 
   SniffedMedia({
