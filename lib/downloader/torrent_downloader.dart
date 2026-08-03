@@ -11,6 +11,7 @@ import 'magnet_link.dart';
 import 'torrent_metadata.dart';
 import 'download_logger.dart';
 import '../premium/ffmpeg/ffmpeg_module_loader.dart';
+import '../premium/build_channel.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[TorrentDownloader] $context: $error';
@@ -22,21 +23,73 @@ void _logError(String context, Object error, [StackTrace? stack]) {
 // (liblibtorrent_flutter.so) is on-demand via the :torrent module.
 bool _isLtLoaded = false;
 
-Future<bool> _ensureLtLoaded() async {
-  if (_isLtLoaded) return true;
+/// Outcome of [TorrentDownloader._ensureLtLoaded].
+enum _LtLoadResult {
+  /// Native engine is initialized and usable.
+  ready,
+
+  /// Engine is not available (module missing/failed, or a real load error).
+  unavailable,
+
+  /// The `:torrent` split was installed mid-process but the running process
+  /// cannot dlopen its native lib; the app is relaunching so the queued task
+  /// auto-resumes with the lib loadable.
+  restarting,
+}
+
+/// True when the error means the native library itself could not be resolved
+/// by the loader (vs. a session/engine-level failure).
+bool _isMissingNativeLibrary(Object error) {
+  final msg = error.toString();
+  return msg.contains('Failed to load dynamic library') ||
+      msg.contains('dlopen failed') ||
+      msg.contains('cannot find library') ||
+      msg.contains('UnsatisfiedLinkError');
+}
+
+Future<_LtLoadResult> _ensureLtLoaded(String saveDirectory) async {
+  if (lt.LibtorrentFlutter.isInitialized) return _LtLoadResult.ready;
+  final loader = FeatureModuleLoader.instance;
   try {
     // Download the :torrent on-demand module from Play Store if needed.
-    final installed =
-        await FeatureModuleLoader.instance.ensureInstalled('torrent');
+    final installed = await loader.ensureInstalled('torrent');
     if (!installed) {
       debugPrint('[TorrentDownloader] torrent module not available');
-      return false;
+      return _LtLoadResult.unavailable;
+    }
+    // Module is present — now the native engine must ACTUALLY load. Only
+    // mark ready after init succeeded; otherwise an auto-retry re-runs this
+    // whole path instead of blindly re-trying a failed dlopen.
+    await Directory(saveDirectory).create(recursive: true);
+    if (!lt.LibtorrentFlutter.isInitialized) {
+      await lt.LibtorrentFlutter.init(
+        defaultSavePath: saveDirectory,
+        pollInterval: const Duration(milliseconds: 600),
+      );
     }
     _isLtLoaded = true;
-    return true;
-  } catch (e) {
-    debugPrint('[TorrentDownloader] torrent module install error: $e');
-    return false;
+    return _LtLoadResult.ready;
+  } catch (e, s) {
+    _logError('Failed to load the torrent engine', e, s);
+    _isLtLoaded = false;
+    // Play Core limitation: a split installed while this process was already
+    // running has its native libs invisible to the process's dlopen() path
+    // (Dart FFI loads by plain name). The module IS installed and the task
+    // is persisted as 'downloading' — relaunch the app so the lib becomes
+    // loadable; the queue auto-resumes the task after the restart. Guarded
+    // by installedInCurrentProcess so a second failure after the restart
+    // (a real ABI/library problem) fails normally instead of looping.
+    if (BuildChannel.isPlay &&
+        loader.installedInCurrentProcess('torrent') &&
+        _isMissingNativeLibrary(e)) {
+      debugPrint(
+        '[TorrentDownloader] :torrent module installed mid-process; '
+        'relaunching so the native library becomes loadable.',
+      );
+      final restarted = await loader.requestRestart();
+      if (restarted) return _LtLoadResult.restarting;
+    }
+    return _LtLoadResult.unavailable;
   }
 }
 
@@ -192,12 +245,18 @@ class TorrentDownloader implements BaseDownloader {
     _taskUpdateController.add(task);
 
     try {
-      final loaded = await _ensureLtLoaded();
-      if (!loaded) {
+      final saveDirectory = _nativeSaveDirectory();
+      final loaded = await _ensureLtLoaded(saveDirectory);
+      if (loaded == _LtLoadResult.unavailable) {
         _failNativeRequired();
         return;
       }
-      final saveDirectory = _nativeSaveDirectory();
+      if (loaded == _LtLoadResult.restarting) {
+        // The app is relaunching so the freshly-installed :torrent split's
+        // native lib becomes loadable. The task stays in 'downloading' state
+        // (persisted by the queue) and auto-resumes after the restart.
+        return;
+      }
       await Directory(saveDirectory).create(recursive: true);
       if (!lt.LibtorrentFlutter.isInitialized) {
         await lt.LibtorrentFlutter.init(

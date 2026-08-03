@@ -136,6 +136,23 @@ abstract class FeatureModuleLoader {
 
   /// Estimated download size for [moduleId] in bytes, or null if unknown.
   int? estimatedSizeBytes(String moduleId);
+
+  /// Whether [moduleId] was installed by a Play Store split download in the
+  /// *current* process, as opposed to already being present when the process
+  /// started.
+  ///
+  /// Play Core cannot make a split's native libraries visible to the
+  /// `dlopen()` search path of a process that was already running when the
+  /// split was installed — Dart FFI loads native libs by plain name, so the
+  /// just-installed split's `.so` is never found until the process restarts.
+  /// Callers that load FFI libraries after a mid-process install use this to
+  /// detect that a process restart is required.
+  bool installedInCurrentProcess(String moduleId);
+
+  /// Relaunches the app so a freshly-installed module's native libraries
+  /// become loadable. Returns `true` when a restart was scheduled. On
+  /// GitHub/fat builds this is a no-op returning `false`.
+  Future<bool> requestRestart();
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +205,12 @@ class GitHubModuleLoader extends FeatureModuleLoader {
 
   @override
   int? estimatedSizeBytes(String moduleId) => null; // Always included.
+
+  @override
+  bool installedInCurrentProcess(String moduleId) => false;
+
+  @override
+  Future<bool> requestRestart() async => false;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +237,12 @@ class PlayModuleLoader extends FeatureModuleLoader {
 
   /// Session IDs for active installs, keyed by module name.
   final Map<String, int> _activeSessions = {};
+
+  /// Modules whose split was downloaded+installed in THIS process (as
+  /// opposed to being present when the process started). Used to decide
+  /// whether a restart is required before the module's native libs can be
+  /// loaded — see [FeatureModuleLoader.installedInCurrentProcess].
+  final Map<String, bool> _installedThisProcess = {};
 
   FeatureModuleStatus _resolveStatus(String moduleId) {
     return _cache[moduleId] ?? FeatureModuleStatus.missing;
@@ -249,11 +278,19 @@ class PlayModuleLoader extends FeatureModuleLoader {
       _cache[moduleId] = FeatureModuleStatus.ready;
       _emit(moduleId, FeatureModuleStatus.ready);
       await _registerPlugin(moduleId);
+      _installedThisProcess[moduleId] = false;
       return true;
     }
 
     _cache[moduleId] = FeatureModuleStatus.downloading;
     _emit(moduleId, FeatureModuleStatus.downloading);
+    _installedThisProcess[moduleId] = true;
+
+    // Subscribe to the status stream BEFORE starting the install. The
+    // stream is broadcast, so any event emitted before a subscription is
+    // silently dropped — a fast-completing install would otherwise report
+    // INSTALLED and leave the waiter below hanging until its timeout.
+    final waiter = _waitForModule(moduleId);
 
     try {
       // Listen for progress events from the native side.
@@ -271,7 +308,7 @@ class PlayModuleLoader extends FeatureModuleLoader {
       _activeSessions[moduleId] = sessionId;
 
       // Wait for completion via the progress stream.
-      final success = await _waitForModule(moduleId);
+      final success = await waiter;
       if (success) {
         await _registerPlugin(moduleId);
       }
@@ -281,6 +318,8 @@ class PlayModuleLoader extends FeatureModuleLoader {
       // Assume module is present (fat APK fallback).
       _cache[moduleId] = FeatureModuleStatus.ready;
       _emit(moduleId, FeatureModuleStatus.ready);
+      // No split install actually happened — a restart would not help.
+      _installedThisProcess[moduleId] = false;
       return true;
     } catch (e) {
       _cache[moduleId] = FeatureModuleStatus.failed;
@@ -412,6 +451,21 @@ class PlayModuleLoader extends FeatureModuleLoader {
         return 15 * 1024 * 1024;
       default:
         return null;
+    }
+  }
+
+  @override
+  bool installedInCurrentProcess(String moduleId) =>
+      _installedThisProcess[moduleId] ?? false;
+
+  @override
+  Future<bool> requestRestart() async {
+    try {
+      final restarted = await _channel.invokeMethod<bool>('restartApp');
+      return restarted == true;
+    } catch (e) {
+      debugPrint('[FeatureModuleLoader] restartApp failed: $e');
+      return false;
     }
   }
 

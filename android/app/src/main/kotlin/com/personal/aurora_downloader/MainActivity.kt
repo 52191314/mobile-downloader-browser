@@ -463,6 +463,14 @@ class MainActivity : FlutterActivity() {
                         val moduleName = call.argument<String>("module") ?: "ffmpeg"
                         result.success(registerFeaturePlugin(moduleName))
                     }
+                    "restartApp" -> {
+                        // Play Core cannot make a split's native libraries visible
+                        // to the dlopen() path of a process that was already
+                        // running when the split was installed — Dart FFI loads by
+                        // plain name. Relaunch so the platform re-scans installed
+                        // splits; the persisted download queue auto-resumes.
+                        result.success(restartAppForModuleInstall())
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -549,6 +557,10 @@ class MainActivity : FlutterActivity() {
                     engine.plugins.add(MediaKitLibsAndroidVideoPlugin())
                     true
                 }
+                // libtorrent_flutter is pure Dart FFI (dlopen by plain name) —
+                // there is no Flutter plugin to register; the library becomes
+                // loadable after the process restart requested by restartApp.
+                "torrent" -> true
                 else -> {
                     Log.w(TAG, "registerPlugin: unknown module $moduleName")
                     false
@@ -556,6 +568,42 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: Throwable) {
             Log.e(TAG, "registerPlugin($moduleName) failed", e)
+            false
+        }
+    }
+
+    /**
+     * Relaunches the app so native libraries from a freshly-installed on-demand
+     * split become loadable.
+     *
+     * SplitCompat makes the installed split's Java classes and resources
+     * available in the running process, but a process that was already running
+     * when the split was installed cannot resolve the split's native libraries
+     * through dlopen() (Dart FFI loads by plain name). The download queue is
+     * persisted, so after the relaunch the torrent task auto-resumes and the
+     * library loads from the installed split in the fresh process.
+     *
+     * Returns true when a relaunch was scheduled; false on failure.
+     */
+    private fun restartAppForModuleInstall(): Boolean {
+        return try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+            }
+            startActivity(intent)
+            // Give the system a moment to schedule the relaunch, then hard-exit
+            // this process so the new activity starts in a fresh process where
+            // the installed split's native libraries are on the dlopen path.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                Runtime.getRuntime().exit(0)
+            }, 600)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "restartAppForModuleInstall failed", e)
             false
         }
     }
