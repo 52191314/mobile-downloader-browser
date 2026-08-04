@@ -403,6 +403,17 @@ class DownloadErrorClassifier {
       return DownloadFailure.hlsKeyFetchFailed;
     }
 
+    // Disk — checked BEFORE the merge-failed pattern below: an in-isolate
+    // merge wraps the original FileSystemException text, and a message like
+    // "File merge failed: FileSystemException: No space left on device"
+    // must still classify as diskFull/permissionDenied, not mergeFailed.
+    if (lower.contains('no space left') || lower.contains('enospc')) {
+      return DownloadFailure.diskFull;
+    }
+    if (lower.contains('permission denied') || lower.contains('eacces')) {
+      return DownloadFailure.permissionDenied;
+    }
+
     // Chunk / merge issues.
     if (lower.contains('not all chunks completed') || lower.contains('chunk incomplete')) {
       return DownloadFailure.chunkIncomplete;
@@ -455,14 +466,6 @@ class DownloadErrorClassifier {
     }
     if (lower.contains('no internet') || lower.contains('network is unreachable')) {
       return DownloadFailure.noInternet;
-    }
-
-    // Disk.
-    if (lower.contains('no space left') || lower.contains('enospc')) {
-      return DownloadFailure.diskFull;
-    }
-    if (lower.contains('permission denied') || lower.contains('eacces')) {
-      return DownloadFailure.permissionDenied;
     }
 
     return DownloadFailure.unknown;

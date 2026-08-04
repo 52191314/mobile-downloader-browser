@@ -21,7 +21,9 @@ val extractTorrentJni by tasks.registering {
         destRoot.deleteRecursively()
         destRoot.mkdirs()
 
-        val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        // arm64-v8a + armeabi-v7a only — must match the base module's ABI set
+        // (x86_64 is not shipped; Play never installs it on ARM devices).
+        val abis = listOf("arm64-v8a", "armeabi-v7a")
         var copied = 0
 
         fun findPrebuiltDir(): File? {
@@ -150,4 +152,15 @@ dependencies {
 
 tasks.named("preBuild").configure {
     dependsOn(extractTorrentJni)
+}
+
+// GitHub/sideload channel: this module is never wired into :app
+// (dynamicFeatures is only populated for Play), but Flutter invokes
+// `gradlew assembleDebug` unqualified, which schedules this module's
+// assembleDebug anyway — and its manifest task fails without a featureName
+// in :app's feature-metadata.json. Disable the whole module instead.
+val auroraPlay = gradle.extensions.getExtraProperties().has("auroraPlayChannel") &&
+    (gradle.extensions.getExtraProperties().get("auroraPlayChannel") as Boolean)
+if (!auroraPlay) {
+    tasks.configureEach { enabled = false }
 }

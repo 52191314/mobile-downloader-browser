@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Private Vault backup exclusion (legacy full-backup, API <= 30).
+
+     The vault's AES-256 master key lives in Keystore-backed secure storage
+     (shared_prefs/FlutterSecureStorage.xml) and the encrypted blobs live in
+     files/vault/. Neither can be restored onto a different device: the
+     Keystore key does not transfer, so a restored vault would be permanently
+     locked (the one-time recovery key is display-only — no entry flow exists).
+     Exclude both from backup/restore. -->
+<full-backup-content>
+    <exclude domain="file" path="files/vault/" />
+    <exclude domain="file" path="vault/" />
+    <exclude domain="sharedpref" path="FlutterSecureStorage" />
+</full-backup-content>

@@ -99,6 +99,8 @@ flutter:
   #   - images/a_dot_ham.jpeg
   assets:
     - assets/browser_guard.js
+    - assets/adblock_cosmetic.js
+    - assets/scriptlets.js
     - assets/brand/aurora-logo-master.webp
     - assets/brand/aurora-logo-red.webp
 
@@ -111,6 +113,13 @@ flutter:
       fonts:
         - asset: assets/fonts/Inter.ttf
     - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono.ttf
+    # Alias: ~20 code sites reference 'JetBrainsMono' (no space). Without this
+    # alias they silently fall back to the system font instead of the bundled
+    # mono face. The same TTF is bundled once regardless of the number of
+    # family entries pointing at it.
+    - family: JetBrainsMono
       fonts:
         - asset: assets/fonts/JetBrainsMono.ttf
 

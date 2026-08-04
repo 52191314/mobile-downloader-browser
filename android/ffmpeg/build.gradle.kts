@@ -47,10 +47,10 @@ val extractFfmpegJni by tasks.registering {
         }
 
         // Bundletool requires every module with natives to advertise the *same*
-        // ABI set as base. Base currently still resolves multi-ABI plugin
-        // artifacts (even with app abiFilters), so extract all common ABIs.
+        // ABI set as base. Base ships arm64-v8a + armeabi-v7a only (see
+        // :app abiFilters + packaging excludes), so extract the same set here.
         // Play still delivers only the device ABI at install time.
-        val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        val abis = listOf("arm64-v8a", "armeabi-v7a")
         var copied = 0
         aars.forEach { aar ->
             copy {
@@ -107,4 +107,15 @@ android {
 // Always extract before preBuild so sourceSets jniLibs dir is populated.
 tasks.named("preBuild").configure {
     dependsOn(extractFfmpegJni)
+}
+
+// GitHub/sideload channel: this module is never wired into :app
+// (dynamicFeatures is only populated for Play), but Flutter invokes
+// `gradlew assembleDebug` unqualified, which schedules this module's
+// assembleDebug anyway — and its manifest task fails without a featureName
+// in :app's feature-metadata.json. Disable the whole module instead.
+val auroraPlay = gradle.extensions.getExtraProperties().has("auroraPlayChannel") &&
+    (gradle.extensions.getExtraProperties().get("auroraPlayChannel") as Boolean)
+if (!auroraPlay) {
+    tasks.configureEach { enabled = false }
 }

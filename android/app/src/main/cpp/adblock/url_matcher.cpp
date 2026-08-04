@@ -7,13 +7,13 @@
 // RegexCache implementation
 RegexCache::RegexCache(size_t capacity) : capacity_(capacity) {}
 
-bool RegexCache::match(const std::string& pattern, const std::string& text) {
+bool RegexCache::match(const std::string& pattern, std::string_view text) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = cache_.find(pattern);
     if (it != cache_.end()) {
         lru_list_.splice(lru_list_.begin(), lru_list_, it->second);
         try {
-            return std::regex_search(text, it->second->re);
+            return std::regex_search(text.begin(), text.end(), it->second->re);
         } catch (...) {
             return false;
         }
@@ -28,7 +28,7 @@ bool RegexCache::match(const std::string& pattern, const std::string& text) {
         }
         lru_list_.push_front({pattern, re});
         cache_[pattern] = lru_list_.begin();
-        return std::regex_search(text, re);
+        return std::regex_search(text.begin(), text.end(), re);
     } catch (...) {
         return false;
     }
@@ -47,7 +47,7 @@ static std::vector<std::string> split_domain(const std::string& domain) {
     return parts;
 }
 
-static bool evaluate_domain_modifiers(const std::vector<std::pair<std::string, bool>>& modifiers, const std::string& host) {
+static bool evaluate_domain_modifiers(const std::vector<std::pair<std::string, bool>>& modifiers, std::string_view host) {
     if (modifiers.empty()) return true;
     bool has_positive = false;
     bool matched_positive = false;
@@ -70,9 +70,9 @@ static bool evaluate_domain_modifiers(const std::vector<std::pair<std::string, b
 
 static bool selector_matches(
     const std::string& selector,
-    const std::string& tag_name,
-    const std::string& id,
-    const std::vector<std::string>& classes
+    std::string_view tag_name,
+    std::string_view id,
+    const std::vector<std::string_view>& classes
 ) {
     std::string clean = selector;
     // Trim
@@ -93,7 +93,7 @@ static bool selector_matches(
         return std::find(classes.begin(), classes.end(), cls) != classes.end();
     }
     
-    std::string tag = tag_name;
+    std::string tag = std::string(tag_name);
     std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) { return std::tolower(c); });
     
     if (clean.find('.') == std::string::npos && clean.find('#') == std::string::npos) {
@@ -263,8 +263,8 @@ void URLMatcher::build_aho_corasick() {
     }
 }
 
-std::string URLMatcher::extract_host(const std::string& url) const {
-    std::string host = url;
+std::string URLMatcher::extract_host(std::string_view url) const {
+    std::string host = std::string(url);
     size_t scheme_pos = host.find("://");
     if (scheme_pos != std::string::npos) {
         host = host.substr(scheme_pos + 3);
@@ -290,8 +290,8 @@ std::string URLMatcher::extract_host(const std::string& url) const {
 
 bool URLMatcher::evaluate_options(
     const Rule* rule, 
-    const std::string& source_host, 
-    const std::string& request_type, 
+    std::string_view source_host, 
+    std::string_view request_type, 
     bool is_third_party
 ) const {
     if (!rule->has_options) return true;
@@ -321,14 +321,14 @@ bool URLMatcher::evaluate_options(
 }
 
 bool URLMatcher::should_block_ex(
-    const std::string& url, 
-    const std::string& source_host, 
-    const std::string& request_type, 
+    std::string_view url, 
+    std::string_view source_host, 
+    std::string_view request_type, 
     bool is_third_party
 ) const {
     if (url.empty()) return false;
     
-    std::string lc_url = url;
+    std::string lc_url = std::string(url);
     std::transform(lc_url.begin(), lc_url.end(), lc_url.begin(), [](unsigned char c) {
         return std::tolower(c);
     });
@@ -482,12 +482,12 @@ bool URLMatcher::should_block_ex(
 }
 
 bool URLMatcher::should_hide_element(
-    const std::string& page_host,
-    const std::string& tag_name,
-    const std::string& id,
-    const std::vector<std::string>& classes
+    std::string_view page_host,
+    std::string_view tag_name,
+    std::string_view id,
+    const std::vector<std::string_view>& classes
 ) const {
-    std::string host = page_host;
+    std::string host = std::string(page_host);
     std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return std::tolower(c); });
     
     // Exceptions first

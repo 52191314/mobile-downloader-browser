@@ -125,9 +125,10 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   bool _previewReady = false;
   bool _previewInitStarted = false;
   Timer? _previewSeekDebounce;
-  /// Throttle main-player UI rebuilds so the bar moves smoothly without
-  /// setState every vsync.
-  DateTime _lastProgressUiAt = DateTime.fromMillisecondsSinceEpoch(0);
+  /// Last-seen `isPlaying` so controller-driven play/pause icon changes (e.g.
+  /// when playback finishes) still trigger a full rebuild. Pure position
+  /// updates no longer need one — see [_buildBottomControls].
+  bool _wasPlaying = false;
 
   // --- Speed ---
   double _currentSpeed = 1.0;
@@ -287,6 +288,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         formatHint: formatHint,
       );
       _controller = controller;
+      _wasPlaying = false;
       _controllerListener = _onControllerUpdate;
       controller.addListener(_controllerListener!);
       await controller.initialize();
@@ -337,15 +339,29 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     return null;
   }
 
+  /// Controller listener. Full-screen `setState` is reserved for non-position
+  /// UI state: buffering, the play/pause icon, and video dimensions. Position /
+  /// duration / buffered updates for the progress bar + clock are consumed
+  /// frame-scoped by the `ValueListenableBuilder`s in [_buildBottomControls],
+  /// so they no longer need a throttled whole-screen rebuild.
   void _onControllerUpdate() {
     if (!mounted || _controller == null) return;
     final v = _controller!.value;
+
+    var needsFullRebuild = false;
 
     if (v.size.width > 0 && v.size.height > 0) {
       if (_videoWidth != v.size.width || _videoHeight != v.size.height) {
         _videoWidth = v.size.width;
         _videoHeight = v.size.height;
+        needsFullRebuild = true;
       }
+    }
+
+    // Play/pause icon reflects isPlaying — e.g. when the video finishes.
+    if (v.isPlaying != _wasPlaying) {
+      _wasPlaying = v.isPlaying;
+      needsFullRebuild = true;
     }
 
     // Buffering: ExoPlayer often clears isPlaying while stalled — treat
@@ -364,17 +380,11 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         _bufferingTimer = null;
         _isBufferingSlow = false;
       }
-      // Immediate rebuild so the spinner appears without waiting for throttle.
-      setState(() {});
-      return;
+      // Immediate rebuild so the spinner appears without any delay.
+      needsFullRebuild = true;
     }
 
-    // Keep the progress bar live (~10 fps).
-    if (_isSeeking) return;
-    final now = DateTime.now();
-    if (now.difference(_lastProgressUiAt).inMilliseconds < 100) return;
-    _lastProgressUiAt = now;
-    setState(() {});
+    if (needsFullRebuild) setState(() {});
   }
 
   @override
@@ -1528,37 +1538,36 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
   // ---- Bottom controls ----
 
-  Widget _buildBottomControls() {
-    final ac = context.ac;
-    final c = _controller;
-    final position = (c != null && c.value.isInitialized)
-        ? c.value.position
-        : Duration.zero;
-    final duration = (c != null && c.value.isInitialized)
-        ? c.value.duration
-        : Duration.zero;
+  /// Progress-bar / clock values derived from a live controller value.
+  /// While scrubbing, the visible position is the user's thumb position
+  /// ([_seekPosition]) rather than the live playback position.
+  (double progress, double bufferedFraction, Duration duration, Duration displayPosition)
+      _progressValues(VideoPlayerValue value) {
+    final duration = value.isInitialized ? value.duration : Duration.zero;
+    final displayPosition = _isSeeking ? _seekPosition : value.position;
+    final double progress = duration.inMilliseconds > 0
+        ? (displayPosition.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
 
-    final displayPosition = _isSeeking ? _seekPosition : position;
-
-    final double progress =
-        duration.inMilliseconds > 0
-            ? (displayPosition.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
-            : 0.0;
-
-    // Build buffered ranges
+    // Build buffered ranges.
     double bufferedProgress = 0.0;
-    if (c != null && c.value.isInitialized && duration.inMilliseconds > 0) {
-      for (final range in c.value.buffered) {
+    if (value.isInitialized && duration.inMilliseconds > 0) {
+      for (final range in value.buffered) {
         final end = range.end.inMilliseconds;
         if (end > bufferedProgress) {
           bufferedProgress = end.toDouble();
         }
       }
     }
-    final double bufferedFraction =
-        duration.inMilliseconds > 0
-            ? (bufferedProgress / duration.inMilliseconds).clamp(0.0, 1.0)
-            : 0.0;
+    final double bufferedFraction = duration.inMilliseconds > 0
+        ? (bufferedProgress / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    return (progress, bufferedFraction, duration, displayPosition);
+  }
+
+  Widget _buildBottomControls() {
+    final ac = context.ac;
+    final c = _controller;
 
     return Positioned(
       bottom: 0,
@@ -1580,7 +1589,22 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
           mainAxisSize: MainAxisSize.min,
           children: [
             // --- Progress bar ---
-            _buildProgressBar(bufferedFraction, progress, duration),
+            // Rebuilt per-frame from the controller (a ValueListenable) so the
+            // bar tracks position/buffered without a whole-screen setState.
+            c == null
+                ? _buildProgressBar(0.0, 0.0, Duration.zero)
+                : ValueListenableBuilder<VideoPlayerValue>(
+                    valueListenable: c,
+                    builder: (context, value, _) {
+                      final (progress, bufferedFraction, duration, _) =
+                          _progressValues(value);
+                      return _buildProgressBar(
+                        bufferedFraction,
+                        progress,
+                        duration,
+                      );
+                    },
+                  ),
 
             const SizedBox(height: 6),
 
@@ -1602,18 +1626,36 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                       size: 26,
                     ),
                   ),
-                  // Time
+                  // Time (elapsed / duration) — frame-scoped like the bar.
                   Flexible(
-                    child: Text(
-                      '${_formatDuration(displayPosition)} / ${_formatDuration(duration)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        fontFeatures: [FontFeature.tabularFigures()],
-                      ),
-                    ),
+                    child: c == null
+                        ? const Text(
+                            '00:00 / 00:00',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          )
+                        : ValueListenableBuilder<VideoPlayerValue>(
+                            valueListenable: c,
+                            builder: (context, value, _) {
+                              final (_, _, duration, displayPosition) =
+                                  _progressValues(value);
+                              return Text(
+                                '${_formatDuration(displayPosition)} / ${_formatDuration(duration)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                ),
+                              );
+                            },
+                          ),
                   ),
                   const Spacer(),
                   // Quality (HLS variants / multi-rendition)

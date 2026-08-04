@@ -428,23 +428,70 @@ class AuroraLog {
   // -- persistence --
 
   Future<void>? _activeSaveFuture;
+  Timer? _saveTimer;
+
+  /// How long to wait after the last log entry before persisting. Bursts of
+  /// entries (e.g. HLS/torrent progress logging) coalesce into a single save.
+  static const Duration _saveDebounce = Duration(milliseconds: 1200);
 
   Future<void> get pendingWrites async {
+    // Flush any pending debounced save so the returned future means
+    // "everything is on disk".
+    _cancelDebounceAndSave();
     while (_isSaving || _needsSave) {
       await _activeSaveFuture;
       await Future.delayed(Duration.zero);
     }
   }
 
+  /// Cancels a pending debounce timer and, if entries are waiting, starts a
+  /// save immediately. Used by [pendingWrites] and [dispose] so a pending
+  /// save is never dropped when the log is closed.
+  void _cancelDebounceAndSave() {
+    if (_saveTimer != null) {
+      _saveTimer!.cancel();
+      _saveTimer = null;
+    }
+    if (_needsSave && _logPath != null && !_isLoading) {
+      _activeSaveFuture = _triggerSave();
+    }
+  }
+
   void _saveToFile() {
     if (_logPath == null || _isLoading) return;
     _needsSave = true;
-    _activeSaveFuture = _triggerSave();
+    // Debounce: coalesce bursts of entries into a single save instead of
+    // rewriting the file on every log call. Arm the timer ONCE per burst —
+    // resetting it on every entry would starve the save during continuous
+    // logging (e.g. HLS progress) and the file would never be written until
+    // logging pauses. `_triggerSave`'s `while (_needsSave)` drain loop then
+    // picks up any entries that arrive while a save is in flight.
+    if (_saveTimer != null) return;
+    _saveTimer = Timer(_saveDebounce, () {
+      _saveTimer = null;
+      _activeSaveFuture = _triggerSave();
+    });
   }
 
-  Future<void> _triggerSave() async {
-    if (_isSaving) return;
+  Future<void>? _inFlightSave;
+
+  Future<void> _triggerSave() {
+    if (_isSaving) {
+      // A save is already running — return ITS future so callers that
+      // captured `_activeSaveFuture` await the real work instead of a
+      // completed no-op (which turned pendingWrites into a busy-poll).
+      return _inFlightSave ?? Future<void>.value();
+    }
     _isSaving = true;
+    final run = _runSaveLoop();
+    _inFlightSave = run;
+    return run.whenComplete(() {
+      _isSaving = false;
+      _inFlightSave = null;
+    });
+  }
+
+  Future<void> _runSaveLoop() async {
     while (_needsSave) {
       _needsSave = false;
       try {
@@ -453,7 +500,21 @@ class AuroraLog {
         final tempFile = File('$path.tmp');
         final data =
             _entries.map((e) => e.toJson()).toList(growable: false);
-        await tempFile.writeAsString(jsonEncode(data), flush: true);
+        // Offload JSON encoding to a worker isolate so serialising up to
+        // _maxEntries never blocks the UI isolate. If the pool is unavailable
+        // or fails, encode on the UI isolate instead — never lose entries.
+        String jsonString;
+        try {
+          jsonString = await WorkerIsolatePool.instance.execute(
+            'jsonEncode',
+            {'data': data},
+          ) as String;
+        } catch (e) {
+          debugPrint(
+              '[AuroraLog] Worker encode failed, encoding on UI isolate: $e');
+          jsonString = jsonEncode(data);
+        }
+        await tempFile.writeAsString(jsonString);
         if (await tempFile.exists()) {
           if (await file.exists()) {
             await file.delete();
@@ -464,7 +525,6 @@ class AuroraLog {
         debugPrint('[AuroraLog] Failed to save logs: $e');
       }
     }
-    _isSaving = false;
   }
 
   // -- clear --
@@ -480,6 +540,9 @@ class AuroraLog {
   // -- dispose --
 
   void dispose() {
+    // Best-effort final flush: cancel any pending debounce timer and persist
+    // outstanding entries before the log shuts down.
+    _cancelDebounceAndSave();
     _controller.close();
   }
 }

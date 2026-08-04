@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -8,7 +9,7 @@ import 'package:path/path.dart' as p;
 
 import 'models.dart';
 import '../logging/aurora_log.dart';
-import 'hls_decryptor.dart';
+import 'hls_decrypt_pool.dart';
 import 'hls_models.dart';
 import 'hls_playlist_parser.dart';
 import 'hls_size_estimator.dart';
@@ -139,32 +140,25 @@ class HlsDownloader implements BaseDownloader {
     // so we skip already-downloaded segments instead of wiping them.
     _resumeDiskBytesSeeded = false;
     if (!_isRetry) {
-      final tempDir = Directory(task.tempDir);
-      if (await tempDir.exists()) {
-        final files = await tempDir.list().toList();
+      // Directory listing + per-file stat runs on a background isolate so a
+      // ~500-segment resume never blocks the UI isolate on ~1000 file ops.
+      final scan = await _scanResumeSegments(task.tempDir);
+      if (scan != null) {
+        final segmentSizes = scan.segmentSizes;
         // Only finished segments (not `.part` partials).
-        final segmentFiles = files.where((e) {
-          if (e is! File) return false;
-          final name = p.basename(e.path).toLowerCase();
-          if (!name.startsWith('segment_')) return false;
-          if (name.endsWith('.part')) return false;
-          return name.endsWith('.ts') || name.endsWith('.m4s');
-        }).toList();
-        if (segmentFiles.isNotEmpty) {
+        if (segmentSizes.isNotEmpty) {
           _isRetry = true;
           // Seed downloadedBytes once from disk. Skip-logic must NOT add
           // those sizes again (that caused multi-GB "100%" with a small
           // estimated total still showing).
           int diskBytes = 0;
-          for (final entity in segmentFiles) {
-            try {
-              diskBytes += await (entity as File).length();
-            } catch (_) {}
+          for (final size in segmentSizes.values) {
+            diskBytes += size;
           }
           task.downloadedBytes = diskBytes;
           _resumeDiskBytesSeeded = true;
           AuroraLog.instance.info(
-            'Resume detected: ${segmentFiles.length} segment files '
+            'Resume detected: ${segmentSizes.length} segment files '
             '(${(diskBytes / 1048576).toStringAsFixed(1)} MB) in ${task.tempDir}',
             category: LogCategory.hls,
             eventType: LogEventType.stateChange,
@@ -173,7 +167,7 @@ class HlsDownloader implements BaseDownloader {
         } else {
           AuroraLog.instance.info(
             'No segment files in ${task.tempDir} '
-            '(${files.length} other files) — fresh start',
+            '(${scan.entryCount} other files) — fresh start',
             category: LogCategory.hls,
             eventType: LogEventType.stateChange,
             taskId: task.id,
@@ -357,6 +351,14 @@ class HlsDownloader implements BaseDownloader {
 
         _taskUpdateController.add(task);
       });
+
+      // Prewarm the persistent decryption pool so the first encrypted
+      // segment doesn't stall on one-shot isolate creation (and so the AES
+      // key schedule is cached across segments of this playlist). Size the
+      // pool to the effective segment concurrency so fast connections don't
+      // serialize downloads through the decrypt workers.
+      HlsDecryptPool.instance.poolSize = maxConcurrentSegments.clamp(2, 6);
+      unawaited(HlsDecryptPool.instance.ensureInitialized());
 
       var partFiles = await _downloadSegments(playlist);
       if (_needsRefresh && _staleSegmentIndexes.isNotEmpty) {
@@ -626,6 +628,23 @@ class HlsDownloader implements BaseDownloader {
     _taskUpdateController.add(task);
   }
 
+  /// Drains a probe/error response body back into the connection pool, but
+  /// aborts (rather than download-and-discard) when the server streamed a
+  /// large body — e.g. it ignored the `Range: bytes=0-0` header and sent
+  /// the whole file.
+  Future<void> _drainOrAbort(http.StreamedResponse response) async {
+    final len = response.contentLength;
+    if (response.statusCode == 206 || (len != null && len <= 65536)) {
+      try {
+        await response.stream.drain<void>();
+      } catch (_) {}
+    } else {
+      try {
+        await response.stream.listen((_) {}, onError: (_) {}).cancel();
+      } catch (_) {}
+    }
+  }
+
   /// Probe a single URI for Content-Length via HEAD, then Range-GET.
   Future<int?> _probeUriContentLength(Uri uri) async {
     try {
@@ -633,7 +652,11 @@ class HlsDownloader implements BaseDownloader {
       if (task.headers != null) headReq.headers.addAll(task.headers!);
       final headResp =
           await client.send(headReq).timeout(const Duration(seconds: 4));
-      await headResp.stream.listen((_) {}, onError: (_) {}).cancel();
+      try {
+        // Drain (not cancel) so the connection returns to the keep-alive
+        // pool instead of being torn down after every probe.
+        await headResp.stream.drain<void>();
+      } catch (_) {}
       if (headResp.statusCode >= 200 && headResp.statusCode < 400) {
         final len = headResp.contentLength;
         if (len != null && len > 0) return len;
@@ -650,7 +673,7 @@ class HlsDownloader implements BaseDownloader {
       getReq.followRedirects = true;
       final getResp =
           await client.send(getReq).timeout(const Duration(seconds: 5));
-      await getResp.stream.listen((_) {}, onError: (_) {}).cancel();
+      await _drainOrAbort(getResp);
       if (getResp.statusCode >= 200 && getResp.statusCode < 400) {
         final cr = getResp.headers['content-range'] ?? '';
         final m = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
@@ -1276,7 +1299,7 @@ class HlsDownloader implements BaseDownloader {
         'HLS key request failed: status ${response.statusCode} $bodyPreview',
         '',
       );
-      await response.stream.listen((_) {}, onError: (_) {}).cancel();
+      await _drainOrAbort(response);
       throw HttpException(
         'HLS key request failed with status ${response.statusCode}',
         uri: key.uri,
@@ -1549,7 +1572,7 @@ class HlsDownloader implements BaseDownloader {
               segmentIndex,
               _playlist?.mediaSequence ?? 0,
             );
-            await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+            await HlsDecryptPool.instance.decryptInPlace(partFile, keyBytes, iv);
           }
           await partFile.rename(finalPath);
           task.downloadedBytes += written;
@@ -1635,7 +1658,7 @@ class HlsDownloader implements BaseDownloader {
               segmentIndex,
               _playlist?.mediaSequence ?? 0,
             );
-            await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+            await HlsDecryptPool.instance.decryptInPlace(partFile, keyBytes, iv);
           }
           // Rename .part to final only after successful write + decrypt.
           await partFile.rename(finalPath);
@@ -1699,7 +1722,7 @@ class HlsDownloader implements BaseDownloader {
               segmentIndex,
               _playlist?.mediaSequence ?? 0,
             );
-            await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+            await HlsDecryptPool.instance.decryptInPlace(partFile, keyBytes, iv);
           }
           // Rename .part to final only after successful write + decrypt.
           await partFile.rename(finalPath);
@@ -1756,7 +1779,7 @@ class HlsDownloader implements BaseDownloader {
                 segmentIndex,
                 _playlist?.mediaSequence ?? 0,
               );
-              await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+              await HlsDecryptPool.instance.decryptInPlace(partFile, keyBytes, iv);
             }
             await partFile.rename(finalPath);
             task.downloadedBytes += retry.length;
@@ -1811,10 +1834,9 @@ class HlsDownloader implements BaseDownloader {
             .timeout(const Duration(seconds: 30));
         AuroraLog.instance.debug('HTTP segment $index: status ${response.statusCode} (attempt $attempt)', category: LogCategory.hls, screen: LogScreen.background, eventType: LogEventType.network);
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          // Drain the error/response body to free the connection.
-          // Use onError to prevent unhandled stream errors if the
-          // connection is reset while draining.
-          await response.stream.listen((_) {}, onError: (_) {}).cancel();
+          // Drain (not cancel) the error/response body so the connection
+          // returns to the keep-alive pool before throwing.
+          await _drainOrAbort(response);
           if (response.statusCode == 403 || response.statusCode == 401) {
             _httpForbiddenStreak++;
             // After 2 HTTP 403s, stop wasting attempts on Dart HTTP for
@@ -1875,9 +1897,8 @@ class HlsDownloader implements BaseDownloader {
             await file.writeAsString('');
             return file;
           }
-          // Drain the error response body to release the HTTP connection
-          // before throwing.
-          await response.stream.listen((_) {}, onError: (_) {}).cancel();
+          // Response already drained/aborted by _drainOrAbort above (the
+          // 403/401 branch returned earlier); just throw for other statuses.
           throw HttpException(
             'HLS segment request failed with status ${response.statusCode}',
             uri: uri,
@@ -1939,7 +1960,7 @@ class HlsDownloader implements BaseDownloader {
               segmentIndex,
               _playlist?.mediaSequence ?? 0,
             );
-            await HlsDecryptor.decryptInPlace(partFile, keyBytes, iv);
+            await HlsDecryptPool.instance.decryptInPlace(partFile, keyBytes, iv);
           } catch (e, s) {
             _logError('Segment decryption failed', e, s);
             // Delete the .part file so retry does a fresh download.
@@ -2099,23 +2120,14 @@ class HlsDownloader implements BaseDownloader {
     }
 
     final destination = File(finalPath);
-    final parent = destination.parent;
-    if (!await parent.exists()) {
-      await parent.create(recursive: true);
-    }
-    final sink = destination.openWrite();
-    var totalMerged = 0;
-    try {
-      for (int i = 0; i < files.length; i++) {
-        if (_isPaused) break;
-        final length = segmentLengths[i]; // reuse pre-fetched stat
-        if (length == 0) continue;
-        await sink.addStream(files[i].openRead());
-        totalMerged += length;
-      }
-    } finally {
-      await sink.close();
-    }
+    // Concatenate on a background isolate so a multi-GB merge doesn't
+    // stream through the UI isolate's event loop (which previously could
+    // jank the UI for seconds on large files).
+    final totalMerged = await _concatFilesInIsolate(
+      files.map((f) => f.path).toList(),
+      segmentLengths,
+      finalPath,
+    );
     task.savePath = finalPath;
 
     if (totalMerged == 0) {
@@ -2132,4 +2144,81 @@ class HlsDownloader implements BaseDownloader {
     }
   }
 
+}
+
+/// Concatenates [paths] into [destPath] on a background isolate, returning
+/// the number of bytes written. Off the UI isolate so multi-GB merges don't
+/// jank the UI during the final segment-concat pass.
+Future<int> _concatFilesInIsolate(
+  List<String> paths,
+  List<int> lengths,
+  String destPath,
+) {
+  return Isolate.run(() async {
+    try {
+      final dest = File(destPath);
+      final parent = dest.parent;
+      if (!await parent.exists()) {
+        await parent.create(recursive: true);
+      }
+      final sink = dest.openWrite();
+      var total = 0;
+      try {
+        for (var i = 0; i < paths.length; i++) {
+          final length = lengths[i];
+          if (length == 0) continue;
+          await sink.addStream(File(paths[i]).openRead());
+          total += length;
+        }
+      } finally {
+        await sink.close();
+      }
+      return total;
+    } catch (e) {
+      // Errors crossing an isolate boundary arrive as RemoteError; rethrow
+      // as a plain Exception so the caller's classifier works on it.
+      throw Exception('HLS segment merge failed: $e');
+    }
+  });
+}
+
+/// Result of a resume scan performed on a background isolate.
+///
+/// [segmentSizes] maps each matched segment file's path to its on-disk byte
+/// size; [entryCount] is the total number of entries in tempDir (matches the
+/// pre-isolate "other files" log count). Both fields are plain sendable types.
+typedef _ResumeScanResult = ({
+  Map<String, int> segmentSizes,
+  int entryCount,
+});
+
+/// Scans [tempDir] for already-downloaded HLS segment files off the UI
+/// isolate. Returns `null` when [tempDir] does not exist.
+///
+/// Only finished segments (`segment_*.ts` / `segment_*.m4s`, excluding
+/// `.part` partials) are included in the returned `segmentSizes` map so the
+/// caller can seed `downloadedBytes` exactly as before.
+Future<_ResumeScanResult?> _scanResumeSegments(String tempDir) {
+  return Isolate.run(() => _scanResumeSegmentsSync(tempDir));
+}
+
+_ResumeScanResult? _scanResumeSegmentsSync(String tempDirPath) {
+  final tempDir = Directory(tempDirPath);
+  if (!tempDir.existsSync()) return null;
+  final entries = tempDir.listSync().toList();
+  final segmentSizes = <String, int>{};
+  for (final entity in entries) {
+    if (entity is! File) continue;
+    final name = p.basename(entity.path).toLowerCase();
+    if (!name.startsWith('segment_')) continue;
+    if (name.endsWith('.part')) continue;
+    if (!name.endsWith('.ts') && !name.endsWith('.m4s')) continue;
+    try {
+      segmentSizes[entity.path] = entity.lengthSync();
+    } catch (_) {
+      // Unreadable file — treat as absent (mirrors the original per-file
+      // try/catch around length()).
+    }
+  }
+  return (segmentSizes: segmentSizes, entryCount: entries.length);
 }

@@ -2,7 +2,9 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'package:encrypt/encrypt.dart' as encrypt;
+import 'package:pointycastle/api.dart';
+import 'package:pointycastle/block/aes.dart';
+import 'package:pointycastle/block/modes/cbc.dart';
 
 class HlsDecryptor {
   /// Decrypts an AES-128-CBC encrypted HLS segment [file] in place.
@@ -35,56 +37,51 @@ class HlsDecryptor {
     final file = File(path);
     final tempFile = File('$path.dec');
     final output = tempFile.openWrite();
-    var currentIv = Uint8List.fromList(iv);
-    var pending = Uint8List(0);
 
-    // Reuse one AES key schedule per key for the whole segment stream.
-    // Creating Encrypter/AES per chunk forces PointyCastle to re-expand the
-    // same key on every iteration (GC + CPU waste).
-    final encrypterNoPad = encrypt.Encrypter(
-      encrypt.AES(
-        encrypt.Key(key),
-        mode: encrypt.AESMode.cbc,
-        padding: null,
-      ),
-    );
-    final encrypterPkcs7 = encrypt.Encrypter(
-      encrypt.AES(
-        encrypt.Key(key),
-        mode: encrypt.AESMode.cbc,
-        padding: 'PKCS7',
-      ),
-    );
+    // ONE raw CBC cipher for the whole segment stream. The AES key schedule
+    // is expanded exactly once (on init) and the internal CBC chaining state
+    // (the previous ciphertext block) carries across processBlock calls, so
+    // subsequent chunks never re-init the cipher or re-expand the key. The
+    // decrypted output reuses a single scratch buffer instead of allocating a
+    // fresh Uint8List per 64 KB chunk.
+    final cipher = CBCBlockCipher(AESEngine())
+      ..init(false, ParametersWithIV(KeyParameter(key), iv));
+    var pending = Uint8List(0); // held-back tail (< 2 blocks) between chunks
+    var combined = Uint8List(0); // reusable scratch: pending + current chunk
+    var outBuffer = Uint8List(0); // reusable decrypted-output scratch
 
     try {
       await for (final chunk in file.openRead()) {
-        final combined = Uint8List(pending.length + chunk.length)
-          ..setRange(0, pending.length, pending)
-          ..setRange(pending.length, pending.length + chunk.length, chunk);
-        if (combined.length < 32) {
-          pending = combined;
+        final totalLength = pending.length + chunk.length;
+        if (totalLength < 32) {
+          // Too small to safely hold back a block; accumulate the whole run.
+          final next = Uint8List(totalLength)
+            ..setRange(0, pending.length, pending)
+            ..setRange(pending.length, totalLength, chunk);
+          pending = next;
           continue;
         }
 
+        if (combined.length < totalLength) {
+          combined = Uint8List(totalLength);
+        }
+        combined
+          ..setRange(0, pending.length, pending)
+          ..setRange(pending.length, totalLength, chunk);
+
         // Keep the final encrypted block pending so PKCS7 padding is only
-        // stripped after EOF. CBC IV chaining is advanced with ciphertext.
-        final decryptLength = ((combined.length - 16) ~/ 16) * 16;
-        final encryptedBlocks = Uint8List.sublistView(
-          combined,
-          0,
-          decryptLength,
+        // stripped after EOF. CBC IV chaining is advanced with ciphertext and
+        // tracked internally by [cipher] (no manual currentIv bookkeeping).
+        final decryptLength = ((totalLength - 16) ~/ 16) * 16;
+        if (outBuffer.length < decryptLength) {
+          outBuffer = Uint8List(decryptLength);
+        }
+        _decryptBlocks(cipher, combined, 0, decryptLength, outBuffer);
+        output.add(Uint8List.sublistView(outBuffer, 0, decryptLength));
+        // Copy (not view) the tail: `combined` is reused next iteration.
+        pending = Uint8List.fromList(
+          Uint8List.sublistView(combined, decryptLength, totalLength),
         );
-        final decrypted = _decryptWith(
-          encrypterNoPad,
-          encryptedBlocks,
-          currentIv,
-        );
-        output.add(decrypted);
-        currentIv = Uint8List.sublistView(
-          encryptedBlocks,
-          encryptedBlocks.length - 16,
-        );
-        pending = Uint8List.sublistView(combined, decryptLength);
       }
 
       if (pending.isEmpty || pending.length % 16 != 0) {
@@ -93,13 +90,12 @@ class HlsDecryptor {
         );
       }
 
-      final finalBlock = _decryptFinalBlock(
-        encrypterPkcs7,
-        encrypterNoPad,
-        pending,
-        currentIv,
-      );
-      output.add(finalBlock);
+      if (outBuffer.length < pending.length) {
+        outBuffer = Uint8List(pending.length);
+      }
+      _decryptBlocks(cipher, pending, 0, pending.length, outBuffer);
+      final plainLength = _stripPkcs7(outBuffer, pending.length);
+      output.add(Uint8List.sublistView(outBuffer, 0, plainLength));
       await output.close();
       await file.delete();
       await tempFile.rename(path);
@@ -114,27 +110,38 @@ class HlsDecryptor {
     }
   }
 
-  static Uint8List _decryptFinalBlock(
-    encrypt.Encrypter withPadding,
-    encrypt.Encrypter withoutPadding,
-    Uint8List encrypted,
-    Uint8List iv,
+  /// Decrypts [length] bytes of [input] starting at [start] into [output].
+  /// [length] is always a multiple of the 16-byte AES block size. CBC chaining
+  /// state lives inside [cipher], so successive calls continue the chain
+  /// across chunk boundaries.
+  static void _decryptBlocks(
+    CBCBlockCipher cipher,
+    Uint8List input,
+    int start,
+    int length,
+    Uint8List output,
   ) {
-    try {
-      return _decryptWith(withPadding, encrypted, iv);
-    } catch (_) {
-      // Some streams don't use PKCS7 padding; retry without padding.
-      return _decryptWith(withoutPadding, encrypted, iv);
+    for (var off = 0; off < length; off += 16) {
+      cipher.processBlock(input, start + off, output, off);
     }
   }
 
-  static Uint8List _decryptWith(
-    encrypt.Encrypter encrypter,
-    Uint8List encrypted,
-    Uint8List iv,
-  ) {
-    return Uint8List.fromList(
-      encrypter.decryptBytes(encrypt.Encrypted(encrypted), iv: encrypt.IV(iv)),
-    );
+  /// Strips PKCS7 padding from the last block of a decrypted run, falling back
+  /// to treating the last block as unpadded (raw CBC) when the padding bytes
+  /// are invalid — the same try-padded-then-retry-no-pad behavior as the
+  /// previous two-encrypter implementation. Returns the plaintext length.
+  static int _stripPkcs7(Uint8List decrypted, int length) {
+    final pad = decrypted[length - 1];
+    if (pad >= 1 && pad <= 16) {
+      var valid = true;
+      for (var i = 1; i <= pad; i++) {
+        if (decrypted[length - i] != pad) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid) return length - pad;
+    }
+    return length;
   }
 }

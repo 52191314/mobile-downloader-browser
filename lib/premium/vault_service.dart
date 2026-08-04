@@ -28,6 +28,17 @@ const Duration _kUnlockDuration = Duration(minutes: 5);
 /// Vault file format version for AES-GCM.
 const int _kVaultFormatGcm = 0x01;
 
+/// Why the last [VaultService.authenticate] attempt failed.
+/// `null` (service field) means the last attempt succeeded.
+enum VaultAuthFailure {
+  /// Device has no enrolled lock screen (no PIN/pattern/biometric).
+  noCredential,
+  /// User dismissed or cancelled the system auth dialog.
+  cancelled,
+  /// The platform auth call threw.
+  error,
+}
+
 /// P7 Private Vault. Instantiate once and reuse.
 class VaultService {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
@@ -43,6 +54,28 @@ class VaultService {
 
   /// Returns the recovery key (shown exactly once before first lock).
   String? get recoveryKey => _lastRecoveryKey;
+
+  /// Why the most recent [authenticate] failed, or null when the last
+  /// attempt succeeded or none was made yet.
+  VaultAuthFailure? lastAuthFailure;
+
+  /// Raw error detail when [lastAuthFailure] is [VaultAuthFailure.error].
+  String? lastAuthFailureDetail;
+
+  /// User-facing explanation of the most recent authentication failure.
+  String? get lastAuthFailureMessage {
+    switch (lastAuthFailure) {
+      case VaultAuthFailure.noCredential:
+        return 'No screen lock (PIN, pattern, or biometric) is set up on '
+            'this device. Private Vault needs one to encrypt your files.';
+      case VaultAuthFailure.cancelled:
+        return 'Authentication was cancelled.';
+      case VaultAuthFailure.error:
+        return lastAuthFailureDetail ?? 'Authentication failed unexpectedly.';
+      case null:
+        return null;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Initialization
@@ -68,6 +101,18 @@ class VaultService {
     return val == 'true';
   }
 
+  /// Returns the recovery key when it has never been acknowledged, re-reading
+  /// it from secure storage. A key created in an earlier session whose banner
+  /// was never dismissed is still recoverable (fixes the lost-key bug where
+  /// `_lastRecoveryKey` memory was the only copy).
+  Future<String?> recoveryKeyIfUnshown() async {
+    if (await recoveryKeyShown) return null;
+    final keyBase64 = await _secureStorage.read(key: _keyAesKey);
+    if (keyBase64 == null) return null;
+    _lastRecoveryKey = keyBase64;
+    return keyBase64;
+  }
+
   /// Marks recovery key as shown and clears it from memory.
   Future<void> markRecoveryKeyShown() async {
     await _secureStorage.write(key: _keyRecoveryShown, value: 'true');
@@ -89,12 +134,16 @@ class VaultService {
     if (_sessionKey != null &&
         _unlockedAt != null &&
         DateTime.now().difference(_unlockedAt!) < _kUnlockDuration) {
+      lastAuthFailure = null;
+      lastAuthFailureDetail = null;
       return true;
     }
 
     final deviceSupported = await _localAuth.isDeviceSupported();
     final canCheck = await _localAuth.canCheckBiometrics;
     if (!deviceSupported && !canCheck) {
+      lastAuthFailure = VaultAuthFailure.noCredential;
+      lastAuthFailureDetail = null;
       if (kDebugMode) {
         debugPrint('[Vault] No device credential — fail closed');
       }
@@ -108,11 +157,18 @@ class VaultService {
         biometricOnly: false, // allow PIN/pattern fallback
       );
       if (didAuth) {
+        lastAuthFailure = null;
+        lastAuthFailureDetail = null;
         _unlockedAt = DateTime.now();
         await _loadSessionKey();
+      } else {
+        lastAuthFailure = VaultAuthFailure.cancelled;
+        lastAuthFailureDetail = null;
       }
       return didAuth;
     } catch (e) {
+      lastAuthFailure = VaultAuthFailure.error;
+      lastAuthFailureDetail = '$e';
       if (kDebugMode) debugPrint('[Vault] authenticate failed: $e');
       return false;
     }
@@ -333,6 +389,8 @@ class VaultService {
   void lock() {
     _sessionKey = null;
     _unlockedAt = null;
+    lastAuthFailure = null;
+    lastAuthFailureDetail = null;
   }
 }
 

@@ -38,7 +38,7 @@ import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
 import com.google.android.play.core.splitinstall.SplitInstallRequest
 import com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
 import com.google.android.play.core.splitinstall.model.SplitInstallSessionStatus
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -74,7 +74,7 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase)
         // Required so feature-module native libs (FFmpeg) resolve after on-demand install.
@@ -141,6 +141,7 @@ class MainActivity : FlutterActivity() {
                     "listAutoBackups" -> listAutoBackups(result)
                     "restoreAutoBackupFile" -> restoreAutoBackupFile(call, result)
                     "copyContentUriToFile" -> copyContentUriToFile(call, result)
+                    "openSecuritySettings" -> openSecuritySettings(result)
                     else -> result.notImplemented()
                 }
             }
@@ -789,6 +790,17 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // Release the native engine's OkHttp client, connection pool, and
+        // worker threads when the activity (and with it the Flutter engine)
+        // is torn down. The Dart side that owns the chunk downloads is gone
+        // at this point, so cancelling in-flight calls is safe.
+        if (::nativeDownloadEngine.isInitialized) {
+            nativeDownloadEngine.dispose()
+        }
+    }
+
     private fun getInitialUrl(): String? {
         val intent = intent ?: return null
         if (Intent.ACTION_VIEW == intent.action || "aurora.ACTION_SNIFF_AND_DOWNLOAD" == intent.action) {
@@ -814,6 +826,17 @@ class MainActivity : FlutterActivity() {
      * private copy at [DownloadTask.savePath] is deleted, so editing a just-
      * downloaded file needs the file materialized back to a local path first.
      */
+    private fun openSecuritySettings(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            Log.w(TAG, "openSecuritySettings failed: $e")
+            result.success(false)
+        }
+    }
+
     private fun copyContentUriToFile(call: MethodCall, result: MethodChannel.Result) {
         val uriStr = call.argument<String>("uri") ?: ""
         val destPath = call.argument<String>("destPath") ?: ""

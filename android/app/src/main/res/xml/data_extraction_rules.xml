@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Private Vault backup exclusion (API 31+: dataExtractionRules).
+
+     Same rationale as backup_rules.xml: the vault's Keystore-bound master key
+     and encrypted blobs are useless (and permanently locked) on any other
+     device, so keep them out of both cloud backup and device-to-device
+     transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="files/vault/" />
+        <exclude domain="file" path="vault/" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="files/vault/" />
+        <exclude domain="file" path="vault/" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage" />
+    </device-transfer>
+</data-extraction-rules>

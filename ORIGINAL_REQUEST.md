@@ -48,3 +48,32 @@ When the user first triggers a BitTorrent download or opens the media_kit player
 ### Graceful Degradation
 - [ ] If `FeatureModuleLoader.ensureInstalled()` returns false, the feature reports an error to the user instead of crashing
 - [ ] GitHub/sideload builds (`AURORA_BUILD_CHANNEL=github`) still work normally (fat APK, all libs included)
+
+## Follow-up — 2026-08-03T14:14:41Z
+
+Comprehensive audit and analysis of the Aurora Downloader codebase to answer whether peak optimization has been achieved across all major subsystems, or if specific optimizations remain.
+
+Working directory: D:\02_Projects\aurora_downloader
+Integrity mode: development
+
+## Requirements
+
+### R1. Full-Stack Subsystem Optimization Audit
+Evaluate all core subsystems of `aurora_downloader`:
+- **Download Engine & I/O**: Isolates, concurrent chunk streaming, buffer allocation, disk I/O, socket connection handling.
+- **Memory & CPU Efficiency**: RAM retention during active high-speed downloads, GC pressure, unneeded object allocations.
+- **Native & JNI Bridge**: `libdartjni.so` bindings, dynamic module loader overhead, FFmpeg native integration.
+- **App Size & Build Pipeline**: Channel split efficiency (`play` on-demand vs `github` fat APK), R8 minification rules, dependency footprint.
+- **Flutter UI & Rendering**: Widget rebuild scope, repaint boundaries, state management efficiency.
+
+### R2. Empirical Bottleneck & Opportunity Report
+For each subsystem, produce empirical evidence showing either:
+1. **Optimal State**: Rationale and technical proof why current code is at peak efficiency.
+2. **Optimization Opportunity**: Identified bottlenecks, quantitative impact (e.g., latency, RAM, APK size), and concrete remediation plan.
+
+## Acceptance Criteria
+
+### Audit Quality & Findings
+- [ ] Every core layer (`lib/`, `android/`, JNI native bindings, FFmpeg module) is thoroughly evaluated.
+- [ ] Every finding provides technical rationale or code evidence rather than speculative recommendations.
+- [ ] Final output delivers a definitive verdict on whether maximum optimization has been achieved and details all remaining optimization targets.

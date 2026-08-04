@@ -1,5 +1,4 @@
 import java.io.FileInputStream
-import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -17,69 +16,23 @@ if (keystorePropertiesFile.exists()) {
 }
 
 // ---------------------------------------------------------------------------
-// Build channel detection: Play Store AAB vs GitHub fat APK.
-// Default is `github` (fat APK) so open-source builds never ship a dynamic
-// feature module.
-//
-// The Flutter Gradle plugin exposes dart-defines as a base64-encoded Gradle
-// project property `dart-defines-encoded`. We decode and check for the
-// Play channel marker.
-// Fallback: AURORA_BUILD_CHANNEL environment variable for CI.
+// Build channel: computed once in settings.gradle.kts (single source of
+// truth, stored on the Gradle object as `auroraPlayChannel`).
+//   Play   → on-demand dynamic-feature modules (:ffmpeg, :torrent, :mediakit)
+//   GitHub → fat builds; the feature modules' tasks are disabled.
 // See: AGENTS.md, docs/play_on_demand_modules_plan.md
 // ---------------------------------------------------------------------------
-fun isPlayBuildChannel(): Boolean {
-    // 1. Env var (CI / shell): highest priority.
-    //    $env:AURORA_BUILD_CHANNEL="play"   → Play (on-demand modules)
-    //    $env:AURORA_BUILD_CHANNEL="github" → GitHub fat APK
-    val envChannel = System.getenv("AURORA_BUILD_CHANNEL")?.lowercase()
-    if (envChannel == "play") return true
-    if (envChannel == "github") return false
+val isPlayChannel = gradle.extensions.getExtraProperties().has("auroraPlayChannel") &&
+    (gradle.extensions.getExtraProperties().get("auroraPlayChannel") as Boolean)
 
-    // 2. --dart-define=AURORA_BUILD_CHANNEL=play (documented in AGENTS.md).
-    //    Flutter passes these to Gradle as `-Pdart-defines=<base64 comma-joined
-    //    list>`. These MUST be checked before the `auroraBuildChannel` gradle
-    //    property because android/gradle.properties sets that to `github` by
-    //    default, which would otherwise shadow the explicit dart-define.
-    if (project.hasProperty("dart-defines")) {
-        val defines = project.property("dart-defines") as String
-        val decodedDefines = defines.split(',').mapNotNull { raw ->
-            runCatching {
-                String(Base64.getDecoder().decode(raw))
-            }.getOrNull()
-        }
-        if (decodedDefines.contains("AURORA_BUILD_CHANNEL=play") ||
-            defines.contains("QVVST1JBX0JVSUxEX0NIQU5ORUw9cGxheQ==")
-        ) {
-            return true
-        }
-        if (decodedDefines.contains("AURORA_BUILD_CHANNEL=github")) return false
-    }
-    if (project.hasProperty("dart-defines-encoded")) {
-        val encoded = project.property("dart-defines-encoded") as String
-        val decoded = runCatching {
-            String(Base64.getDecoder().decode(encoded))
-        }.getOrNull()
-        if (decoded?.contains("AURORA_BUILD_CHANNEL=play") == true) return true
-        if (decoded?.contains("AURORA_BUILD_CHANNEL=github") == true) return false
-    }
-
-    // 3. -PauroraBuildChannel=play / github (android/gradle.properties default: github).
-    if (project.hasProperty("auroraBuildChannel")) {
-        val channel = project.property("auroraBuildChannel")
-        if (channel is String && channel.lowercase() == "play") return true
-        if (channel is String && channel.lowercase() == "github") return false
-    }
-
-    // 4. Default: GitHub fat APK. Do NOT special-case bundle tasks here — doing
-    //    so silently turned every `flutter build appbundle` into a Play build
-    //    that stripped the FFmpeg/libmpv/libtorrent natives from the base and
-    //    crashed on launch (builds 38–44).
-    return false
+// Channel switches (play <-> github) change which dynamic features are wired
+// into :app, but AGP does not track that set as an input of
+// generateDebugFeatureMetadata — its feature-metadata.json can go stale
+// (featureSplits from the other channel), which breaks the feature modules'
+// manifest tasks. Always regenerate; the task is cheap.
+tasks.matching { it.name == "generateDebugFeatureMetadata" }.configureEach {
+    outputs.upToDateWhen { false }
 }
-// Set the env var before building Play AAB:
-//   $env:AURORA_BUILD_CHANNEL="play"
-//   flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
-val isPlayChannel = isPlayBuildChannel()
 
 android {
     namespace = "com.personal.aurora_downloader"
@@ -183,6 +136,12 @@ android {
             excludes += listOf(
                 "**/mips/**",
                 "**/mips64/**",
+                // No x86/x86_64 anywhere — app ships arm64-v8a + armeabi-v7a
+                // only. Keeps the AAB free of ~15 MB of emulator-only .so
+                // (upload size) and keeps the base's ABI set in sync with the
+                // on-demand feature modules (bundletool requires a match).
+                "**/x86/**",
+                "**/x86_64/**",
             )
         }
     }

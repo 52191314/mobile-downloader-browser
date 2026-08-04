@@ -2923,6 +2923,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return VaultPage(
       vault: widget.vaultService,
       tier: widget.proEntitlement.tier,
+      downloadQueue: widget.downloadQueue,
     );
   }
 

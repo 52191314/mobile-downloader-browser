@@ -130,6 +130,17 @@ class _QueuePageState extends State<QueuePage> {
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
 
+  // -- Sectioned-mode partition cache ---------------------------------------
+  // Sectioned mode re-sorts 4 sections on every build. Because the queue's
+  // task list is mutated in place (no list identity change on progress), the
+  // cache is keyed on a cheap fingerprint of the task set + states + the
+  // sort/filter/collapse state, so pure progress ticks reuse the previous
+  // partition instead of re-sorting. Reset in initState/dispose.
+  List<_TaskSection>? _cachedSections;
+  int? _sectionsFingerprint;
+  int? _sectionsStateKey;
+  AColors? _cachedSectionsAc;
+
   @override
   void initState() {
     super.initState();
@@ -158,6 +169,10 @@ class _QueuePageState extends State<QueuePage> {
     if (_searchQuery.isNotEmpty) {
       _searchExpanded = true;
     }
+    _cachedSections = null;
+    _sectionsFingerprint = null;
+    _sectionsStateKey = null;
+    _cachedSectionsAc = null;
   }
 
   void _onUrlTextChanged() {
@@ -189,6 +204,10 @@ class _QueuePageState extends State<QueuePage> {
     _rebuildTimer?.cancel();
     _sub?.cancel();
     _removedSub?.cancel();
+    _cachedSections = null;
+    _sectionsFingerprint = null;
+    _sectionsStateKey = null;
+    _cachedSectionsAc = null;
     super.dispose();
   }
 
@@ -424,6 +443,56 @@ class _QueuePageState extends State<QueuePage> {
     return _sortDescending ? -cmp : cmp;
   }
 
+  /// Cheap fingerprint of [tasks] for the partition cache.
+  ///
+  /// Order-sensitive rolling hash, so even two tasks *swapping* states (e.g.
+  /// one pausing while another resumes in the same tick) invalidate the cache
+  /// — a plain sum of state indexes would miss that and serve a stale section
+  /// order. Also folds in the sort-relevant field for the current sort so
+  /// mid-download changes (HLS `totalBytes` refinement under size sort,
+  /// priority changes, savePath changes under name sort) can't serve a stale
+  /// partition. Speed-sorted partitions are never cached anyway (task.speed
+  /// mutates every tick), so speed is deliberately omitted.
+  int _tasksFingerprint(List<DownloadTask> tasks) {
+    var fp = tasks.length;
+    for (final task in tasks) {
+      fp = fp * 31 + task.state.index;
+      switch (_sortBy) {
+        case TaskSortField.date:
+          fp = fp * 31 + task.createdAt.millisecondsSinceEpoch;
+        case TaskSortField.name:
+          fp = fp * 31 + task.savePath.hashCode;
+        case TaskSortField.size:
+          fp = fp * 31 + task.totalBytes;
+        case TaskSortField.priority:
+          fp = fp * 31 + task.priority.index;
+        case TaskSortField.state:
+          fp = fp * 31 + task.state.index;
+        case TaskSortField.speed:
+          break; // speed-sorted partitions are never cached
+      }
+      // Scheduled-section default order sorts by scheduledStartAt.
+      fp = fp * 31 + (task.scheduledStartAt?.millisecondsSinceEpoch ?? 0);
+      fp = fp * 31 + task.id.hashCode;
+    }
+    return fp;
+  }
+
+  /// Fingerprint of the sort/filter/collapse state that affects the partition
+  /// output. Filter changes also shift the task fingerprint (the filtered task
+  /// set differs), but sort-direction toggles and section collapse changes
+  /// would otherwise slip through the fingerprint.
+  int _computeSectionsStateKey() {
+    var key = _sortBy.index;
+    key = key * 31 + (_sortDescending ? 1 : 0);
+    key = key * 31 + (_stateFilter?.hashCode ?? 0);
+    key = key * 31 + _searchQuery.hashCode;
+    key = key * 31 + _selectedFolderFilter.hashCode;
+    key = key * 31 + (_flatList ? 1 : 0);
+    key = key * 31 + _collapsedSections.hashCode;
+    return key;
+  }
+
   /// Partitions [tasks] into 4 ordered sections, sorting each section
   /// according to the section-specific rules (or global sort when
   /// non-default is active).
@@ -629,8 +698,25 @@ class _QueuePageState extends State<QueuePage> {
       );
     }
 
-    // Sectioned mode
-    final sections = _partitionIntoSections(filteredTasks, ac);
+    // Sectioned mode. Reuse the previously computed sections unless the task
+    // set/states (fingerprint), the sort/filter/collapse state, or the
+    // palette changed — pure progress ticks on the in-place-mutated task list
+    // produce the same partition, so re-sorting all 4 sections every ~500 ms
+    // is avoided. Speed-sorted partitions are never cached: `task.speed`
+    // changes on every tick, so a cached order would be stale.
+    final fingerprint = _tasksFingerprint(filteredTasks);
+    final stateKey = _computeSectionsStateKey();
+    if (_cachedSections == null ||
+        fingerprint != _sectionsFingerprint ||
+        stateKey != _sectionsStateKey ||
+        !identical(ac, _cachedSectionsAc) ||
+        _sortBy == TaskSortField.speed) {
+      _cachedSections = _partitionIntoSections(filteredTasks, ac);
+      _sectionsFingerprint = fingerprint;
+      _sectionsStateKey = stateKey;
+      _cachedSectionsAc = ac;
+    }
+    final sections = _cachedSections!;
 
     final items = <Widget>[];
     for (int i = 0; i < sections.length; i++) {
@@ -1520,15 +1606,34 @@ class _QueuePageState extends State<QueuePage> {
 
   Widget _buildStatusLine() {
     final ac = context.ac;
-    final running = widget.queue.activeTasks.length;
-    final waiting = widget.queue.queuedTasks.length;
-    final paused =
-        widget.queue.allTasks.where((t) => t.state == DownloadState.paused).length;
-    final failed =
-        widget.queue.allTasks.where((t) => t.state == DownloadState.failed).length;
-    final totalSpeed = widget.queue.allTasks
-        .where((t) => t.state == DownloadState.downloading)
-        .fold<double>(0.0, (sum, t) => sum + t.speed);
+    // Single pass over the queue (one list allocation) collects every count
+    // the status line needs. Previously this ran 5 separate O(n) scans, and
+    // each `activeTasks`/`queuedTasks`/`allTasks` getter allocated a fresh
+    // list. `running`/`waiting` map to the `downloading`/`idle` states, which
+    // track the queue's active-set and execution-queue membership.
+    var running = 0; // downloading
+    var waiting = 0; // idle
+    var paused = 0;
+    var failed = 0;
+    var totalSpeed = 0.0;
+    for (final task in widget.queue.allTasks) {
+      switch (task.state) {
+        case DownloadState.downloading:
+          running++;
+          totalSpeed += task.speed;
+        case DownloadState.idle:
+          waiting++;
+        case DownloadState.paused:
+          paused++;
+        case DownloadState.failed:
+          failed++;
+        // Remaining states are not rendered on the status line.
+        case DownloadState.completed:
+        case DownloadState.scheduled:
+        case DownloadState.merging:
+          break;
+      }
+    }
 
     if (running == 0 && waiting == 0 && paused == 0 && failed == 0) {
       return const SizedBox.shrink();

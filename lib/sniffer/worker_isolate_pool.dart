@@ -48,7 +48,13 @@ class WorkerIsolatePool {
   }
 
   Future<dynamic> _executeUnsafe(String type, Map<String, dynamic> params) async {
-    await _ensureInitialized();
+    final initFuture = _ensureInitialized();
+    if (_workers.isEmpty) {
+      // A concurrent caller raced the spawn batch (workers still
+      // registering) — wait for the shared batch instead of throwing
+      // "No workers available" and misreporting e.g. an empty queue.
+      await initFuture;
+    }
     if (_workers.isEmpty) {
       throw StateError('No workers available in the pool');
     }
@@ -64,16 +70,23 @@ class WorkerIsolatePool {
     return completer.future;
   }
 
-  Future<void> _ensureInitialized() async {
-    if (_initialized) return;
-    _initialized = true;
+  /// Memoized initialization future so concurrent callers (e.g. cold-start
+  /// log restore + queue restore) await the SAME spawn batch. The old code
+  /// set `_initialized = true` before the spawns finished, so a second caller
+  /// could observe an empty `_workers` list and throw.
+  Future<void>? _initFuture;
 
+  Future<void> _ensureInitialized() {
+    if (_initialized) return Future<void>.value();
+    return _initFuture ??= _doEnsureInitialized();
+  }
+
+  Future<void> _doEnsureInitialized() async {
     // Spawn all workers concurrently, each gets its own response port.
-    final futures = <Future<void>>[];
-    for (var i = 0; i < _poolSize; i++) {
-      futures.add(_spawnWorker());
-    }
-    await Future.wait(futures);
+    // _spawnWorker never throws (spawn failures are logged and skipped), so
+    // this always completes.
+    await Future.wait(List.generate(_poolSize, (_) => _spawnWorker()));
+    _initialized = true;
   }
 
   Future<void> _spawnWorker() async {
@@ -112,7 +125,17 @@ class WorkerIsolatePool {
       }
     });
 
-    final workerSendPort = await sendPortCompleter.future;
+    final SendPort? workerSendPort;
+    try {
+      workerSendPort = await sendPortCompleter.future
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Worker never registered its port (rare) — skip it so the pool runs
+      // degraded rather than hanging the shared init batch.
+      isolate.kill(priority: Isolate.immediate);
+      responsePort.close();
+      return;
+    }
     _workers.add(_WorkerEntry(
       isolate: isolate,
       sendPort: workerSendPort,
@@ -146,6 +169,7 @@ class WorkerIsolatePool {
     if (_disposed) return;
     _disposed = true;
     _initialized = false;
+    _initFuture = null;
 
     for (final worker in _workers) {
       try {

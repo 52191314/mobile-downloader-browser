@@ -1,6 +1,7 @@
 #pragma once
 #include "rule_parser.h"
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <unordered_map>
@@ -17,7 +18,7 @@ struct RegexCacheEntry {
 class RegexCache {
 public:
     explicit RegexCache(size_t capacity = 100);
-    bool match(const std::string& pattern, const std::string& text);
+    bool match(const std::string& pattern, std::string_view text);
 
 private:
     size_t capacity_;
@@ -47,25 +48,25 @@ public:
 
     void compile(const std::vector<Rule>& rules, const std::vector<CosmeticRule>& cosmetic_rules);
     bool should_block_ex(
-        const std::string& url, 
-        const std::string& source_host, 
-        const std::string& request_type, 
+        std::string_view url, 
+        std::string_view source_host, 
+        std::string_view request_type, 
         bool is_third_party
     ) const;
     
     bool should_hide_element(
-        const std::string& page_host,
-        const std::string& tag_name,
-        const std::string& id,
-        const std::vector<std::string>& classes
+        std::string_view page_host,
+        std::string_view tag_name,
+        std::string_view id,
+        const std::vector<std::string_view>& classes
     ) const;
 
 private:
-    std::string extract_host(const std::string& url) const;
+    std::string extract_host(std::string_view url) const;
     void build_aho_corasick();
     void clear();
     
-    bool evaluate_options(const Rule* rule, const std::string& source_host, const std::string& request_type, bool is_third_party) const;
+    bool evaluate_options(const Rule* rule, std::string_view source_host, std::string_view request_type, bool is_third_party) const;
 
     std::vector<Rule> rules_;
     std::vector<CosmeticRule> cosmetic_rules_;

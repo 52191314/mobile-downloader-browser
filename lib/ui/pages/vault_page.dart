@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../downloader/download_queue.dart';
+import '../../downloader/models.dart';
 import '../../platform/secure_window.dart';
 import '../../premium/phase2_caps.dart';
 import '../../premium/pro_entitlement.dart';
@@ -17,7 +20,13 @@ import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import 'webdav_settings_page.dart';
 
-/// Vault UI — lists encrypted vault files with lock/unlock, export, and delete.
+/// Channel to the native host — used to open the system lock-screen settings
+/// when the device has no PIN/biometric enrolled.
+const MethodChannel _kSecuritySettingsChannel =
+    MethodChannel('aurora_downloader/public_downloads');
+
+/// Vault UI — lists encrypted vault files with lock/unlock, import, export,
+/// and delete.
 ///
 /// Applies Android [FLAG_SECURE] while this page is open to block screenshots
 /// and recent-app previews (including recovery-key display).
@@ -25,10 +34,14 @@ class VaultPage extends StatefulWidget {
   final VaultService vault;
   final EntitlementTier tier;
 
+  /// Optional access to completed downloads, enabling in-page import.
+  final DownloadQueue? downloadQueue;
+
   const VaultPage({
     super.key,
     required this.vault,
     required this.tier,
+    this.downloadQueue,
   });
 
   @override
@@ -41,6 +54,10 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
   bool _unlocked = false;
   String? _recoveryKey;
   int _fileCount = 0;
+
+  /// Why the last unlock attempt failed (null when unlocked or no attempt).
+  VaultAuthFailure? _authErrorCode;
+  String? _authError;
 
   @override
   void initState() {
@@ -77,16 +94,28 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     final ready = await widget.vault.ensureInitialized();
     if (!mounted) return;
 
-    if (ready && !await widget.vault.recoveryKeyShown) {
-      _recoveryKey = widget.vault.recoveryKey;
+    if (ready) {
+      // Re-reads from storage so a key created in an earlier session whose
+      // banner was never acknowledged is still shown (not just memory).
+      _recoveryKey = await widget.vault.recoveryKeyIfUnshown();
     }
 
-    _unlocked = await widget.vault.authenticate(reason: 'Unlock vault');
+    final unlocked = await widget.vault.authenticate(reason: 'Unlock vault');
     if (!mounted) return;
-    if (_unlocked) {
+    if (unlocked) {
+      setState(() {
+        _unlocked = true;
+        _authErrorCode = null;
+        _authError = null;
+      });
       await _loadEntries();
     } else {
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _unlocked = false;
+        _authErrorCode = widget.vault.lastAuthFailure;
+        _authError = widget.vault.lastAuthFailureMessage;
+      });
     }
   }
 
@@ -102,14 +131,50 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     setState(() {
       _unlocked = false;
       _entries = [];
+      _authErrorCode = null;
+      _authError = null;
     });
   }
 
   Future<void> _unlock() async {
     final ok = await widget.vault.authenticate(reason: 'Unlock vault');
+    if (!mounted) return;
     if (ok) {
-      setState(() => _unlocked = true);
+      setState(() {
+        _unlocked = true;
+        _authErrorCode = null;
+        _authError = null;
+      });
       await _loadEntries();
+    } else {
+      setState(() {
+        _authErrorCode = widget.vault.lastAuthFailure;
+        _authError = widget.vault.lastAuthFailureMessage;
+      });
+    }
+  }
+
+  Future<void> _openLockScreenSettings() async {
+    try {
+      final ok = await _kSecuritySettingsChannel.invokeMethod<bool>(
+        'openSecuritySettings',
+      );
+      if (!mounted) return;
+      if (ok != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open lock screen settings. '
+                'Set a PIN or biometric in your device Settings > Security.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open lock screen settings: $e'),
+        ),
+      );
     }
   }
 
@@ -149,6 +214,184 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     if (confirm == true) {
       await widget.vault.delete(entry.name);
       await _loadEntries();
+    }
+  }
+
+  /// Encrypts the user's selected completed downloads into the vault.
+  Future<void> _importFromDownloads() async {
+    final tasks = (widget.downloadQueue?.completedTasks ?? const <DownloadTask>[])
+        .where((t) => File(t.savePath).existsSync())
+        .toList();
+
+    if (tasks.isEmpty) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nothing to import'),
+          content: const Text(
+              'No completed downloads found on disk. Finish a download first, '
+              'then import it here.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final selected = <String>{};
+    var deleteOriginal = true;
+    var importing = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Import into Private Vault'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: tasks.length,
+                    itemBuilder: (context, i) {
+                      final t = tasks[i];
+                      final name = p.basename(t.savePath);
+                      return CheckboxListTile(
+                        value: selected.contains(t.id),
+                        onChanged: importing
+                            ? null
+                            : (v) => setDialogState(() {
+                                  if (v == true) {
+                                    selected.add(t.id);
+                                  } else {
+                                    selected.remove(t.id);
+                                  }
+                                }),
+                        title: Text(name,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(
+                          _formatSize(_safeFileSize(t.savePath)),
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        dense: true,
+                      );
+                    },
+                  ),
+                ),
+                CheckboxListTile(
+                  value: deleteOriginal,
+                  onChanged: importing
+                      ? null
+                      : (v) => setDialogState(() => deleteOriginal = v ?? true),
+                  title: const Text('Delete original after encrypting'),
+                  dense: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: importing ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: importing || selected.isEmpty
+                  ? null
+                  : () async {
+                      setDialogState(() => importing = true);
+                      final results = await _encryptSelectedTasks(
+                        tasks.where((t) => selected.contains(t.id)).toList(),
+                        deleteOriginal: deleteOriginal,
+                      );
+                      if (!ctx.mounted) return;
+                      Navigator.pop(ctx);
+                      if (!mounted) return;
+                      await _loadEntries();
+                      final ok = results.where((r) => r).length;
+                      final failed = results.length - ok;
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text(failed == 0
+                              ? 'Imported $ok file${ok == 1 ? '' : 's'} '
+                                  'into the vault.'
+                              : 'Imported $ok, failed $failed.'),
+                        ),
+                      );
+                    },
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Encrypts [tasks] into the vault; returns per-task success flags.
+  Future<List<bool>> _encryptSelectedTasks(
+    List<DownloadTask> tasks, {
+    required bool deleteOriginal,
+  }) async {
+    final results = <bool>[];
+    for (final t in tasks) {
+      final file = File(t.savePath);
+      if (!file.existsSync()) {
+        results.add(false);
+        continue;
+      }
+      if (!await widget.vault.canAccept(widget.tier)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(widget.tier.isAtLeastPro
+                  ? 'Vault could not accept this file.'
+                  : 'Vault is full (max ${Phase2Caps.maxFreeVaultItems} '
+                      'for free). Delete items or upgrade to Pro+.'),
+            ),
+          );
+        }
+        results.add(false);
+        // The cap is global — the rest of the batch cannot fit either.
+        break;
+      }
+      final vaultName = await widget.vault.store(file, tier: widget.tier);
+      if (vaultName != null) {
+        if (deleteOriginal) {
+          try {
+            await file.delete();
+          } catch (_) {
+            // Already encrypted — no plaintext leak.
+          }
+        }
+        results.add(true);
+      } else {
+        final fail = widget.vault.lastAuthFailureMessage;
+        if (fail != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Not imported: $fail')),
+          );
+        }
+        results.add(false);
+        // An auth failure blocks the rest of the batch.
+        if (widget.vault.lastAuthFailure != null) break;
+      }
+    }
+    return results;
+  }
+
+  int _safeFileSize(String path) {
+    try {
+      return File(path).lengthSync();
+    } catch (_) {
+      return 0;
     }
   }
 
@@ -371,6 +614,11 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
         actions: [
           if (_unlocked) ...[
             IconButton(
+              icon: const Icon(Icons.file_upload_outlined),
+              tooltip: 'Import downloads',
+              onPressed: _importFromDownloads,
+            ),
+            IconButton(
               icon: const Icon(Icons.cloud_sync_outlined),
               tooltip: 'WebDAV Vault Sync',
               onPressed: _syncWebdavVault,
@@ -402,52 +650,76 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     }
     if (!_unlocked) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lock, size: 64, color: AC.textSecondary),
-            const SizedBox(height: 16),
-            Text('Vault is locked',
-                style: TextStyle(
-                    color: AC.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text('Authenticate to view vault files',
-                style: TextStyle(color: AC.textSecondary, fontSize: 14)),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _unlock,
-              icon: const Icon(Icons.fingerprint),
-              label: const Text('Unlock'),
-            ),
-          ],
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock, size: 64, color: AC.textSecondary),
+              const SizedBox(height: 16),
+              Text('Vault is locked',
+                  style: TextStyle(
+                      color: AC.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text(
+                _authError ??
+                    'Authenticate with biometric or device PIN to view vault files',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AC.textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _unlock,
+                icon: const Icon(Icons.fingerprint),
+                label: const Text('Unlock'),
+              ),
+              if (_authErrorCode == VaultAuthFailure.noCredential) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _openLockScreenSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Open lock screen settings'),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
 
     if (_entries.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.shield_outlined, size: 64, color: AC.textSecondary),
-            const SizedBox(height: 16),
-            Text('Vault is empty',
-                style: TextStyle(
-                    color: AC.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text('Move downloaded files here to keep them private',
-                style: TextStyle(color: AC.textSecondary, fontSize: 14)),
-            const SizedBox(height: 8),
-            Text('$_fileCount / ${Phase2Caps.maxFreeVaultItems} items',
-                style: TextStyle(
-                    color: AC.accentFrost,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
-          ],
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shield_outlined, size: 64, color: AC.textSecondary),
+              const SizedBox(height: 16),
+              Text('Vault is empty',
+                  style: TextStyle(
+                      color: AC.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text('Move downloaded files here to keep them private',
+                  style: TextStyle(color: AC.textSecondary, fontSize: 14)),
+              const SizedBox(height: 8),
+              Text('$_fileCount / ${Phase2Caps.maxFreeVaultItems} items',
+                  style: TextStyle(
+                      color: AC.accentFrost,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _importFromDownloads,
+                icon: const Icon(Icons.file_upload_outlined),
+                label: const Text('Add files'),
+              ),
+            ],
+          ),
         ),
       );
     }

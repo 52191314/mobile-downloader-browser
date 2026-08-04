@@ -246,7 +246,21 @@ class DownloadSplitter implements BaseDownloader {
               getResponse.headers['last-modified'] ??
               getResponse.headers['Last-Modified'];
         } finally {
-          await getResponse.stream.listen((_) {}).cancel();
+          // Drain (not cancel) so the connection returns to the keep-alive
+          // pool — but only when the body is small. If the server ignored
+          // the Range header and streamed the whole file, abort instead of
+          // downloading it all just to discard it.
+          final probeLen = getResponse.contentLength;
+          if (getResponse.statusCode == 206 ||
+              (probeLen != null && probeLen <= 65536)) {
+            try {
+              await getResponse.stream.drain<void>();
+            } catch (_) {}
+          } else {
+            try {
+              await getResponse.stream.listen((_) {}, onError: (_) {}).cancel();
+            } catch (_) {}
+          }
         }
       } catch (e, s) {
         _logError('GET range probe failed, falling back to full GET', e, s);
@@ -347,7 +361,21 @@ class DownloadSplitter implements BaseDownloader {
             }
           }
         } finally {
-          await getResponse.stream.listen((_) {}).cancel();
+          // Drain (not cancel) so the connection returns to the keep-alive
+          // pool — but only when the body is small. If the server ignored
+          // the Range header and streamed the whole file, abort instead of
+          // downloading it all just to discard it.
+          final probeLen = getResponse.contentLength;
+          if (getResponse.statusCode == 206 ||
+              (probeLen != null && probeLen <= 65536)) {
+            try {
+              await getResponse.stream.drain<void>();
+            } catch (_) {}
+          } else {
+            try {
+              await getResponse.stream.listen((_) {}, onError: (_) {}).cancel();
+            } catch (_) {}
+          }
         }
       } catch (e, s) {
         _logError('GET revalidate failed, proceeding with stored meta', e, s);

@@ -16,8 +16,17 @@
 -keep class kotlin.Metadata { *; }
 -keep class kotlin.reflect.** { *; }
 
-# Keep all app classes
--keep class com.personal.aurora_downloader.** { *; }
+# App classes are kept by their manifest references (.AuroraApplication,
+# .MainActivity, .DownloadForegroundService) and direct calls from
+# MainActivity (NativeDownloadEngine) — R8 keeps the class + entry points
+# automatically. The previous `-keep class com.personal.aurora_downloader.** { *; }`
+# blocked R8 from shrinking/obfuscating the app's own Kotlin code; keep only
+# the class names so the manifests/launch still resolve while members can be
+# optimized.
+-keep class com.personal.aurora_downloader.AuroraApplication
+-keep class com.personal.aurora_downloader.MainActivity
+-keep class com.personal.aurora_downloader.DownloadForegroundService
+-keep class com.personal.aurora_downloader.NativeDownloadEngine
 
 # libtorrent_flutter
 -keep class com.derivlab.libtorrent_flutter.** { *; }

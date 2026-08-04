@@ -96,8 +96,12 @@ class DownloadQueue {
 
   String? queuePath;
   bool _isLoading = false;
-  bool _isSaving = false;
-  Future<void>? _pendingSaveFuture;
+
+  /// Chains queue writes so at most one save is in flight at a time and no
+  /// save request is ever dropped. Each [saveToFile] call appends its write
+  /// after the previous one's completion instead of busy-polling (replaces
+  /// the old 50 ms `_waitAndSave` spin loop).
+  Future<void>? _saveChain;
 
   /// When true, [_schedule] is a no-op. Used during queue file restore and
   /// for a short post-launch hold so Secure Folder cold start is not
@@ -114,6 +118,17 @@ class DownloadQueue {
   /// download), which saturates flash I/O and causes the UI progress bar
   /// to appear frozen.
   Timer? _saveDebounceTimer;
+
+  /// Periodic flush (every 5 s) that closes the save-debounce durability
+  /// gap: the 1 s debounce timer is reset on every emit, so during a long
+  /// download the queue JSON would never be written. This timer flushes a
+  /// dirty queue while downloads are active, so a crash loses at most ~5 s
+  /// of progress instead of everything since the last terminal/pause save.
+  /// Self-cancels once the queue is clean and nothing is downloading.
+  Timer? _savePeriodicTimer;
+
+  /// True when a state change since the last save has not been persisted.
+  bool _queueDirty = false;
 
   /// Periodic timer that checks whether any scheduled tasks should start.
   /// Created on first [scheduleTask] call; cancelled in [dispose].
@@ -317,7 +332,19 @@ class DownloadQueue {
         ready.add(task);
       }
     }
-    if (ready.isEmpty) return;
+    if (ready.isEmpty) {
+      // Self-cancel: nothing became ready on this tick. If there are no
+      // *remaining* scheduled tasks at all, stop the periodic 30 s timer —
+      // it is re-armed lazily on the next scheduleTask / queue-restore path.
+      final hasScheduledRemaining = _tasks.values.any(
+        (t) => t.state == DownloadState.scheduled,
+      );
+      if (!hasScheduledRemaining) {
+        _scheduleTimer?.cancel();
+        _scheduleTimer = null;
+      }
+      return;
+    }
 
     for (final task in ready) {
       task.state = DownloadState.idle;
@@ -1102,23 +1129,23 @@ class DownloadQueue {
     _schedule();
   }
 
-  Future<void> _waitAndSave(String path) async {
-    while (_isSaving) {
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+  Future<void> saveToFile(String path) async {
+    // Serialize writes: append this save after any in-flight or queued save
+    // instead of busy-waiting for the previous one to finish. _writeQueue
+    // never throws, so the chain only ever carries normal completions.
+    final previous = _saveChain ?? Future<void>.value();
+    final next = previous.then((_) => _writeQueue(path));
+    _saveChain = next;
+    try {
+      await next;
+    } finally {
+      if (identical(_saveChain, next)) {
+        _saveChain = null;
+      }
     }
-    _pendingSaveFuture = null;
-    await saveToFile(path);
   }
 
-  Future<void> saveToFile(String path) async {
-    if (_isSaving) {
-      if (_pendingSaveFuture == null) {
-        _pendingSaveFuture = _waitAndSave(path);
-      }
-      return _pendingSaveFuture;
-    }
-
-    _isSaving = true;
+  Future<void> _writeQueue(String path) async {
     try {
       final file = File(path);
       final fileDir = file.parent;
@@ -1167,8 +1194,6 @@ class DownloadQueue {
     } catch (e, s) {
       _logError('Failed to save queue to file', e, s);
       _warn('Failed to save download queue: $e');
-    } finally {
-      _isSaving = false;
     }
   }
 
@@ -1917,6 +1942,7 @@ class DownloadQueue {
     _splitters.clear();
 
     _saveDebounceTimer?.cancel();
+    _savePeriodicTimer?.cancel();
     _scheduleTimer?.cancel();
     _startupHoldTimer?.cancel();
     _startupHold = false;
@@ -1983,24 +2009,57 @@ class DownloadQueue {
       // DownloadSplitter fires every 500ms per active download, and each
       // save does jsonEncode + 3 file operations.
       final isTerminal = task.state == DownloadState.completed ||
-          task.state == DownloadState.failed;
+          task.state == DownloadState.failed ||
+          task.state == DownloadState.paused;
       if (isTerminal) {
         // Evict oldest completed/failed tasks to keep memory bounded.
         _evictOldCompletedTasks();
-        // Persist immediately for terminal states so the queue survives
-        // a crash right after completion.
+        // Persist immediately for terminal states (completed/failed/paused)
+        // so the queue survives a crash right after the state change.
+        _queueDirty = false;
         _saveDebounceTimer?.cancel();
         unawaited(saveToFile(queuePath!));
       } else {
+        _queueDirty = true;
         _saveDebounceTimer?.cancel();
         _saveDebounceTimer = Timer(const Duration(seconds: 1), () {
+          _queueDirty = false;
           unawaited(saveToFile(queuePath!));
         });
+        // The 1 s debounce is reset on every emit, so a long download would
+        // otherwise never write the queue. The periodic timer flushes the
+        // dirty state at least every ~5 s while a download is active.
+        _startPeriodicSaveTimer();
       }
     }
     // Update the foreground service notification on every task state
     // change (throttled to 1 s inside syncForegroundService).
     syncForegroundService();
+  }
+
+  /// Arms the periodic queue-flush timer if it is not already running.
+  void _startPeriodicSaveTimer() {
+    _savePeriodicTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      _onPeriodicSaveTick,
+    );
+  }
+
+  /// Flushes a dirty queue and self-cancels once the queue is clean and
+  /// nothing is downloading.
+  void _onPeriodicSaveTick(Timer timer) {
+    if (_queueDirty) {
+      _queueDirty = false;
+      if (queuePath != null && !_isLoading) {
+        unawaited(saveToFile(queuePath!));
+      }
+    }
+    if (!_queueDirty && _activeTasks.isEmpty) {
+      timer.cancel();
+      if (identical(_savePeriodicTimer, timer)) {
+        _savePeriodicTimer = null;
+      }
+    }
   }
 
   void _warn(String warning) {

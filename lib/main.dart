@@ -46,7 +46,6 @@ import 'premium/audio_extract_platform.dart';
 import 'premium/phase2_caps.dart';
 import 'premium/accent_pack.dart';
 import 'premium/vault_service.dart';
-import 'ui/pages/vault_page.dart';
 import 'sniffer/token_refresh_service.dart';
 
 import 'compliance/restricted_media_policy.dart';
@@ -467,6 +466,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // Prewarm the worker-isolate pool so the first queue/log restore that
+    // needs an isolate doesn't stall on 3 sequential Isolate.spawns.
+    unawaited(WorkerIsolatePool.instance.ensureInitialized());
     _currentTabIndex = widget.initialTabIndex.clamp(0, 1);
     _visitedMainTabs.add(_currentTabIndex);
     _downloadQueue =
@@ -1921,6 +1923,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _showSnack('File not found: ${task.savePath}');
       return;
     }
+    // Deleting the source file out from under an unfinished download would
+    // corrupt the download (e.g. a seeding torrent or a paused/partial file).
+    if (task.state != DownloadState.completed) {
+      _showSnack('Only completed downloads can be moved to the vault.');
+      return;
+    }
     final vaultName = await _vaultService.store(file, tier: tier);
     if (vaultName != null) {
       try {
@@ -1930,7 +1938,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       }
       _showSnack('Moved to vault.');
     } else {
-      _showSnack('Failed to move to vault.');
+      final fail = _vaultService.lastAuthFailureMessage;
+      _showSnack(fail ?? 'Failed to move to vault.');
     }
   }
 

@@ -2,7 +2,8 @@
 #include <mutex>
 #include <memory>
 #include <vector>
-#include <sstream>
+#include <string_view>
+#include <cctype>
 
 struct AdBlockEngineWrapper {
     std::mutex mutex;
@@ -45,7 +46,8 @@ EXPORT int aurora_adblock_should_block(void* engine, const char* urlUtf8) {
     }
     
     if (current_impl) {
-        return current_impl->should_block_ex(std::string(urlUtf8), "", "", false) ? 1 : 0;
+        // string_view: no heap copy for the per-request URL.
+        return current_impl->should_block_ex(std::string_view(urlUtf8), "", "", false) ? 1 : 0;
     }
     return 0;
 }
@@ -67,9 +69,11 @@ EXPORT int aurora_adblock_should_block_ex(
     }
     
     if (current_impl) {
-        std::string url(urlUtf8);
-        std::string source_host(sourceHostUtf8 ? sourceHostUtf8 : "");
-        std::string request_type(requestTypeUtf8 ? requestTypeUtf8 : "");
+        // string_view: zero-copy views over the Dart-provided buffers — no
+        // per-request std::string heap allocations at the FFI boundary.
+        std::string_view url(urlUtf8);
+        std::string_view source_host(sourceHostUtf8 ? sourceHostUtf8 : "");
+        std::string_view request_type(requestTypeUtf8 ? requestTypeUtf8 : "");
         bool third_party = (isThirdParty != 0);
         return current_impl->should_block_ex(url, source_host, request_type, third_party) ? 1 : 0;
     }
@@ -93,16 +97,32 @@ EXPORT int aurora_adblock_should_hide_element(
     }
     
     if (current_impl) {
-        std::string host(pageHostUtf8);
-        std::string tag(tagNameUtf8 ? tagNameUtf8 : "");
-        std::string id(idUtf8 ? idUtf8 : "");
-        std::string classes_str(classesUtf8 ? classesUtf8 : "");
-        
-        std::vector<std::string> classes;
-        std::stringstream ss(classes_str);
-        std::string cls;
-        while (ss >> cls) {
-            classes.push_back(cls);
+        std::string_view host(pageHostUtf8);
+        std::string_view tag(tagNameUtf8 ? tagNameUtf8 : "");
+        std::string_view id(idUtf8 ? idUtf8 : "");
+
+        // Split the whitespace-delimited class list into string_views (the
+        // old code built a std::vector<std::string> + stringstream per call).
+        std::vector<std::string_view> classes;
+        if (classesUtf8 != nullptr) {
+            std::string_view classes_str(classesUtf8);
+            size_t start = 0;
+            while (start < classes_str.size()) {
+                // Skip leading whitespace (matches `while (ss >> cls)`).
+                while (start < classes_str.size() &&
+                       std::isspace(static_cast<unsigned char>(classes_str[start]))) {
+                    ++start;
+                }
+                size_t end = start;
+                while (end < classes_str.size() &&
+                       !std::isspace(static_cast<unsigned char>(classes_str[end]))) {
+                    ++end;
+                }
+                if (end > start) {
+                    classes.push_back(classes_str.substr(start, end - start));
+                }
+                start = end;
+            }
         }
         
         return current_impl->should_hide_element(host, tag, id, classes) ? 1 : 0;

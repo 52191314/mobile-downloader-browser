@@ -58,7 +58,29 @@ class NativeDownloadEngine {
     }
 
     // ── Thread pool for background downloads ──────────────────────────
-    private val downloadExecutor = Executors.newCachedThreadPool()
+    // Bounded: an unbounded cached pool could spawn hundreds of threads when
+    // many chunks run concurrently across multiple tasks.
+    private val downloadExecutor = Executors.newFixedThreadPool(32)
+
+    // ── Main-thread reply dispatcher ───────────────────────────────────
+    // MethodChannel results must be delivered on the platform (main) thread,
+    // not directly from OkHttp worker threads. Replying from a pool thread
+    // races the channel's lifecycle and can surface as intermittent
+    // IllegalStateExceptions under high concurrency (engine teardown, rapid
+    // cancel + reply ordering).
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun reply(result: MethodChannel.Result, block: () -> Unit) {
+        mainHandler.post {
+            try {
+                block()
+            } catch (e: Exception) {
+                // Delivering the reply can throw if the engine was torn down
+                // before the message posted; never let that crash the app.
+                Log.w(NETWORK_TAG, "Failed to deliver channel reply: ${e.message}")
+            }
+        }
+    }
 
     // ── Cancel flags & active calls ────────────────────────────────────
     private val cancelFlags = ConcurrentHashMap<String, Boolean>()
@@ -95,6 +117,15 @@ class NativeDownloadEngine {
         // Unique ID for this download for cancel tracking
         val downloadId = call.argument<String>("downloadId") ?: java.util.UUID.randomUUID().toString()
 
+        // downloadChunk runs on the platform (main) thread and dispose() also
+        // runs on the main thread, so this check-then-submit is race-free.
+        if (downloadExecutor.isShutdown) {
+            reply(result) {
+                result.error("engine_shutdown", "Native download engine is shut down", null)
+            }
+            return
+        }
+
         downloadExecutor.submit {
             try {
                 _doDownloadChunk(
@@ -104,7 +135,7 @@ class NativeDownloadEngine {
                 )
             } catch (e: Exception) {
                 Log.e(NETWORK_TAG, "downloadChunk background exception: ${e.message}")
-                result.error("download_failed", e.message, null)
+                reply(result) { result.error("download_failed", e.message, null) }
             } finally {
                 cancelFlags.remove(downloadId)
                 activeCalls.remove(downloadId)
@@ -147,7 +178,10 @@ class NativeDownloadEngine {
             .header("User-Agent", userAgent)
             .header("Accept", "*/*")
             .header("Accept-Language", "en-US,en;q=0.9")
-            .header("Accept-Encoding", "gzip")
+            // identity: the ranged chunk body is appended to a file by byte
+            // offset — transparent gzip would corrupt offsets/sizes. (The HLS
+            // streamSegmentToFile path already uses identity.)
+            .header("Accept-Encoding", "identity")
             .header("Sec-Fetch-Dest", "empty")
             .header("Sec-Fetch-Mode", "cors")
             .header("Sec-Fetch-Site", "cross-site")
@@ -175,9 +209,11 @@ class NativeDownloadEngine {
             response = okHttpCall.execute()
         } catch (e: IOException) {
             if (cancelFlags[downloadId] == true) {
-                result.success(mapOf("cancelled" to true, "downloadId" to downloadId))
+                reply(result) {
+                    result.success(mapOf("cancelled" to true, "downloadId" to downloadId))
+                }
             } else {
-                result.error("io_error", e.message, null)
+                reply(result) { result.error("io_error", e.message, null) }
             }
             return
         }
@@ -187,11 +223,13 @@ class NativeDownloadEngine {
 
         if (body == null || statusCode !in 200..399) {
             response.close()
-            result.success(mapOf(
-                "statusCode" to statusCode,
-                "bytesWritten" to 0,
-                "downloadId" to downloadId,
-            ))
+            reply(result) {
+                result.success(mapOf(
+                    "statusCode" to statusCode,
+                    "bytesWritten" to 0,
+                    "downloadId" to downloadId,
+                ))
+            }
             return
         }
 
@@ -214,10 +252,12 @@ class NativeDownloadEngine {
                             if (!append) {
                                 outFile.delete()
                             }
-                            result.success(mapOf(
-                                "cancelled" to true,
-                                "downloadId" to downloadId,
-                            ))
+                            reply(result) {
+                                result.success(mapOf(
+                                    "cancelled" to true,
+                                    "downloadId" to downloadId,
+                                ))
+                            }
                             return@_doDownloadChunk
                         }
                         output.write(buffer, 0, read)
@@ -228,9 +268,11 @@ class NativeDownloadEngine {
         } catch (e: IOException) {
             Log.e(NETWORK_TAG, "downloadChunk stream error for $downloadId: ${e.message}")
             if (cancelFlags[downloadId] == true) {
-                result.success(mapOf("cancelled" to true, "downloadId" to downloadId))
+                reply(result) {
+                    result.success(mapOf("cancelled" to true, "downloadId" to downloadId))
+                }
             } else {
-                result.error("stream_error", e.message, null)
+                reply(result) { result.error("stream_error", e.message, null) }
             }
             return
         } finally {
@@ -238,11 +280,13 @@ class NativeDownloadEngine {
         }
 
         Log.d(NETWORK_TAG, "downloadChunk $downloadId OK: $statusCode, $bytesWritten bytes")
-        result.success(mapOf(
-            "statusCode" to statusCode,
-            "bytesWritten" to bytesWritten,
-            "downloadId" to downloadId,
-        ))
+        reply(result) {
+            result.success(mapOf(
+                "statusCode" to statusCode,
+                "bytesWritten" to bytesWritten,
+                "downloadId" to downloadId,
+            ))
+        }
     }
 
     /**

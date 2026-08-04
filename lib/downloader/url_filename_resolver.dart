@@ -191,7 +191,22 @@ Future<ResolvedFilename> resolveFilename({
             dispositionFilename = parseContentDispositionFilename(cd);
           }
         }
-        unawaited(response.stream.listen((_) {}).cancel().catchError((_) {}));
+        // Drain only when the body is small (the range probe normally
+        // returns 1 byte). If the server ignored Range and streamed the
+        // whole file, abort instead of downloading it all to discard it.
+        final probeLen = response.contentLength;
+        if (response.statusCode == 206 ||
+            (probeLen != null && probeLen <= 65536)) {
+          unawaited(response.stream.drain<void>().catchError((_) {}));
+        } else {
+          unawaited(
+            response
+                .stream
+                .listen((_) {}, onError: (_) {})
+                .cancel()
+                .catchError((_) {}),
+          );
+        }
       } catch (_) {}
     }
   } catch (_) {
