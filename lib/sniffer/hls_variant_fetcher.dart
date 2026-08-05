@@ -1,9 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../downloader/hls_playlist_parser.dart';
-import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
 import 'media_sniffer_engine.dart';
 import 'models/browser_tab.dart';
@@ -43,13 +43,8 @@ class HlsVariantFetcher {
       try {
         final playlist = HlsPlaylistParser.parse(cached, uri);
         if (playlist.isMaster && playlist.variants.isNotEmpty) {
-          AuroraLog.instance.debug(
-            'Using cached playlist body for $url '
-            '(${playlist.variants.length} variants)',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('Using cached playlist body for $url '
+            '(${playlist.variants.length} variants)');
           return playlist.variants.map((v) => _toSniffedMedia(v)).toList();
         }
       } catch (_) {}
@@ -81,24 +76,14 @@ class HlsVariantFetcher {
           .timeout(const Duration(seconds: 15));
 
       if (response.statusCode != 200) {
-        AuroraLog.instance.debug(
-          'HlsVariantFetcher Dart client returned '
-          '${response.statusCode}, trying WebView JS fetch…',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
+        debugPrint('HlsVariantFetcher Dart client returned '
+          '${response.statusCode}, trying WebView JS fetch…');
         // 1st fallback: WebView JS.
         String? jsBody;
         try {
           jsBody = await tab.controller.fetchPlaylistBodyViaJavaScript(url);
         } catch (e) {
-          AuroraLog.instance.error(
-            'JS fetch error: $e',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.error,
-          );
+          debugPrint('JS fetch error: $e');
         }
         if (jsBody != null && jsBody.isNotEmpty) {
           response = http.Response(
@@ -106,19 +91,9 @@ class HlsVariantFetcher {
             200,
             request: http.Request('GET', uri),
           );
-          AuroraLog.instance.debug(
-            'WebView JS fetch succeeded for variant fetch',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('WebView JS fetch succeeded for variant fetch');
         } else {
-          AuroraLog.instance.debug(
-            'WebView JS fetch failed, trying native Android HTTP…',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('WebView JS fetch failed, trying native Android HTTP…');
           try {
             final nativeResult = await NetworkBindingService.fetchUrl(
               url,
@@ -134,12 +109,7 @@ class HlsVariantFetcher {
               );
             }
           } catch (e) {
-            AuroraLog.instance.error(
-              'Native HTTP error: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('Native HTTP error: $e');
           }
         }
       }
@@ -149,20 +119,10 @@ class HlsVariantFetcher {
       final playlist = HlsPlaylistParser.parse(response.body, uri);
       if (!playlist.isMaster || playlist.variants.isEmpty) return [];
 
-      AuroraLog.instance.debug(
-        'HlsVariantFetcher resolved ${playlist.variants.length} variants',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.sniff,
-      );
+      debugPrint('HlsVariantFetcher resolved ${playlist.variants.length} variants');
       return playlist.variants.map((v) => _toSniffedMedia(v)).toList();
     } catch (e) {
-      AuroraLog.instance.error(
-        'HlsVariantFetcher error: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('HlsVariantFetcher error: $e');
       return [];
     }
   }

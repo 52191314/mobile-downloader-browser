@@ -1,4 +1,3 @@
-import '../logging/aurora_log.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -26,7 +25,7 @@ class TsRemuxService {
   /// was more forgiving of the old sequential-track remux.
   ///
   /// Returns a [RemuxResult]; on failure the `.ts` file is kept as fallback
-  /// and the failure reason is logged to AuroraLog for diagnostics.
+  /// and the failure reason is surfaced via debugPrint.
   static Future<RemuxResult> remuxTsToMp4(
     String sourcePath,
     String destPath,
@@ -47,32 +46,17 @@ class TsRemuxService {
         success = (result as bool?) ?? false;
       }
       if (!success) {
-        AuroraLog.instance.error(
-          'remuxTsToMp4 failed: ${error ?? "unknown"} '
-          '(source=$sourcePath)',
-          category: LogCategory.platform,
-          screen: LogScreen.background,
-          eventType: LogEventType.error,
-        );
+        debugPrint('remuxTsToMp4 failed: ${error ?? "unknown"} '
+          '(source=$sourcePath)');
       }
       return RemuxResult(success: success, error: error);
     } on PlatformException catch (e) {
       debugPrint('[TsRemuxService] remuxTsToMp4 PlatformException: $e');
-      AuroraLog.instance.error(
-        'remuxTsToMp4 PlatformException: ${e.message}',
-        category: LogCategory.platform,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
+      debugPrint('remuxTsToMp4 PlatformException: ${e.message}');
       return RemuxResult(success: false, error: e.message);
     } catch (e) {
       debugPrint('[TsRemuxService] remuxTsToMp4 failed: $e');
-      AuroraLog.instance.error(
-        'remuxTsToMp4 failed: $e',
-        category: LogCategory.platform,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
+      debugPrint('remuxTsToMp4 failed: $e');
       return RemuxResult(success: false, error: e.toString());
     }
   }

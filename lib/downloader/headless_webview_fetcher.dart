@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import '../logging/aurora_log.dart';
 
 /// A fallback segment fetcher that uses a [HeadlessInAppWebView] to download
 /// binary data from CDN hosts that block Dart's HTTP client (Cloudflare TLS
@@ -95,12 +94,7 @@ class HeadlessWebViewFetcher {
 
       return await _xhrFetchBinary(url);
     } catch (e) {
-      AuroraLog.instance.debug(
-        'HeadlessWebViewFetcher: XHR failed for $url: $e',
-        category: LogCategory.hls,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-      );
+      debugPrint('HeadlessWebViewFetcher: XHR failed for $url: $e');
       return null;
     } finally {
       _release();
@@ -130,12 +124,7 @@ class HeadlessWebViewFetcher {
         onReceivedError: (controller, request, error) {
           // Only fail hard on main-frame errors during init.
           if (request.isForMainFrame == true && !completer.isCompleted) {
-            AuroraLog.instance.debug(
-              'HeadlessWebViewFetcher: load error for $origin: ${error.description}',
-              category: LogCategory.hls,
-              screen: LogScreen.background,
-              eventType: LogEventType.network,
-            );
+            debugPrint('HeadlessWebViewFetcher: load error for $origin: ${error.description}');
             completer.complete(false);
           }
         },
@@ -153,12 +142,7 @@ class HeadlessWebViewFetcher {
       final ok = await completer.future.timeout(
         const Duration(seconds: 45),
         onTimeout: () {
-          AuroraLog.instance.debug(
-            'HeadlessWebViewFetcher: timeout loading $origin',
-            category: LogCategory.hls,
-            screen: LogScreen.background,
-            eventType: LogEventType.network,
-          );
+          debugPrint('HeadlessWebViewFetcher: timeout loading $origin');
           return false;
         },
       );
@@ -170,21 +154,11 @@ class HeadlessWebViewFetcher {
 
       _completeInit();
       if (ok) {
-        AuroraLog.instance.debug(
-          'HeadlessWebViewFetcher: initialized for $origin',
-          category: LogCategory.hls,
-          screen: LogScreen.background,
-          eventType: LogEventType.network,
-        );
+        debugPrint('HeadlessWebViewFetcher: initialized for $origin');
       }
       return ok;
     } catch (e) {
-      AuroraLog.instance.debug(
-        'HeadlessWebViewFetcher: init failed for $origin: $e',
-        category: LogCategory.hls,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-      );
+      debugPrint('HeadlessWebViewFetcher: init failed for $origin: $e');
       _completeInit();
       return false;
     } finally {
@@ -286,12 +260,7 @@ class HeadlessWebViewFetcher {
     final result = await completer.future.timeout(
       const Duration(seconds: 50),
       onTimeout: () {
-        AuroraLog.instance.debug(
-          'HeadlessWebViewFetcher: XHR timed out for $url',
-          category: LogCategory.hls,
-          screen: LogScreen.background,
-          eventType: LogEventType.network,
-        );
+        debugPrint('HeadlessWebViewFetcher: XHR timed out for $url');
         return null;
       },
     );
@@ -341,12 +310,7 @@ class HeadlessWebViewFetcher {
 
       return await _xhrFetchText(url);
     } catch (e) {
-      AuroraLog.instance.debug(
-        'HeadlessWebViewFetcher: XHR text fetch failed for $url: $e',
-        category: LogCategory.hls,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-      );
+      debugPrint('HeadlessWebViewFetcher: XHR text fetch failed for $url: $e');
       return null;
     } finally {
       _release();
@@ -405,12 +369,7 @@ class HeadlessWebViewFetcher {
     final result = await completer.future.timeout(
       const Duration(seconds: 35),
       onTimeout: () {
-        AuroraLog.instance.debug(
-          'HeadlessWebViewFetcher: text XHR timed out for $url',
-          category: LogCategory.hls,
-          screen: LogScreen.background,
-          eventType: LogEventType.network,
-        );
+        debugPrint('HeadlessWebViewFetcher: text XHR timed out for $url');
         return null;
       },
     );

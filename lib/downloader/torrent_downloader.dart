@@ -9,14 +9,12 @@ import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'magnet_link.dart';
 import 'torrent_metadata.dart';
-import 'download_logger.dart';
 import '../premium/ffmpeg/ffmpeg_module_loader.dart';
 import '../premium/build_channel.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[TorrentDownloader] $context: $error';
   debugPrint(message);
-  DownloadLogger.instance.error(message);
 }
 
 // The Dart code itself lives in the base module; only the native lib

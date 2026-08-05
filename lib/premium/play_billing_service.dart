@@ -1,9 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
-import '../logging/aurora_log.dart';
 import 'build_channel.dart';
 import 'license/license_api_client.dart';
 import 'license/license_service.dart';
@@ -96,12 +96,7 @@ class PlayBillingService {
     await entitlement.loadCachedEntitlement();
 
     if (!BuildChannel.isPlay) {
-      AuroraLog.instance.info(
-        'PlayBilling skipped (channel=${BuildChannel.label})',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.stateChange,
-      );
+      debugPrint('PlayBilling skipped (channel=${BuildChannel.label})');
       return;
     }
 
@@ -110,13 +105,7 @@ class PlayBillingService {
     } catch (e, s) {
       _storeAvailable = false;
       _lastError = e.toString();
-      AuroraLog.instance.error(
-        'PlayBilling isAvailable failed: $e',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.error,
-        stackTrace: s,
-      );
+      debugPrint('PlayBilling isAvailable failed: $e');
       return;
     }
 
@@ -129,13 +118,7 @@ class PlayBillingService {
       _onPurchaseUpdates,
       onError: (Object e, StackTrace s) {
         _lastError = e.toString();
-        AuroraLog.instance.error(
-          'PlayBilling purchaseStream error: $e',
-          category: LogCategory.app,
-          screen: LogScreen.settings,
-          eventType: LogEventType.error,
-          stackTrace: s,
-        );
+        debugPrint('PlayBilling purchaseStream error: $e');
       },
     );
 
@@ -152,12 +135,7 @@ class PlayBillingService {
     });
     if (response.error != null) {
       _lastError = response.error!.message;
-      AuroraLog.instance.warn(
-        'PlayBilling queryProductDetails: ${response.error}',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.error,
-      );
+      debugPrint('PlayBilling queryProductDetails: ${response.error}');
     }
     ProductDetails? find(String id) {
       try {
@@ -242,13 +220,7 @@ class PlayBillingService {
       return ok;
     } catch (e, s) {
       _lastError = e.toString();
-      AuroraLog.instance.error(
-        'PlayBilling buy($productId) failed: $e',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.error,
-        stackTrace: s,
-      );
+      debugPrint('PlayBilling buy($productId) failed: $e');
       return false;
     }
   }
@@ -306,13 +278,7 @@ class PlayBillingService {
     try {
       await service.activate(mapped, reason: reason);
     } catch (e, s) {
-      AuroraLog.instance.warn(
-        'PlayBilling license activate failed: $e',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.error,
-        stackTrace: s,
-      );
+      debugPrint('PlayBilling license activate failed: $e');
     }
   }
 
@@ -402,12 +368,7 @@ class PlayBillingService {
               try {
                 await _iap.completePurchase(p);
               } catch (e) {
-                AuroraLog.instance.warn(
-                  'PlayBilling completePurchase failed: $e',
-                  category: LogCategory.app,
-                  screen: LogScreen.settings,
-                  eventType: LogEventType.error,
-                );
+                debugPrint('PlayBilling completePurchase failed: $e');
               }
             }
           }
@@ -435,13 +396,7 @@ class PlayBillingService {
         }
       } catch (e, s) {
         // BillingClient unavailable / threw — fall through to grant-only.
-        AuroraLog.instance.warn(
-          'PlayBilling BillingClient query failed, using fallback: $e',
-          category: LogCategory.app,
-          screen: LogScreen.settings,
-          eventType: LogEventType.error,
-          stackTrace: s,
-        );
+        debugPrint('PlayBilling BillingClient query failed, using fallback: $e');
       }
 
       if (usedBillingClient) return; // BC ran but reported error; keep cache.
@@ -478,21 +433,10 @@ class PlayBillingService {
       // server verifies each one independently.
       await _activateLicense(collected, reason: 'fallback_$reason');
       await entitlement.recordReconcileFailure(); // not authoritative
-      AuroraLog.instance.info(
-        'reconcile used grant-only restore fallback (reason=$reason)',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.stateChange,
-      );
+      debugPrint('reconcile used grant-only restore fallback (reason=$reason)');
     } catch (e, s) {
       await entitlement.recordReconcileFailure();
-      AuroraLog.instance.error(
-        'PlayBilling reconcile failed: $e',
-        category: LogCategory.app,
-        screen: LogScreen.settings,
-        eventType: LogEventType.error,
-        stackTrace: s,
-      );
+      debugPrint('PlayBilling reconcile failed: $e');
       // never revoke
     }
   }

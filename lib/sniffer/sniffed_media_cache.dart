@@ -7,7 +7,6 @@ import 'worker_isolate_pool.dart';
 import 'package:flutter/foundation.dart';
 
 import '../compliance/restricted_media_policy.dart';
-import '../logging/aurora_log.dart';
 import 'models/sniffed_media.dart';
 
 /// Owns the persistent and in-memory caches of sniffed media for a single
@@ -206,12 +205,7 @@ class SniffedMediaCache {
     detectedMedia.clear();
     suppressedMediaCount = 0;
     suppressedReasons.clear();
-    AuroraLog.instance.debug(
-      'SniffedMediaCache cleared ($itemCount items removed)',
-      category: LogCategory.sniffer,
-      screen: LogScreen.browser,
-      eventType: LogEventType.sniff,
-    );
+    debugPrint('SniffedMediaCache cleared ($itemCount items removed)');
   }
 
   /// Clears the global cross-tab dedup cache so the same URL can be

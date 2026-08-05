@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../logging/aurora_log.dart';
 import '../pro_entitlement.dart';
 import 'aurora_license.dart';
 import 'install_id_store.dart';
@@ -478,26 +477,11 @@ class LicenseService extends ChangeNotifier {
   void _log(String message, {required _LogLevel level}) {
     switch (level) {
       case _LogLevel.info:
-        AuroraLog.instance.info(
-          '[License] $message',
-          category: LogCategory.app,
-          screen: LogScreen.settings,
-          eventType: LogEventType.stateChange,
-        );
+        debugPrint('[License] $message');
       case _LogLevel.warn:
-        AuroraLog.instance.warn(
-          '[License] $message',
-          category: LogCategory.app,
-          screen: LogScreen.settings,
-          eventType: LogEventType.error,
-        );
+        debugPrint('[License] $message');
       case _LogLevel.error:
-        AuroraLog.instance.error(
-          '[License] $message',
-          category: LogCategory.app,
-          screen: LogScreen.settings,
-          eventType: LogEventType.error,
-        );
+        debugPrint('[License] $message');
     }
   }
 }

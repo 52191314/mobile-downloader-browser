@@ -22,7 +22,6 @@ import '../premium/premium_flags.dart';
 import '../premium/upsell_controller.dart';
 import 'video_library.dart';
 import '../downloader/headless_webview_fetcher.dart';
-import '../logging/aurora_log.dart';
 import '../platform/network_binding_service.dart';
 import '../ui/notifications/aurora_snackbar.dart';
 import '../platform/public_downloads_service.dart';
@@ -1007,14 +1006,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (!_tabsLoaded) {
       _tabsLoaded = true;
       _updateBuiltTabIds();
-      AuroraLog.instance.info(
-        'markTabsLoaded: tabs=${_tabs.length} '
+      debugPrint('markTabsLoaded: tabs=${_tabs.length} '
         'flushing ${_pendingOpenUrlsAfterTabsLoaded.length} '
-        'pending external open(s)',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
+        'pending external open(s)');
       // Rebuild so the active tab's real WebView mounts (restore left
       // _tabsLoaded false during switchToActiveTab's earlier setState).
       if (mounted) setState(() {});
@@ -1047,12 +1041,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (url == null || url.isEmpty) return;
     if (seq == _lastHandledOpenSeq) return;
     _lastHandledOpenSeq = seq;
-    AuroraLog.instance.info(
-      'openRequestBus consumed seq=$seq url="$url" tabsLoaded=$_tabsLoaded',
-      category: LogCategory.browser,
-      screen: LogScreen.browser,
-      eventType: LogEventType.navigation,
-    );
+    debugPrint('openRequestBus consumed seq=$seq url="$url" tabsLoaded=$_tabsLoaded');
     _handleExternalOpenUrl(url);
   }
 
@@ -1062,13 +1051,8 @@ class _SnifferScreenState extends State<SnifferScreen>
   void _handleExternalOpenUrl(String url) {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
-    AuroraLog.instance.info(
-      '_handleExternalOpenUrl("$trimmed") tabsLoaded=$_tabsLoaded '
-      'tabs=${_tabs.length} active=${_tabs.isEmpty ? -1 : _activeTabIndex}',
-      category: LogCategory.browser,
-      screen: LogScreen.browser,
-      eventType: LogEventType.navigation,
-    );
+    debugPrint('_handleExternalOpenUrl("$trimmed") tabsLoaded=$_tabsLoaded '
+      'tabs=${_tabs.length} active=${_tabs.isEmpty ? -1 : _activeTabIndex}');
     if (!_tabsLoaded || _tabs.isEmpty) {
       _pendingOpenUrlsAfterTabsLoaded.add(trimmed);
       return;
@@ -1097,13 +1081,8 @@ class _SnifferScreenState extends State<SnifferScreen>
     final routeToCct = host.isNotEmpty &&
         widget.settings.externalBrowserHosts.contains(host);
     if (routeToCct) {
-      AuroraLog.instance.info(
-        '_navigateActiveTabToExternalUrl: host=$host is external-only, '
-        'running native intake only (no WebView load)',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
+      debugPrint('_navigateActiveTabToExternalUrl: host=$host is external-only, '
+        'running native intake only (no WebView load)');
       tab.addressController.text = url;
       tab.currentUrl = url;
       if (mounted) setState(() {});
@@ -1138,12 +1117,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.currentUrl = url;
     _addressExpanded = false;
     if (mounted) setState(() {});
-    AuroraLog.instance.info(
-      '_navigateActiveTabToExternalUrl tab=${tab.id} url="$url"',
-      category: LogCategory.browser,
-      screen: LogScreen.browser,
-      eventType: LogEventType.navigation,
-    );
+    debugPrint('_navigateActiveTabToExternalUrl tab=${tab.id} url="$url"');
     // Post-frame so setState rebuild creates BrowserWidget if it was
     // previously evicted, then loadUrl awaits _ready.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1170,20 +1144,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         } catch (_) {}
         try {
           await _loadUrlWithHostSettings(tab, Uri.parse(url), forceInApp: true);
-          AuroraLog.instance.info(
-            'external open loadRequest finished for "$url"',
-            category: LogCategory.browser,
-            screen: LogScreen.browser,
-            eventType: LogEventType.navigation,
-          );
+          debugPrint('external open loadRequest finished for "$url"');
         } catch (e, s) {
-          AuroraLog.instance.error(
-            'external open loadRequest failed for "$url": $e',
-            category: LogCategory.browser,
-            screen: LogScreen.browser,
-            eventType: LogEventType.error,
-            stackTrace: s,
-          );
+          debugPrint('external open loadRequest failed for "$url": $e');
         }
       }());
     });
@@ -2045,12 +2008,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         }
       }
     } catch (e) {
-      AuroraLog.instance.error(
-        'Iframe content fetch failed for $iframeSrcUrl: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('Iframe content fetch failed for $iframeSrcUrl: $e');
     }
   }
 
@@ -2144,12 +2102,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     try {
       safety = await _safeBrowsing.check(uri.toString());
     } catch (e) {
-      AuroraLog.instance.error(
-        'Safe browsing check failed: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('Safe browsing check failed: $e');
       safety = const SafeBrowsingResult(verdict: SafeBrowsingVerdict.safe);
     }
     if (safety.verdict == SafeBrowsingVerdict.malicious) {

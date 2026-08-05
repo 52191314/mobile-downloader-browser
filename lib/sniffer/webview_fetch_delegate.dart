@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../downloader/hls_playlist_parser.dart';
-import '../logging/aurora_log.dart';
 
 /// WebView-side WAF-bypass fetch methods.
 ///
@@ -158,7 +157,7 @@ class WebViewFetchDelegate {
       final result = await completer.future.timeout(
         const Duration(seconds: 20),
         onTimeout: () {
-          AuroraLog.instance.debug('fetchViaJavaScript timed out for $safeUrl', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+          debugPrint('fetchViaJavaScript timed out for $safeUrl');
           return null;
         },
       );
@@ -166,18 +165,18 @@ class WebViewFetchDelegate {
       // Clean up the one-shot handler.
       try { _controller!.removeJavaScriptHandler(handlerName: channelName); } catch (_) {}
 
-      AuroraLog.instance.debug('fetchViaJavaScript raw result: $result', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+      debugPrint('fetchViaJavaScript raw result: $result');
       if (result is String && result.startsWith('OK:')) {
         final body = result.substring(3);
-        AuroraLog.instance.debug('fetchViaJavaScript SUCCESS, body length=${body.length}', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+        debugPrint('fetchViaJavaScript SUCCESS, body length=${body.length}');
         return body;
       }
       if (result is String) {
-        AuroraLog.instance.debug('fetchViaJavaScript failed: $result', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+        debugPrint('fetchViaJavaScript failed: $result');
       }
       return null;
     } catch (e) {
-      AuroraLog.instance.debug('fetchViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+      debugPrint('fetchViaJavaScript threw: $e');
       return null;
     }
   }
@@ -312,7 +311,7 @@ class WebViewFetchDelegate {
 
       return result;
     } catch (e) {
-      AuroraLog.instance.debug('fetchHeadersViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+      debugPrint('fetchHeadersViaJavaScript threw: $e');
       return null;
     }
   }
@@ -390,7 +389,7 @@ class WebViewFetchDelegate {
       }
       return result;
     } catch (e) {
-      AuroraLog.instance.debug('fetchPlaylistBodyViaJavaScript threw: $e', category: LogCategory.browser, screen: LogScreen.browser, eventType: LogEventType.network);
+      debugPrint('fetchPlaylistBodyViaJavaScript threw: $e');
       return null;
     }
   }
@@ -493,12 +492,7 @@ class WebViewFetchDelegate {
       final result = await completer.future.timeout(
         const Duration(seconds: 45),
         onTimeout: () {
-          AuroraLog.instance.debug(
-            'fetchBinaryViaJavaScript timed out for $safeUrl',
-            category: LogCategory.browser,
-            screen: LogScreen.browser,
-            eventType: LogEventType.network,
-          );
+          debugPrint('fetchBinaryViaJavaScript timed out for $safeUrl');
           return null;
         },
       );
@@ -508,21 +502,11 @@ class WebViewFetchDelegate {
       } catch (_) {}
 
       if (result != null) {
-        AuroraLog.instance.debug(
-          'fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes',
-          category: LogCategory.browser,
-          screen: LogScreen.browser,
-          eventType: LogEventType.network,
-        );
+        debugPrint('fetchBinaryViaJavaScript SUCCESS, ${result.length} bytes');
       }
       return result;
     } catch (e) {
-      AuroraLog.instance.debug(
-        'fetchBinaryViaJavaScript threw: $e',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.network,
-      );
+      debugPrint('fetchBinaryViaJavaScript threw: $e');
       return null;
     } finally {
       _releaseBinarySlot();

@@ -26,3 +26,9 @@ linter:
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
+
+# Archived code (removed from the app) is kept for reference only and is not
+# part of the build; its imports intentionally no longer resolve.
+analyzer:
+  exclude:
+    - archive/**

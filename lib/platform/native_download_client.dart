@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../logging/aurora_log.dart';
 
 /// Result of a single native chunk download.
 class NativeChunkResult {
@@ -92,13 +91,8 @@ class NativeDownloadClient {
           'bytes=$bytesWritten cancelled=$cancelled',
         );
       }
-      AuroraLog.instance.debug(
-        'NativeDownloadClient chunk status=$statusCode bytes=$bytesWritten '
-        'cancelled=$cancelled',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-      );
+      debugPrint('NativeDownloadClient chunk status=$statusCode bytes=$bytesWritten '
+        'cancelled=$cancelled');
       return NativeChunkResult(
         statusCode: statusCode,
         bytesWritten: bytesWritten,
@@ -111,12 +105,7 @@ class NativeDownloadClient {
       if (kDebugMode) {
         debugPrint('[NativeDownloadClient] error: $e');
       }
-      AuroraLog.instance.error(
-        'NativeDownloadClient error: $e',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-      );
+      debugPrint('NativeDownloadClient error: $e');
       return null;
     }
   }

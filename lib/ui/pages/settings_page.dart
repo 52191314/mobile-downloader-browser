@@ -21,7 +21,6 @@ import '../../backup/auto_backup_models.dart';
 import '../../backup/unified_backup_database.dart';
 
 import '../../settings/download_settings.dart';
-import '../../settings/onboarding_experiment.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -40,7 +39,6 @@ import '../settings_open_request.dart';
 import '../widgets/dock_order_store.dart';
 import '../widgets/media_type_chip.dart';
 import '../widgets/panel.dart';
-import 'diagnostics_page.dart';
 import '../../premium/vault_service.dart';
 import '../../premium/watcher/watcher_service.dart';
 import '../../premium/automation/automation_api_service.dart';
@@ -503,7 +501,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.info_outline_rounded,
                 title: 'About',
-                subtitle: 'v2.4.5 · diagnostics · battery',
+                subtitle: 'v4.0.0 · battery',
                 onTap: () => _openPage(_buildAboutPage()),
               ),
             ]),
@@ -2383,7 +2381,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Downloader',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v2.4.5', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v4.0.0', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
@@ -2409,37 +2407,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
               const Divider(height: 1, indent: 56),
-              ListTile(
-                leading: Icon(
-                  Icons.tour_outlined,
-                  color: context.ac.accentFrost,
-                ),
-                title: const Text('Show app tour'),
-                subtitle: const Text(
-                  'Interactive walkthrough of the main controls',
-                ),
-                trailing: Icon(
-                  Icons.chevron_right,
-                  color: context.ac.textSecondary,
-                ),
-                onTap: () async {
-                  await OnboardingExperiment.resetOnboarding();
-                  if (!context.mounted) return;
-                  // Pop back to the shell so the spotlight can attach.
-                  // [_openSettingsSection] re-shows the tour when completion
-                  // is still false after this route closes.
-                  Navigator.of(context, rootNavigator: true)
-                      .popUntil((route) => route.isFirst);
-                },
-              ),
-              const Divider(height: 1, indent: 56),
-              ListTile(
-                leading: Icon(Icons.monitor_heart_outlined, color: context.ac.accentFrost),
-                title: const Text('Diagnostics'),
-                subtitle: const Text('View, filter, and export app logs'),
-                trailing: Icon(Icons.chevron_right, color: context.ac.textSecondary),
-                onTap: () => _openPage(const DiagnosticsPage()),
-              ),
             ],
           )),
         ],

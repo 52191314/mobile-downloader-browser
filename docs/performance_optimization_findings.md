@@ -3,6 +3,16 @@
 Status: 2026-08-03 · Source: 5 parallel code audits (UI/rendering, download engine & I/O,
 memory/CPU/crypto, app size & build, startup & lifecycle) plus targeted bug review.
 
+**Update 2026-08-05:** Re-verified against the current tree — **the findings below are mostly
+stale; the fixes have landed.** Confirmed fixed in code: §1 logging subsystem (removed outright,
+see `archive/diagnostics_logging_2026-08-05/` — all call sites are now `debugPrint`), §2 HLS
+decrypt (single reused CBC cipher + output buffer, `hls_decryptor.dart`), §3 queue persistence
+(`_saveChain` + 5 s periodic flush close the spin-loop + durability gap, `download_queue.dart`),
+§4 decrypt pool sized to segment concurrency (`hls_downloader.dart:360`), §5 queue status line
+single-pass (`queue_page.dart:_buildStatusLine`), §7 HLS resume scan on `Isolate.run`
+(`hls_downloader.dart:2202`), §8 schedule timer cancelled when idle. Still open: §6 shell
+500 ms whole-tree rebuild (`main.dart:_queueRebuildTimer`).
+
 ## Executive summary
 
 The codebase's **plumbing layer is now in good shape** (probe pooling, main-thread channel

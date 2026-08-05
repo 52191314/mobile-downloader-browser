@@ -11,7 +11,6 @@ import 'worker_isolate_pool.dart';
 
 import '../downloader/hls_playlist_parser.dart';
 import '../downloader/hls_size_estimator.dart';
-import '../logging/aurora_log.dart';
 import 'dash_playlist_parser.dart';
 import 'media_sniffer_engine.dart';
 import 'models/sniffed_media.dart';
@@ -416,12 +415,7 @@ class MediaEnricher {
 
     if (_isHlsUri(uri, item)) {
       debugPrint('[MediaEnricher] HLS enrichment entered for ${item.url}');
-      AuroraLog.instance.debug(
-        'HLS enrichment entered for ${item.url}',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.sniff,
-      );
+      debugPrint('HLS enrichment entered for ${item.url}');
       try {
         String? playlistBody;
         try {
@@ -431,12 +425,7 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] HLS cache hit for ${item.url} (${cached.length} chars)',
             );
-            AuroraLog.instance.debug(
-              'HLS cache hit for ${item.url} (${cached.length} chars)',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('HLS cache hit for ${item.url} (${cached.length} chars)');
           }
         } catch (_) {}
 
@@ -444,12 +433,7 @@ class MediaEnricher {
           debugPrint(
             '[MediaEnricher] HLS enrichment cache miss for ${item.url}',
           );
-          AuroraLog.instance.debug(
-            'HLS enrichment cache miss for ${item.url}',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('HLS enrichment cache miss for ${item.url}');
           // Race-condition mitigation: the browser_guard.js fetch hook may
           // still be cloning the response body into hlsPlaylistCache. Wait
           // briefly and re-check before falling through to network tiers.
@@ -461,12 +445,7 @@ class MediaEnricher {
               debugPrint(
                 '[MediaEnricher] HLS body available after 600ms retry for ${item.url}',
               );
-              AuroraLog.instance.debug(
-                'HLS body available after 600ms retry for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('HLS body available after 600ms retry for ${item.url}');
             }
           } catch (_) {}
         }
@@ -482,45 +461,25 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] Trying WebView JS fetch for HLS body: ${item.url}',
             );
-            AuroraLog.instance.debug(
-              'Trying WebView JS fetch for HLS body: ${item.url}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Trying WebView JS fetch for HLS body: ${item.url}');
             final jsBody = await host.fetchPlaylistBodyViaWebView!(item.url);
             if (jsBody != null && jsBody.isNotEmpty) {
               debugPrint(
                 '[MediaEnricher] Fetched HLS playlist body via WebView for ${item.url} (${jsBody.length} chars)',
               );
-              AuroraLog.instance.debug(
-                'Fetched HLS playlist body via WebView for ${item.url} (${jsBody.length} chars)',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('Fetched HLS playlist body via WebView for ${item.url} (${jsBody.length} chars)');
               playlistBody = jsBody;
             } else {
               debugPrint(
                 '[MediaEnricher] WebView playlist fetch returned null/empty for ${item.url}',
               );
-              AuroraLog.instance.warn(
-                'WebView playlist fetch returned null/empty for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('WebView playlist fetch returned null/empty for ${item.url}');
             }
           } catch (e) {
             debugPrint(
               '[MediaEnricher] WebView playlist fetch threw: $e',
             );
-            AuroraLog.instance.warn(
-              'WebView playlist fetch threw for ${item.url}: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('WebView playlist fetch threw for ${item.url}: $e');
           }
         }
 
@@ -540,22 +499,12 @@ class MediaEnricher {
             debugPrint(
                '[MediaEnricher] Dart HLS GET succeeded for ${item.url} (${response.body.length} chars)',
             );
-            AuroraLog.instance.debug(
-               'Dart HLS GET succeeded for ${item.url} (${response.body.length} chars)',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Dart HLS GET succeeded for ${item.url} (${response.body.length} chars)');
           } else {
             debugPrint(
                '[MediaEnricher] Dart HLS GET failed for ${item.url}, status ${response.statusCode}',
             );
-            AuroraLog.instance.warn(
-               'Dart HLS GET failed for ${item.url}, status ${response.statusCode}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('Dart HLS GET failed for ${item.url}, status ${response.statusCode}');
           }
         }
 
@@ -571,46 +520,26 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] Trying headless WebView fetch for HLS body: ${item.url}',
             );
-            AuroraLog.instance.debug(
-              'Trying headless WebView fetch for HLS body: ${item.url}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Trying headless WebView fetch for HLS body: ${item.url}');
             final headlessBody =
                 await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
             if (headlessBody != null && headlessBody.isNotEmpty) {
               debugPrint(
                 '[MediaEnricher] Fetched HLS playlist body via headless WebView for ${item.url} (${headlessBody.length} chars)',
               );
-              AuroraLog.instance.debug(
-                'Fetched HLS playlist body via headless WebView for ${item.url} (${headlessBody.length} chars)',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('Fetched HLS playlist body via headless WebView for ${item.url} (${headlessBody.length} chars)');
               playlistBody = headlessBody;
             } else {
               debugPrint(
                 '[MediaEnricher] Headless WebView playlist fetch returned null/empty for ${item.url}',
               );
-              AuroraLog.instance.warn(
-                'Headless WebView playlist fetch returned null/empty for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('Headless WebView playlist fetch returned null/empty for ${item.url}');
             }
           } catch (e) {
             debugPrint(
               '[MediaEnricher] Headless WebView playlist fetch threw: $e',
             );
-            AuroraLog.instance.warn(
-              'Headless WebView playlist fetch threw for ${item.url}: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('Headless WebView playlist fetch threw for ${item.url}: $e');
           }
         }
 
@@ -620,13 +549,8 @@ class MediaEnricher {
             '[MediaEnricher] ⚠ ALL HLS body-fetch tiers failed for ${item.url} — '
             'variants will NOT be expanded',
           );
-          AuroraLog.instance.warn(
-            'ALL HLS body-fetch tiers failed for ${item.url} — '
-            'variants NOT expanded',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.error,
-          );
+          debugPrint('ALL HLS body-fetch tiers failed for ${item.url} — '
+            'variants NOT expanded');
         }
 
         if (playlistBody != null && playlistBody.isNotEmpty) {
@@ -639,13 +563,8 @@ class MediaEnricher {
             'isMaster=${playlist.isMaster}, ${playlist.variants.length} variants, '
             '${playlist.segments.length} segments, body[:200]=${bodyPreview.replaceAll('\n', '\\n')}',
           );
-          AuroraLog.instance.debug(
-            'HLS body parsed for ${item.url}: isMaster=${playlist.isMaster}, '
-            '${playlist.variants.length} variants, ${playlist.segments.length} segments',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('HLS body parsed for ${item.url}: isMaster=${playlist.isMaster}, '
+            '${playlist.variants.length} variants, ${playlist.segments.length} segments');
 
           // --- Simplified-master re-fetch (Phase 2) ---
           // Some CDNs (e.g. mycloudz.cc, cloudwish.xyz on javhd.today) serve a
@@ -661,13 +580,8 @@ class MediaEnricher {
                 '[MediaEnricher] Master has only ${playlist.variants.length} variant(s)'
                 ' — re-fetching via headless WebView: ${item.url}',
               );
-              AuroraLog.instance.debug(
-                'Master has only ${playlist.variants.length} variant(s)'
-                ' — re-fetching via headless WebView: ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('Master has only ${playlist.variants.length} variant(s)'
+                ' — re-fetching via headless WebView: ${item.url}');
               final headlessMasterBody =
                   await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
               if (headlessMasterBody != null &&
@@ -681,14 +595,9 @@ class MediaEnricher {
                     '${playlist.variants.length}→${fullPlaylist.variants.length}'
                     ' variants for ${item.url}',
                   );
-                  AuroraLog.instance.info(
-                    'Master re-fetched via headless WebView: '
+                  debugPrint('Master re-fetched via headless WebView: '
                     '${playlist.variants.length}→${fullPlaylist.variants.length}'
-                    ' variants for ${item.url}',
-                    category: LogCategory.sniffer,
-                    screen: LogScreen.browser,
-                    eventType: LogEventType.sniff,
-                  );
+                    ' variants for ${item.url}');
                   // Log the full-master body preview for diagnostics
                   final fullPreview = headlessMasterBody.length > 200
                       ? headlessMasterBody.substring(0, 200)
@@ -704,12 +613,7 @@ class MediaEnricher {
                     ' (${fullPlaylist.variants.length} vs ${playlist.variants.length})'
                     ' for ${item.url}',
                   );
-                  AuroraLog.instance.debug(
-                    'Headless re-fetch did not yield more variants for ${item.url}',
-                    category: LogCategory.sniffer,
-                    screen: LogScreen.browser,
-                    eventType: LogEventType.sniff,
-                  );
+                  debugPrint('Headless re-fetch did not yield more variants for ${item.url}');
                 }
               } else if (headlessMasterBody != null) {
                 debugPrint(
@@ -720,23 +624,13 @@ class MediaEnricher {
                 debugPrint(
                   '[MediaEnricher] Headless master re-fetch returned null/empty for ${item.url}',
                 );
-                AuroraLog.instance.warn(
-                  'Headless master re-fetch returned null/empty for ${item.url}',
-                  category: LogCategory.sniffer,
-                  screen: LogScreen.browser,
-                  eventType: LogEventType.error,
-                );
+                debugPrint('Headless master re-fetch returned null/empty for ${item.url}');
               }
             } catch (e) {
               debugPrint(
                 '[MediaEnricher] Headless master re-fetch threw for ${item.url}: $e',
               );
-              AuroraLog.instance.warn(
-                'Headless master re-fetch threw for ${item.url}: $e',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('Headless master re-fetch threw for ${item.url}: $e');
             }
           }
 
@@ -790,13 +684,8 @@ class MediaEnricher {
               '$createdCount variants created, $skippedCount skipped (duplicates)'
               ' for ${item.url}',
             );
-            AuroraLog.instance.info(
-              'Master playlist expanded for ${item.url}: '
-              '$createdCount variants created, $skippedCount skipped (duplicates)',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Master playlist expanded for ${item.url}: '
+              '$createdCount variants created, $skippedCount skipped (duplicates)');
           } else {
             duration = Duration(
               milliseconds: (playlist.durationSeconds * 1000).round(),
@@ -853,13 +742,8 @@ class MediaEnricher {
                 '[MediaEnricher] HLS size ${estimate.source.name}: '
                 '${estimate.totalBytes}B (${estimate.detail}) for ${item.url}',
               );
-              AuroraLog.instance.info(
-                'HLS size ${estimate.source.name}: ${estimate.totalBytes}B '
-                '(${estimate.detail}) for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('HLS size ${estimate.source.name}: ${estimate.totalBytes}B '
+                '(${estimate.detail}) for ${item.url}');
             }
           }
           contentType ??= 'application/vnd.apple.mpegurl';
@@ -872,12 +756,7 @@ class MediaEnricher {
     if (uri.path.toLowerCase().endsWith('.mpd') ||
         (item.contentType?.toLowerCase().contains('dash+xml') ?? false)) {
       debugPrint('[MediaEnricher] DASH enrichment entered for ${item.url}');
-      AuroraLog.instance.debug(
-        'DASH enrichment entered for ${item.url}',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.sniff,
-      );
+      debugPrint('DASH enrichment entered for ${item.url}');
       try {
         String? manifestBody;
         try {
@@ -887,12 +766,7 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] DASH cache hit for ${item.url} (${cached.length} chars)',
             );
-            AuroraLog.instance.debug(
-              'DASH cache hit for ${item.url} (${cached.length} chars)',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('DASH cache hit for ${item.url} (${cached.length} chars)');
           }
         } catch (_) {}
 
@@ -900,12 +774,7 @@ class MediaEnricher {
           debugPrint(
             '[MediaEnricher] DASH enrichment cache miss for ${item.url}',
           );
-          AuroraLog.instance.debug(
-            'DASH enrichment cache miss for ${item.url}',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+          debugPrint('DASH enrichment cache miss for ${item.url}');
         }
 
         if (manifestBody == null &&
@@ -914,46 +783,26 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] Trying WebView JS fetch for DASH body: ${item.url}',
             );
-            AuroraLog.instance.debug(
-              'Trying WebView JS fetch for DASH body: ${item.url}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Trying WebView JS fetch for DASH body: ${item.url}');
             final jsBody =
                 await host.fetchPlaylistBodyViaWebView!(item.url);
             if (jsBody != null && jsBody.isNotEmpty) {
               debugPrint(
                 '[MediaEnricher] Fetched DASH manifest via WebView for ${item.url} (${jsBody.length} chars)',
               );
-              AuroraLog.instance.debug(
-                'Fetched DASH manifest via WebView for ${item.url} (${jsBody.length} chars)',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('Fetched DASH manifest via WebView for ${item.url} (${jsBody.length} chars)');
               manifestBody = jsBody;
             } else {
               debugPrint(
                 '[MediaEnricher] WebView DASH fetch returned null/empty for ${item.url}',
               );
-              AuroraLog.instance.warn(
-                'WebView DASH fetch returned null/empty for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('WebView DASH fetch returned null/empty for ${item.url}');
             }
           } catch (e) {
             debugPrint(
               '[MediaEnricher] WebView DASH fetch threw: $e',
             );
-            AuroraLog.instance.warn(
-              'WebView DASH fetch threw for ${item.url}: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('WebView DASH fetch threw for ${item.url}: $e');
           }
         }
 
@@ -971,22 +820,12 @@ class MediaEnricher {
             debugPrint(
                '[MediaEnricher] Dart DASH GET succeeded for ${item.url} (${response.body.length} chars)',
             );
-            AuroraLog.instance.debug(
-               'Dart DASH GET succeeded for ${item.url} (${response.body.length} chars)',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Dart DASH GET succeeded for ${item.url} (${response.body.length} chars)');
           } else {
             debugPrint(
                '[MediaEnricher] Dart DASH GET failed for ${item.url}, status ${response.statusCode}',
             );
-            AuroraLog.instance.warn(
-               'Dart DASH GET failed for ${item.url}, status ${response.statusCode}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('Dart DASH GET failed for ${item.url}, status ${response.statusCode}');
           }
         }
 
@@ -998,46 +837,26 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] Trying headless WebView fetch for DASH body: ${item.url}',
             );
-            AuroraLog.instance.debug(
-              'Trying headless WebView fetch for DASH body: ${item.url}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('Trying headless WebView fetch for DASH body: ${item.url}');
             final headlessBody =
                 await host.fetchPlaylistBodyViaHeadlessWebView!(item.url);
             if (headlessBody != null && headlessBody.isNotEmpty) {
               debugPrint(
                 '[MediaEnricher] Fetched DASH manifest via headless WebView for ${item.url} (${headlessBody.length} chars)',
               );
-              AuroraLog.instance.debug(
-                'Fetched DASH manifest via headless WebView for ${item.url} (${headlessBody.length} chars)',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.sniff,
-              );
+              debugPrint('Fetched DASH manifest via headless WebView for ${item.url} (${headlessBody.length} chars)');
               manifestBody = headlessBody;
             } else {
               debugPrint(
                 '[MediaEnricher] Headless WebView DASH fetch returned null/empty for ${item.url}',
               );
-              AuroraLog.instance.warn(
-                'Headless WebView DASH fetch returned null/empty for ${item.url}',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('Headless WebView DASH fetch returned null/empty for ${item.url}');
             }
           } catch (e) {
             debugPrint(
               '[MediaEnricher] Headless WebView DASH fetch threw: $e',
             );
-            AuroraLog.instance.warn(
-              'Headless WebView DASH fetch threw for ${item.url}: $e',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.error,
-            );
+            debugPrint('Headless WebView DASH fetch threw for ${item.url}: $e');
           }
         }
 
@@ -1047,13 +866,8 @@ class MediaEnricher {
             '[MediaEnricher] ⚠ ALL DASH body-fetch tiers failed for ${item.url} — '
             'variants will NOT be expanded',
           );
-          AuroraLog.instance.warn(
-            'ALL DASH body-fetch tiers failed for ${item.url} — '
-            'variants NOT expanded',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.error,
-          );
+          debugPrint('ALL DASH body-fetch tiers failed for ${item.url} — '
+            'variants NOT expanded');
         }
 
         if (manifestBody != null && manifestBody.isNotEmpty) {
@@ -1064,14 +878,9 @@ class MediaEnricher {
             '${playlist.representations.length} representations, '
             'duration=${playlist.durationSeconds}s',
           );
-          AuroraLog.instance.debug(
-            'DASH manifest parsed for ${item.url}: '
+          debugPrint('DASH manifest parsed for ${item.url}: '
             'isMultiVariant=${playlist.isMultiVariant}, '
-            '${playlist.representations.length} representations',
-            category: LogCategory.sniffer,
-            screen: LogScreen.browser,
-            eventType: LogEventType.sniff,
-          );
+            '${playlist.representations.length} representations');
           if (playlist.durationSeconds > 0) {
             duration = playlist.duration;
             isLive = playlist.isLive;
@@ -1130,12 +939,7 @@ class MediaEnricher {
             debugPrint(
               '[MediaEnricher] DASH variants created: $variantCount for ${item.url}',
             );
-            AuroraLog.instance.info(
-              'DASH variants created: $variantCount for ${item.url}',
-              category: LogCategory.sniffer,
-              screen: LogScreen.browser,
-              eventType: LogEventType.sniff,
-            );
+            debugPrint('DASH variants created: $variantCount for ${item.url}');
           }
           contentType ??= 'application/dash+xml';
         }

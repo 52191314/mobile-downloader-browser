@@ -14,7 +14,6 @@ import 'file_combiner.dart';
 import 'hls_downloader.dart';
 import 'speed_limiter.dart';
 import 'torrent_downloader.dart';
-import '../logging/aurora_log.dart';
 import '../platform/download_foreground_service.dart';
 import '../settings/download_settings.dart' show ProxyType;
 import '../sniffer/sniffer_url_utils.dart';
@@ -25,13 +24,7 @@ import '../compliance/restricted_media_policy.dart';
 
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
-  AuroraLog.instance.error(
-    '$context: $error',
-    category: LogCategory.download,
-    screen: LogScreen.background,
-    eventType: LogEventType.error,
-    stackTrace: stack,
-  );
+  debugPrint('$context: $error');
 }
 
 /// Internal pair for relevance-scored search results used by
@@ -644,14 +637,8 @@ class DownloadQueue {
     if (task == null) return false;
 
     if (task.state == DownloadState.downloading) {
-      AuroraLog.instance.error(
-        'Force merge refused for '
-        '${task.savePath.split("/").last}: task is still downloading.',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-        taskId: task.id,
-      );
+      debugPrint('Force merge refused for '
+        '${task.savePath.split("/").last}: task is still downloading.');
       task.failureReason = DownloadFailure.mergeFailed;
       task.errorMessage = 'Can\'t force merge while the task is still downloading.';
       _emitTask(task);
@@ -921,17 +908,11 @@ class DownloadQueue {
 
     await prepareBrowserContext(existing);
 
-    AuroraLog.instance.info(
-      'Updated task $existingTaskId from donor '
+    debugPrint('Updated task $existingTaskId from donor '
       '(urlChanged=$urlChanged tokenChanged=$tokenChanged '
       'bridges: fetch=${existing.fetchViaWebView != null} '
       'cookie=${existing.cookieProvider != null} '
-      'token=${existing.onTokenExpired != null})',
-      category: LogCategory.download,
-      screen: LogScreen.background,
-      eventType: LogEventType.stateChange,
-      taskId: existingTaskId,
-    );
+      'token=${existing.onTokenExpired != null})');
 
     await resumeTaskAsync(existingTaskId);
   }
@@ -1020,23 +1001,11 @@ class DownloadQueue {
                 final newFile = File(newPath);
                 await newFile.parent.create(recursive: true);
                 await oldFile.rename(newPath);
-                AuroraLog.instance.info(
-                  'Auto-classified completed file moved from $oldPath to $newPath',
-                  category: LogCategory.download,
-                  screen: LogScreen.background,
-                  eventType: LogEventType.fileIo,
-                  taskId: updatedTask.id,
-                );
+                debugPrint('Auto-classified completed file moved from $oldPath to $newPath');
               }
             } catch (e) {
               updatedTask.savePath = oldPath;
-              AuroraLog.instance.error(
-                'Failed to move auto-classified file: $e',
-                category: LogCategory.download,
-                screen: LogScreen.background,
-                eventType: LogEventType.error,
-                taskId: updatedTask.id,
-              );
+              debugPrint('Failed to move auto-classified file: $e');
             }
           }
         }
@@ -1046,13 +1015,7 @@ class DownloadQueue {
     _schedule();
 
     if (updatedTask.state == DownloadState.failed) {
-      AuroraLog.instance.error(
-        'Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-        taskId: updatedTask.id,
-      );
+      debugPrint('Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}');
       if (autoRetry && !updatedTask.isBackupImport) {
         final isStallOrTruncation =
             updatedTask.failureReason == DownloadFailure.speedStall ||
@@ -1061,17 +1024,11 @@ class DownloadQueue {
         final alreadyDownloadedEnough =
             updatedTask.downloadedBytes >= minBytesBeforeFullRetry;
         if (isStallOrTruncation && alreadyDownloadedEnough) {
-          AuroraLog.instance.error(
-            'Skipped auto-retry for '
+          debugPrint('Skipped auto-retry for '
             '${updatedTask.savePath.split("/").last}: '
             'already downloaded '
             '${(updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB. '
-            'User can use Force Merge or manual retry.',
-            category: LogCategory.download,
-            screen: LogScreen.background,
-            eventType: LogEventType.error,
-            taskId: updatedTask.id,
-          );
+            'User can use Force Merge or manual retry.');
           final alreadyMb =
               (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
           updatedTask.failureReason = DownloadFailure.partialDownload;
@@ -1101,13 +1058,7 @@ class DownloadQueue {
             }
           });
         } else {
-          AuroraLog.instance.error(
-            'Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.',
-            category: LogCategory.download,
-            screen: LogScreen.background,
-            eventType: LogEventType.error,
-            taskId: updatedTask.id,
-          );
+          debugPrint('Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.');
           final originalError = updatedTask.errorMessage ?? 'Unknown error';
           final cleanError = originalError.replaceFirst(
             RegExp(r'^Retrying in [12]s \(attempt \d+/(?:\d+|∞)\)\. '),
@@ -1779,13 +1730,7 @@ class DownloadQueue {
         if (await tempDir.exists()) {
           await tempDir.delete(recursive: true);
           purged++;
-          AuroraLog.instance.info(
-            'Purged stale failed temp for ${task.savePath.split("/").last}',
-            category: LogCategory.download,
-            screen: LogScreen.background,
-            eventType: LogEventType.fileIo,
-            taskId: task.id,
-          );
+          debugPrint('Purged stale failed temp for ${task.savePath.split("/").last}');
         }
       } catch (e, s) {
         _logError('Failed to purge temp for ${task.id}', e, s);
@@ -1903,13 +1848,7 @@ class DownloadQueue {
       }
     } catch (error) {
       task.publishErrorMessage = error.toString();
-      AuroraLog.instance.error(
-        'Failed to publish completed file: ${task.savePath.split("/").last}. Error: $error',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-        taskId: task.id,
-      );
+      debugPrint('Failed to publish completed file: ${task.savePath.split("/").last}. Error: $error');
     } finally {
       _publishingTasks.remove(task.id);
       _emitTask(task);
@@ -2174,12 +2113,7 @@ class DownloadQueue {
       }
       if (recoveredCount > 0 && !_isLoading) {
         debugPrint('[DownloadQueue] INFO: Successfully recovered $recoveredCount tasks from corrupt history backups.');
-        AuroraLog.instance.info(
-          'Successfully recovered $recoveredCount tasks from corrupt history backups.',
-          category: LogCategory.download,
-          screen: LogScreen.background,
-          eventType: LogEventType.stateChange,
-        );
+        debugPrint('Successfully recovered $recoveredCount tasks from corrupt history backups.');
         unawaited(saveToFile(path));
       }
     } catch (e, s) {

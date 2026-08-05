@@ -6,7 +6,6 @@ import '../../compliance/restricted_media_policy.dart';
 import '../../downloader/downloader.dart';
 import '../../downloader/file_classifier.dart';
 import '../../downloader/filename_service.dart';
-import '../../logging/aurora_log.dart';
 import '../../theme/aurora_palette.dart';
 import '../../ui/notifications/aurora_snackbar.dart';
 import '../filename_utils.dart';
@@ -407,13 +406,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
         // scheduleTask owns persistence + scheduled state; ignore force —
         // a new id always creates a distinct scheduled entry.
         widget.downloadQueue.scheduleTask(task, startAt);
-        AuroraLog.instance.info(
-          'Media scheduled: "$filename" for $startAt (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-          taskId: task.id,
-        );
+        debugPrint('Media scheduled: "$filename" for $startAt (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}');
         if (!mounted) return;
         navigator.pop(true);
         final hh = startAt.hour.toString().padLeft(2, '0');
@@ -424,13 +417,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
         );
       } else {
         widget.downloadQueue.addTask(task, force: force);
-        AuroraLog.instance.info(
-          'Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-          taskId: task.id,
-        );
+        debugPrint('Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}');
         if (!mounted) return;
         navigator.pop(true);
         AuroraSnackbar.show(context, 'Added "$filename" to queue.');

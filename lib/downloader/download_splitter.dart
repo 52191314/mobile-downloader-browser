@@ -9,7 +9,6 @@ import 'models.dart';
 import 'download_error_classifier.dart';
 import 'range_calculator.dart';
 import 'file_combiner.dart';
-import '../logging/aurora_log.dart';
 import '../platform/ts_remux_service.dart';
 import '../platform/native_download_client.dart';
 import 'speed_limiter.dart';
@@ -17,13 +16,7 @@ import 'speed_limiter.dart';
 void _logError(String context, Object error, [StackTrace? stack]) {
   final message = '[DownloadSplitter] $context: $error';
   debugPrint(message);
-  AuroraLog.instance.error(
-    message,
-    category: LogCategory.download,
-    screen: LogScreen.background,
-    eventType: LogEventType.error,
-    stackTrace: stack,
-  );
+  debugPrint(message);
 }
 
 class DownloadSplitter implements BaseDownloader {
@@ -423,14 +416,8 @@ class DownloadSplitter implements BaseDownloader {
         '[DownloadSplitter] Resource changed ($reason) for ${task.url}. '
         'Wiping partials and restarting fresh.',
       );
-      AuroraLog.instance.warn(
-        'Resource changed ($reason). '
-        'Wiping partials for ${task.savePath.split("/").last}.',
-        category: LogCategory.download,
-        screen: LogScreen.background,
-        eventType: LogEventType.network,
-        taskId: task.id,
-      );
+      debugPrint('Resource changed ($reason). '
+        'Wiping partials for ${task.savePath.split("/").last}.');
 
       // Delete tempDir to discard all partial chunks.
       final dir = Directory(task.tempDir);
@@ -534,30 +521,18 @@ class DownloadSplitter implements BaseDownloader {
                 '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
                 '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
               );
-              AuroraLog.instance.warn(
-                'Speed 0 for ${_zeroSpeedTickCount * 0.25}s '
+              debugPrint('Speed 0 for ${_zeroSpeedTickCount * 0.25}s '
                 'on ${task.savePath.split("/").last} '
                 '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
-                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
-                category: LogCategory.download,
-                screen: LogScreen.background,
-                eventType: LogEventType.network,
-                taskId: task.id,
-              );
+                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)');
             } else if (_zeroSpeedTickCount > 4 && _zeroSpeedTickCount % 10 == 0) {
               // Every 2.5 s after the initial warning
               debugPrint(
                 '[DownloadSplitter] ⚠ Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
                 'on ${task.savePath.split("/").last}',
               );
-              AuroraLog.instance.warn(
-                'Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
-                'on ${task.savePath.split("/").last}',
-                category: LogCategory.download,
-                screen: LogScreen.background,
-                eventType: LogEventType.network,
-                taskId: task.id,
-              );
+              debugPrint('Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
+                'on ${task.savePath.split("/").last}');
             }
           } else {
             _zeroSpeedTickCount = 0;
@@ -743,14 +718,8 @@ class DownloadSplitter implements BaseDownloader {
             task.statusMessage = null;
             task.errorMessage = null;
           } else {
-            AuroraLog.instance.error(
-              'TS→MP4 remux failed for ${task.savePath.split("/").last}: '
-              '${remux.error ?? "unknown"}',
-              category: LogCategory.hls,
-              screen: LogScreen.background,
-              eventType: LogEventType.error,
-              taskId: task.id,
-            );
+            debugPrint('TS→MP4 remux failed for ${task.savePath.split("/").last}: '
+              '${remux.error ?? "unknown"}');
             task.statusMessage = null;
             task.errorMessage =
                 'Couldn\'t convert to .mp4 — keeping original .ts. '
@@ -1154,15 +1123,9 @@ class DownloadSplitter implements BaseDownloader {
                   '${chunk.start} instead of $rangeStart for chunk '
                   '${chunk.index}; truncated file for fresh re-download.',
                 );
-                AuroraLog.instance.warn(
-                  '206 Content-Range started at ${chunk.start} '
+                debugPrint('206 Content-Range started at ${chunk.start} '
                   'instead of $rangeStart for chunk ${chunk.index}; '
-                  'truncated file for fresh re-download.',
-                  category: LogCategory.download,
-                  screen: LogScreen.background,
-                  eventType: LogEventType.network,
-                  taskId: task.id,
-                );
+                  'truncated file for fresh re-download.');
               } else {
                 // Server returned 206 from a completely different
                 // offset — cannot safely use this response.
@@ -1208,14 +1171,8 @@ class DownloadSplitter implements BaseDownloader {
           '[DownloadSplitter] Open-ended resume returned 200 OK for '
           'chunk ${chunk.index}; truncated file for fresh re-download.',
         );
-        AuroraLog.instance.debug(
-          'Open-ended resume returned 200 OK for '
-          'chunk ${chunk.index}; truncated file for fresh re-download.',
-          category: LogCategory.download,
-          screen: LogScreen.background,
-          eventType: LogEventType.network,
-          taskId: task.id,
-        );
+        debugPrint('Open-ended resume returned 200 OK for '
+          'chunk ${chunk.index}; truncated file for fresh re-download.');
       }
     }
 
@@ -1342,14 +1299,8 @@ class DownloadSplitter implements BaseDownloader {
                 '[DownloadSplitter] Clamped oversized chunk ${chunk.index} '
                 'from $actualSize to ${chunk.size} bytes (excess $excess).',
               );
-              AuroraLog.instance.warn(
-                'Clamped oversized chunk ${chunk.index} '
-                'from $actualSize to ${chunk.size} bytes (excess $excess).',
-                category: LogCategory.download,
-                screen: LogScreen.background,
-                eventType: LogEventType.network,
-                taskId: task.id,
-              );
+              debugPrint('Clamped oversized chunk ${chunk.index} '
+                'from $actualSize to ${chunk.size} bytes (excess $excess).');
             }
           }
         }

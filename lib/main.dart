@@ -12,9 +12,6 @@ import 'downloader/download_rules.dart';
 import 'downloader/downloader.dart';
 import 'downloader/filename_service.dart';
 import 'downloader/url_filename_resolver.dart';
-import 'logging/aurora_log.dart';
-import 'logging/log_settings_store.dart';
-import 'utils/log_server.dart';
 import 'notifications/download_notification_service.dart';
 import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
@@ -97,23 +94,9 @@ void main() {
       } catch (e, s) {
         debugPrint('[InitSystemUAError] $e\n$s');
       }
-      if (kDebugMode) {
-        try {
-          LogServer.start();
-        } catch (e, s) {
-          debugPrint('[LogServerInitError] $e\n$s');
-        }
-      }
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
-        AuroraLog.instance.error(
-          '[FlutterError] ${details.exceptionAsString()}',
-          category: LogCategory.app,
-          screen: LogScreen.unknown,
-          eventType: LogEventType.error,
-          stackTrace: details.stack,
-        );
-        debugPrint('[AuroraFlutterError] ${details.exceptionAsString()}');
+        debugPrint('[FlutterError] ${details.exceptionAsString()}');
       };
       // In release mode, ErrorWidget shows a blank grey box by default
       // (invisible on a white/dark background). Override it so any build()
@@ -172,13 +155,7 @@ void main() {
       }
     },
     (error, stack) {
-      AuroraLog.instance.fatal(
-        '[ZoneError] $error',
-        category: LogCategory.app,
-        screen: LogScreen.background,
-        eventType: LogEventType.error,
-        stackTrace: stack,
-      );
+      debugPrint('[ZoneError] $error');
       debugPrint('[AuroraZoneError] $error\n$stack');
     },
   );
@@ -443,24 +420,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   void _logError(String context, Object error, [StackTrace? stack]) {
     debugPrint('[AuroraHome] $context: $error');
-    AuroraLog.instance.error(
-      '$context: $error',
-      category: LogCategory.app,
-      screen: _currentScreen,
-      eventType: LogEventType.error,
-      stackTrace: stack,
-    );
-  }
-
-  LogScreen get _currentScreen {
-    switch (_currentTabIndex) {
-      case 0:
-        return LogScreen.queue;
-      case 1:
-        return LogScreen.browser;
-      default:
-        return LogScreen.unknown;
-    }
   }
 
   @override
@@ -537,13 +496,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       if (prevState != task.state) {
         _prevTaskStates[task.id] = task.state;
         if (!_isDisposed) {
-          AuroraLog.instance.info(
-            'Task "$fileName": ${prevState?.name ?? "new"} → ${task.state.name}',
-            category: LogCategory.download,
-            screen: _currentScreen,
-            eventType: LogEventType.stateChange,
-            taskId: task.id,
-          );
+          debugPrint('Task "$fileName": ${prevState?.name ?? "new"} → ${task.state.name}');
         }
       }
       // Soft battery-opt prompt on first download if launch path has not
@@ -829,12 +782,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _currentTabIndex = clamped;
       _visitedMainTabs.add(clamped);
     });
-    AuroraLog.instance.info(
-      'Tab switch: $previous → $clamped',
-      category: LogCategory.app,
-      screen: LogScreen.settings,
-      eventType: LogEventType.navigation,
-    );
+    debugPrint('Tab switch: $previous → $clamped');
   }
 
   /// Opens a Settings sub-page over the shell (usually Browser).
@@ -939,11 +887,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       debugPrint(
         '[AuroraHome] App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}',
       );
-      AuroraLog.instance.info(
-        'App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}',
-        category: LogCategory.app,
-        eventType: LogEventType.lifecycle,
-      );
+      debugPrint('App backgrounded, active downloads: ${_downloadQueue.activeTasks.length}');
       // Pause browser WebViews to free resources for background downloads.
       unawaited(_browserController.pauseAllWebViews());
       // Force-sync the foreground service so Android sees the persistent
@@ -958,11 +902,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       unawaited(_autoBackupService.performBackgroundBackup());
     } else if (state == AppLifecycleState.resumed) {
       debugPrint('[AuroraHome] App resumed');
-      AuroraLog.instance.info(
-        'App resumed',
-        category: LogCategory.app,
-        eventType: LogEventType.lifecycle,
-      );
+      debugPrint('App resumed');
       // Only resume WebViews if the user is on the Browser tab.
       if (_currentTabIndex == 1) {
         unawaited(_browserController.resumeActiveWebView());
@@ -975,11 +915,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       unawaited(_licenseService.refreshIfDue());
     } else if (state == AppLifecycleState.detached) {
       debugPrint('[AuroraHome] App detached — process likely being killed');
-      AuroraLog.instance.warn(
-        'App detached — process likely being killed',
-        category: LogCategory.app,
-        eventType: LogEventType.lifecycle,
-      );
+      debugPrint('App detached — process likely being killed');
     }
   }
 
@@ -1324,12 +1260,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   }
 
   void _openUrlInBrowser(String url) {
-    AuroraLog.instance.info(
-      '_openUrlInBrowser("$url")',
-      category: LogCategory.app,
-      screen: LogScreen.queue,
-      eventType: LogEventType.userAction,
-    );
+    debugPrint('_openUrlInBrowser("$url")');
     _openUrlInBrowserAfterTabReady(url);
   }
 
@@ -1350,14 +1281,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
     void publish() {
       if (!mounted) return;
-      AuroraLog.instance.info(
-        'browserOpenRequestBus.request("$trimmed") '
+      debugPrint('browserOpenRequestBus.request("$trimmed") '
         '(firstVisit=$firstVisitToBrowser, browserMounted='
-        '${_visitedMainTabs.contains(1)})',
-        category: LogCategory.app,
-        screen: LogScreen.queue,
-        eventType: LogEventType.navigation,
-      );
+        '${_visitedMainTabs.contains(1)})');
       // Primary path: ChangeNotifier bus → SnifferScreen listener.
       _browserOpenRequestBus.request(trimmed);
       // Fallback if bus listener was not yet attached (first frame after
@@ -1485,12 +1411,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       }
     });
     final target = task.sourcePageUrl ?? task.url;
-    AuroraLog.instance.info(
-      '_resniffManual: target="$target", sourcePageUrl=${task.sourcePageUrl}',
-      category: LogCategory.app,
-      screen: LogScreen.queue,
-      eventType: LogEventType.userAction,
-    );
+    debugPrint('_resniffManual: target="$target", sourcePageUrl=${task.sourcePageUrl}');
     _openUrlInBrowserAfterTabReady(target);
     if (mounted) {
       _showSnack(
@@ -1623,12 +1544,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
       await Future.wait([
         if (kDriveSyncEnabled) _driveSyncService.loadSyncedTasks(path),
-        LogSettingsStore.instance.load(path).then((verbosity) {
-          return AuroraLog.instance.initialize(
-            '$path/aurora_logs.json',
-            verbosity: verbosity,
-          );
-        }),
         _downloadQueue.loadFromFile('$path/download_queue.json'),
       ]);
       // Free disk from abandoned failed-task segment trees older than 3 days.
@@ -1653,12 +1568,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     setState(() => _settings = settings);
     _applySettings(settings);
     unawaited(_settingsStore.save(settings));
-    AuroraLog.instance.info(
-      'Settings updated',
-      category: LogCategory.settings,
-      screen: _currentScreen,
-      eventType: LogEventType.userAction,
-    );
+    debugPrint('Settings updated');
   }
 
   void _onProEntitlementChanged() {

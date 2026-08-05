@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../../compliance/restricted_media_policy.dart';
 import '../../downloader/downloader.dart';
 import '../../downloader/filename_service.dart';
-import '../../logging/aurora_log.dart';
 import '../../settings/download_settings.dart';
 import '../bridge_url_guard.dart';
 import '../models/browser_tab.dart';
@@ -174,12 +173,7 @@ class TabCallbackBinder {
         _host.barsVisible = true;
       }
       _host.fetchedIframeSrcs.clear();
-      AuroraLog.instance.info(
-        'Page started: $url',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
+      debugPrint('Page started: $url');
       tab.authHeaderCache.clear();
       final navHost = Uri.tryParse(url)?.host;
       if (navHost != null) {
@@ -197,12 +191,7 @@ class TabCallbackBinder {
       final previousUrl = tab.committedMainFrameUrl;
       if (url != tab.committedMainFrameUrl &&
           _host.isDifferentPage(tab.currentUrl, url)) {
-        AuroraLog.instance.debug(
-          'Navigation: clearing media cache ($previousUrl -> $url)',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
+        debugPrint('Navigation: clearing media cache ($previousUrl -> $url)');
         tab.snifferEngine.clearCache();
         if (tab == _host.activeTab) {
           _host.latestVideoMedia = null;
@@ -210,13 +199,8 @@ class TabCallbackBinder {
           _host.floatingPlayerDismissedForUrl = null;
         }
       } else {
-        AuroraLog.instance.debug(
-          'Same-page navigation ($url) — keeping media cache '
-          '(${tab.snifferEngine.detectedMedia.length} items)',
-          category: LogCategory.sniffer,
-          screen: LogScreen.browser,
-          eventType: LogEventType.sniff,
-        );
+        debugPrint('Same-page navigation ($url) — keeping media cache '
+          '(${tab.snifferEngine.detectedMedia.length} items)');
       }
       if (tab.sniffingEnabled) {
         _sniffIntakeController.sniffBrowserUrl(tab, url, sourcePageUrl: url);
@@ -232,12 +216,7 @@ class TabCallbackBinder {
       tab.progress = 0;
       tab.committedMainFrameUrl = url;
       _host.debouncedNavSetState();
-      AuroraLog.instance.info(
-        'Page finished: $url',
-        category: LogCategory.browser,
-        screen: LogScreen.browser,
-        eventType: LogEventType.navigation,
-      );
+      debugPrint('Page finished: $url');
       final hardOff = RestrictedMediaPolicy.shouldHardOffSniffing(url);
       tab.sniffingEnabled = !hardOff;
       if (hardOff) {
@@ -508,21 +487,11 @@ class TabCallbackBinder {
                   url.isNotEmpty &&
                   body.isNotEmpty) {
                 capturedTab.hlsPlaylistCache[url] = body;
-                AuroraLog.instance.debug(
-                  'HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${capturedTab.hlsPlaylistCache.length})',
-                  category: LogCategory.sniffer,
-                  screen: LogScreen.browser,
-                  eventType: LogEventType.sniff,
-                );
+                debugPrint('HlsPlaylistChannel cached body for $url (${body.length} chars, cache size=${capturedTab.hlsPlaylistCache.length})');
               }
             })
             .catchError((e) {
-              AuroraLog.instance.error(
-                'HlsPlaylistChannel error: $e',
-                category: LogCategory.sniffer,
-                screen: LogScreen.browser,
-                eventType: LogEventType.error,
-              );
+              debugPrint('HlsPlaylistChannel error: $e');
             });
       },
     );

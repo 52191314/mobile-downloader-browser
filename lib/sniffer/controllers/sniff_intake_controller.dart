@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../../downloader/downloader.dart';
-import '../../logging/aurora_log.dart';
 import '../../settings/download_settings.dart';
 import '../cookie_header_cache.dart';
 import '../models/browser_tab.dart';
@@ -341,12 +340,7 @@ class SniffIntakeController {
         thumbnailUrl: poster,
       );
     } catch (e) {
-      AuroraLog.instance.error(
-        'sniffWithLiveHeaders failed for $url: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('sniffWithLiveHeaders failed for $url: $e');
     }
   }
 
@@ -523,12 +517,7 @@ class SniffIntakeController {
         }
       }
     } catch (e) {
-      AuroraLog.instance.error(
-        'CookieManager.getCookies failed for $url: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('CookieManager.getCookies failed for $url: $e');
     }
 
     // Fallback: try document.cookie for page domain, only if same
@@ -561,12 +550,7 @@ class SniffIntakeController {
         }
       }
     } catch (e) {
-      AuroraLog.instance.error(
-        'document.cookie fallback failed for $url: $e',
-        category: LogCategory.sniffer,
-        screen: LogScreen.browser,
-        eventType: LogEventType.error,
-      );
+      debugPrint('document.cookie fallback failed for $url: $e');
     }
     return {};
   }
