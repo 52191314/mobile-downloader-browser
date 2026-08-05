@@ -259,7 +259,7 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   bool _findVisible = false;
   final TextEditingController _findController = TextEditingController();
-  final int _findMatchCount = 0;
+  int _findMatchCount = 0;
   int _findCurrentMatch = 0;
 
   bool _desktopMode = false;
@@ -1530,18 +1530,38 @@ class _SnifferScreenState extends State<SnifferScreen>
   }
 
   void _findNext(bool forward) {
-    _findCurrentMatch = forward
-        ? (_findCurrentMatch + 1).clamp(0, _findMatchCount - 1)
-        : (_findCurrentMatch - 1).clamp(0, _findMatchCount - 1);
-    _activeTab.controller.findNext(forward);
-    if (_findCurrentMatch == 0 && !forward) {
-      _findCurrentMatch = _findMatchCount - 1;
+    if (_findMatchCount <= 0) return;
+    if (forward) {
+      _findCurrentMatch = _findCurrentMatch + 1 >= _findMatchCount
+          ? 0
+          : _findCurrentMatch + 1;
+    } else {
+      _findCurrentMatch = _findCurrentMatch - 1 < 0
+          ? _findMatchCount - 1
+          : _findCurrentMatch - 1;
     }
+    _activeTab.controller.findNext(forward, _findController.text);
     setState(() {});
   }
 
+  /// Runs the find cycle for a new query and syncs the match counter into the
+  /// UI (the counter previously stayed at its dead-initial 0, so Next/Prev
+  /// clamped against -1 and threw on every press).
+  Future<void> _updateFindCount(String value) async {
+    final count = await _activeTab.controller.findAllAsync(value);
+    if (!mounted) return;
+    setState(() {
+      _findMatchCount = count;
+      _findCurrentMatch = 0;
+    });
+  }
+
   void _dismissFind() {
-    setState(() => _findVisible = false);
+    setState(() {
+      _findVisible = false;
+      _findMatchCount = 0;
+      _findCurrentMatch = 0;
+    });
   }
 
   /// Debounced [setState] for navigation callbacks. Cancels any pending
@@ -2647,26 +2667,47 @@ class _SnifferScreenState extends State<SnifferScreen>
         manualRules: updatedSettings.manualAdBlockRules,
         cosmeticRules: updatedSettings.manualCosmeticRules,
       );
+      // Same-host (cosmetic) rules only reach the page through the per-page
+      // injection; without this the picked element stayed visible until a
+      // reload. Re-inject so it disappears now.
+      final url = await tab.controller.currentUrl();
+      if (url != null && url.isNotEmpty) {
+        await tab.controller.reapplyCosmeticRules(url);
+      }
     }
-    // Undo snackbar
+    // Undo snackbar — only when a rule was actually applied. The controller
+    // already surfaced specific reasons (already blocked / limit reached /
+    // parse failure) with its own snackbar, so don't fake a success here.
     if (mounted) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (updatedSettings == null) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Element blocked. Undo?'),
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 6),
           action: SnackBarAction(
             label: 'Undo',
+            // Explicit color so the Undo button is visible on any theme.
+            textColor: Colors.lightBlueAccent,
             onPressed: () {
               widget.onSettingsChanged?.call(previousSettings);
               unawaited(
-                tab.controller.configureAdBlock(
-                  enabled: widget.settings.adblockEnabled,
-                  popupBlockingEnabled: widget.settings.popupBlockingEnabled,
-                  filterSources: widget.settings.adblockFilterSources,
-                  manualRules: previousSettings.manualAdBlockRules,
-                  cosmeticRules: previousSettings.manualCosmeticRules,
-                ),
+                tab.controller
+                    .configureAdBlock(
+                      enabled: widget.settings.adblockEnabled,
+                      popupBlockingEnabled:
+                          widget.settings.popupBlockingEnabled,
+                      filterSources: widget.settings.adblockFilterSources,
+                      manualRules: previousSettings.manualAdBlockRules,
+                      cosmeticRules: previousSettings.manualCosmeticRules,
+                    )
+                    .then((_) async {
+                      // Un-hide cosmetic elements now, not only after reload.
+                      final undoUrl = await tab.controller.currentUrl();
+                      if (undoUrl != null && undoUrl.isNotEmpty) {
+                        await tab.controller.reapplyCosmeticRules(undoUrl);
+                      }
+                    }),
               );
             },
           ),
@@ -3375,7 +3416,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       matchCount: _findMatchCount,
       currentMatch: _findCurrentMatch,
       onQueryChanged: (value) {
-        _activeTab.controller.findAllAsync(value);
+        unawaited(_updateFindCount(value));
       },
       onFindNext: () => _findNext(true),
       onFindPrevious: () => _findNext(false),
@@ -3634,10 +3675,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     setState(() => _isSavingPage = true);
     try {
       final title = cleanTitle(await tab.controller.pageTitle(), url);
-      final result = await tab.controller.evaluateJavaScript(
-        'document.documentElement.outerHTML',
-      );
-      final html = _injectBaseTag(_normalizeJsString(result), url);
+      // Chunked capture: pulling outerHTML through a single evaluateJavascript
+      // freezes the tab on real pages (multi-MB platform-channel message).
+      final htmlRaw = await tab.controller.capturePageHtml();
+      if (htmlRaw == null) {
+        _showSnack('Could not save this page: page too large or unreadable.');
+        return;
+      }
+      final html = _injectBaseTag(htmlRaw, url);
       final id = DateTime.now().microsecondsSinceEpoch.toString();
       final dir = await widget.libraryStore.savedPagesDirectory();
       final file = File('${dir.path}${Platform.pathSeparator}$id.html');
@@ -5103,18 +5148,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// as download filenames — fall back to the URL-derived name instead.
   static bool _isErrorPageTitle(String title) {
     return FilenameService.isUnusableTitle(title);
-  }
-
-  String _normalizeJsString(Object? value) {
-    if (value == null) return '<html><body></body></html>';
-    final raw = value.toString();
-    if (raw.startsWith('"') && raw.endsWith('"')) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is String) return decoded;
-      } catch (_) {}
-    }
-    return raw;
   }
 
   String _injectBaseTag(String html, String url) {

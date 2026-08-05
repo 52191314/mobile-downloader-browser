@@ -1116,14 +1116,95 @@ class _SettingsPageState extends State<SettingsPage> {
                         }),
                   )),
               const SizedBox(height: 16),
-              Text(
-                  'Custom rules: ${local.manualAdBlockRules.length} network filters, '
-                  '${local.manualCosmeticRules.length} cosmetic filters',
-                  style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
+              _buildBlockedElementsSection(local, setLocal),
             ])),
           ],
         ),
       ),
+    );
+  }
+
+  /// Per-site view of element-picker blocks with one-tap undo. This is the
+  /// persistent counterpart to the transient "Element blocked. Undo?" toast
+  /// (which only lives for a few seconds) and to Tools → Reset blocks (which
+  /// clears the whole current page at once).
+  Widget _buildBlockedElementsSection(
+    DownloadSettings local,
+    void Function(void Function()) setLocal,
+  ) {
+    final bySite = <String, List<_BlockedRuleEntry>>{};
+    for (final r in local.manualAdBlockRules) {
+      final site =
+          (r.addedForHost != null && r.addedForHost!.isNotEmpty)
+              ? r.addedForHost!
+              : r.pattern;
+      bySite
+          .putIfAbsent(site, () => [])
+          .add(_BlockedRuleEntry('Blocked host: ${r.pattern}', r));
+    }
+    for (final r in local.manualCosmeticRules) {
+      bySite
+          .putIfAbsent(r.host, () => [])
+          .add(_BlockedRuleEntry('Hidden element: ${r.selector}', r));
+    }
+    final sites = bySite.keys.toList()..sort();
+    final total =
+        local.manualAdBlockRules.length + local.manualCosmeticRules.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Blocked elements by site ($total)',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: context.ac.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        if (total == 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              "Nothing blocked yet. Use the browser's Tools → Block element "
+              'to hide ads or elements on a site.',
+              style: TextStyle(
+                fontSize: 12,
+                color: context.ac.textSecondary,
+              ),
+            ),
+          )
+        else
+          for (final site in sites) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 10, bottom: 2),
+              child: Text(
+                site,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: context.ac.accentFrost,
+                ),
+              ),
+            ),
+            for (final entry in bySite[site]!)
+              _BlockedRuleRow(
+                label: entry.label,
+                onUndo: () {
+                  final updated = local.copyWith(
+                    manualAdBlockRules: local.manualAdBlockRules
+                        .where((r) => !identical(r, entry.rule))
+                        .toList(),
+                    manualCosmeticRules: local.manualCosmeticRules
+                        .where((r) => !identical(r, entry.rule))
+                        .toList(),
+                  );
+                  setLocal(() => local = updated);
+                  _update(updated);
+                },
+              ),
+          ],
+      ],
     );
   }
 
@@ -6371,6 +6452,44 @@ class _DownloadDestinationEditorState
             color: context.ac.textSecondary,
             fontFamily: 'JetBrainsMono',
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One blocked rule shown in the per-site management section.
+class _BlockedRuleEntry {
+  final String label;
+  final Object rule;
+  const _BlockedRuleEntry(this.label, this.rule);
+}
+
+/// A single rule row with an undo button.
+class _BlockedRuleRow extends StatelessWidget {
+  final String label;
+  final VoidCallback onUndo;
+  const _BlockedRuleRow({required this.label, required this.onUndo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: context.ac.textSecondary,
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Undo block',
+          icon: const Icon(Icons.undo_rounded, size: 18),
+          color: context.ac.accentFrost,
+          visualDensity: VisualDensity.compact,
+          onPressed: onUndo,
         ),
       ],
     );

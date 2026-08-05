@@ -42,6 +42,9 @@ abstract interface class SnifferBrowserController {
     bool skipExternalPrompt = false,
   });
   Future<void> loadFile(String path);
+  /// Re-runs the per-page cosmetic-rule injection on the current document so a
+  /// newly added rule (e.g. element picker) applies without a reload.
+  Future<void> reapplyCosmeticRules(String pageUrl);
   Future<String?> currentUrl();
   Future<String?> pageTitle();
   Future<Object?> evaluateJavaScript(String source);
@@ -100,9 +103,16 @@ abstract interface class SnifferBrowserController {
   Future<void> resumeTab();
   void onRenderProcessGone();
   Future<int> fillForm(Map<String, String> values);
-  Future<void> findAllAsync(String search);
-  Future<void> findNext(bool forward);
+  Future<int> findAllAsync(String search);
+  Future<void> findNext(bool forward, String query);
   Future<void> clearMatches();
+  /// Captures the current document's outerHTML in bounded chunks so a large
+  /// DOM never crosses the platform channel as one giant message (which froze
+  /// the tab). Returns null when the page is unreadable or too large.
+  Future<String?> capturePageHtml({
+    int chunkSize = 200000,
+    int maxBytes = 30 * 1024 * 1024,
+  });
   Future<void> clearCookies();
   Future<void> clearSiteData(String url);
 
@@ -1406,13 +1416,29 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   Future<void> loadFile(String path) async {
     _setCurrentUrl('file://$path');
     await _ready.future;
-    if (path.startsWith('/') || path.contains(':\\') || path.contains(':/')) {
-      await _controller?.loadUrl(
-        urlRequest: URLRequest(url: WebUri('file://$path')),
-      );
+    if (path.startsWith('/') || path.contains(':\\\\') || path.contains(':/')) {
+      // Absolute path = a saved page. The WebView runs with
+      // allowFileAccess=false (browser_widget.dart), which refuses file://
+      // loads — so load the captured HTML as data instead (no file access
+      // needed). The <base href> the saver injected points at the source
+      // origin, so remote subresources (css/images) resolve over the network.
+      try {
+        final html = await File(path).readAsString();
+        await _controller?.loadData(
+          data: html,
+          baseUrl: WebUri('file://$path'),
+        );
+      } catch (error) {
+        debugPrint('loadFile failed for $path: $error');
+      }
     } else {
       await _controller?.loadFile(assetFilePath: path);
     }
+  }
+
+  @override
+  Future<void> reapplyCosmeticRules(String pageUrl) async {
+    await _adblockInjector.injectForPage(pageUrl);
   }
 
   @override
@@ -1741,48 +1767,72 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   }
 
   @override
-  Future<void> findAllAsync(String search) async {
+  /// Runs the find cycle and returns the number of matches (0 when none).
+  ///
+  /// Highlights the first match with a single `window.find` and counts via a
+  /// TreeWalker over text nodes. No counting loops: repeated `window.find`
+  /// calls thrash Android WebView's native finder and can break page
+  /// rendering (the white-region regression). The plugin json-decodes
+  /// results, so the count arrives as a Dart int directly.
+  Future<int> findAllAsync(String search) async {
     final c = _controller;
-    if (c == null) return;
+    if (c == null || search.isEmpty) return 0;
     await c
         .evaluateJavascript(
           source:
-              'window.__auroraFindMatchCount = 0;'
-              'window.__auroraFindCurrentIdx = 0;'
-              'if(window.getSelection) window.getSelection().removeAllRanges();',
+              "window.find('${_jsEscape(search)}',false,false,true,false,false,false);",
         )
         .catchError((_) {});
-    await c
+    final count = await c
         .evaluateJavascript(
           source:
-              "window.find('${_jsEscape(search)}',false,false,true,false,true,false);"
-              'window.__auroraFindMatchCount = 1;',
+              "(function(){var q='${_jsEscape(search.toLowerCase())}';var n=0;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var t;while((t=w.nextNode())){var s=t.textContent.toLowerCase();var i=s.indexOf(q);while(i!==-1){n++;i=s.indexOf(q,i+q.length);}}return n;})();",
         )
-        .catchError((_) {});
-    await c
-        .evaluateJavascript(
-          source:
-              'var c=0;while(window.find("${_jsEscape(search)}",false,false,true,false,true,false))c++;'
-              'window.__auroraFindMatchCount=c||1;'
-              'window.getSelection().removeAllRanges();',
-        )
-        .catchError((_) {});
-    await c
-        .evaluateJavascript(
-          source:
-              "window.find('${_jsEscape(search)}',false,false,true,false,true,false);",
-        )
-        .catchError((_) {});
+        .catchError((_) => 0);
+    if (count is int) return count;
+    return int.tryParse('$count') ?? 0;
   }
 
   @override
-  Future<void> findNext(bool forward) async {
+  Future<String?> capturePageHtml({
+    int chunkSize = 200000,
+    int maxBytes = 30 * 1024 * 1024,
+  }) async {
+    final c = _controller;
+    if (c == null) return null;
+    // This plugin's evaluateJavascript json-decodes results: a JS number
+    // arrives as Dart int and a JS string as a decoded String (no quotes).
+    final lenRaw = await c
+        .evaluateJavascript(
+          source: 'document.documentElement.outerHTML.length;',
+        )
+        .catchError((_) => 0);
+    final len = lenRaw is int ? lenRaw : (int.tryParse('$lenRaw') ?? 0);
+    if (len <= 0 || len > maxBytes) return null;
+    final sb = StringBuffer();
+    for (var start = 0; start < len; start += chunkSize) {
+      final end = start + chunkSize < len ? start + chunkSize : len;
+      final raw = await c
+          .evaluateJavascript(
+            source:
+                'document.documentElement.outerHTML.substring($start, $end);',
+          )
+          .catchError((_) => '');
+      if (raw is String) sb.write(raw);
+    }
+    return sb.toString();
+  }
+
+  @override
+  Future<void> findNext(bool forward, String query) async {
+    // Navigate with the real query: window.find starts from the current
+    // selection, so this moves the highlight to the next/previous occurrence.
+    // The previous implementation searched for a space then re-found the
+    // selection — it never moved to the next match.
     await _controller
         ?.evaluateJavascript(
           source:
-              "window.find(' ',false,!$forward,true,false,true,false);"
-              'window.find(window.getSelection().toString(),false,'
-              '!$forward,true,false,true,false);',
+              "window.find('${_jsEscape(query)}',false,${!forward},true,false,false,false);",
         )
         .catchError((_) {});
   }
@@ -1792,9 +1842,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     await _controller
         ?.evaluateJavascript(
           source:
-              'if(window.getSelection) window.getSelection().removeAllRanges();'
-              'window.__auroraFindMatchCount = 0;'
-              'window.__auroraFindCurrentIdx = 0;',
+              'if(window.getSelection) window.getSelection().removeAllRanges();',
         )
         .catchError((_) {});
   }
@@ -2302,6 +2350,9 @@ class MockBrowserController implements SnifferBrowserController {
   }
 
   @override
+  Future<void> reapplyCosmeticRules(String pageUrl) async {}
+
+  @override
   Future<String?> currentUrl() async => _currentUrl;
 
   @override
@@ -2434,10 +2485,17 @@ class MockBrowserController implements SnifferBrowserController {
   Future<int> fillForm(Map<String, String> values) async => 0;
 
   @override
-  Future<void> findAllAsync(String search) async {}
+  Future<int> findAllAsync(String search) async => 0;
 
   @override
-  Future<void> findNext(bool forward) async {}
+  Future<void> findNext(bool forward, String query) async {}
+
+  @override
+  Future<String?> capturePageHtml({
+    int chunkSize = 200000,
+    int maxBytes = 30 * 1024 * 1024,
+  }) async =>
+      null;
 
   @override
   Future<void> clearMatches() async {}
