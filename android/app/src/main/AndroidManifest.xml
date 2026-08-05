@@ -20,7 +20,7 @@
         android:label="Aurora Downloader"
         android:name=".AuroraApplication"
         android:icon="@mipmap/ic_launcher"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules">
