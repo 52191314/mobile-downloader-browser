@@ -222,7 +222,7 @@ Constants: `kAuroraProProductId` / `kAuroraUltraProductId` /
 | Name | Intent |
 |------|--------|
 | Gradle `productFlavors { play, github }` | Optional later: different applicationId, icons, or automatic dart-defines per flavor |
-| `AURORA_ENABLE_LOG_SERVER` | Possible compile-time debug tooling (today log server is `kDebugMode` only) |
+| ~~`AURORA_ENABLE_LOG_SERVER`~~ | ~~Possible compile-time debug tooling~~ — **removed 2026-08-05**: the debug log server was deleted with the logging subsystem (see `archive/diagnostics_logging_2026-08-05/`). Do not reintroduce. |
 | `AURORA_ENABLE_FFMPEG_MODULE` | When `false` (default: `true`), the on-demand FFmpeg module download is disabled. Useful for internal testing without Play Feature Delivery. |
 
 Do not invent new channel values (`beta`, `fdroid`, …) without documenting them here and handling unknown values safely (treat unknown like `github` unless explicitly designed otherwise).

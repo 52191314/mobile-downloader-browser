@@ -212,7 +212,7 @@ if (!allowed.any { canonical.startsWith(it) }) throw SecurityException("Path not
 
 | # | Status | Location | Issue | Exploitation / Impact |
 |---|--------|----------|-------|-----------------------|
-| **M1** | ✅✋ | [`lib/utils/log_server.dart:15`](lib/utils/log_server.dart), [`lib/log_server.dart:30`](lib/log_server.dart) | Both log servers bind **`0.0.0.0`** with **no authentication, no TLS**. `utils/` variant dumps last 100 log lines + live WebSocket stream (no origin check → any webpage can connect). Call sites are `kDebugMode`-guarded (`main.dart:79`), but the guard is **outside** the class — a future unguarded call leaks URLs/paths to the whole LAN. Debug builds actively expose live download activity to any LAN peer. | Future release-build path or existing debug-build LAN exposure. **Fix:** move `kDebugMode` guard inside the class, bind `127.0.0.1` by default, require an opt-in token for remote access. |
+| **M1** | ✅ | removed 2026-08-05 | Both log servers (`lib/utils/log_server.dart`, `lib/log_server.dart`) bound **`0.0.0.0`** with no auth/TLS and exposed live download activity to the LAN in debug builds. **Resolved by removal** — the entire logging subsystem (AuroraLog, DownloadLogger, both servers, Diagnostics UI) was deleted and archived under `archive/diagnostics_logging_2026-08-05/`; all call sites are now plain `debugPrint`. No server binds any port anymore. |
 | **M2** | 🔎 | [`browser_controller.dart:1028-1041`](lib/sniffer/browser_controller.dart) | `shouldOverrideUrlLoadingCallback` does **not block non-HTTP schemes**. Only the cross-origin redirect check is performed; `intent://`, `tel:`, `file://`, `market://`, `sms:`, `geo:` navigations proceed. | A malicious page (or ad) can launch arbitrary Android intents — open apps, send SMS, call numbers, open settings. **Fix:** whitelist `http`/`https` schemes; handle `intent://` defensively (require user confirmation for non-http navigations). |
 | **M3** | 🔎 | [`browser_widget.dart:44-45`](lib/sniffer/browser_widget.dart) | WebView `allowFileAccess: true` + `allowContentAccess: true`. Combined with a page that can navigate to `file:///` or `content://` URIs, this broadens the attack surface unnecessarily. | `content://` accesses ContentProvider data; `file://` can read local files if combined with a navigation bypass. **Fix:** disable both unless a specific feature requires them. |
 | **M4** | 🔎 | [`compliance/restricted_media_policy.dart:264-279`](lib/compliance/restricted_media_policy.dart) + redirect paths | Play-compliance domain block is bypassable via **trailing dot** (`youtube.com.` — `Uri.host` preserves it, suffix match fails), **IP literals** (no DNS resolution performed), **IDN punycode homographs**, and **post-enqueue redirects** (policy checked at enqueue time, not at each redirect hop). | Store-policy/liability risk: blocked sites are downloadable through trivial URL variants. **Fix:** normalize trailing dot, attempt DNS resolution of the IP family, re-evaluate policy at every redirect hop. |
@@ -282,14 +282,14 @@ USB debugging or ADB access →
 ```
 → **Impact:** credential + privacy exfiltration, permanent Pro unlock.
 
-**Chain 3 — Debug build LAN exposure**
+**Chain 3 — Debug build LAN exposure** _(resolved 2026-08-05 — logging subsystem removed, no server binds any port)_
 ```
 Debug build on same Wi-Fi →
   M1: LogServer on 0.0.0.0:8080, unauthenticated, HTML page + WebSocket live stream →
   logs contain download URLs, file paths, user activity
   (malicious webpage can connect via WebSocket — no origin check)
 ```
-→ **Impact:** real-time surveillance of user's downloads and browsing from any LAN device or visited website.
+→ **Impact:** real-time surveillance of user's downloads and browsing from any LAN device or visited website. _(Moot: both log servers deleted.)_
 
 **Chain 4 — Sniffer browser → device (no device access)**
 ```
