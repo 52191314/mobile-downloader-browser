@@ -21,13 +21,13 @@ You already have a GitHub repo for Aurora. Use it.
 3. Save. After the Pages action succeeds, open:
 
 ```text
-https://52191314.github.io/Aurora-Downloader/privacy.html
+https://52191314.github.io/mobile-downloader-browser/privacy.html
 ```
 
 Also works:
 
 ```text
-https://52191314.github.io/Aurora-Downloader/
+https://52191314.github.io/mobile-downloader-browser/
 ```
 
 (index links to the privacy policy).
@@ -64,7 +64,7 @@ Privacy policy URL:   <the public https link that works in incognito>
 Example shape (after Pages is on):
 
 ```text
-https://52191314.github.io/Aurora-Downloader/privacy_policy.html
+https://52191314.github.io/mobile-downloader-browser/privacy_policy.html
 ```
 
 **Before submit:**
