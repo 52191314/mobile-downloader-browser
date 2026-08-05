@@ -39,8 +39,11 @@
 - Play builds ship as a lean base AAB: FFmpeg (~10 MB of native libs) is an
   on-demand module downloaded on first Ultra-tier FFmpeg Studio use; torrent and
   media-player engines are on-demand modules too
-- Mid-process module installs trigger an automatic app restart so the freshly
-  downloaded native libraries load correctly
+- Mid-process module installs ask before restarting the app — no more silent
+  relaunch mid-download. Choose "Restart now" or "Not now" (the download stays
+  queued and resumes after a manual restart)
+- Native libraries now load mmap'd straight from the APK (extractNativeLibs
+  off): roughly 24 MB less storage used, faster installs
 - GitHub / sideload builds stay fat (no billing, no on-demand downloads) —
   enforced mechanically by the build channel
 
@@ -50,6 +53,21 @@
 - Vault security stack verified current: local_auth ^3.0.2 (latest),
   flutter_secure_storage 10.3.1
 
+## What's new in 4.0.0+50 (after the initial 4.0.0+48 release)
+
+- **Blocked-redirect dialog gains "Always block on this site"**: pick it once
+  and that site's redirects to that destination are silently cancelled forever
+  (per-source-site list, managed by the invisible-redirect blocker)
+- **Notification elapsed timer fixed**: the download notification's stopwatch
+  no longer resets to 0 every few seconds — it now counts from when the
+  download started
+- **Dialog hardening** (found by a full popup audit): duplicate "Save partial
+  file?" prompts can no longer stack, back-button no longer escapes mandatory
+  dialogs, add-to-queue can't be dismissed mid-submit, and stale-context
+  crashes after async work are gone
+- Logging internals simplified (removed the in-app diagnostics logger — logcat
+  is the supported debug channel)
+
 ### Build
-- 4.0.0+48, play channel, obfuscated, split debug info
+- 4.0.0+50, play channel, obfuscated, split debug info
 - Signing: upload keystore (UPLOAD.RSA verified in the bundle)
