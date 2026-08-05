@@ -135,6 +135,10 @@ class _QueuePageState extends State<QueuePage> {
   /// re-failures don't stack duplicate dialogs.
   final Set<String> _partialMergeDialogTaskIds = {};
 
+  /// True while the sort bottom sheet is on screen — guards against a rapid
+  /// double-tap on the sort chip pushing two identical sheets.
+  bool _sortPickerShowing = false;
+
   // -- Sectioned-mode partition cache ---------------------------------------
   // Sectioned mode re-sorts 4 sections on every build. Because the queue's
   // task list is mutated in place (no list identity change on progress), the
@@ -1113,6 +1117,8 @@ class _QueuePageState extends State<QueuePage> {
   }
 
   void _showSortPicker(BuildContext context) {
+    if (_sortPickerShowing) return;
+    _sortPickerShowing = true;
     final ac = context.ac;
     showModalBottomSheet(
       context: context,
@@ -1219,7 +1225,7 @@ class _QueuePageState extends State<QueuePage> {
           ),
         );
       },
-    );
+    ).whenComplete(() => _sortPickerShowing = false);
   }
 
   String _sortLabel(TaskSortField field) {
@@ -1350,6 +1356,7 @@ class _QueuePageState extends State<QueuePage> {
         if (widget.onCancelTask == null) break;
         final confirm = await showDialog<bool>(
           context: context,
+          barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: const Text('Cancel scheduled downloads?'),
             content: const Text(
@@ -1377,6 +1384,7 @@ class _QueuePageState extends State<QueuePage> {
         if (widget.onCancelTask == null) break;
         final confirmActive = await showDialog<bool>(
           context: context,
+          barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: const Text('Cancel active downloads?'),
             content: const Text(
@@ -1565,6 +1573,27 @@ class _QueuePageState extends State<QueuePage> {
         break;
       case 'cancel_scheduled':
         if (widget.onCancelTask == null) break;
+        // Consistent with the batch cancel_scheduled above: confirm before
+        // removing selected scheduled downloads.
+        final confirm = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Cancel scheduled downloads?'),
+            content: const Text(
+              'Selected scheduled downloads will be removed.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Keep')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Remove all')),
+            ],
+          ),
+        );
+        if (confirm != true) break;
         for (final task in selectedTasks) {
           if (task.state == DownloadState.scheduled) {
             widget.onCancelTask!(task)?.call();
@@ -1575,6 +1604,7 @@ class _QueuePageState extends State<QueuePage> {
         if (widget.onCancelTask == null) break;
         final confirm = await showDialog<bool>(
           context: context,
+          barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: const Text('Remove selected downloads?'),
             content: const Text(

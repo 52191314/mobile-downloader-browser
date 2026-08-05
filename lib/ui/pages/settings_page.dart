@@ -5303,9 +5303,20 @@ class _RulesPageState extends State<_RulesPage> {
               actions: [
                 if (isEditing)
                   TextButton(
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      _confirmDelete(index!);
+                    onPressed: () async {
+                      // Await the rule dialog's pop animation so the
+                      // confirm dialog pushes cleanly (no stacked routes).
+                      final navigator = Navigator.of(ctx);
+                      final indexAtTap = index;
+                      navigator.pop();
+                      if (indexAtTap != null) {
+                        // Let the pop finish before pushing the confirm.
+                        await Future<void>.delayed(
+                          const Duration(milliseconds: 250),
+                        );
+                        if (!mounted || !context.mounted) return;
+                        await _confirmDelete(indexAtTap);
+                      }
                     },
                     child: Text(
                       'Delete',

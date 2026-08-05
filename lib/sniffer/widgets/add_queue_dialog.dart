@@ -13,6 +13,7 @@ import '../hls_playlist_cache_lookup.dart';
 import '../models/browser_tab.dart';
 import '../models/sniffed_media.dart';
 import '../sniffer_url_utils.dart';
+import '../sheets/duplicate_download_dialog.dart';
 import 'folder_selector.dart';
 import 'rename_file_dialog.dart';
 
@@ -349,36 +350,11 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
           );
       if (hasDuplicate) {
         if (!mounted) return;
-        final choice = await showDialog<DuplicateChoice>(
-          context: context,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              title: const Text('Already in Queue'),
-              content: const Text(
-                'This download link has already been added to your queue.\n\n'
-                'What would you like to do?',
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(DuplicateChoice.skip),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(DuplicateChoice.downloadAgain),
-                  child: const Text('Create New'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context)
-                      .pop(DuplicateChoice.updateExisting),
-                  child: const Text('Update Existing'),
-                ),
-              ],
-            );
-          },
-        );
-        if (choice == null || choice == DuplicateChoice.skip) {
+        // Shared duplicate prompt (same widget as enqueue_download's) so the
+        // copy and the DuplicateChoice mapping stay consistent.
+        final choice =
+            await showDuplicateDownloadDialog(context: context, filename: filename);
+        if (choice == DuplicateChoice.skip) {
           if (mounted) {
             setState(() => isSubmitting = false);
           }
@@ -425,11 +401,11 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
     } catch (e) {
       if (mounted) {
         setState(() => isSubmitting = false);
+        AuroraSnackbar.show(
+          context,
+          'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
+        );
       }
-      AuroraSnackbar.show(
-        context,
-        'Failed to add download: ${e.toString().length > 120 ? e.toString().substring(0, 120) : e.toString()}',
-      );
     }
   }
 

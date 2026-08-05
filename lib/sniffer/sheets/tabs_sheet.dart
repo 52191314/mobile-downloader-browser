@@ -728,5 +728,5 @@ void showCreateTabGroupDialog(
         ],
       );
     },
-  );
+  ).whenComplete(controller.dispose);
 }

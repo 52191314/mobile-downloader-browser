@@ -103,7 +103,6 @@ class DownloadCard extends StatelessWidget {
     this.onRedownload,
     this.onOpenFfmpegStudio,
     this.onSchedule,
-    this.onShowProperties,
     this.selectionMode = false,
     this.selected = false,
     this.onToggleSelected,
@@ -132,7 +131,6 @@ class DownloadCard extends StatelessWidget {
   /// Process or edit completed file in FFmpeg Studio.
   final Future<void> Function(DownloadTask task)? onOpenFfmpegStudio;
   final void Function(DownloadTask task, DateTime startAt)? onSchedule;
-  final VoidCallback? onShowProperties;
 
   final bool selectionMode;
   final bool selected;
@@ -1024,15 +1022,11 @@ class DownloadCard extends StatelessWidget {
                       case 'delete':
                         onCancel?.call();
                       case 'properties':
-                        if (onShowProperties != null) {
-                          onShowProperties!();
-                        } else {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) =>
-                                DownloadPropertiesDialog(task: task),
-                          );
-                        }
+                        showDialog(
+                          context: context,
+                          builder: (ctx) =>
+                              DownloadPropertiesDialog(task: task),
+                        );
                     }
                   },
                   itemBuilder: (_) => popupItems,

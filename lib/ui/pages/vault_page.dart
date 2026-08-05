@@ -120,6 +120,7 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadEntries() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     _entries = await widget.vault.list(authed: true);
     _fileCount = await widget.vault.fileCount();

@@ -348,7 +348,7 @@ class _GroupActionsBody extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 
   void _confirmThen(

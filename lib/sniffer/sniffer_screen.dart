@@ -349,6 +349,10 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// (e.g. a redirect chain A→B) presenting simultaneously and stacking
   /// dialogs on the root navigator.
   bool _strictRedirectDialogShowing = false;
+
+  /// True while the Cloudflare-block bottom sheet is on screen — guards
+  /// against repeated onCloudflareBlockDetected emissions stacking sheets.
+  bool _cloudflareBlockSheetShowing = false;
   final Map<String, int> _recentStrictRedirectPrompts = {};
   /// Redirect prompts blocked while the source tab was not visible.
   /// Keyed by [BrowserTab.id]; flushed when that tab becomes active again.
@@ -671,6 +675,10 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   void _showCloudflareBlockSheet(String host, String? currentUrl) {
     if (!mounted) return;
+    // Re-entry guard: onCloudflareBlockDetected can fire repeatedly (each
+    // stealth retry that fails re-emits), which would stack sheets.
+    if (_cloudflareBlockSheetShowing) return;
+    _cloudflareBlockSheetShowing = true;
     final targetUrl = currentUrl ?? 'https://$host';
     // If the user already chose "always open in CCT" for this host, don't
     // re-show the sheet — the CCT should already be open. Re-prompting here
@@ -791,7 +799,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         ),
       );
       },
-    );
+    ).whenComplete(() => _cloudflareBlockSheetShowing = false);
   }
 
   void _cancelPickerIfActive({String reason = 'tab change'}) {
@@ -2123,6 +2131,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       safety = const SafeBrowsingResult(verdict: SafeBrowsingVerdict.safe);
     }
     if (safety.verdict == SafeBrowsingVerdict.malicious) {
+      if (!mounted) return;
       final proceed = await _showPhishingWarning(uri, safety);
       if (proceed != true) return;
     } else if (safety.verdict == SafeBrowsingVerdict.suspicious) {
@@ -3650,6 +3659,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     final tab = _activeTab;
     final url = await tab.controller.currentUrl();
     if (url == null || url.isEmpty || url.startsWith('file:')) return;
+    if (!mounted) return;
     final existing = _library.favorites.where(
       (favorite) => favorite.url == url,
     );
@@ -3661,13 +3671,14 @@ class _SnifferScreenState extends State<SnifferScreen>
               .toList(growable: false),
         ),
       );
-      _showSnack('Bookmark removed.');
+      if (mounted) _showSnack('Bookmark removed.');
       return;
     }
 
     final title = cleanTitle(await tab.controller.pageTitle(), url);
+    if (!mounted) return;
     final selection = await _promptFavoriteFolder();
-    if (selection == null) return;
+    if (selection == null || !mounted) return;
     final favorite = BrowserFavorite(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       title: title,
@@ -3682,11 +3693,13 @@ class _SnifferScreenState extends State<SnifferScreen>
         folders: selection.updatedFolders ?? _library.folders,
       ),
     );
-    _showSnack(
-      selection.folderId == null
-          ? 'Favorite added.'
-          : 'Favorite added to ${selection.folderName ?? 'folder'}.',
-    );
+    if (mounted) {
+      _showSnack(
+        selection.folderId == null
+            ? 'Favorite added.'
+            : 'Favorite added to ${selection.folderName ?? 'folder'}.',
+      );
+    }
   }
 
   Future<FavoriteSelection?> _promptFavoriteFolder() async {
@@ -3809,123 +3822,6 @@ class _SnifferScreenState extends State<SnifferScreen>
     final host = (Uri.tryParse(currentUrl ?? '')?.host ?? '').toLowerCase();
     await tab.controller.setZoomScale(1.0);
     if (host.isNotEmpty) _persistSiteZoom(host, 1.0);
-  }
-
-  /// Shows a dialog to pick the global User-Agent profile.  The selection
-  /// is persisted in [DownloadSettings.userAgentProfile] and applied
-  /// immediately to all browser tabs.  Use _editSiteUserAgent for per-site
-  /// overrides.
-  Future<void> _showUserAgentSelector() async {
-    final current = widget.settings.userAgentProfile;
-    final profiles = url_utils.uaProfiles.keys.toList();
-    final labels = profiles.map((k) => url_utils.uaProfileLabels[k] ?? k).toList();
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Select User-Agent'),
-        backgroundColor: context.ac.surfacePanel,
-        children: [
-          for (var i = 0; i < profiles.length; i++) ...[
-            if (i > 0) const Divider(height: 1),
-            RadioListTile<String>(
-              title: Text(labels[i]),
-              value: profiles[i],
-              groupValue: current,
-              onChanged: (value) {
-                Navigator.of(ctx).pop(value);
-              },
-            ),
-          ],
-          const Divider(height: 1),
-          // Also offer the per-site custom override editor
-          TextButton.icon(
-            icon: const Icon(Icons.edit, size: 18),
-            label: const Text('Custom per-site…'),
-            onPressed: () {
-              Navigator.of(ctx).pop('__custom__');
-            },
-          ),
-        ],
-      ),
-    );
-    if (result == null || result == current) return;
-
-    if (result == '__custom__') {
-      final currentUrl = _activeTab.addressController.text.trim();
-      if (currentUrl.isNotEmpty) {
-        unawaited(_editSiteUserAgent(currentUrl));
-      } else {
-        _showSnack('Open a page first to set a custom user agent.');
-      }
-      return;
-    }
-
-    widget.onSettingsChanged?.call(
-      widget.settings.copyWith(userAgentProfile: result),
-    );
-
-    // Apply the new UA to all tabs immediately
-    final ua = uaForProfile(result);
-    for (final tab in _tabs) {
-      await tab.controller.setUserAgent(ua);
-    }
-    if (_activeTab.addressController.text.isNotEmpty) {
-      await _activeTab.controller.reload();
-    }
-    _showSnack('UA switched to ${uaProfileLabels[result] ?? result}.');
-  }
-
-  Future<void> _editSiteUserAgent(String currentUrl) async {
-    final host = (Uri.tryParse(currentUrl)?.host ?? '').toLowerCase();
-    if (host.isEmpty) {
-      _showSnack('Open a page first to set a custom UA.');
-      return;
-    }
-    final existing = widget.settings.siteUserAgents[host] ?? '';
-    final controller = TextEditingController(text: existing);
-    final next = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('User agent for $host'),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          minLines: 1,
-          decoration: const InputDecoration(
-            hintText:
-                'Mozilla/5.0 ... (leave empty to use default / desktop UA)',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (next == null) return;
-    final updated = Map<String, String>.from(widget.settings.siteUserAgents);
-    if (next.isEmpty) {
-      updated.remove(host);
-    } else {
-      updated[host] = next;
-    }
-    widget.onSettingsChanged?.call(
-      widget.settings.copyWith(siteUserAgents: updated),
-    );
-    final ua = _effectiveUserAgentFor(host);
-    if (ua != null) {
-      await _activeTab.controller.setUserAgent(ua);
-    }
-    await _activeTab.controller.reload();
-    _showSnack('Custom UA saved for $host.');
   }
 
   BookmarkFolder get _unsortedFolder => BookmarkFolder(
