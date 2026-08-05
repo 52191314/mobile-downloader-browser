@@ -1019,9 +1019,18 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
           ),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[AuroraVideoPlayer] enterPip failed: $e');
+      // Same UX as the !success path: tell the user instead of kicking
+      // them out of the player. Popping here would end playback for a
+      // transient platform error.
       if (mounted) {
-        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Picture-in-Picture is not available on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
     }
   }

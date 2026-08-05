@@ -645,24 +645,27 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     if (_settings.neverAskBatteryOpt) return;
     if (_batteryOptRequested || _batteryOptDialogShowing) return;
 
-    if (delay > Duration.zero) {
-      await Future.delayed(delay);
-      if (!mounted) return;
-      // Re-check after delay — tour may have started or re-locked prompts.
-      if (!_canPromptPermissions) return;
-      if (_settings.neverAskBatteryOpt) return;
-      if (_batteryOptRequested || _batteryOptDialogShowing) return;
-    }
-
-    if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
-      _batteryOptRequested = true;
-      return;
-    }
-
-    if (!_canPromptPermissions) return;
-
+    // Claim the dialog slot BEFORE any await: two concurrent triggers
+    // (launch + first-download listener) can both pass the guard above and
+    // reach the await before either sets the flag, stacking two dialogs.
     _batteryOptDialogShowing = true;
     try {
+      if (delay > Duration.zero) {
+        await Future.delayed(delay);
+        if (!mounted) return;
+        // Re-check after delay — tour may have started or re-locked prompts.
+        if (!_canPromptPermissions) return;
+        if (_settings.neverAskBatteryOpt) return;
+        if (_batteryOptRequested || _batteryOptDialogShowing) return;
+      }
+
+      if (await DownloadForegroundService.isIgnoringBatteryOptimizations()) {
+        _batteryOptRequested = true;
+        return;
+      }
+
+      if (!_canPromptPermissions) return;
+
       final choice = await _showBatteryOptRequestDialog();
       if (!mounted) return;
 
@@ -1372,8 +1375,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         await _downloadQueue.updateTaskFromDonor(task.id, donor);
         if (mounted) {
           _showSnack('Link updated. Download will retry.');
+          setState(() {});
         }
-        setState(() {});
       } else if (choice == 'new') {
         final newId = DateTime.now().microsecondsSinceEpoch.toString();
         final baseDir = await _completedWorkspaceDirectory();
@@ -1389,8 +1392,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         );
         newTask.copyBrowserBridgesFrom(task);
         _downloadQueue.addTask(newTask, force: true);
-        if (mounted) _showSnack('Done \u2014 new download created with refreshed link.');
-        setState(() {});
+        if (mounted) {
+          _showSnack('Done \u2014 new download created with refreshed link.');
+          setState(() {});
+        }
       }
     } catch (e, s) {
       _logError('Auto-resniff failed', e, s);

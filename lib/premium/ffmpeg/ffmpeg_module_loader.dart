@@ -468,12 +468,23 @@ class PlayModuleLoader extends FeatureModuleLoader {
   bool installedInCurrentProcess(String moduleId) =>
       _installedThisProcess[moduleId] ?? false;
 
+  /// True while the restart-confirm dialog is on screen; prevents two
+  /// concurrent [requestRestart] calls (e.g. two torrent tasks failing to
+  /// dlopen in the same tick) from stacking dialogs.
+  bool _restartDialogShowing = false;
+
   @override
   Future<bool> requestRestart({String? moduleId}) async {
     // Ask the user first — a module install should never silently relaunch
     // the app and lose the user's place.
     final navigator = FeatureModuleLoader.navigatorKey.currentState;
     if (navigator != null && navigator.context.mounted) {
+      // If another restart dialog is already up (concurrent torrent tasks,
+      // or one stacked on an unrelated dialog), don't push another — the
+      // caller's task stays 'downloading' and the user answers the visible
+      // dialog, which relaunches the app and resumes everything.
+      if (_restartDialogShowing) return false;
+      _restartDialogShowing = true;
       final name = moduleId == null ? '' : ' ($displayName(moduleId))';
       final confirmed = await showDialog<bool>(
         context: navigator.context,
@@ -497,7 +508,18 @@ class PlayModuleLoader extends FeatureModuleLoader {
           ],
         ),
       );
+      _restartDialogShowing = false;
       if (confirmed != true) return false;
+    } else {
+      // Fail CLOSED: if we can't show a confirm dialog (navigator not yet
+      // attached, app torn down, background engine), never relaunch
+      // silently. The caller keeps the task 'downloading'/paused and it
+      // resumes after the user restarts manually.
+      debugPrint(
+        '[FeatureModuleLoader] restart requested but no UI available; '
+        'declining to relaunch silently.',
+      );
+      return false;
     }
     try {
       final restarted = await _channel.invokeMethod<bool>('restartApp');

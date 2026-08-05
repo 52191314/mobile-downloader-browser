@@ -49,7 +49,10 @@ class _WatcherPageState extends State<WatcherPage> {
   Widget build(BuildContext context) {
     if (!ProFeatures.allows(ProFeature.watcher, widget.proEntitlement.tier)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // The route may have been popped between build and callback.
+        if (!mounted) return;
         Navigator.of(context).pop();
+        if (!mounted) return;
         showProUpsell(context, ProFeature.watcher);
       });
       return const Scaffold(body: SizedBox.shrink());

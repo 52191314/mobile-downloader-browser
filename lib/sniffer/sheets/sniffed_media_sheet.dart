@@ -194,6 +194,10 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
   Timer? _rebuildDebounce;
   Object? _buildError;
 
+  /// True once the sheet has started closing (batch download / series grab
+  /// double-tap guard — see [_enqueueGroups]).
+  bool _closing = false;
+
   @override
   void initState() {
     super.initState();
@@ -359,6 +363,11 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
   }
 
   Future<void> _enqueueGroups(List<CaptureGroup> toEnqueue) async {
+    // Guard: if this sheet is already being closed (double-tap on
+    // "Download selected"/"Series grab" fires this twice before the first
+    // pop lands), a second pop would eject an unrelated route below.
+    if (_closing) return;
+    _closing = true;
     final nav = Navigator.of(context);
     nav.pop();
     for (final group in toEnqueue) {

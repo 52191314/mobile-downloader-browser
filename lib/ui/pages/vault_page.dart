@@ -574,12 +574,16 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
             }
           }
           await _loadEntries();
+          // The restore loop + _loadEntries can take seconds; the page may
+          // have been disposed while iterating (user backed out mid-restore).
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Vault restored: $restoredCount files from WebDAV.'),
             ),
           );
         } else {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Failed to restore vault (incorrect passphrase or no remote backup).'),

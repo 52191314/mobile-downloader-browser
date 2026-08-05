@@ -34,7 +34,7 @@ Future<void> showMediaPreview(
   BuildContext context,
   SniffedMedia media, {
   required BrowserTab activeTab,
-  required bool isMounted,
+  required bool Function() isMounted,
   required Future<Map<String, String>> Function(String url) getCookiesForUrl,
   /// Optional multi-host cookie collector (media URL + page URL). When
   /// provided, used instead of a single [getCookiesForUrl] call so CDN
@@ -67,7 +67,14 @@ Future<void> showMediaPreview(
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    // Block system back during header resolution: barrierDismissible only
+    // stops barrier taps, NOT the back button. If the user backs out while
+    // the loading dialog is up, the later Navigator.pop(context) would pop
+    // whatever is on top (in the worst case the root home route).
+    builder: (ctx) => PopScope(
+      canPop: false,
+      child: const Center(child: CircularProgressIndicator()),
+    ),
   );
 
   String resolvedUrl = media.url;
@@ -99,7 +106,7 @@ Future<void> showMediaPreview(
     }
   } catch (_) {}
 
-  if (!isMounted) return;
+  if (!isMounted()) return;
   Navigator.pop(context);
 
   final finalMedia = media.copyWith(
@@ -190,7 +197,7 @@ Future<void> showMediaPreview(
         ),
       ),
     );
-    if (!isMounted) return;
+    if (!isMounted()) return;
     if (result == 'download') {
       await onAddToQueue(finalMedia);
     }
@@ -200,7 +207,7 @@ Future<void> showMediaPreview(
     context,
     MaterialPageRoute(builder: (_) => MediaPreviewWidget(media: finalMedia)),
   );
-  if (!isMounted) return;
+  if (!isMounted()) return;
   if (result == 'download') {
     await onAddToQueue(finalMedia);
   }

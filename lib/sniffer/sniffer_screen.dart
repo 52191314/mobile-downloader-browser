@@ -343,6 +343,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   final List<String> _pendingOpenUrlsAfterTabsLoaded = [];
   static const Duration _strictRedirectPromptCooldown = Duration(seconds: 8);
   final Set<String> _activeStrictRedirectPrompts = {};
+
+  /// True while ANY strict-redirect dialog is on screen. The set above
+  /// dedups by promptKey; this guards against two DIFFERENT redirects
+  /// (e.g. a redirect chain A→B) presenting simultaneously and stacking
+  /// dialogs on the root navigator.
+  bool _strictRedirectDialogShowing = false;
   final Map<String, int> _recentStrictRedirectPrompts = {};
   /// Redirect prompts blocked while the source tab was not visible.
   /// Keyed by [BrowserTab.id]; flushed when that tab becomes active again.
@@ -2505,6 +2511,19 @@ class _SnifferScreenState extends State<SnifferScreen>
         if (list.isEmpty) {
           _pendingStrictRedirectByTabId.remove(tab.id);
         }
+        // Don't present while a redirect dialog from another source is up;
+        // leave it queued and re-flush on the next activation.
+        if (_strictRedirectDialogShowing) {
+          _enqueuePendingStrictRedirect(
+            tabId: tab.id,
+            uri: pending.uri,
+            title: pending.title,
+            method: pending.method,
+            sourcePageUrl: pending.sourcePageUrl,
+            promptKey: pending.promptKey,
+          );
+          break;
+        }
         await _presentStrictRedirectPrompt(
           tab: tab,
           uri: pending.uri,
@@ -2543,9 +2562,24 @@ class _SnifferScreenState extends State<SnifferScreen>
       return;
     }
     if (_activeStrictRedirectPrompts.contains(promptKey)) return;
+    // Global guard: if ANY redirect dialog is already up (different
+    // promptKey — redirect chain A→B, or a new redirect arriving mid-
+    // prompt), requeue instead of stacking a second dialog.
+    if (_strictRedirectDialogShowing) {
+      _enqueuePendingStrictRedirect(
+        tabId: tab.id,
+        uri: uri,
+        title: title,
+        method: method,
+        sourcePageUrl: sourcePageUrl,
+        promptKey: promptKey,
+      );
+      return;
+    }
 
     final url = uri.toString();
     _activeStrictRedirectPrompts.add(promptKey);
+    _strictRedirectDialogShowing = true;
     try {
       final sourceHost = Uri.tryParse(sourcePageUrl ?? '')?.host;
       final targetHost = uri.host.isNotEmpty ? uri.host : url;
@@ -2626,6 +2660,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     } finally {
       _activeStrictRedirectPrompts.remove(promptKey);
+      _strictRedirectDialogShowing = false;
     }
   }
 
@@ -4753,7 +4788,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         context,
         media,
         activeTab: _activeTab,
-        isMounted: mounted,
+        isMounted: () => mounted,
         getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
         getPlaybackCookies: ({required String mediaUrl, String? pageUrl}) =>
             _sniffIntakeController.getPlaybackCookies(

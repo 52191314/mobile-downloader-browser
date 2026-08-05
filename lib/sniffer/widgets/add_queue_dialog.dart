@@ -435,7 +435,12 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    // While submitting, block barrier taps AND system back so the route
+    // can't be dismissed under the async submit (a late navigator.pop(true)
+    // would then pop the wrong route). Dismissal is still allowed when idle.
+    return PopScope(
+      canPop: !isSubmitting,
+      child: AlertDialog(
       title: const Text('Add to Download Queue'),
       content: SingleChildScrollView(
         child: Column(
@@ -600,6 +605,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
               : const Text('Download'),
         ),
       ],
+      ),
     );
   }
 }

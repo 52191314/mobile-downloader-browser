@@ -242,6 +242,13 @@ class DownloadNotificationService {
           priority: Priority.low,
           showWhen: true,
           usesChronometer: true,
+          // Pin the chronometer to the task's real start time. Without an
+          // explicit `when`, Android re-defaults it to "now" on EVERY
+          // show() call — and _updateProgressNotification re-shows the
+          // notification on each queue tick, so the elapsed counter was
+          // resetting to 0 every few seconds.
+          when: (task.scheduledStartAt ?? task.createdAt)
+              .millisecondsSinceEpoch,
           autoCancel: false,
           actions: const <AndroidNotificationAction>[
             AndroidNotificationAction(

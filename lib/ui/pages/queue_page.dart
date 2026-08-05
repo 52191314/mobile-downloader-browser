@@ -130,6 +130,11 @@ class _QueuePageState extends State<QueuePage> {
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
 
+  /// Task ids with a "Save partial file?" dialog currently on screen — used
+  /// to dedup [DownloadQueue.onTaskUpdated] emissions so auto-retry
+  /// re-failures don't stack duplicate dialogs.
+  final Set<String> _partialMergeDialogTaskIds = {};
+
   // -- Sectioned-mode partition cache ---------------------------------------
   // Sectioned mode re-sorts 4 sections on every build. Because the queue's
   // task list is mutated in place (no list identity change on progress), the
@@ -1597,7 +1602,7 @@ class _QueuePageState extends State<QueuePage> {
         }
         break;
     }
-    _exitSelectionMode();
+    if (mounted) _exitSelectionMode();
   }
 
   // ---------------------------------------------------------------------------
@@ -1826,6 +1831,7 @@ class _QueuePageState extends State<QueuePage> {
       }
     }
     if (path == null || path.isEmpty || !File(path).existsSync()) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('File path is missing or file does not exist.')),
       );
@@ -1834,9 +1840,11 @@ class _QueuePageState extends State<QueuePage> {
     final resolvedPath = path;
 
     // Ensure the FFmpeg on-demand module is installed (Play) or ready (GitHub).
+    if (!mounted) return;
     final loader = FeatureModuleLoader.instance;
     final moduleReady = await _ensureFfmpegModule(context, loader);
     if (!moduleReady) return;
+    if (!mounted) return;
 
     final name = resolvedPath.replaceAll('\\', '/').split('/').last;
     final item = FfmpegStudioItem(
@@ -2092,10 +2100,16 @@ class _QueuePageState extends State<QueuePage> {
 
   void _showPartialMergeDialog(DownloadTask task) {
     if (!mounted) return;
+    // Dedup: never stack a second "Save partial file?" for the same task
+    // (auto-retry re-failure re-emits with a fresh [PARTIAL: message) and
+    // never show it while one is already up.
+    if (_partialMergeDialogTaskIds.contains(task.id)) return;
+    _partialMergeDialogTaskIds.add(task.id);
     final match = RegExp(r'\[PARTIAL:([\d.]+)\]').firstMatch(task.errorMessage ?? '');
     final pct = match?.group(1) ?? '?';
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Save partial file?'),
         content: Text(
@@ -2134,7 +2148,12 @@ class _QueuePageState extends State<QueuePage> {
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      // Release the dedup slot when the dialog closes, so a later genuine
+      // re-failure (new task, or user dismissed and it failed again) can
+      // prompt again.
+      _partialMergeDialogTaskIds.remove(task.id);
+    });
   }
 
   /// Called by [DownloadQueue.onResniffDuplicate] when a duplicate URL is
