@@ -521,6 +521,14 @@ class _SnifferScreenState extends State<SnifferScreen>
         widget.settings.adblockAllowlist) {
       _updateAllTabAdblockAllowlist();
     }
+    if (oldWidget.settings.alwaysBlockedRedirectHosts !=
+        widget.settings.alwaysBlockedRedirectHosts) {
+      for (final tab in _tabs) {
+        tab.controller.setAlwaysBlockedRedirectHosts(
+          widget.settings.alwaysBlockedRedirectHosts,
+        );
+      }
+    }
     if (oldWidget.settings.customVideoHosts !=
         widget.settings.customVideoHosts) {
       _updateAllTabCustomVideoHosts();
@@ -632,6 +640,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.controller.updateCustomVideoHosts(widget.settings.customVideoHosts);
     await tab.controller.setInvisibleRedirectBlocking(
       widget.settings.invisibleRedirectBlockingEnabled,
+    );
+    tab.controller.setAlwaysBlockedRedirectHosts(
+      widget.settings.alwaysBlockedRedirectHosts,
     );
     await tab.controller.setReplaceSitePlayer(
       widget.settings.replaceSitePlayer,
@@ -2577,6 +2588,35 @@ class _SnifferScreenState extends State<SnifferScreen>
             // re-prompt the same destination after the user confirmed.
             unawaited(tab.controller.allowNextCrossOriginNavigation(url));
             unawaited(_loadUrlWithHostSettings(tab, uri));
+          }
+          break;
+        case RedirectPromptAction.alwaysBlock:
+          // Persist a per-source-site block: future redirects from this
+          // source host to the target are cancelled silently. The controller
+          // enforces it (browser_controller.shouldOverrideUrlLoadingCallback);
+          // settings persistence flows through onSettingsChanged.
+          if (sourceHost != null && sourceHost.isNotEmpty) {
+            final lowerSource = sourceHost.toLowerCase();
+            final lowerTarget = targetHost.toLowerCase();
+            final existing = Map<String, List<String>>.from(
+              widget.settings.alwaysBlockedRedirectHosts,
+            );
+            final targets = List<String>.from(existing[lowerSource] ?? const []);
+            if (!targets.contains(lowerTarget)) {
+              targets.add(lowerTarget);
+              existing[lowerSource] = targets;
+              final updated = widget.settings
+                  .copyWith(alwaysBlockedRedirectHosts: existing);
+              widget.onSettingsChanged?.call(updated);
+              // Apply to every tab immediately so the rule holds even before
+              // settings propagate through the widget tree.
+              for (final t in _tabs) {
+                t.controller.setAlwaysBlockedRedirectHosts(existing);
+              }
+            }
+            _showSnack(
+              'Redirects from $sourceHost to $targetHost will always be blocked.',
+            );
           }
           break;
         case RedirectPromptAction.ignore:

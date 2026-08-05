@@ -33,6 +33,11 @@ enum _LtLoadResult {
   /// cannot dlopen its native lib; the app is relaunching so the queued task
   /// auto-resumes with the lib loadable.
   restarting,
+
+  /// The split was installed mid-process but the user declined the
+  /// restart prompt (or it failed). The task stays paused with a message
+  /// instead of being failed; it resumes after a manual app restart.
+  restartDeclined,
 }
 
 /// True when the error means the native library itself could not be resolved
@@ -84,8 +89,13 @@ Future<_LtLoadResult> _ensureLtLoaded(String saveDirectory) async {
         '[TorrentDownloader] :torrent module installed mid-process; '
         'relaunching so the native library becomes loadable.',
       );
-      final restarted = await loader.requestRestart();
+      final restarted = await loader.requestRestart(moduleId: 'torrent');
       if (restarted) return _LtLoadResult.restarting;
+      // User declined the restart (or it failed): the module IS installed
+      // but its libs are invisible to this process's dlopen path. The task
+      // stays 'downloading' and the queue auto-resumes it after a later
+      // manual restart — do not fail it outright.
+      return _LtLoadResult.restartDeclined;
     }
     return _LtLoadResult.unavailable;
   }
@@ -253,6 +263,20 @@ class TorrentDownloader implements BaseDownloader {
         // The app is relaunching so the freshly-installed :torrent split's
         // native lib becomes loadable. The task stays in 'downloading' state
         // (persisted by the queue) and auto-resumes after the restart.
+        return;
+      }
+      if (loaded == _LtLoadResult.restartDeclined) {
+        // The module is installed but the user declined the restart, so the
+        // libs are still invisible to this process. Pause with a message
+        // instead of failing: the user can resume after a manual restart.
+        _isPaused = true;
+        task.state = DownloadState.paused;
+        task.errorMessage =
+            'The torrent engine was installed. Restart Aurora, then '
+            'resume this download.';
+        task.failureReason = null;
+        task.speed = 0.0;
+        _taskUpdateController.add(task);
         return;
       }
       await Directory(saveDirectory).create(recursive: true);

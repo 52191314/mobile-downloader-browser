@@ -31,6 +31,7 @@ import 'ui/settings_open_request.dart';
 import 'backup/auto_backup_service.dart';
 import 'premium/premium_flags.dart';
 import 'premium/build_channel.dart';
+import 'premium/ffmpeg/ffmpeg_module_loader.dart';
 import 'sync/sync.dart';
 import 'premium/license/license_service.dart';
 import 'premium/pro_entitlement.dart';
@@ -195,6 +196,7 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           title: 'Aurora Downloader',
           debugShowCheckedModeBanner: false,
+          navigatorKey: FeatureModuleLoader.navigatorKey,
           themeMode: mode,
           theme: buildLightTheme(colors: lightColors),
           // OLED black: only when the user explicitly selected

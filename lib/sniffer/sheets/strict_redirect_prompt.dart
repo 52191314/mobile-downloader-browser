@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 
 /// User choice from the blocked-redirect confirmation dialog.
-enum RedirectPromptAction { foreground, background, currentTab, ignore }
+enum RedirectPromptAction {
+  foreground,
+  background,
+  currentTab,
+  ignore,
+
+  /// Persist a per-source-site block so future redirects from this source
+  /// host to the target are cancelled silently (no prompt).
+  alwaysBlock,
+}
 
 /// Queued redirect prompt for a background browser tab.
 ///
@@ -61,6 +70,14 @@ Future<RedirectPromptAction?> showStrictRedirectPromptDialog({
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(RedirectPromptAction.alwaysBlock),
+            child: Text(
+              'Always block on this site',
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          ),
           TextButton(
             onPressed: () =>
                 Navigator.of(ctx).pop(RedirectPromptAction.ignore),

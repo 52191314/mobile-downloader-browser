@@ -19,6 +19,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../build_channel.dart';
@@ -108,6 +109,12 @@ abstract class FeatureModuleLoader {
   static FeatureModuleLoader get instance => _instance;
   static late final FeatureModuleLoader _instance = _create();
 
+  /// Global navigator used to show the restart-confirmation dialog from
+  /// non-UI contexts (e.g. the download engine). Wired to the app's
+  /// MaterialApp in `main.dart`.
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
+
   static FeatureModuleLoader _create() {
     if (BuildChannel.isPlay) {
       return PlayModuleLoader();
@@ -152,7 +159,10 @@ abstract class FeatureModuleLoader {
   /// Relaunches the app so a freshly-installed module's native libraries
   /// become loadable. Returns `true` when a restart was scheduled. On
   /// GitHub/fat builds this is a no-op returning `false`.
-  Future<bool> requestRestart();
+  ///
+  /// When [navigatorKey] is set, the user is asked to confirm the restart
+  /// first (a module install should never silently relaunch the app).
+  Future<bool> requestRestart({String? moduleId});
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +220,7 @@ class GitHubModuleLoader extends FeatureModuleLoader {
   bool installedInCurrentProcess(String moduleId) => false;
 
   @override
-  Future<bool> requestRestart() async => false;
+  Future<bool> requestRestart({String? moduleId}) async => false;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +469,36 @@ class PlayModuleLoader extends FeatureModuleLoader {
       _installedThisProcess[moduleId] ?? false;
 
   @override
-  Future<bool> requestRestart() async {
+  Future<bool> requestRestart({String? moduleId}) async {
+    // Ask the user first — a module install should never silently relaunch
+    // the app and lose the user's place.
+    final navigator = FeatureModuleLoader.navigatorKey.currentState;
+    if (navigator != null && navigator.context.mounted) {
+      final name = moduleId == null ? '' : ' ($displayName(moduleId))';
+      final confirmed = await showDialog<bool>(
+        context: navigator.context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Restart to finish setup?'),
+          content: Text(
+            'Aurora needs to restart to activate the engine that was '
+            'just installed$name. Your downloads will continue after the '
+            'restart.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Restart now'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return false;
+    }
     try {
       final restarted = await _channel.invokeMethod<bool>('restartApp');
       return restarted == true;

@@ -127,6 +127,11 @@ abstract interface class SnifferBrowserController {
   void incrementBlockedInvisibleRedirects();
   Future<void> setInvisibleRedirectBlocking(bool enabled);
 
+  /// Replaces the per-source-site redirect blocklist
+  /// (`sourceHost → [targetHost, …]`). Redirects matching an entry are
+  /// cancelled silently without prompting (see [setInvisibleRedirectBlocking]).
+  void setAlwaysBlockedRedirectHosts(Map<String, List<String>> hosts);
+
   /// When true, injected JS intercepts site media `play()` and routes
   /// playback to Aurora's in-app player instead.
   Future<void> setReplaceSitePlayer(bool enabled);
@@ -324,6 +329,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
   AdBlockEngine _adBlockEngine = AdBlockEngine.sharedBuiltIn();
   int _blockedRequestCount = 0;
   int _blockedInvisibleRedirectsCount = 0;
+  Map<String, List<String>> _alwaysBlockedRedirectHosts = const {};
 
   /// Per-site allowlist of hostnames. When the current page host matches an
   /// entry in this list, adblock is bypassed for both subresource requests
@@ -547,6 +553,16 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
           )
           .catchError((_) {});
     }
+  }
+
+  @override
+  void setAlwaysBlockedRedirectHosts(Map<String, List<String>> hosts) {
+    // Normalise to lowercase so lookups in shouldOverrideUrlLoadingCallback
+    // are case-insensitive.
+    _alwaysBlockedRedirectHosts = {
+      for (final e in hosts.entries)
+        e.key.toLowerCase(): e.value.map((h) => h.toLowerCase()).toList(),
+    };
   }
 
   @override
@@ -1104,6 +1120,15 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
 
     if (_invisibleRedirectBlockingEnabled && crossOriginMainFrame) {
+      // "Always block on this site" entries: cancel silently, no prompt.
+      final alwaysBlocked = _alwaysBlockedRedirectHosts[sourceHost] ?? const [];
+      final targetHost =
+          requestUri?.host.isNotEmpty == true ? requestUri!.host : '';
+      if (targetHost.isNotEmpty &&
+          alwaysBlocked.contains(targetHost.toLowerCase())) {
+        _blockedInvisibleRedirectsCount++;
+        return NavigationActionPolicy.CANCEL;
+      }
       final hasGesture = action.hasGesture == true;
       final isRedirect = action.isRedirect == true;
       final navType = action.navigationType;
@@ -2036,6 +2061,7 @@ class MockBrowserController implements SnifferBrowserController {
   AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
   int _blockedPopupsCount = 0;
   int _blockedInvisibleRedirectsCount = 0;
+  Map<String, List<String>> _alwaysBlockedRedirectHosts = const {};
   Map<String, String> _currentHeaders = {};
   HlsPlaylist? _lastMasterPlaylist;
 
@@ -2172,6 +2198,14 @@ class MockBrowserController implements SnifferBrowserController {
   @override
   Future<void> setInvisibleRedirectBlocking(bool enabled) async {
     _invisibleRedirectBlockingEnabled = enabled;
+  }
+
+  @override
+  void setAlwaysBlockedRedirectHosts(Map<String, List<String>> hosts) {
+    _alwaysBlockedRedirectHosts = {
+      for (final e in hosts.entries)
+        e.key.toLowerCase(): e.value.map((h) => h.toLowerCase()).toList(),
+    };
   }
 
   @override

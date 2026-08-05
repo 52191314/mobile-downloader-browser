@@ -536,6 +536,12 @@ class DownloadSettings {
   final bool cloudflareStealthEnabled;
   final bool popupBlockingEnabled;
   final bool invisibleRedirectBlockingEnabled;
+
+  /// Per-source-site redirect blocklist: `sourceHost → [targetHost, …]`.
+  /// When the user picks "Always block on this site" in the redirect prompt,
+  /// the source host is mapped to the blocked target so future redirects
+  /// from that source are cancelled silently instead of prompting again.
+  final Map<String, List<String>> alwaysBlockedRedirectHosts;
   final List<AdblockFilterSource> adblockFilterSources;
   final List<ManualAdBlockRule> manualAdBlockRules;
   final List<CosmeticAdRule> manualCosmeticRules;
@@ -636,6 +642,7 @@ class DownloadSettings {
     this.cloudflareStealthEnabled = true,
     this.popupBlockingEnabled = true,
     this.invisibleRedirectBlockingEnabled = true,
+    this.alwaysBlockedRedirectHosts = const {},
     required this.adblockFilterSources,
     this.manualAdBlockRules = const [],
     this.manualCosmeticRules = const [],
@@ -735,6 +742,7 @@ class DownloadSettings {
     bool? cloudflareStealthEnabled,
     bool? popupBlockingEnabled,
     bool? invisibleRedirectBlockingEnabled,
+    Map<String, List<String>>? alwaysBlockedRedirectHosts,
     List<AdblockFilterSource>? adblockFilterSources,
     List<ManualAdBlockRule>? manualAdBlockRules,
     List<CosmeticAdRule>? manualCosmeticRules,
@@ -831,6 +839,8 @@ class DownloadSettings {
           cloudflareStealthEnabled ?? this.cloudflareStealthEnabled,
       popupBlockingEnabled: popupBlockingEnabled ?? this.popupBlockingEnabled,
       invisibleRedirectBlockingEnabled: invisibleRedirectBlockingEnabled ?? this.invisibleRedirectBlockingEnabled,
+      alwaysBlockedRedirectHosts:
+          alwaysBlockedRedirectHosts ?? this.alwaysBlockedRedirectHosts,
       adblockFilterSources: adblockFilterSources ?? this.adblockFilterSources,
       manualAdBlockRules: manualAdBlockRules ?? this.manualAdBlockRules,
       manualCosmeticRules: manualCosmeticRules ?? this.manualCosmeticRules,
@@ -882,6 +892,7 @@ class DownloadSettings {
     'cloudflareStealthEnabled': cloudflareStealthEnabled,
     'popupBlockingEnabled': popupBlockingEnabled,
     'invisibleRedirectBlockingEnabled': invisibleRedirectBlockingEnabled,
+    'alwaysBlockedRedirectHosts': alwaysBlockedRedirectHosts,
     'adblockFilterSources': [
       for (final source in adblockFilterSources) source.toJson(),
     ],
@@ -972,6 +983,9 @@ class DownloadSettings {
       invisibleRedirectBlockingEnabled:
           json['invisibleRedirectBlockingEnabled'] as bool? ??
           defaults.invisibleRedirectBlockingEnabled,
+      alwaysBlockedRedirectHosts: _parseStringListMap(
+        json['alwaysBlockedRedirectHosts'],
+      ),
       adblockFilterSources:
           _parseFilterSources(
             json['adblockFilterSources'] as List? ??
@@ -1156,6 +1170,29 @@ class DownloadSettings {
     });
     return result;
   }
+
+  /// Parses a `{sourceHost: [targetHost, …]}` map for
+  /// [alwaysBlockedRedirectHosts]. Hosts are lowercased; empty lists and
+  /// non-string entries are dropped.
+  static Map<String, List<String>> _parseStringListMap(Object? raw) {
+    if (raw is! Map) return const {};
+    final result = <String, List<String>>{};
+    raw.forEach((key, value) {
+      if (key is! String || key.trim().isEmpty) return;
+      if (value is! List || value.isEmpty) return;
+      final targets = <String>[];
+      for (final item in value) {
+        if (item is String && item.trim().isNotEmpty) {
+          targets.add(item.toLowerCase());
+        }
+      }
+      if (targets.isNotEmpty) {
+        result[key.toLowerCase()] = targets;
+      }
+    });
+    return result;
+  }
+
   static List<AdblockFilterSource>? _parseFilterSources(List? raw) {
     if (raw == null || raw.isEmpty) return null;
     final result = <AdblockFilterSource>[];
