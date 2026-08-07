@@ -24,6 +24,9 @@ import '../compliance/restricted_media_policy.dart';
 void _logError(String context, Object error, [StackTrace? stack]) {
   debugPrint('[DownloadQueue] $context: $error');
   debugPrint('$context: $error');
+  if (stack != null) {
+    debugPrint('$context stack:\n$stack');
+  }
 }
 
 /// Internal pair for relevance-scored search results used by
