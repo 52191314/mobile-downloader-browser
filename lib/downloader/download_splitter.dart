@@ -1056,6 +1056,11 @@ class DownloadSplitter implements BaseDownloader {
       if (response.statusCode == 403 || response.statusCode == 401) {
         await response.stream.listen((_) {}).cancel();
         if (retriedWithRefresh || task.onTokenExpired == null) {
+          // Null the response like the 429 branch does: the consumed
+          // stream must never reach the status checks below, which would
+          // re-listen it and crash with "Stream has already been listened
+          // to" instead of failing with the clean 403/401 error.
+          response = null;
           break;
         }
         retriedWithRefresh = true;
@@ -1063,11 +1068,15 @@ class DownloadSplitter implements BaseDownloader {
           task.errorMessage = 'Access token expired. Aurora is fetching a fresh one.';
           _emitTask();
           final newUrl = await task.onTokenExpired!(forceReload: false);
-          if (newUrl == null || newUrl == task.url) break;
+          if (newUrl == null || newUrl == task.url) {
+            response = null;
+            break;
+          }
           task.url = newUrl;
           continue;
         } catch (e, s) {
           _logError('Token refresh failed for direct download', e, s);
+          response = null;
           break;
         }
       }
