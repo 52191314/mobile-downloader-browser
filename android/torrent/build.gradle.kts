@@ -10,6 +10,14 @@ plugins {
 val extractTorrentJni by tasks.registering {
     val outDir = layout.buildDirectory.dir("extracted-torrent-jni")
     outputs.dir(outDir)
+    // The task's real inputs are the plugin's prebuilt .so files in the pub
+    // cache (see findPrebuiltDir below), which Gradle cannot see as task
+    // inputs (they live outside the build and are swapped by
+    // tooling/prepare_torrent_16k.sh — notably for 16 KB page-size
+    // alignment). Without this, the task is UP-TO-DATE after the first run
+    // and the stale, unaligned libtorrent .so keeps getting packaged.
+    // The copy is cheap (~2 files), so always re-run it.
+    outputs.upToDateWhen { false }
 
     val torrentPlugin = findProject(":libtorrent_flutter")
     if (torrentPlugin != null) {
