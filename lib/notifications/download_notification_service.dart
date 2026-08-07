@@ -55,6 +55,14 @@ class DownloadNotificationService {
   static const String _doneChannelName = 'Download complete';
   static const String _doneChannelDescription =
       'Notifies you when a download finishes.';
+  static const String _watcherChannelId = 'aurora_watcher';
+  static const String _watcherChannelName = 'Aurora Watcher';
+  static const String _watcherChannelDescription =
+      'New items detected by your watch rules.';
+
+  /// Fixed notification id for watcher alerts — new detections replace the
+  /// previous one instead of stacking.
+  static const int _watcherNotificationId = 9001;
 
   /// Action IDs returned via [NotificationResponse.actionId].
   static const String actionPause = 'pause';
@@ -125,6 +133,44 @@ class DownloadNotificationService {
         showBadge: true,
       ),
     );
+    await androidPlugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _watcherChannelId,
+        _watcherChannelName,
+        description: _watcherChannelDescription,
+        importance: Importance.defaultImportance,
+        playSound: true,
+        enableVibration: true,
+        showBadge: true,
+      ),
+    );
+  }
+
+  /// Shows a non-download alert (e.g. Aurora Watcher found new items).
+  /// Uses a fixed id so consecutive watcher alerts replace each other.
+  Future<void> showWatcherNotification(String title, String body) async {
+    try {
+      await _plugin.show(
+        id: _watcherNotificationId,
+        title: title,
+        body: body,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _watcherChannelId,
+            _watcherChannelName,
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+            playSound: true,
+            enableVibration: true,
+            onlyAlertOnce: true,
+            autoCancel: true,
+            showWhen: true,
+          ),
+        ),
+      );
+    } catch (e, s) {
+      _logError('Failed to show watcher notification', e, s);
+    }
   }
 
   void listenTo(

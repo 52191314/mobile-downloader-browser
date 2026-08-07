@@ -3,20 +3,20 @@
 /// Gate: [ProFeature.watcher] (Ultra tier only).
 ///
 /// Architecture:
-/// - Runs as a periodic timer on a background isolate-like loop.
+/// - Runs as an in-app periodic timer while the app process is alive
+///   (foreground or backgrounded). It is NOT an OS-scheduled background
+///   task: if the process is killed, checks stop until the app reopens.
 /// - Fetches RSS feeds or page HTML using Dart HTTP client.
 /// - Diffs against [WatchRule.seenIds] to identify new items.
 /// - Auto-enqueues new URLs into the download queue.
-/// - Sends local notification on new items.
+/// - Fires [onNewItems] when new items are enqueued (host shows a
+///   local notification).
 ///
-/// Battery policy:
-/// - Default interval ≥ 1 hour.
-/// - Wi‑Fi only option available per rule.
-/// - Respects device doze / battery optimization where possible.
+/// Battery note: the loop ticks every 5 minutes, but each rule only checks
+/// when its own [WatchRule.minInterval] has elapsed (default 1 hour).
 library;
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -42,7 +42,11 @@ class WatcherService extends ChangeNotifier {
   /// Callback to enqueue a download URL.
   final Future<void> Function(String url, {String? label})? onEnqueue;
 
-  WatcherService({this.onEnqueue});
+  /// Fired with a human-readable summary when new items were enqueued.
+  /// The host typically surfaces this as a local notification.
+  final void Function(String message)? onNewItems;
+
+  WatcherService({this.onEnqueue, this.onNewItems});
 
   /// Read-only view of all rules.
   List<WatchRule> get rules => List.unmodifiable(_rules);
@@ -177,6 +181,13 @@ class WatcherService extends ChangeNotifier {
             }
           }
         }
+      }
+
+      // Notify the host when anything was actually enqueued.
+      if (newItems.isNotEmpty) {
+        final source = rule.label ?? rule.url;
+        final count = newItems.length;
+        onNewItems?.call('$count new item${count == 1 ? '' : 's'} · $source');
       }
 
       await _persist();

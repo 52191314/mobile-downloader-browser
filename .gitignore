@@ -190,3 +190,8 @@ docs/premium_implementation_tracker.md
 .mcp.json
 GEMINI.md
 opencode.jsonc
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example

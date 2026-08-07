@@ -389,6 +389,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       _urlController.text = url;
       await _addDownloadFromUrl();
     },
+    onNewItems: (message) {
+      unawaited(
+        _notificationService.showWatcherNotification('Aurora Watcher', message),
+      );
+    },
   );
   late final AutomationApiService _automationApiService = AutomationApiService(
     proEntitlement: _proEntitlement,
@@ -396,6 +401,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       if (mounted) setState(() {});
     },
     downloadQueue: _downloadQueue,
+    completedDirProvider: () =>
+        _completedWorkspaceDirectory().then((d) => d.path),
+    tempDirProvider: () => _tempWorkspaceDirectory().then((d) => d.path),
   );
   StreamSubscription<DownloadTask>? _queueSubscription;
   DownloadSettings _settings = DownloadSettings.defaults();
@@ -511,12 +519,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_watcherService.initialize());
-    if (_automationApiService.isAllowed) {
-      unawaited(_automationApiService.start().catchError((e) {
-        if (kDebugMode) debugPrint('[AutomationApi] Auto-start failed: $e');
-        return '';
-      }));
-    }
+    // Automation API is default OFF (SECURITY_AUDIT §5.1): only auto-start
+    // after the user explicitly enabled it (persisted preference), and only
+    // for Ultra. The in-app toggle also persists this flag.
+    unawaited(_startAutomationApiIfEnabled());
     // First install: tour first. Permissions stay locked (_permissionPromptsAllowed
     // = false) until finish/skip. Returning users unlock immediately.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1474,6 +1480,19 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       unawaited(_addDownloadFromUrl());
     } else {
       _openUrlInBrowser(url);
+    }
+  }
+
+  /// Starts the Automation API server only when the user previously enabled
+  /// it (persisted preference, default off) AND the tier allows it.
+  Future<void> _startAutomationApiIfEnabled() async {
+    if (!_automationApiService.isAllowed) return;
+    final enabled = await _automationApiService.loadEnabledPreference();
+    if (!enabled) return;
+    try {
+      await _automationApiService.start();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AutomationApi] Auto-start failed: $e');
     }
   }
 

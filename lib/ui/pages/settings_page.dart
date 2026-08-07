@@ -501,7 +501,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _NavItem(
                 icon: Icons.info_outline_rounded,
                 title: 'About',
-                subtitle: 'v4.0.0 · battery',
+                subtitle: 'v4.0.1 · battery',
                 onTap: () => _openPage(_buildAboutPage()),
               ),
             ]),
@@ -2214,6 +2214,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       if (val) {
                         try {
                           await service.start();
+                          // Persist the choice so the server auto-starts on
+                          // next launch (default is OFF per SECURITY_AUDIT).
+                          await service.saveEnabledPreference(true);
                           if (mounted) setState(() {});
                         } catch (e) {
                           if (mounted) {
@@ -2225,6 +2228,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         }
                       } else {
                         await service.stop();
+                        await service.saveEnabledPreference(false);
                         if (mounted) setState(() {});
                       }
                     },
@@ -2381,7 +2385,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Downloader',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v4.0.0', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v4.0.1', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),

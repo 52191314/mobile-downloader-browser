@@ -2,9 +2,9 @@
 ///
 /// Gate: [ProFeature.watcher] (Ultra tier only).
 ///
-/// Watchers run as periodic background checks (WorkManager on Android,
-/// simple Dart timer with FGS integration). When a new item is detected,
-/// the URL is auto-enqueued into the download queue.
+/// Watchers run as an in-app periodic timer while the app process is alive;
+/// when a new item is detected, the URL is auto-enqueued into the download
+/// queue. Checks do not run while the process is killed (no OS scheduling).
 library;
 
 /// Type of content source to watch.
