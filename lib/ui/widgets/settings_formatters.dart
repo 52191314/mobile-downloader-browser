@@ -131,10 +131,6 @@ String? _extensionForMime(String mime) {
   return map[mime];
 }
 
-/// Converts a [DownloadState] to a human-readable status label.
-@Deprecated('Use stateLabel() instead')
-String _stateLabel(DownloadState state) => stateLabel(state);
-
 const _sizeKbPresets = [0, 100, 500, 1024, 5120, 10240, 51200, 102400];
 const _durationPresets = [0, 10, 30, 60, 120, 300, 600, 900];
 

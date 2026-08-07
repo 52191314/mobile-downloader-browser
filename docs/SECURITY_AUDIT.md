@@ -2,10 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-07-20 |
-| **Scope** | Premium tiers, LAN Send-to-PC, Private Vault, WebDAV backup, billing, free-taste, sniffer-adjacent network |
-| **App version baseline** | 2.4.4+28 / `Play-Console-Launch` |
-| **Status** | Living document — update when Ultra Automation API / Vault Sync / Companion ship |
+| **Date** | 2026-08-07 |
+| **Scope** | Premium tiers, LAN Send-to-PC, Private Vault, WebDAV backup, billing, free-taste, sniffer-adjacent network, Automation API |
+| **App version baseline** | 4.0.1+52 / `play` |
+| **Status** | Living document — Automation API shipped (4.0.1); update when Vault Sync / Companion ship |
 | **Related** | `docs/ultra_full_feature_pack_plan.md`, `docs/ffmpeg_spike_pr-21a.md` |
 
 ---
@@ -19,7 +19,7 @@
 | Local malware / backup tool | Read vault ciphertext / keys | App support dir, Keystore |
 | Modified APK user | Bypass Pro/Ultra gates | Client honor system (GPL) |
 | Remote internet | RCE / unsolicited open port | Only if user starts LAN share or (future) companion mode |
-| Confused deputy (Tasker) | Abuse automation API | Future localhost API |
+| Confused deputy (Tasker) | Abuse automation API | Localhost Automation API (shipped; default off, bearer token) |
 
 **Out of scope for this audit:** full WebView exploit chain, Play Billing server fraud beyond client reconcile, physical extraction of unlocked device with root.
 
@@ -37,7 +37,8 @@
 | Private Vault | **Improved crypto; UX/auth bugs** | AES-GCM; fail-closed without device lock; lifecycle vs biometric friction |
 | WebDAV backup | **Improved transport policy** | HTTPS required except private IP; restore validated; backup still **not** E2EE |
 | Restricted media (Play) | **Good** | Independent of tier |
-| Automation API / Companion | **Not shipped** | Design must follow §5 |
+| Automation API | **Shipped (4.0.1)** | §5.1 controls implemented — see §4.6 |
+| Desktop companion | **Not shipped** | Future (§5.3) |
 
 **Overall residual risk for a local downloader utility:** **Medium**, dominated by intentional cleartext LAN sharing and user-chosen WebDAV trust.
 
@@ -83,7 +84,7 @@ Severity: **Critical** · **High** · **Medium** · **Low** · **Info**
 | **O-07** | Med | Free cap day uses local clock | Set clock back to reset daily free taste | Accept or use monotonic + last-seen day |
 | **O-08** | Med | Offline cached Pro after refund | Until BC reconcile succeeds | Document; optional recheck on resume |
 | **O-09** | Low | Recovery key = raw key material | Screenshot before FLAG_SECURE race; user stores insecurely | Show only under FLAG_SECURE; force confirm “written down” |
-| **O-10** | Low | Companion / Automation API (future) | Accidental LAN bind = remote queue control | Localhost default; separate port; never share with Send-to-PC |
+| **O-10** | Low | Desktop companion (future); Automation API shipped | Accidental LAN bind = remote queue control | Shipped API mitigates: localhost-only, default off, bearer token, rate limits; companion still future |
 | **O-11** | Info | GPL gate bypass | Expected | No DRM |
 | **O-12** | Med | Add-to-queue cookie fetch no timeout | UI spinner can hang on dead WebView | Timeout 2–3s; proceed with empty cookies |
 | **O-13** | Low | Debug Force Pro only (no Ultra) | Incomplete Ultra QA | Free/Pro/Ultra dropdown |
@@ -191,21 +192,31 @@ Severity: **Critical** · **High** · **Medium** · **Low** · **Info**
 | Custom headers from profiles | O-06 |
 | Cleartext media URLs | Inherent to many sites; user-initiated |
 
+### 4.6 Automation API (`AutomationApiService`)
+
+**Controls now:**
+
+- Ultra tier only; **default off** — persisted `enabled` flag in `automation_api_settings.json`; auto-starts at launch only if previously enabled
+- Binds `127.0.0.1:8080` only (loopback); separate port from Send-to-PC (17890)
+- Bearer token: 32 random bytes, `aurora_` prefix, stored in platform secure storage (**not hashed**); shown / regenerable in Settings
+- Endpoints: `GET /v1/status` (tier + queue counts), `GET /v1/tasks` (list), `POST /v1/tasks` (enqueue), `POST /v1/tasks/:id/pause|resume|cancel`
+- `POST /v1/tasks` → `201` with real `savePath` under the completed-downloads directory; `409` duplicate URL, `400` missing/blocked URL or bad JSON, `413` body > 64 KB, `429` > 60 req/10 s, `503` queue unavailable
+
 ---
 
 ## 5. Requirements for upcoming Ultra features
 
-### 5.1 Automation API (U4)
+### 5.1 Automation API (U4) — shipped in 4.0.1
 
-| Rule | Mandatory |
-|------|-----------|
-| Bind `127.0.0.1` only by default | Yes |
-| Separate port from Send-to-PC (17890) | Yes |
-| Bearer token, high entropy, show once | Yes |
-| Default **off** | Yes |
-| No path that returns arbitrary filesystem | Yes — only queue metadata + enqueue URL |
-| Rate limit + body size limit | Yes |
-| Ultra gate | Yes |
+| Rule | Status |
+|------|--------|
+| Bind `127.0.0.1` only by default | **Implemented** |
+| Separate port from Send-to-PC (17890) | **Implemented** — 8080 |
+| Bearer token, high entropy, show once | **Implemented** — 32 random bytes, `aurora_` prefix, secure storage, regenerable in Settings |
+| Default **off** | **Implemented** — persisted toggle; auto-starts at launch only if previously enabled |
+| No path that returns arbitrary filesystem | **Implemented** — queue metadata + enqueue only |
+| Rate limit + body size limit | **Implemented** — 60 req / 10 s; body ≤ 64 KB |
+| Ultra gate | **Implemented** |
 
 ### 5.2 E2EE Vault Sync (U6)
 
@@ -269,6 +280,7 @@ Run before any Play production push that touches premium/network:
 | Date | Change |
 |------|--------|
 | 2026-07-20 | Initial audit from remediation + hardening review; mirrored open issues into Ultra plan |
+| 2026-08-07 | Automation API shipped (4.0.1+52): §5.1 controls implemented; §4.6 added |
 
 ---
 

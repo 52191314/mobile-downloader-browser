@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 
 /// A card wrapper that only activates horizontal swipe after a deliberate
@@ -93,19 +92,6 @@ class _HoldSwipeCardState extends State<HoldSwipeCard>
     ));
     _snapController.reset();
     _snapController.forward();
-  }
-
-  /// Spring-powered snap that replaces [Curves.decelerate] with realistic
-  /// physics for a more natural feel.
-  void _snapToSpring(double target) {
-    if (_snapController.isAnimating) _snapController.stop();
-    final simulation = SpringSimulation(
-      const SpringDescription(mass: 1, stiffness: 200, damping: 20),
-      _dragOffset,
-      target,
-      0, // initial velocity
-    );
-    _snapController.animateWith(simulation);
   }
 
   // ── Long-press gesture handlers ────────────────────────────────────

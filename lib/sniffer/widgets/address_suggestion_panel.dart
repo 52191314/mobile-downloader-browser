@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../settings/download_settings.dart';
 import '../../theme/aurora_palette.dart';
 import '../models/address_suggestion.dart';
 

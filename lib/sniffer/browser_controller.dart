@@ -1123,7 +1123,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       // "Always block on this site" entries: cancel silently, no prompt.
       final alwaysBlocked = _alwaysBlockedRedirectHosts[sourceHost] ?? const [];
       final targetHost =
-          requestUri?.host.isNotEmpty == true ? requestUri!.host : '';
+          requestUri.host.isNotEmpty == true ? requestUri.host : '';
       if (targetHost.isNotEmpty &&
           alwaysBlocked.contains(targetHost.toLowerCase())) {
         _blockedInvisibleRedirectsCount++;
@@ -2061,7 +2061,6 @@ class MockBrowserController implements SnifferBrowserController {
   AdBlockEngine _adBlockEngine = AdBlockEngine.builtIn();
   int _blockedPopupsCount = 0;
   int _blockedInvisibleRedirectsCount = 0;
-  Map<String, List<String>> _alwaysBlockedRedirectHosts = const {};
   Map<String, String> _currentHeaders = {};
   HlsPlaylist? _lastMasterPlaylist;
 
@@ -2071,7 +2070,6 @@ class MockBrowserController implements SnifferBrowserController {
   void Function(String)? _onOpenUrlInNewTab;
   Future<bool> Function()? _onSystemBackRequested;
   void Function()? _onNavStateChanged;
-  void Function(int)? _onProgressChanged;
 
   @override
   void openUrlInNewTab(String url) {
@@ -2201,12 +2199,7 @@ class MockBrowserController implements SnifferBrowserController {
   }
 
   @override
-  void setAlwaysBlockedRedirectHosts(Map<String, List<String>> hosts) {
-    _alwaysBlockedRedirectHosts = {
-      for (final e in hosts.entries)
-        e.key.toLowerCase(): e.value.map((h) => h.toLowerCase()).toList(),
-    };
-  }
+  void setAlwaysBlockedRedirectHosts(Map<String, List<String>> hosts) {}
 
   @override
   void armPlayNavigationSuppress([
@@ -2442,9 +2435,7 @@ class MockBrowserController implements SnifferBrowserController {
   }
 
   @override
-  void setOnProgressChanged(void Function(int progress)? callback) {
-    _onProgressChanged = callback;
-  }
+  void setOnProgressChanged(void Function(int progress)? callback) {}
 
   @override
   void setOnUrlChanged(void Function(String url) callback) {

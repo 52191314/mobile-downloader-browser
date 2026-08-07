@@ -195,14 +195,6 @@ Widget _buildListView(
   // Non-nullable convenience aliases with no-op fallbacks.
   void onDrop(String id, String? g) =>
       onDropOnGroup?.call(id, g);
-  void onLongPress(String g) =>
-      onGroupLongPress?.call(g);
-  int colorFor(String n) =>
-      (colorIndexForGroup != null) ? colorIndexForGroup!(n) : -1;
-  bool isExpanded(String n) =>
-      (isGroupExpanded != null) ? isGroupExpanded!(n) : true;
-  void toggleGroup(String n) =>
-      onToggleGroup?.call(n);
 
   return ListView(
     children: [
@@ -319,7 +311,7 @@ Widget _buildGroupSection(
   required void Function(String name)? onToggleGroup,
 }) {
   final colorIdx = (colorIndexForGroup != null)
-      ? colorIndexForGroup!(groupName)
+      ? colorIndexForGroup(groupName)
       : -1;
   final accent = TabGroupPalette.colorFor(
     colorIndex: colorIdx >= 0 ? colorIdx : null,
@@ -334,7 +326,7 @@ Widget _buildGroupSection(
   void onLongPress(String g) =>
       onGroupLongPress?.call(g);
   bool isExpanded(String n) =>
-      (isGroupExpanded != null) ? isGroupExpanded!(n) : true;
+      (isGroupExpanded != null) ? isGroupExpanded(n) : true;
   void toggleGroup(String n) =>
       onToggleGroup?.call(n);
 

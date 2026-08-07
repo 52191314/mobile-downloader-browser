@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:path/path.dart' as p;
 import 'models.dart';
-import 'download_error_classifier.dart';
 import 'download_splitter.dart';
 import 'file_combiner.dart';
 import 'hls_downloader.dart';
@@ -79,13 +78,6 @@ class DownloadQueue {
   /// Global speed limiter shared across all active downloads.
   /// Set via [setSpeedLimit]; 0 = unlimited (no-op).
   final SpeedLimiter speedLimiter = SpeedLimiter();
-
-  /// Current proxy configuration, applied via [applyProxySettings].
-  ProxyType _proxyType = ProxyType.none;
-  String _proxyHost = '';
-  int _proxyPort = 8080;
-  String _proxyUsername = '';
-  String _proxyPassword = '';
 
   String? queuePath;
   bool _isLoading = false;
@@ -214,11 +206,6 @@ class DownloadQueue {
   /// Applies proxy settings by recreating the shared HTTP client.
   /// Called when the user changes proxy configuration in Settings.
   void applyProxySettings(ProxyType type, String host, int port, String username, String password) {
-    _proxyType = type;
-    _proxyHost = host;
-    _proxyPort = port;
-    _proxyUsername = username;
-    _proxyPassword = password;
     // Direct assignment replaces the deferred initializer from the constructor
     // or overwrites the existing client. No explicit close needed here because
     // the old client (if it was constructed at all) is garbage-collected and
@@ -1176,7 +1163,7 @@ class DownloadQueue {
           // Re-base tempDir from the old getTemporaryDirectory() (non-persistent)
           // to the persistent getApplicationSupportDirectory()/downloads_tmp so
           // partial download bytes survive OS cache clearing.
-          final tempDirStr = (item as Map)['tempDir'] as String? ?? '';
+          final tempDirStr = item['tempDir'] as String? ?? '';
           if (tempDirStr.isNotEmpty) {
             final normalized = tempDirStr.replaceAll('\\', '/');
             if (!normalized.contains('downloads_tmp')) {
@@ -1185,7 +1172,7 @@ class DownloadQueue {
               final basename = lastSlash != -1
                   ? normalized.substring(lastSlash + 1)
                   : normalized;
-              (item as Map)['tempDir'] =
+              item['tempDir'] =
                   '$persistentDownloadsTmp/$basename';
             }
           }

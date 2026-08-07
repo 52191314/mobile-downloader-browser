@@ -58,14 +58,14 @@ class IdmBackupParser {
       }
 
       List<int>? decomp;
-      if (compMethod == 8 && compBytes != null) {
+      if (compMethod == 8) {
         try {
           // Decompress using raw deflate (no zlib headers)
           decomp = ZLibDecoder(raw: true).convert(compBytes);
         } catch (_) {
           // Skip file if decompression fails
         }
-      } else if (compMethod == 0 && compBytes != null) {
+      } else if (compMethod == 0) {
         decomp = compBytes;
       }
 

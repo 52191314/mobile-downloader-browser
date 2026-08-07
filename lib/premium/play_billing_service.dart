@@ -102,7 +102,7 @@ class PlayBillingService {
 
     try {
       _storeAvailable = await _iap.isAvailable();
-    } catch (e, s) {
+    } catch (e) {
       _storeAvailable = false;
       _lastError = e.toString();
       debugPrint('PlayBilling isAvailable failed: $e');
@@ -218,7 +218,7 @@ class PlayBillingService {
       final ok = await _iap.buyNonConsumable(purchaseParam: param);
       if (!ok) _lastError = 'Purchase was not started.';
       return ok;
-    } catch (e, s) {
+    } catch (e) {
       _lastError = e.toString();
       debugPrint('PlayBilling buy($productId) failed: $e');
       return false;
@@ -277,7 +277,7 @@ class PlayBillingService {
     if (mapped.isEmpty) return;
     try {
       await service.activate(mapped, reason: reason);
-    } catch (e, s) {
+    } catch (e) {
       debugPrint('PlayBilling license activate failed: $e');
     }
   }
@@ -394,7 +394,7 @@ class PlayBillingService {
           );
           return;
         }
-      } catch (e, s) {
+      } catch (e) {
         // BillingClient unavailable / threw — fall through to grant-only.
         debugPrint('PlayBilling BillingClient query failed, using fallback: $e');
       }
@@ -434,7 +434,7 @@ class PlayBillingService {
       await _activateLicense(collected, reason: 'fallback_$reason');
       await entitlement.recordReconcileFailure(); // not authoritative
       debugPrint('reconcile used grant-only restore fallback (reason=$reason)');
-    } catch (e, s) {
+    } catch (e) {
       await entitlement.recordReconcileFailure();
       debugPrint('PlayBilling reconcile failed: $e');
       // never revoke

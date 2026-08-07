@@ -204,7 +204,7 @@ Future<void> enqueueDirectDownload({
       pageHost: pageHost,
     );
     if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
-      suggestedName = ruleEngine.applyRename(matchedRule!, suggestedName);
+      suggestedName = ruleEngine.applyRename(matchedRule, suggestedName);
     }
     final ruleDest = ruleEngine.getDestinationFolder(matchedRule);
     if (ruleDest != null && ruleDest.isNotEmpty) {

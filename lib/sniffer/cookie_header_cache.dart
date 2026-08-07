@@ -1,4 +1,3 @@
-import 'dart:async';
 
 /// Manages a time-based cache of cookie header maps keyed by normalized URL.
 /// Cookies are cached for a short TTL (5 seconds) to avoid flooding the

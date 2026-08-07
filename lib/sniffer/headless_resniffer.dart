@@ -1,10 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-
-import 'sniffer_url_utils.dart';
 
 /// DOM query JS that mirrors [_queryHlsFromPage] in `sniffer_screen.dart`:
 /// finds the first non-ping `.m3u8` URL in <source>, <video>/<audio>, or

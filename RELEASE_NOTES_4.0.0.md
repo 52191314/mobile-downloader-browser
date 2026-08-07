@@ -1,5 +1,17 @@
 # Aurora Downloader 4.0.0 (48) — Release Notes
 
+## What's new in 4.0.1 (52)
+
+- **Automation API enqueue fix**: `POST /v1/tasks` is now fully wired to the download queue and
+  returns a real `savePath` under the app's completed-downloads directory (previously a broken
+  `/tmp/<id>` placeholder)
+- **Automation API default off**: the server no longer auto-starts on every launch — it only
+  starts if you previously enabled it in Settings (persisted toggle, Ultra tier), and now enforces
+  a rate limit (60 requests / 10 s) and a 64 KB body size limit
+- **Aurora Watcher notifications**: new items now fire a local notification on a dedicated
+  `aurora_watcher` channel in addition to being auto-enqueued
+- Build: 4.0.1+52, play channel
+
 ## What's new (Play Store listing — under 500 chars)
 
 - Private Vault: reliable biometric/PIN unlock, clearer locked/unlocked states, and

@@ -11,7 +11,6 @@
 /// Free users are capped at first-5 via [FreeTaste.evaluate].
 library;
 
-import 'dart:math';
 
 /// Parsed episode descriptor from a link.
 class EpisodeLink {

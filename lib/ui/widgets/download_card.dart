@@ -30,7 +30,7 @@ FileCategory categoryForTask(DownloadTask task) {
     final cat = MediaFileTypes.categoryForExtension(
       MediaFileTypes.extensionForMime(cleanMime),
     );
-    if (cat != null && cat != FileCategory.other) return cat;
+    if (cat != FileCategory.other) return cat;
   }
 
   // 4) Extension from task display name
@@ -39,7 +39,7 @@ FileCategory categoryForTask(DownloadTask task) {
   if (dotIdx > 0) {
     final ext = name.substring(dotIdx).toLowerCase();
     final cat = MediaFileTypes.categoryForExtension(ext);
-    if (cat != null && cat != FileCategory.other) return cat;
+    if (cat != FileCategory.other) return cat;
   }
 
   // 5) Extension from URL
@@ -50,7 +50,7 @@ FileCategory categoryForTask(DownloadTask task) {
     if (lastDot > 0) {
       final ext = lastSeg.substring(lastDot).toLowerCase();
       final cat = MediaFileTypes.categoryForExtension(ext);
-      if (cat != null && cat != FileCategory.other) return cat;
+      if (cat != FileCategory.other) return cat;
     }
   }
 

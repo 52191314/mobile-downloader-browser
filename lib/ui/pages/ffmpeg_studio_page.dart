@@ -17,7 +17,6 @@ import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
 import '../../theme/aurora_palette.dart';
-import '../../theme/aurora_tokens.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/panel.dart';
 

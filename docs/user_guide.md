@@ -1,6 +1,6 @@
 # Aurora Downloader — Complete User Guide
 
-> **Version:** 2.4.5  
+> **Version:** 4.0.1 (52)  
 > **Platform:** Android  
 > **License:** GPL-3.0
 
@@ -358,8 +358,8 @@ See [Site Profiles](#site-profiles) under the browser section.
 | Private Vault | Encrypted file storage. | **Pro** (25 items free, unlimited Pro) |
 | WebDAV Backup | Remote backup to your own server. | **Pro** |
 | FFmpeg Studio | Compress, trim, convert, extract audio. | **Ultra** |
-| Watcher | RSS/page monitor with auto-enqueue. | **Ultra** |
-| Automation API | Localhost REST API for Tasker. | **Ultra** |
+| Watcher | RSS/page monitor with auto-enqueue + new-item notifications. | **Ultra** |
+| Automation API | Localhost REST API for Tasker (default off). | **Ultra** |
 | Upgrades | View current tier and purchase Pro/Ultra. | — |
 
 ### About
@@ -651,7 +651,7 @@ The sync uses **PBKDF2-SHA256** key derivation with 600,000 iterations + AES-GCM
 
 **Tier:** Ultra
 
-The Watcher monitors RSS feeds and web pages for new links and automatically enqueues them as downloads.
+The Watcher monitors RSS feeds and web pages for new links, automatically enqueues them as downloads, and notifies you when new items appear.
 
 ### How to Use
 
@@ -664,21 +664,25 @@ The Watcher monitors RSS feeds and web pages for new links and automatically enq
 | **Label** | A friendly name for this watch (e.g., "Weekly podcasts"). |
 | **URL** | The RSS feed URL or web page URL to monitor. |
 | **Type** | **RSS** — parses `<item>` (RSS) and `<entry>` (Atom) elements. **Page** — extracts all `<a href>` links. |
-| **Regex filter** (optional) | Only match links matching this regular expression. E.g., `\.mp4$` for video files only. |
-| **Interval** | How often to check: 30 min / 1 hour / 2 hours / 6 hours / 12 hours / 24 hours. |
+| **Regex filter** (optional) | Only match items whose titles match this regular expression. E.g., `\\.mp4$` for video files only. |
+| **Interval** | How often to check: 30 min / 1 hour (default) / 2 hours / 6 hours / 12 hours / 24 hours. |
 | **Enabled** | Turn the watch on or off. |
 
 4. Tap **Save**.
 
 ### How It Works
 
-1. A background timer runs every **5 minutes**.
-2. For each enabled rule whose `minInterval` has elapsed since `lastCheckedAt`, the service:
+1. While the app is running (foreground or backgrounded), an in-app timer ticks every **5 minutes**.
+   This is **not** an OS-scheduled background task — if the app process is killed, checks stop until the app is reopened.
+2. For each enabled rule whose `minInterval` (default 1 hour) has elapsed since `lastCheckedAt`, the service:
    - Fetches the URL.
    - Parses RSS items or page links.
-   - Compares against the `seenIds` set (up to 500 entries, auto-evicted).
-   - For each new, unseen link, calls the `onEnqueue` callback → the link is added to the download queue.
-3. The new link's ID is added to `seenIds` so it won't be re-downloaded on the next check.
+   - Filters by the rule's regex (if set) and compares against the rule's `seenIds` set (up to 500 entries, auto-evicted).
+   - For each new, unseen item, calls the `onEnqueue` callback → the link is added to the download queue.
+3. New items also fire a local notification on the dedicated **`aurora_watcher`** notification channel.
+4. The new item's ID is added to `seenIds` so it won't be re-downloaded on the next check.
+
+Rules are persisted in `watcher_rules.json`.
 
 ### Managing Watch Rules
 
@@ -705,42 +709,49 @@ The Automation API provides a localhost REST interface for integrating Aurora Do
 
 ### Security Features
 
-- Binds to **127.0.0.1 only** (loopback) — not accessible from other devices on your network.
-- Uses a separate port (default **8080**) from the Send-to-PC LAN server.
-- **Random Bearer token** generated on start, stored hashed in `FlutterSecureStorage`.
-- **Default off** — must be manually enabled each session.
+- **Ultra tier required.**
+- **Default off** — the server does not run unless you enable it in Settings. The toggle is
+  persisted (`automation_api_settings.json`); at app launch the server only auto-starts if you
+  previously enabled it.
+- Binds to **127.0.0.1:8080 only** (loopback) — not accessible from other devices on your network.
+- Uses a separate port (**8080**) from the Send-to-PC LAN server.
+- **Bearer token** — 32 random bytes with an `aurora_` prefix, stored in the platform's secure
+  storage (not hashed), shown and regenerable on the Settings page.
 
 ### How to Use
 
 1. Go to **Settings → Data & Account → Automation API**.
-2. Tap **Start**.
-3. Copy the displayed **Bearer token**.
+2. Tap the toggle to **enable** the server (Ultra tier required). Your choice is remembered for
+   future launches.
+3. Copy the displayed **Bearer token** (or tap **Regenerate** for a new one).
 4. Use any HTTP client to send requests to `http://127.0.0.1:8080/`.
 
 ### API Endpoints
 
 #### `GET /v1/status`
 
-Returns the current app status.
+Returns the current app status: your tier and live queue counts.
 
 ```bash
-curl -H "Authorization: Bearer aurora_<your_token>" http://127.0.0.1:8080/v1/status
+curl -H "Authorization: Bearer aurora_<token>" http://127.0.0.1:8080/v1/status
 ```
 
 **Response:**
 ```json
 {
   "status": "ok",
-  "tier": "ultra"
+  "tier": "ultra",
+  "queuePending": 1,
+  "queueActive": 2
 }
 ```
 
 #### `GET /v1/tasks`
 
-Returns the current download queue.
+Returns the current download queue as a list of tasks.
 
 ```bash
-curl -H "Authorization: Bearer aurora_<your_token>" http://127.0.0.1:8080/v1/tasks
+curl -H "Authorization: Bearer aurora_<token>" http://127.0.0.1:8080/v1/tasks
 ```
 
 #### `POST /v1/tasks`
@@ -749,17 +760,45 @@ Enqueue a new download URL.
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer aurora_<your_token>" \
+  -H "Authorization: Bearer aurora_<token>" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/video.mp4"}' \
+  -d '{"url": "https://example.com/video.mp4", "label": "My video"}' \
   http://127.0.0.1:8080/v1/tasks
 ```
 
-**Response:**
+- `url` (required) — the URL to download.
+- `label` (optional) — a friendly label for the task.
+
+**Response (201 Created):**
 ```json
 {
-  "status": "enqueued"
+  "status": "queued",
+  "url": "https://example.com/video.mp4",
+  "taskId": "…",
+  "savePath": "/storage/emulated/0/Download/Aurora/completed/video.mp4"
 }
+```
+
+`savePath` is the real destination under the app's completed-downloads directory.
+
+**Errors:**
+
+| Code | Meaning |
+|------|---------|
+| 400 | Missing/blocked URL, or malformed JSON body. |
+| 409 | The URL is already queued. |
+| 413 | Request body larger than 64 KB. |
+| 429 | More than 60 requests within 10 seconds. |
+| 503 | The download queue is unavailable. |
+
+#### `POST /v1/tasks/:id/pause|resume|cancel`
+
+Pause, resume, or cancel a task by its ID.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer aurora_<token>" \
+  http://127.0.0.1:8080/v1/tasks/<taskId>/pause
 ```
 
 ### Tasker Integration Example
@@ -995,7 +1034,7 @@ On **GitHub/F-Droid/sideload builds**, the upsell screen is informational — Pr
 | **Vault won't unlock** | Ensure you have a device PIN/biometric set up. The vault fails closed on unsecured devices. Use your recovery key if you've lost biometric access. |
 | **Scheduled tasks not starting** | The engine checks every 30 seconds. Ensure the task's state shows "Scheduled" and the start time has passed. |
 | **Watcher not detecting new items** | Check that the rule is enabled and the interval has elapsed. Tap **Check now** to force an immediate check. Verify the RSS feed or page URL is accessible. |
-| **Automation API won't start** | Ensure no other app is using port 8080. Try restarting the service. The server binds to 127.0.0.1 only — you cannot access it from other devices. |
+| **Automation API won't start** | The server is off by default — enable it in Settings → Data & Account → Automation API (Ultra tier required). Ensure no other app is using port 8080. It binds to 127.0.0.1 only — you cannot access it from other devices. |
 | **Downloads fail with "Restricted"** | The URL matches the Restricted Media Policy (blocks known piracy/proxy/token-leak domains). No workaround — this is a compliance feature. |
 | **WebDAV backup fails** | Verify your WebDAV credentials. Check that the server URL includes the correct path. Ensure your server supports PUT requests. |
 
@@ -1021,4 +1060,4 @@ If downloads stop when the screen turns off:
 
 ---
 
-*Last updated: 2026-07-21*
+*Last updated: 2026-08-07*

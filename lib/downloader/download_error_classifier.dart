@@ -291,7 +291,7 @@ class DownloadErrorClassifier {
 
   static DownloadFailure _fromSocketException(SocketException e) {
     final msg = e.message.toLowerCase();
-    final osMsg = e.osError?.message?.toLowerCase() ?? '';
+    final osMsg = e.osError?.message.toLowerCase() ?? '';
     final combined = '$msg $osMsg';
 
     if (combined.contains('failed host lookup') ||
@@ -326,7 +326,7 @@ class DownloadErrorClassifier {
 
   static DownloadFailure _fromFileSystemException(FileSystemException e) {
     final msg = e.message.toLowerCase();
-    final osMsg = e.osError?.message?.toLowerCase() ?? '';
+    final osMsg = e.osError?.message.toLowerCase() ?? '';
     final combined = '$msg $osMsg';
 
     if (combined.contains('no space left') ||

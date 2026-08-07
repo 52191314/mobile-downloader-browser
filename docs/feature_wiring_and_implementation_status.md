@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-07-22 |
-| **Status** | Reference / audit snapshot |
+| **Date** | 2026-08-07 |
+| **Status** | Reference / audit snapshot — updated for 4.0.1: Watcher + Automation API shipped |
 | **Scope** | UI reachability vs backend completeness |
 | **Related** | [`ultra_full_feature_pack_plan.md`](ultra_full_feature_pack_plan.md), [`2026-07-20-ultra-pack-and-security-summary.md`](2026-07-20-ultra-pack-and-security-summary.md) |
 
@@ -13,6 +13,9 @@ This document answers two questions:
 2. **Would the feature actually work if reached?** (implementation completeness)
 
 It is an audit of the codebase as of the date above — not a commitment that marketing, Play listing, or user guide copy match reality.
+
+> **Update (2026-08-07):** Aurora Watcher and the Automation API shipped in 4.0.1+52 and are now
+> reachable from Settings → Data & Account. Their rows below reflect the shipped state.
 
 ---
 
@@ -43,12 +46,14 @@ Side effect of the locked model: anything still only linked from the unused hub 
 
 | Feature | Code location | Problem |
 |---------|---------------|---------|
-| **Aurora Watcher** | `WatcherPage` + `WatcherService` | Only linked from dead `_buildSettingsHub`. **No** browser overflow Settings entry and no `SettingsSection` for Watcher. |
 | **FFmpeg Studio** | `FfmpegStudioPage`; queue passes `onOpenFfmpegStudio` into `DownloadCard` | Card never adds a **popup menu** item or `onSelected` case — callback is dead. User guide still claims overflow has “Edit in FFmpeg Studio”. |
-| **Automation API** | `AutomationApiService` started from `main.dart` for Ultra | Injected into `SettingsPage` but `widget.automationApiService` is never read. No token / enable UI on a Settings section reachable from overflow. |
 | **Accent packs** | `lib/premium/accent_pack.dart` + theme notifier | Appearance UI (overflow → Theme) is dark mode + snackbars only. No picker. User guide describes packs. |
 | **Library export / import** | `_exportLibrary` / `_importLibrary` on sniffer screen | Methods exist; not hooked to Tools segment (or any overflow row). |
 | **Full-page Translate** | `_translatePage` | Exists; only **selection** translate is on the element context menu. |
+
+> **Resolved in 4.0.1+52:** Aurora Watcher (Settings → Data & Account → Watcher) and the
+> Automation API (Settings → Data & Account → Automation API, default off) are now reachable —
+> see §2 for implementation status.
 
 ### Dead code (do not revive as navigation)
 
@@ -74,7 +79,7 @@ Side effect of the locked model: anything still only linked from the unused hub 
 
 - Debug control is still **“Force Pro”** only — not Free / Pro / **Ultra** dropdown (despite `setDebugTier` supporting any tier).
 - Pro page feature list is mostly older Pro rows; Ultra heroes are thin or missing.
-- Dead-hub Watcher copy says **“Folder Watcher” / Pro**; product is **Ultra RSS/page** monitor (`ProFeature.watcher`). When wired, label it correctly on the **Settings** overflow segment.
+- Dead-hub Watcher copy said **“Folder Watcher” / Pro**; the product is the **Ultra RSS/page** monitor (`ProFeature.watcher`), now wired in 4.0.1 and labeled correctly under Settings → Data & Account → Watcher.
 
 ### Documented / planned but not productized
 
@@ -111,17 +116,16 @@ These have non-stub implementations and normal product paths (subject to tier ga
 
 ### Partially real
 
-#### Watcher (RSS / page)
+#### Watcher (RSS / page) — shipped (4.0.1+52)
 
-**Implemented:** HTTP fetch, regex RSS/Atom + page `<a href>` parse, rule store, 5‑minute Dart timer, enqueue callback wired in `main.dart` to `_addDownloadFromUrl`.
+**Implemented:** HTTP fetch, regex RSS/Atom + page `<a href>` parse, rule store (`watcher_rules.json`), 5‑minute in-app Dart timer, enqueue callback wired in `main.dart` to `_addDownloadFromUrl`, new-item notification on the dedicated `aurora_watcher` channel, and UI under Settings → Data & Account → Watcher (per-rule enable/disable, regex title filter, Check now).
 
 **Limits:**
 
-- Runs only while the **app process is alive** (Dart `Timer`, not WorkManager / true background).
+- Runs only while the **app process is alive** (Dart `Timer`, not WorkManager / true background) — foreground or backgrounded; checks stop if the process is killed.
 - Fragile parsers; not a full feed library.
-- **No UI path** on the browser overflow Settings segment (or any `SettingsSection`) to create rules without code changes.
 
-**Verdict:** If Ultra + rules existed + app stayed open, auto-enqueue can work. Overnight “install and forget” is **not** supported by current architecture.
+**Verdict:** Auto-enqueue works while the app is running. Overnight “install and forget” is **not** supported by current architecture.
 
 #### FFmpeg Studio
 
@@ -137,18 +141,18 @@ Load/save + `appAccentPackNotifier` + theme integration exist. Without a picker 
 
 ### Will not really work (stubs / incomplete wiring)
 
-#### Automation API — mostly placeholder
+#### Automation API — shipped (4.0.1+52)
 
-Server bind + Bearer token auth are real. Handlers are **not** connected to `DownloadQueue`:
+Server bind + Bearer token auth are real and handlers are now connected to `DownloadQueue`:
 
-| Endpoint | Actual behavior |
-|----------|-----------------|
-| `GET /v1/status` | Hardcodes `queuePending: 0`, `queueActive: 0` |
-| `GET /v1/tasks` | Always `[]` + note needing DownloadQueue wiring |
-| `POST /v1/tasks` | Reads `url`; does **not** enqueue; only fires `onQueueChanged` → `setState` |
-| pause / resume / cancel | Return success JSON; **do not** touch the queue |
+| Endpoint | Behavior |
+|----------|----------|
+| `GET /v1/status` | Tier + live queue counts |
+| `GET /v1/tasks` | Live queue list |
+| `POST /v1/tasks` | Enqueues; `201` with real `savePath`; `409` duplicate URL, `400` bad/missing URL, `413` body > 64 KB, `429` rate-limited (60 req / 10 s), `503` queue unavailable |
+| pause / resume / cancel | Real queue control via `POST /v1/tasks/:id/…` |
 
-Also: no token UI on a Settings section from overflow; auto-start on Ultra conflicts with design comments (“toggle default off”). **Tasker / scripts cannot control downloads with current code.**
+Server is **default off** (Ultra): persisted toggle in `automation_api_settings.json`; auto-starts at launch only if previously enabled. Token (32 random bytes, `aurora_` prefix) in platform secure storage, shown / regenerable in Settings; binds `127.0.0.1:8080`. **Tasker / scripts can control downloads.**
 
 Primary file: `lib/premium/automation/automation_api_service.dart`.
 
@@ -174,9 +178,9 @@ Primary file: `lib/premium/automation/automation_api_service.dart`.
 | Vault / WebDAV / LAN / audio extract | Yes | Yes (overflow Settings + product paths) | **Yes** (with gates) |
 | Vault Sync E2EE | Yes | Vault UI | **Yes** if Ultra + WebDAV configured |
 | Turbo / dead-link / clipboard | Yes | Background | **Yes** for Pro+ |
-| Watcher | Mostly (foreground only) | **No overflow / section** | Only if forced / rules injected |
+| Watcher | Yes (in-app timer while running) | Yes (Settings → Data & Account) | **Yes** (Ultra, app running) |
 | FFmpeg | Yes | **No download-card popup entry** | Only if Studio opened by code |
-| Automation API | **No** (stubs) | Auto-start only | **No** for real control |
+| Automation API | Yes | Yes (Settings → Data & Account, default off) | **Yes** (Ultra, when enabled) |
 | Accent packs | Yes | **No picker** (Theme section incomplete) | Effectively **no** |
 | Ultra extras / AI / companion | No | No | **No** |
 | Settings hub widget | N/A (duplicate chrome) | Intentionally unused | N/A — **keep popup** |
@@ -187,12 +191,12 @@ Primary file: `lib/premium/automation/automation_api_service.dart`.
 
 All fixes extend the **existing popup menus** / `SettingsSection` map. Do **not** mount `_buildSettingsHub` or add a Settings dock tab.
 
-1. Add Watcher (and any other hub-only items) to browser overflow **Settings** segment + a `SettingsSection` (or dedicated page open from that row).
+1. ~~Add Watcher to overflow Settings + a `SettingsSection`~~ — **Done (4.0.1):** Settings → Data & Account → Watcher.
 2. Add FFmpeg Studio item + handler on `DownloadCard` **popup** for completed files (`onOpenFfmpegStudio` is already passed in).
-3. Wire `AutomationApiService` to `DownloadQueue` (list / enqueue / pause / resume / cancel) + Settings token UI reachable from overflow; default **off**.
+3. ~~Wire `AutomationApiService` to `DownloadQueue` + Settings token UI; default off~~ — **Done (4.0.1):** queue-connected, token UI in Settings, default off.
 4. Accent pack picker on Appearance / Theme (opened from overflow Settings; gate with `ProFeature.themePack`).
 5. Debug tier dropdown: Free / Pro / **Ultra**.
-6. Align user guide / upsell copy with unreachable or stub features (Automation API, FFmpeg card menu, accent packs, Watcher path).
+6. Align user guide / upsell copy with unreachable or stub features (FFmpeg card menu, accent packs).
 7. Optional cleanup: remove or quarantine `_buildSettingsHub` so it cannot be mistaken for the product Settings surface.
 
 ---
@@ -201,15 +205,13 @@ All fixes extend the **existing popup menus** / `SettingsSection` map. Do **not*
 
 Until the gaps above are closed, do **not** treat the following as shippable user-facing Ultra/Pro polish:
 
-- “Tasker / Automation API controls the queue”
-- “Folder / RSS Watcher from Settings” (no reachable overflow entry)
 - “Edit in FFmpeg Studio” on every completed download card popup
 - “Choose accent color packs in Appearance”
 - “Force Ultra” debug for license testing
 
 Also do **not** claim or plan a full-screen settings hub as the primary Settings UX — the product surface is the **browser Settings \| Tools popup** plus section pages.
 
-Core downloader, browser capture, Pro engine caps, vault, WebDAV, LAN share, and background Pro helpers remain the solid product surface.
+Core downloader, browser capture, Pro engine caps, vault, WebDAV, LAN share, background Pro helpers, Watcher, and the Automation API (both since 4.0.1) form the solid product surface.
 
 ---
 

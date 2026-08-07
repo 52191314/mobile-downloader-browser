@@ -27,9 +27,6 @@ import 'package:http/http.dart' as http;
 import 'pro_entitlement.dart';
 import 'pro_features.dart';
 
-/// Number of PBKDF2 iterations for key derivation.
-const _kPbkdf2Iterations = 600000;
-
 /// Key length in bytes (AES-256).
 const _kKeyLength = 32;
 

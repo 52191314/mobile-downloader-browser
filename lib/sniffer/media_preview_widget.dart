@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 
-import 'media_sniffer_engine.dart';
 import 'models/sniffed_media.dart';
 
 class MediaPreviewWidget extends StatefulWidget {

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 
 /// How often the app automatically backs up its data.
 enum AutoBackupInterval {

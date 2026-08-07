@@ -38,7 +38,7 @@ flowchart TD
         F -- Yes --> G["Show Interactive App Tour"]
         G --> H["Request System Permissions"]
         F -- No --> H
-        H --> I["Start Background Services (Watcher, Auto-Backup, Automation API)"]
+        H --> I["Start In-App Timers (Watcher, Auto-Backup); Automation API if enabled"]
         I --> J["Render Core App Shell (AuroraDock)"]
     end
 
@@ -130,7 +130,7 @@ flowchart TD
         TourPage --> RequestPermissions["Request Storage & Notification Permissions"]
         CheckFirstLaunch -- No --> CheckPerms["Check Existing Permissions"]
         CheckPerms --> RequestPermissions
-        RequestPermissions --> StartServices["Start Background Workers & Automation API"]
+        RequestPermissions --> StartServices["Start In-App Timers & Automation API (if enabled)"]
         StartServices --> LaunchShell["Launch Core Navigation Shell"]
     end
 ```

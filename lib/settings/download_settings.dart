@@ -1129,17 +1129,6 @@ class DownloadSettings {
     return result;
   }
 
-  static Map<String, double> _parseStringDoubleMap(Map? raw) {
-    if (raw == null) return const {};
-    final result = <String, double>{};
-    raw.forEach((key, value) {
-      if (key is String && value is num) {
-        result[key.toLowerCase()] = value.toDouble();
-      }
-    });
-    return result;
-  }
-
   /// Parses per-site zoom levels with the same clamping applied at zoom-time
   /// (0.5x–3.0x). Rejects non-finite values and drops no-op (~1.0x) entries so
   /// a corrupted or out-of-range persisted value can't break zoom math on load.

@@ -114,7 +114,7 @@ class SiteProfile {
     Map<String, String>? headers;
     if (rawHeaders is Map) {
       headers = rawHeaders.map((k, v) => MapEntry(k.toString(), v.toString()));
-      if (headers!.isEmpty) headers = null;
+      if (headers.isEmpty) headers = null;
     }
     return SiteProfile(
       id: json['id'] as String,

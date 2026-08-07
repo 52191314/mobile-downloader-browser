@@ -10,8 +10,6 @@ import 'package:path_provider/path_provider.dart';
 import 'dev/screenshot_fixtures.dart';
 import 'downloader/download_rules.dart';
 import 'downloader/downloader.dart';
-import 'downloader/filename_service.dart';
-import 'downloader/url_filename_resolver.dart';
 import 'notifications/download_notification_service.dart';
 import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
@@ -1199,7 +1197,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         pageHost: uri.host,
       );
       if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
-        fileName = _ruleEngine!.applyRename(matchedRule!, fileName);
+        fileName = _ruleEngine!.applyRename(matchedRule, fileName);
       }
       final ruleDest = _ruleEngine!.getDestinationFolder(matchedRule);
       if (ruleDest != null && ruleDest.isNotEmpty) {

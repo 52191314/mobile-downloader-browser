@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import 'media_sniffer_engine.dart';
 import 'models/sniffed_media.dart';
 import 'sniffer_url_utils.dart';
 
@@ -149,11 +148,6 @@ class MediaCaptureAnalyzer {
   String _groupKey(SniffedMedia media, Uri? uri) {
     if (uri == null) return '${media.type.name}:${media.url}';
     return '${media.type.name}:${_normalizedUri(uri)}';
-  }
-
-  String _normalizedUrl(String url) {
-    final uri = Uri.tryParse(url);
-    return uri == null ? url : _normalizedUri(uri);
   }
 
   String _normalizedUri(Uri uri) {

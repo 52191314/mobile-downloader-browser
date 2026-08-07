@@ -15,7 +15,6 @@ import '../../downloader/download_rules.dart';
 import '../../platform/public_downloads_service.dart';
 import '../../platform/download_foreground_service.dart';
 import '../../sniffer/browser_library.dart';
-import '../../sniffer/idm_backup_parser.dart';
 import '../../backup/auto_backup_service.dart';
 import '../../backup/auto_backup_models.dart';
 import '../../backup/unified_backup_database.dart';
@@ -28,7 +27,6 @@ import '../../premium/accent_pack.dart';
 import 'user_guide_page.dart';
 import '../../premium/play_billing_service.dart';
 import '../../premium/build_channel.dart';
-import '../../sniffer/media_sniffer_engine.dart';
 import '../../sniffer/controllers/site_profile_runtime.dart';
 import '../../sniffer/external_scheme.dart';
 import '../../sniffer/models/site_profile.dart';
@@ -44,7 +42,6 @@ import '../../premium/watcher/watcher_service.dart';
 import '../../premium/automation/automation_api_service.dart';
 import 'vault_page.dart';
 import 'watcher_page.dart';
-import '../../premium/premium_flags.dart';
 import '../../sync/sync.dart';
 import 'webdav_settings_page.dart';
 
@@ -247,425 +244,6 @@ class _SettingsPageState extends State<SettingsPage> {
     return _sectionRoot(widget.launchSection);
   }
 
-  // ---------------------------------------------------------------------------
-  // Profile header
-  // ---------------------------------------------------------------------------
-
-  Widget _buildProfileHeader() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => _openPage(const UserGuidePage()),
-        borderRadius: BorderRadius.circular(16),
-        child: Ink(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: context.ac.glassSurface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: context.ac.glassBorder),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: context.ac.accentFrost.withValues(alpha: 0.15),
-                radius: 24,
-                child: Icon(
-                  Icons.menu_book_rounded,
-                  color: context.ac.accentFrost,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'User Guide & Tutorial',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.3,
-                        color: context.ac.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Complete feature guide, tutorials & troubleshooting',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.ac.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: context.ac.textTertiary,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Hub: grouped navigation rows (replaces uneven 2-col card grid)
-  // NOTE: When adding or updating a Settings entry, update both settings_page.dart (_buildSettingsHub) and sniffer_screen.dart (rawSettingsEntries).
-  // ---------------------------------------------------------------------------
-
-  Widget _buildSettingsHub() {
-    return ListenableBuilder(
-      listenable: widget.proEntitlement,
-      builder: (context, _) {
-        final isPro = widget.proEntitlement.isPro;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildSectionTitle('Downloads'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.download_rounded,
-                title: 'Defaults',
-                subtitle: 'Save location, concurrency, retries',
-                onTap: () => _openPage(_buildDefaultsPage()),
-              ),
-              _NavItem(
-                icon: Icons.wifi_rounded,
-                title: 'Network',
-                subtitle: 'Proxy and browser identity',
-                onTap: () => _openPage(_buildNetworkPage()),
-              ),
-              _NavItem(
-                icon: Icons.rule_rounded,
-                title: 'Rules',
-                subtitle: 'Auto-rename and organize',
-                badge: isPro ? null : 'Pro',
-                onTap: () => _openPage(_buildRulesPage()),
-              ),
-              _NavItem(
-                icon: Icons.schedule_rounded,
-                title: 'Schedule',
-                subtitle: 'Download later / night mode',
-                badge: isPro ? null : 'Pro',
-                onTap: () => _openPage(_buildSchedulePage()),
-              ),
-            ]),
-            const SizedBox(height: 18),
-            _buildSectionTitle('Browser'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.shield_rounded,
-                title: 'Adblock',
-                subtitle: 'Ads, popups, filter lists',
-                onTap: () => _openPage(_buildAdblockPage()),
-              ),
-              _NavItem(
-                icon: Icons.search_rounded,
-                title: 'Search & Privacy',
-                subtitle: _settings.searchEngine.name,
-                onTap: () => _openPage(_buildSearchPage()),
-              ),
-              _NavItem(
-                icon: Icons.tune_rounded,
-                title: 'Sniffer',
-                subtitle: 'Media types and site player',
-                onTap: () => _openPage(_buildSnifferPage()),
-              ),
-              _NavItem(
-                icon: Icons.people_outline_rounded,
-                title: 'Profiles',
-                subtitle: 'Per-site browser settings',
-                badge: isPro ? null : 'Pro',
-                onTap: () => _openPage(_buildProfilesPage()),
-              ),
-            ]),
-            const SizedBox(height: 18),
-            _buildSectionTitle('Appearance'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.palette_outlined,
-                title: 'Theme',
-                subtitle: 'Dark mode and display',
-                onTap: () => _openPage(_buildAppearancePage()),
-              ),
-            ]),
-            const SizedBox(height: 18),
-            _buildSectionTitle('Tools & Sync'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.backup_rounded,
-                title: 'Backup',
-                subtitle: 'Save and restore app data',
-                onTap: () => _openPage(_buildBackupPage()),
-              ),
-              _NavItem(
-                icon: Icons.cloud_outlined,
-                title: 'WebDAV Backup',
-                subtitle: isPro
-                    ? 'Remote backup to your server'
-                    : 'Cloud backup — Pro feature',
-                onTap: () {
-                  if (!isPro) {
-                    showProUpsell(context, ProFeature.webdavBackup);
-                    return;
-                  }
-                  _openPage(const WebdavSettingsPage());
-                },
-              ),
-              if (kDriveSyncEnabled)
-                _NavItem(
-                  icon: Icons.cloud_outlined,
-                  title: 'Google Drive Sync',
-                  subtitle: isPro
-                      ? 'Cloud sync and auto-upload'
-                      : 'Cloud sync — Pro feature',
-                  onTap: () {
-                    if (!isPro) {
-                      showProUpsell(context, ProFeature.driveSync);
-                      return;
-                    }
-                    _openPage(_buildDrivePage());
-                  },
-                ),
-              _NavItem(
-                icon: Icons.shield_outlined,
-                title: 'Private Vault',
-                subtitle: isPro
-                    ? 'Encrypted file storage'
-                    : 'Secure private storage — Pro feature',
-                onTap: () {
-                  if (!isPro) {
-                    showProUpsell(context, ProFeature.privateVault);
-                    return;
-                  }
-                  _openPage(_buildVaultPage());
-                },
-              ),
-              if (widget.watcherService != null)
-                _NavItem(
-                  icon: Icons.folder_special_outlined,
-                  title: 'Folder Watcher',
-                  subtitle: isPro
-                      ? 'Auto-enqueue from watched folders'
-                      : 'Watched folder automation — Pro feature',
-                  onTap: () {
-                    if (!isPro) {
-                      showProUpsell(context, ProFeature.watcher);
-                      return;
-                    }
-                    _openPage(
-                      WatcherPage(
-                        watcherService: widget.watcherService!,
-                        proEntitlement: widget.proEntitlement,
-                      ),
-                    );
-                  },
-                ),
-            ]),
-            const SizedBox(height: 18),
-            _buildSectionTitle('Advanced'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.api_rounded,
-                title: 'Automation API',
-                subtitle: isPro
-                    ? 'Local REST server for scripts'
-                    : 'REST API & Tasker integration — Pro feature',
-                onTap: () {
-                  if (!isPro) {
-                    showProUpsell(context, ProFeature.automationApi);
-                    return;
-                  }
-                  _openPage(_buildAutomationPage());
-                },
-              ),
-              _NavItem(
-                icon: isPro
-                    ? Icons.auto_awesome
-                    : Icons.auto_awesome_outlined,
-                title: 'Aurora Pro & Ultra',
-                subtitle: isPro
-                    ? 'Premium features unlocked'
-                    : 'Unlock premium features',
-                onTap: () => _openPage(_buildProPage()),
-              ),
-            ]),
-            const SizedBox(height: 18),
-            _buildSectionTitle('About'),
-            _buildNavGroup([
-              _NavItem(
-                icon: Icons.info_outline_rounded,
-                title: 'About',
-                subtitle: 'v4.0.1 · battery',
-                onTap: () => _openPage(_buildAboutPage()),
-              ),
-            ]),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildSectionTitle(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: context.ac.textTertiary,
-          letterSpacing: 0.9,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNavGroup(List<_NavItem> items) {
-    return Container(
-      decoration: BoxDecoration(
-        color: context.ac.surfaceCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: context.ac.borderHairline),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0)
-              Divider(
-                height: 1,
-                thickness: 1,
-                indent: 56,
-                color: context.ac.borderHairline,
-              ),
-            _buildNavRow(items[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNavRow(_NavItem item) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: item.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: context.ac.accentFrost.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  item.icon,
-                  size: 20,
-                  color: context.ac.accentFrost,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            item.title,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.2,
-                              color: context.ac.textPrimary,
-                            ),
-                          ),
-                        ),
-                        if (item.badge != null) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: context.ac.accentPurple
-                                  .withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              item.badge!,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.3,
-                                color: context.ac.accentPurple,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.ac.textTertiary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: context.ac.textTertiary,
-                size: 22,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _openPage(Widget page) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => page,
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0.3, 0),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-              reverseCurve: Curves.easeInCubic,
-            )),
-            child: FadeTransition(
-              opacity: animation,
-              child: child,
-            ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 250),
-      ),
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // Detail pages
@@ -2300,7 +1878,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               ],
                             ),
                           );
-                          if (confirm == true && service != null) {
+                          if (confirm == true) {
                             await service.regenerateToken();
                             if (mounted) setState(() {});
                           }
@@ -3018,24 +2596,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// One row in the Settings hub navigation list.
-class _NavItem {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final String? badge;
-  final VoidCallback onTap;
-
-  const _NavItem({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.badge,
-  });
-}
-
-/// Detail page for Drive Sync settings with live state subscription.
 class _DriveSyncPageContent extends StatefulWidget {
   final DriveSyncService driveSyncService;
   final TextEditingController folderController;
@@ -3572,8 +3132,6 @@ class BackupPage extends StatefulWidget {
 }
 
 class _BackupPageState extends State<BackupPage> {
-  BrowserLibrary? _library;
-
   bool exportFavorites = true;
   bool exportHistory = true;
   bool exportSavedPages = true;
@@ -5345,10 +4903,10 @@ class _RulesPageState extends State<_RulesPage> {
                     final now = DateTime.now();
                     final newRule = DownloadRule(
                       id: isEditing
-                          ? rule!.id
+                          ? rule.id
                           : now.microsecondsSinceEpoch.toString(),
                       name: name,
-                      enabled: isEditing ? rule!.enabled : true,
+                      enabled: isEditing ? rule.enabled : true,
                       hostPattern: hostController.text.trim().isEmpty
                           ? null
                           : hostController.text.trim(),
@@ -5363,7 +4921,7 @@ class _RulesPageState extends State<_RulesPage> {
                       requireCharging: requireCharging ? true : null,
                       timeWindowStartHour: timeWindowStart,
                       timeWindowEndHour: timeWindowEnd,
-                      createdAt: isEditing ? rule!.createdAt : now,
+                      createdAt: isEditing ? rule.createdAt : now,
                     );
 
                     if (isEditing) {

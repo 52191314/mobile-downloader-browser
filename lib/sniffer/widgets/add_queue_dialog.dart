@@ -218,21 +218,6 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
     }
   }
 
-  String _variantLabel(SniffedMedia m) {
-    // Prefer the height field populated from the HLS RESOLUTION attribute.
-    if (m.height != null) return '${m.height}p';
-    // Fallback: look for a resolution marker in the URL or name.
-    final res = RegExp(r'(?<!\d)(2160|1440|1080|720|540|480|360)p(?!\d)')
-        .firstMatch('${m.name.toLowerCase()} ${m.url.toLowerCase()}')
-        ?.group(1);
-    if (res != null) return '${res}p';
-    if (m.width != null && m.height != null) return '${m.width}x${m.height}';
-    if (m.bandwidth != null) {
-      return '${(m.bandwidth! / 1000000).toStringAsFixed(1)} Mbps';
-    }
-    return 'Default / Master';
-  }
-
   /// Date + time pickers for "Download later". Returns null if cancelled.
   Future<DateTime?> _pickScheduleStartAt() async {
     final now = DateTime.now();

@@ -70,7 +70,7 @@ String uaForProfile(String profile, {String customUserAgent = ''}) {
   if (profile == 'mobile' && _systemUserAgent != null) {
     return stripWebViewUaMarkers(_systemUserAgent!);
   }
-  return uaProfiles[profile] ?? stripWebViewUaMarkers(_systemUserAgent) ?? snifferMobileUserAgent;
+  return uaProfiles[profile] ?? stripWebViewUaMarkers(_systemUserAgent);
 }
 
 /// Aggressive UA rewrite for callers that want a desktop-like fingerprint.
