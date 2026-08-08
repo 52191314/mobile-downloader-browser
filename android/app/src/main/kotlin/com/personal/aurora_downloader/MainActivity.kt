@@ -19,6 +19,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.PowerManager
 import android.provider.MediaStore
@@ -32,6 +33,7 @@ import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import androidx.activity.enableEdgeToEdge
 import com.google.android.play.core.splitcompat.SplitCompat
 import com.google.android.play.core.splitinstall.SplitInstallManager
 import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
@@ -83,6 +85,15 @@ class MainActivity : FlutterFragmentActivity() {
         } catch (e: Throwable) {
             Log.w(TAG, "SplitCompat.installActivity failed: ${e.message}")
         }
+    }
+
+    // Play-recommended edge-to-edge: targetSdk 35+ is edge-to-edge by default
+    // on Android 15+; calling this keeps system-bar behavior consistent on
+    // older versions (transparent bars, insets delivered to the Flutter
+    // view, which handles them via SafeArea/MediaQuery).
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
     }
 
     private val channelName = "aurora_downloader/public_downloads"
