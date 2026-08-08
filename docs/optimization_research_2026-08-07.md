@@ -183,7 +183,7 @@ page may briefly show ads).
 ## 5. Verdict / recommended order
 
 Do first (this batch):
-1. **S1** Inter subset — one tooling script + rebuild, ~0.5 MB off every install. 
+1. **S1** Inter subset — one tooling script + rebuild, ~0.5 MB off every install.
 2. **P1b + P2** queue rebuild reduction — per-card progress notifier + shell timer
    removal (dock badge via ValueNotifier). Biggest UI-jank win.
 3. **S6** drop the 3 dead deps.
@@ -198,6 +198,78 @@ Scope later:
 6. **P5** player progress ValueListenableBuilder — small, safe.
 
 Not worth it: S4/S5 (deliberate features), S7 (required for crash de-obfuscation).
+
+---
+
+## 6. Round-2 cross-check (2026-08-08) — perf audit subagent findings, all verified
+
+The parallel performance audit (task-0) landed 10 findings; I re-read the cited code
+for each. **Confirmed and added to the list** (new, not in §3):
+
+### P8. Unthrottled notification `show()` per queue tick — VERIFIED, top perf bug
+`download_notification_service.dart:265-317` — `_onTaskUpdated` → `_updateProgressNotification`
+calls `_plugin.show(...)` **unconditionally** on every `downloading` event. The queue
+emits every 250 ms per active splitter (`download_splitter.dart:480-549`), and per HLS
+segment. 3 concurrent downloads = ~12 full platform-channel/Binder round trips/sec,
+each building a fresh `AndroidNotificationDetails`, on the UI isolate. The comment at
+:293 even documents the chronometer reset workaround for this re-show. The downstream
+throttles (queue save 1 s, fg-service 200 ms, UI rebuild 500 ms) do **not** gate this
+path — it is the one unthrottled hot path in the whole pipeline.
+Fix: in `_updateProgressNotification`, skip `show()` unless ≥1 s elapsed AND progress
+changed ≥1 point (keep exact updates for terminal states). Low risk, immediate win.
+
+### P9. Flat-mode queue sort/search runs per rebuild — VERIFIED
+`queue_page.dart:311-326 _computeFilteredTasks()` calls `queryTasks(...)` (full
+materialize + O(n log n) sort, and O(tasks×tokens) lower/contains scans when searching)
+on **every** `build()` — the sectioned-mode fingerprint cache does NOT cover flat mode.
+Runs at ~2 Hz during downloads, plus each shell rebuild.
+Fix: cache the flat-mode filtered list on the same fingerprint (`queue_page.dart:465-503`
+pattern); pure progress ticks already mutate in place and are excluded from the
+fingerprint. Medium risk (sorting correctness on state changes — cover with the
+existing fingerprint invalidation paths).
+
+### P10. Vault encrypt/decrypt = whole-file 3× memory copies on UI isolate — VERIFIED, OOM class
+`vault_service.dart:248-266` — `source.readAsBytes()` (full file) → `encryptBytes`
+(full ciphertext) → `Uint8List.fromList([...nonce.bytes, ...encrypted.bytes])` (3rd
+copy), all on the UI isolate; export path :299 and `vault_sync_service.dart:196` the
+same. A multi-GB video → multi-GB RSS spike → OOM kill (this is a Pro feature — the
+worst user-visible failure mode). Fix: chunked stream encrypt (`openRead` →
+`openWrite`, per-chunk AES-GCM with the 12-byte nonce + counter), whole pass in
+`Isolate.run`. Medium risk (GCM chunk semantics — keep the v1 format for the first
+chunk; add KAT tests).
+
+### P11. Per-chunk `length()` watchdog poll + O(n) re-sum — VERIFIED (native-chunk path)
+`download_splitter.dart:915-940` — per-chunk `Timer.periodic(500 ms)` stat-poll of
+`chunkFile.length()` on the UI isolate (native download path only), plus the 250 ms
+speed timer re-summing all chunks (`:1538-1546`). Up to 32 chunks × tasks = dozens of
+async stats/sec. Fix: use the byte deltas already tracked in the stream listener
+(`:1266-1268`) and let `NativeDownloadClient` report progress via callback; drop the
+stat loop (stall detection can use the native callback or a single background sampler).
+
+### P12. Player 1 Hz full-tree setState — VERIFIED (already reduced from 10 Hz)
+`aurora_video_player.dart:199-201` — `Timer.periodic(1 s)` → `setState` on the whole
+player for the entire playback session; only the clock changes. Wrap the clock in a
+`ValueListenableBuilder<Duration>`. Small, safe.
+
+### P13. Minor items — VERIFIED / plausible
+- `main.dart:423` `_prevTaskStates` map never pruned (slow leak, cap/evict).
+- UI-thread sync I/O: `vault_page.dart:224,347` `existsSync`, `filename_service.dart:476`
+  `existsSync` per uniqueness candidate, `vault_service.dart:220-229` / `phase2_caps.dart:77`
+  `listSync` — all user-triggered; convert to async or bulk off-isolate.
+- `settings_page.dart:257,535,848,939,1096` — `ListView(children:)` of the 6k-line
+  page; rebuilds the whole tree on each toggle. `ListView.builder`/const tiles.
+- `media_binary_parsers.dart:203,234,343` + `media_enricher.dart` — byte-scan parsers
+  on the UI isolate at sniff time; `sniffer_screen.dart:2164,2207` jsonDecode of
+  JS-bridge payloads on the UI thread. Move to the existing `WorkerIsolatePool`.
+- `hls_downloader.dart:1429,1496,1536,1601` — per-segment emits uncoalesced at source
+  (the "200+/sec" input to P8); coalesce to one emit per 500 ms per task.
+
+### Updated top-5 for the next implementation batch
+1. **P8** notification throttle (1 s + ≥1% gate) — kills the biggest unthrottled channel flood.
+2. **P1b/P2** per-card progress notifier + shell timer removal — the UI rebuild win.
+3. **P9** flat-mode filter/sort cache — removes O(n log n) per tick.
+4. **P10** vault chunked + isolate encrypt/decrypt — kills the OOM class bug.
+5. **P11** watchdog deltas + callback progress — removes per-chunk stat churn.
 
 ## Verification steps used
 - `unzip -l` on the release AAB; per-module and per-ABI byte accounting.
