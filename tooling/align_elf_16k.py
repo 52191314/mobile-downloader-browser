@@ -79,32 +79,37 @@ def parse_elf(data):
         "e_shentsize": e_shentsize, "e_shnum": e_shnum,
         "PH": PH, "PH_SZ": PH_SZ, "SH": SH, "SH_SZ": SH_SZ,
         "phdrs": phdrs, "shdrs": shdrs,
+        # PT_LOAD field indices differ between classes:
+        #   ELF64 phdr: (p_type, p_flags, p_offset, p_vaddr, p_paddr, ...)
+        #   ELF32 phdr: (p_type, p_offset, p_vaddr, p_paddr, ...)  (no p_flags gap)
+        "P_OFF": 2 if is64 else 1,
+        "P_VADDR": 3 if is64 else 2,
     }
 
 
-def load_segments(phdrs):
+def load_segments(phdrs, p_off):
     """Return PT_LOAD phdr indexes sorted by file offset."""
     idxs = [i for i, p in enumerate(phdrs) if p[0] == PT_LOAD]
-    return sorted(idxs, key=lambda i: phdrs[i][2])
+    return sorted(idxs, key=lambda i: phdrs[i][p_off])
 
 
-def compute_pads(phdrs, loads):
+def compute_pads(phdrs, loads, p_off, p_vaddr):
     """Return {phdr_idx: pad_bytes} and total padding."""
     pads = {}
     cum = 0
     for i in loads:
-        p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = phdrs[i]
-        new_off = p_offset + cum
+        ph = phdrs[i]
+        new_off = ph[p_off] + cum
         # want (p_vaddr - (new_off + pad)) % PAGE == 0
-        pad = (p_vaddr - new_off) % PAGE
+        pad = (ph[p_vaddr] - new_off) % PAGE
         pads[i] = pad
         cum += pad
     return pads, cum
 
 
-def shift_at(pads, loads, phdrs, x):
+def shift_at(pads, loads, phdrs, p_off, x):
     """Padding inserted before file offset x (sum of pads of LOADs starting <= x)."""
-    return sum(pads[i] for i in loads if phdrs[i][2] <= x)
+    return sum(pads[i] for i in loads if phdrs[i][p_off] <= x)
 
 
 def main():
@@ -117,13 +122,18 @@ def main():
 
     e = parse_elf(data)
     phdrs, shdrs = e["phdrs"], e["shdrs"]
-    loads = load_segments(phdrs)
+    P_OFF, P_VADDR = e["P_OFF"], e["P_VADDR"]
+    # p_filesz / p_memsz / p_align indices (same position in both classes
+    # relative to the class layout; p_align is the last field either way).
+    P_FILESZ, P_MEMSZ, P_ALIGN = (5, 6, 7) if e["is64"] else (4, 5, 7)
+    loads = load_segments(phdrs, P_OFF)
     if not loads:
         sys.exit("no PT_LOAD segments found")
 
-    pads, total_pad = compute_pads(phdrs, loads)
+    pads, total_pad = compute_pads(phdrs, loads, P_OFF, P_VADDR)
 
-    if all(phdrs[i][7] >= PAGE and (phdrs[i][3] - phdrs[i][2]) % PAGE == 0
+    if all(phdrs[i][P_ALIGN] >= PAGE and
+           (phdrs[i][P_VADDR] - phdrs[i][P_OFF]) % PAGE == 0
            for i in loads):
         print(f"{src}: already 16 KB aligned, no changes")
         return 0
@@ -132,19 +142,19 @@ def main():
     out = bytearray()
     prev_end = 0
     for i in loads:
-        p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align = phdrs[i]
-        out += data[prev_end:p_offset]
+        ph = phdrs[i]
+        out += data[prev_end:ph[P_OFF]]
         out += b"\x00" * pads[i]
-        out += data[p_offset:p_offset + p_filesz]
-        prev_end = p_offset + p_filesz
+        out += data[ph[P_OFF]:ph[P_OFF] + ph[P_FILESZ]]
+        prev_end = ph[P_OFF] + ph[P_FILESZ]
     out += data[prev_end:]
 
     # --- rewrite program headers (phdr table stays at e_phoff, before any padding) ---
     for i in range(e["e_phnum"]):
         ph = list(phdrs[i])
-        ph[2] += shift_at(pads, loads, phdrs, ph[2])  # p_offset
+        ph[P_OFF] += shift_at(pads, loads, phdrs, P_OFF, ph[P_OFF])
         if i in pads:
-            ph[7] = PAGE  # p_align
+            ph[P_ALIGN] = PAGE  # p_align
         struct.pack_into(e["PH"], out, e["e_phoff"] + i * e["e_phentsize"], *ph)
 
     # --- rewrite section headers (table itself shifted by total_pad) ---
@@ -152,7 +162,7 @@ def main():
     for i in range(e["e_shnum"]):
         sh = list(shdrs[i])
         if sh[4] != 0:  # sh_offset
-            sh[4] += shift_at(pads, loads, phdrs, sh[4])
+            sh[4] += shift_at(pads, loads, phdrs, P_OFF, sh[4])
         struct.pack_into(e["SH"], out, table_off + i * e["e_shentsize"], *sh)
 
     # --- move the section header table to the end of the file ---
@@ -163,18 +173,20 @@ def main():
 
     # --- verify ---
     v = parse_elf(out)
-    for i in load_segments(v["phdrs"]):
+    v_off, v_vaddr = v["P_OFF"], v["P_VADDR"]
+    v_align = 7
+    for i in load_segments(v["phdrs"], v_off):
         p = v["phdrs"][i]
-        if p[7] < PAGE or (p[3] - p[2]) % PAGE != 0:
-            sys.exit(f"VERIFY FAILED on phdr {i}: offset={p[2]:#x} vaddr={p[3]:#x} align={p[7]:#x}")
+        if p[v_align] < PAGE or (p[v_vaddr] - p[v_off]) % PAGE != 0:
+            sys.exit(f"VERIFY FAILED on phdr {i}: offset={p[v_off]:#x} vaddr={p[v_vaddr]:#x} align={p[v_align]:#x}")
     # every phdr and shdr must sit exactly where the rebuild intended
     for i, p in enumerate(v["phdrs"]):
-        expect = phdrs[i][2] + shift_at(pads, loads, phdrs, phdrs[i][2])
-        if p[2] != expect:
-            sys.exit(f"VERIFY FAILED: phdr {i} offset {p[2]:#x} != expected {expect:#x}")
+        expect = phdrs[i][P_OFF] + shift_at(pads, loads, phdrs, P_OFF, phdrs[i][P_OFF])
+        if p[P_OFF] != expect:
+            sys.exit(f"VERIFY FAILED: phdr {i} offset {p[P_OFF]:#x} != expected {expect:#x}")
     for i, s in enumerate(v["shdrs"]):
         if shdrs[i][4] != 0:
-            expect = shdrs[i][4] + shift_at(pads, loads, phdrs, shdrs[i][4])
+            expect = shdrs[i][4] + shift_at(pads, loads, phdrs, P_OFF, shdrs[i][4])
             if s[4] != expect:
                 sys.exit(f"VERIFY FAILED: section {i} offset {s[4]:#x} != expected {expect:#x}")
     with open(dst, "wb") as f:
