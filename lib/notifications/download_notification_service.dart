@@ -44,6 +44,13 @@ class DownloadNotificationService {
       FlutterLocalNotificationsPlugin();
   final Set<String> _activeLiveNotificationIds = {};
 
+  /// Per-task throttle state for progress notifications. The queue emits
+  /// task updates every 250 ms per active splitter (and per HLS segment);
+  /// each emit used to re-`show()` the notification — a full platform
+  /// channel round trip on the UI isolate, ~12×/s with 3 downloads. We only
+  /// re-show when at least 1 s elapsed AND the visible percent moved ≥ 1.
+  final Map<String, ({int percent, DateTime at})> _lastProgressShow = {};
+
   /// P10: Pro gate for rich notification body (speed/ETA).
   bool Function()? isProCallback;
 
@@ -191,6 +198,7 @@ class DownloadNotificationService {
     _removedSubscription?.cancel();
     _removedSubscription = null;
     _activeLiveNotificationIds.clear();
+    _lastProgressShow.clear();
   }
 
   /// Dismiss the system notification for [taskId] (e.g. after cancel).
@@ -199,6 +207,7 @@ class DownloadNotificationService {
       final id = _notificationIdFor(taskId);
       unawaited(_plugin.cancel(id: id));
       _activeLiveNotificationIds.remove(taskId);
+      _lastProgressShow.remove(taskId);
     } catch (e, s) {
       _logError('Failed to cancel notification', e, s);
     }
@@ -265,6 +274,20 @@ class DownloadNotificationService {
   void _updateProgressNotification(DownloadTask task) {
     final id = _notificationIdFor(task.id);
     final progress = _progressPercent(task);
+
+    // Throttle: the queue emits every 250 ms per active download (and once
+    // per HLS segment); each show() is a platform-channel round trip that
+    // also resets the notification's visual state. Re-show only when the
+    // user-visible percent moved ≥ 1 point AND at least 1 s has passed.
+    final now = DateTime.now();
+    final last = _lastProgressShow[task.id];
+    if (last != null &&
+        now.difference(last.at).inMilliseconds < 1000 &&
+        (progress - last.percent).abs() < 1) {
+      return;
+    }
+    _lastProgressShow[task.id] = (percent: progress, at: now);
+
     final filename = _shortName(task.savePath);
 
     // P10: Pro+ gets speed/ETA in notification body.
