@@ -1,4 +1,4 @@
-# Google Play Store Listing — Aurora: Browser & Downloader
+# Google Play Store Listing — Aurora Download Manager
 
 Copy-paste ready metadata for Play Console. Keep branding generic: **browser + download manager**, not a multi-platform video grabber.
 
@@ -9,13 +9,13 @@ pre-launch plan; it is the delta between what is live and what should be.
 
 | Field | Live value |
 |---|---|
-| Name | Aurora: Browser & Downloader |
+| Name | Aurora Download Manager (renamed 2026-08-08; was Aurora: Browser & Downloader) |
 | Developer | Ahjie521 |
 | Track | Closed testing |
-| Version | 2.4.5 / versionCode 29 |
-| Listing updated | 2026-07-23 |
+| Version | 1.0.1 / versionCode 54 (2026-08-08) |
+| Listing updated | 2026-07-23 (text refresh pending 2026-08-08 — this doc) |
 | Installs | 0+ |
-| Download size | 67 MB |
+| Download size | ~26 MB arm64 base install (AAB upload 103.6 MB incl. on-demand modules + symbols; see "Known drift") |
 | Min Android | 7.0 |
 | Content rating | Rated for 3+ · Unrestricted Internet, In-App Purchases |
 
@@ -25,7 +25,7 @@ pre-launch plan; it is the delta between what is live and what should be.
 |---|---|
 | Live description | A **shorter, different** copy than the block below — the block below was never published. It also **sells Google Drive sync** ("BACK UP TO GOOGLE DRIVE"), which this repo's canonical copy dropped — see the 2026-08-08 Drive correction below |
 | Live screenshots | 8-shot set, **passed Play policy review** (2026-07-xx, verified 2026-08-08). Old UI (2026-07-18); conversion issues remain (see Screenshots section) but they are not a policy risk |
-| Live binary | Predates the four HIGH fixes from `play_review_audit_2026-07-27.md` (targetSdk pin, battery prompt, bridge guard, WebView flags). `versionCode` still 29 |
+| Live binary | versionCode 54 (1.0.1) — **now includes** the four HIGH fixes from `play_review_audit_2026-07-27.md` (targetSdk pin, battery prompt, bridge guard, WebView flags), the torrent publish fix, and the 16 KB page-size alignment. Previous live binary was versionCode 29 |
 | IAP products | Only `aurora_pro_unlock` documented; code defines three. Activation unverified |
 
 **Lesson that keeps recurring:** do not infer Console state from this repo. The
@@ -40,42 +40,50 @@ audit made this error twice (rev 2 §0, and the content-rating row corrected
 
 | Field | Value |
 |-------|--------|
-| **App name** (≤30 chars) | **`Aurora: Browser & Downloader`** — live, 28 chars |
+| **App name** (≤30 chars) | **`Aurora Download Manager`** — 23 chars, chosen 2026-08-08 (was `Aurora: Browser & Downloader`) |
 | **Developer** | Ahjie521 |
 | **Package name** | Use the existing applicationId from `android/app/build.gradle.kts` (do not invent a new one mid-launch) |
 | **Default language** | English (United States) — add locales later |
 | **Category** | Tools (or Productivity) |
 | **Tags** | download manager, web browser, file download |
 
-The name is **already published** and should not change without reason — renaming
-a live listing discards whatever search association it has built.
-Earlier revisions of this doc said `Aurora Downloader`; corrected 2026-07-28.
+Name rationale (2026-08-08): the app has **zero users** (0+ installs, closed
+testing), so renaming is free — no search association exists to protect. The
+old doc rule ("don't rename a live listing") applied to a listing with
+history; it does not apply here. Chosen: `Aurora Download Manager` — keeps the
+Aurora brand (About page, UI, privacy policy all say "Aurora Downloader"),
+adds the exact **"download manager"** search phrase Play weights, and avoids
+the exact-name collision with the existing "Mobile Download Manager" developer
+brand on Play (publisher of IDM+ Download Manager). Dropped the browser-first
+framing — the short description and full description still carry the browser.
 
-**Do not use:** TikTok, Instagram, YouTube, Netflix, Facebook, “video grabber”, “downloader for X”.
+**Do not use:** TikTok, Instagram, YouTube, Netflix, Facebook, "video grabber", "downloader for X".
 
 ---
 
 ## Short description (≤80 characters)
 
-**Primary:**
+**Primary (2026-08-08 refresh):**
 
 ```text
-Fast multi-part downloads, ad-free browsing, and a queue that never gives up.
+Download manager, ad-free browser, torrents. A queue that never gives up.
 ```
 
 Alternates:
 
 ```text
-Private browser + fast download manager. Resume anything, lose nothing.
+Fast multi-part downloads, ad-free browsing, and a queue that never gives up.
 ```
 
 ```text
-Download manager with a private ad-blocking browser. No account, no ads.
+Private browser + fast download manager. Resume anything, lose nothing.
 ```
 
 Lead with the verb and keep `download manager` + `browser` in the string — Play
-weights the short description for search. All three are under the limit; see the
-count table in the "Copy hygiene" section below.
+weights the short description for search. All are under the limit; see the
+count table in the "Copy hygiene" section below. The pre-1.0.1 primary
+("Fast multi-part downloads…") is kept as an alternate — the torrent mention
+moved into the primary only because the 1.0.1 release ships torrent support.
 
 ---
 
@@ -115,6 +123,11 @@ DOWNLOADS THAT ACTUALLY FINISH
   and Android's background limits
 • Refresh a link that has gone stale, and let Pro revive dead links automatically
 • Progress, speed, and status for the whole queue at a glance
+
+TORRENTS, INCLUDED
+• Download torrents and magnet links with a fast native engine
+• Finished torrents save straight to your Downloads folder — multi-file torrents included
+• Pause, resume, and seed from your device
 
 BACK UP TO GOOGLE DRIVE
 • Connect your Google account and completed downloads sync to your personal Google Drive automatically
@@ -181,6 +194,15 @@ Not affiliated with Google, YouTube, or any third-party media service.
 | **WHAT AURORA DOES NOT DO** as a headed section | Turns three compliance disclaimers into a trust signal instead of fine print |
 | Removed "unless you enable cloud features" | The caveat described nothing by itself; the Google Drive sync bullet carries the cloud story now |
 
+#### Revision 2026-08-08 — 1.0.1 release pass (torrents + state refresh)
+
+| Change | Reason |
+|---|---|
+| Added **TORRENTS, INCLUDED** section after DOWNLOADS THAT ACTUALLY FINISH | 1.0.1 ships the native torrent engine fix: completed torrents now publish to Downloads (multi-file included). Honest, benefit-led, and decoupled from media capture (the pairing the review audit warns about) |
+| Short description primary swapped to "Download manager, ad-free browser, torrents. A queue that never gives up." (73) | Torrent support is now a headline capability; keeps `download manager` + `browser` search terms. Pre-1.0.1 primary kept as alternate |
+| Live-state table: version 1.0.1/54, download size, live-binary drift row | Release 54 shipped; old rows described versionCode 29 |
+| **App name changed** to `Aurora Download Manager` (23) | Zero users → renaming is free (no search association to protect). Keeps the Aurora brand, adds the exact "download manager" search phrase, and avoids the "Mobile Download Manager" developer-brand collision on Play. Browser-first framing dropped from the name; short + full descriptions still carry the browser |
+
 #### Revision 2026-07-30 — tier-accuracy pass
 
 The claim above that "every number matches `pro_features.dart`" held for the raw
@@ -234,11 +256,15 @@ above (they match the live text verbatim).
 
 | Field | Length | Limit | Status |
 |---|---:|---:|---|
-| Short description (primary) | 77 | 80 | OK |
-| Short description (alt 1) | 71 | 80 | OK |
-| Short description (alt 2) | 72 | 80 | OK |
-| Full description | 3,651 | 4,000 | OK |
-| App name `Aurora Downloader` | 17 | 30 | OK |
+| Short description (primary, 2026-08-08) | 73 | 80 | OK |
+| Short description (alt 1) | 77 | 80 | OK |
+| Short description (alt 2) | 71 | 80 | OK |
+| Full description | 3,867 | 4,000 | OK |
+| App name `Aurora Download Manager` | 23 | 30 | OK |
+
+Counts measured 2026-08-08 with the same block-extraction logic as the
+PowerShell snippet below (full description = opening line through the closing
+fence).
 
 Re-run after any edit:
 
