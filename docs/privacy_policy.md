@@ -1,6 +1,6 @@
 # Privacy Policy — Aurora: Browser & Downloader
 
-**Last updated:** 2026-07-29  
+**Last updated:** 2026-08-08  
 
 **App:** Aurora: Browser & Downloader  
 **Package:** `com.personal.aurora_downloader`  
@@ -43,6 +43,15 @@ If you buy the optional **Aurora Pro** or **Aurora Ultra** unlock:
 
 The built-in browser can open third-party websites. Those sites may set cookies or collect data under **their** privacy policies. We do not control third-party websites.
 
+### 2.4 Optional Google Drive sync
+
+If you choose to enable **Google Drive sync** (Settings → Drive):
+
+- You sign in with your Google account via Google Sign-In. We receive your account name and email address from Google for the purpose of connecting the App to your Drive.
+- Files the App creates — completed downloads and private-vault media you choose to sync — are uploaded to a dedicated **Aurora** folder in **your own** Google Drive. Nothing else in your Drive is read or modified.
+- You control the schedule (instant, 15 minutes, hourly, daily). Daily sync counts are capped by tier (free 15 / Pro 50 / Ultra 1,000 per day).
+- Your Google account data and Drive files are handled by **Google** under Google's own terms and privacy policy; we do not receive or store them on our servers.
+
 ---
 
 ## 3. How we use information
@@ -78,6 +87,7 @@ The App may request or use:
 We share data only as needed to provide the App:
 
 - **Google Play & License Host** — Play Billing and purchase verification (`https://aurora-license-server.fly.dev`) to confirm purchase receipts and unlock features.  
+- **Google (Drive sync)** — only if you enable it: your Google account identity and the files Aurora creates are shared with Google so they can be stored in your own Drive.  
 - **Websites you visit** — normal browser traffic you initiate  
 
 We do not sell data to data brokers or advertisers.
@@ -87,6 +97,7 @@ We do not sell data to data brokers or advertisers.
 ## 6. Data retention and deletion
 
 - **On device:** data remains until you clear app data, delete files, or uninstall the App.  
+- **Google Drive:** files synced to your own Drive remain there until **you** delete them — the App cannot delete files from your Drive. Disconnect Drive in Settings to stop future syncs.  
 - **License verification records:** stored securely on the verification host to support purchase restoration across app reinstalls and multi-device use.  
 - **Purchases:** retained by Google per Play policies; Pro/Ultra status may be restored via “Restore purchase.”
 

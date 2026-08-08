@@ -1,7 +1,7 @@
 # Play Console — App content declarations (Aurora Downloader)
 
 Fill these in **Play Console → Policy → App content** (wording may vary slightly by Console UI version).  
-Answers match the **Play-channel** product as of 2026-07-17.
+Answers match the **Play-channel** product as of 2026-08-08 (Drive sync restored in this doc; see change log).
 
 **Package:** `com.personal.aurora_downloader`  
 **Name:** Aurora Downloader  
@@ -15,13 +15,14 @@ Answers match the **Play-channel** product as of 2026-07-17.
 | Answer | Use this |
 |--------|----------|
 | **All features available without login** | **Yes** for core browser, sniffer, queue, downloads, settings. |
-| **Special access / login required?** | **No login required** (Optional Google Sign-In for Drive sync is cancelled/unsupported). |
+| **Special access / login required?** | **No login required** (optional Google Sign-In for Drive sync, only if the user enables it). |
 | **Instructions for reviewers** | Paste something like: |
 
 ```text
 No login required for core features (browser, media capture tray, download queue).
 
-Optional Google Drive sync has been cancelled due to restricted GCP credentials. No login or special credentials needed.
+Optional Google Drive sync: only if the user chooses to connect their Google account
+in Settings → Drive. Core features never require it.
 
 YouTube media download/sniff is intentionally disabled for Play policy compliance.
 ```
@@ -47,7 +48,7 @@ Publish a page that includes:
 3. **Data collected:**  
    - On device: browsing state (tabs, history/favorites if used), download queue, settings, cookies in WebView.  
    - **Not** sold to advertisers.  
-   - ~~Optional: Google account if user links Drive~~ (Cancelled)  
+   - Optional: Google account (name/email) **only if the user links Drive** for cloud sync.  
 Purchase status via Google Play Billing (Google processes payment).  
 4. **Permissions:** Internet, notifications, foreground service for downloads, legacy storage on old Android only; MediaStore for Downloads.  
 5. **Third parties:** Google (Play Billing); websites the user chooses to visit.  
@@ -68,7 +69,7 @@ Aurora Downloader is a private web browser and download manager for Android.
 
 Data we process
 • On your device: browser tabs and related session data, download queue and file paths, app settings, and WebView cookies for sites you visit.
-• ~~Optional Google account: only if you choose to connect Google Drive for backup/sync.~~ (Cancelled)
+• Optional Google account (name/email): only if you choose to connect Google Drive for backup/sync. Files Aurora creates (downloads, vault media) are uploaded to your personal Drive; nothing else on your Drive is touched.
 • Purchases: one-time Aurora Pro unlock is processed by Google Play Billing. We do not receive your full payment card details.
 
 What we do not do
@@ -90,7 +91,7 @@ Aurora Downloader is not directed at children under 13.
 
 Your choices
 • Uninstalling the app removes local app data on your device.
-• ~~Disconnect Drive in settings to stop cloud access.~~ (Cancelled)
+• Disconnect Drive in settings to stop cloud access; files already uploaded stay in your personal Drive until you delete them.
 • Contact us at YOUR_EMAIL with privacy questions.
 ```
 
@@ -101,7 +102,7 @@ Your choices
 | Question | Answer |
 |----------|--------|
 | All functionality available without special access? | **Yes** (core app). |
-| Login credentials for Google? | ~~Only if testing Drive...~~ (Cancelled: Google Drive feature cancelled/unsupported). |
+| Login credentials for Google? | **Optional** — only if the user enables Drive sync (Google Sign-In). Core features need no login. |
 | Any geo / paid wall? | Pro features are IAP; free tier is fully usable. License testers for purchase testing. |
 
 ---
@@ -193,9 +194,18 @@ Declare **what the app actually does**. Approximate form answers:
 | Statement | Answer |
 |-----------|--------|
 | Data is encrypted in transit | **Yes** for network APIs you use (HTTPS). Local disk is normal app/MediaStore storage. |
-| Users can request data deletion | **Yes** — uninstall + contact email |
+| Users can request data deletion | **Yes** — uninstall + contact email. Note: files already synced to the user's *own* Drive persist until the user deletes them — the app cannot delete from the user's Drive. This is why the live card says "Data can't be deleted" for Drive-synced data |
 | Independent security review | **No** (unless you paid for one) |
 | Committed to Play Families Policy | **No** (not a kids app) |
+
+### Data safety — live card explained (2026-08-08)
+
+The live Console declaration ("Personal info, Photos and videos and 3 others",
+"Data can't be deleted") is **explained by Google Drive sync**, not an
+over-declaration. Personal info = Google account used for Sign-In; Photos and
+videos = vault media / downloaded media uploaded to the user's own Drive; "Data
+can't be deleted" = the app cannot delete files from the user's personal Drive
+(uninstall removes local copies only). Keep the declaration as-is.
 
 ### Data sharing
 
@@ -251,3 +261,4 @@ If the form lists “In-app purchases / digital goods” separately from “Fina
 | Date | Note |
 |------|------|
 | 2026-07-17 | Initial App content answers for Play-Console-Launch. |
+| 2026-08-08 | **Drive sync is LIVE** — flag `kDriveSyncEnabled = true` since commit d2584a2 (2026-08-02); before that it was `false` (2026-07-20 → 08-02, pending GCP OAuth verification — the 2026-07-27 audit's "archived" conclusion was correct at the time). Verified wired: `lib/sync/drive_sync_service.dart`, `lib/main.dart:363`, `google_sign_in ^6.2.2` in pubspec. Data-safety live card explained by Drive sync: "Personal info" = Google account, "Photos and videos" = vault/downloaded media in the user's own Drive, "Data can't be deleted" = app cannot delete from the user's Drive. Earlier "(Cancelled)" edits here were stale after the re-enable. |

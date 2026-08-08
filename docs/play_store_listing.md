@@ -23,8 +23,8 @@ pre-launch plan; it is the delta between what is live and what should be.
 
 | Item | Status |
 |---|---|
-| Live description | A **shorter, different** copy than the block below — the block below was never published |
-| Live screenshots | Old UI, 2026-07-18. One frame advertises "Google Drive sync — upcoming", a feature deleted from the codebase |
+| Live description | A **shorter, different** copy than the block below — the block below was never published. It also **sells Google Drive sync** ("BACK UP TO GOOGLE DRIVE"), which this repo's canonical copy dropped — see the 2026-08-08 Drive correction below |
+| Live screenshots | 8-shot set, **passed Play policy review** (2026-07-xx, verified 2026-08-08). Old UI (2026-07-18); conversion issues remain (see Screenshots section) but they are not a policy risk |
 | Live binary | Predates the four HIGH fixes from `play_review_audit_2026-07-27.md` (targetSdk pin, battery prompt, bridge guard, WebView flags). `versionCode` still 29 |
 | IAP products | Only `aurora_pro_unlock` documented; code defines three. Activation unverified |
 
@@ -86,8 +86,9 @@ none, and the previous version's `~~strikethrough~~` would have shipped literal
 tildes and the word "Cancelled" to users.
 
 Rules baked into this copy: no trademarked platform named as a download target,
-no competitor app named, no Drive references, benefit-led headings, and every
-number matches `lib/premium/pro_features.dart`.
+no competitor app named, benefit-led headings, and every number matches
+`lib/premium/pro_features.dart`. **Google Drive sync IS a shipped feature** (see
+the 2026-08-08 correction below) — the block includes it as the live listing does.
 
 ```text
 Aurora Downloader is a web browser with a serious download manager built in.
@@ -115,6 +116,11 @@ DOWNLOADS THAT ACTUALLY FINISH
 • Refresh a link that has gone stale, and let Pro revive dead links automatically
 • Progress, speed, and status for the whole queue at a glance
 
+BACK UP TO GOOGLE DRIVE
+• Connect your Google account and completed downloads sync to your personal Google Drive automatically
+• Choose your schedule — instant, every 15 minutes, hourly, or daily
+• Your files go to a dedicated Aurora folder on your Drive, organized and ready to access from any device
+
 MOVING IN FROM ANOTHER APP
 • Import your existing download list from other Android download managers, so you
   start with your library intact instead of from zero
@@ -126,10 +132,13 @@ YOUR FILES STAY YOURS
 • Finished files land in your normal Downloads folder
 • Send files to your computer over your own Wi-Fi, with nothing routed through a
   server — 20 files a day on free, unlimited with Pro
+• Google Drive sync is optional and uses only the files Aurora creates — nothing
+  else on your Drive is touched
 • No account required. No ads.
 
 AURORA PRO — one-time unlock
 • 16 downloads at once and 32 parts per file (free tier: 3 and 8)
+• Higher Google Drive sync limits — 50 files a day (free tier: 15)
 • Unlimited ad-block filter lists, your own custom lists, unlimited element-hiding
   rules, and the tracker pack
 • Download rules, schedules, night mode, and per-site profiles
@@ -140,6 +149,7 @@ AURORA PRO — one-time unlock
 
 AURORA ULTRA — everything in Pro, plus
 • 64 downloads at once and 64 parts per file
+• Up to 1,000 Google Drive syncs a day
 • Full media conversion suite, downloaded on demand so it never bloats the install
 • Folder watcher and a local automation API
 • Unlimited private vault with sync
@@ -169,7 +179,7 @@ Not affiliated with Google, YouTube, or any third-party media service.
 | Added **AURORA ULTRA** section | Old copy sold one tier; the code ships three products (`aurora_pro_unlock`, `aurora_ultra_unlock`, `aurora_ultra_upgrade`) |
 | Real numbers (3/8, 16/32, 64/64) | "Higher concurrency" is meaningless to a shopper; the jump from 3 to 64 sells itself |
 | **WHAT AURORA DOES NOT DO** as a headed section | Turns three compliance disclaimers into a trust signal instead of fine print |
-| Removed "unless you enable cloud features" | No cloud features remain after the Drive removal — the caveat now describes nothing |
+| Removed "unless you enable cloud features" | The caveat described nothing by itself; the Google Drive sync bullet carries the cloud story now |
 
 #### Revision 2026-07-30 — tier-accuracy pass
 
@@ -201,6 +211,25 @@ on a downloader — the exact category where Play's IP enforcement is discretion
 The generic phrasing above is the safe default. Reverse it only if you decide the
 search traffic is worth the first-review risk.
 
+#### Revision 2026-08-08 — Google Drive sync restored (docs were stale, not the app)
+
+Earlier revisions of this doc and of `play_console_app_content.md` declared
+Google Drive sync **cancelled/deleted**, and this doc's canonical copy dropped
+the Drive section to match. **That was stale documentation.** The truth:
+`kDriveSyncEnabled` (`lib/premium/premium_flags.dart:4`) was `false` from
+2026-07-20 to 2026-08-02 (pending GCP OAuth verification — the 2026-07-27
+audit's "archived" conclusion was correct *then*), and was flipped back to
+`true` in commit d2584a2 (2026-08-02). Since then the feature is **live**:
+`lib/sync/drive_sync_service.dart` is fully wired (`lib/main.dart:363`,
+Settings → Drive page, `google_sign_in ^6.2.2` +
+`extension_google_sign_in_as_googleapis_auth` in pubspec), uploads the user's
+completed downloads + vault media to a dedicated Aurora folder in *their own*
+Google Drive (`uploadFile` / `uploadDirectory`), and enforces daily limits from
+`lib/premium/pro_features.dart:182-198` (free 15 / Pro 50 / Ultra 1000). The
+live listing's "BACK UP TO GOOGLE DRIVE" section is **accurate** — the local
+docs were stale, not the listing. Drive bullets restored to the canonical copy
+above (they match the live text verbatim).
+
 ### Copy hygiene — verified counts
 
 | Field | Length | Limit | Status |
@@ -208,7 +237,7 @@ search traffic is worth the first-review risk.
 | Short description (primary) | 77 | 80 | OK |
 | Short description (alt 1) | 71 | 80 | OK |
 | Short description (alt 2) | 72 | 80 | OK |
-| Full description | 3,270 | 4,000 | OK |
+| Full description | 3,651 | 4,000 | OK |
 | App name `Aurora Downloader` | 17 | 30 | OK |
 
 Re-run after any edit:
@@ -238,7 +267,7 @@ predate the v2.4.5 changes and three carry real review risk:
 |---|---|
 | `…_154746.jpg` | Full Google search page — Google wordmark, "Sign in", AI Overview, LinkedIn/Wikipedia favicons. Violates this doc's own no-brand-logos rule and puts third-party trademarks in a downloader's store assets |
 | `…_155721.jpg` | Shows a **Torrent** filter chip beside video capture — exactly the pairing `play_review_audit_2026-07-27.md` §9 warns against. Also every `.mp4` row is mislabelled `text/html` |
-| `…_154911.jpg` | Settings card reads "Google Drive sync — upcoming" — that feature was **deleted from the codebase** in audit rev 3. Advertising it is a misleading-listing problem |
+| `…_154911.jpg` | Settings card reads "Google Drive sync — upcoming". Drive sync shipped (see the 2026-08-08 correction above) — the "upcoming" wording is now itself stale, and this old UI is long gone |
 | `…_155827.jpg` | Queue: paste field clipped behind the app bar, four identically-named items, all Paused. A download manager whose hero shot shows nothing downloading |
 | `…_160348.jpg` | Tab groups named "h", "e", "l", "o" — test junk |
 
@@ -347,7 +376,11 @@ carry the claim.
   likely to read as "video grabber" to a reviewer. Shot 2 should show the capture
   sheet, not the settings row.
 - Nothing Paused, nothing empty, no placeholder or duplicate filenames.
-- No Drive, no cloud sync, no "upcoming" or "coming soon" strings.
+- No "upcoming" or "coming soon" strings. (Google Drive sync itself is fine to
+  show — it ships; the old "— upcoming" wording is what was stale.)
+- **Policy note (2026-08-08):** the live 8-shot set already **passed Play policy
+  review** — the reshoot below is a conversion improvement, not a policy fix.
+  Do not block a Play upload on it; the current set is compliant.
 - Fix the clipped paste field before shooting shot 1 — it is a real layout
   overlap, visible in `…_155827.jpg`.
 
@@ -442,15 +475,25 @@ Update when code changes. Baseline:
 | Data type | Collected? | Shared? | Purpose |
 |-----------|------------|---------|---------|
 | App activity / diagnostics | Only if you add crash analytics | No (local logs default) | Debugging |
-| Files / docs user downloads | On device | No ~~(unless user enables Drive)~~ (Cancelled) | App functionality |
+| Files / docs user downloads | On device; **optional upload to the user's own Google Drive** if Drive sync enabled | To Google APIs, user-authorized | App functionality / backup |
 | Web browsing | On device in WebView | No | App functionality |
-| ~~Google account~~ | ~~Only if user links Drive~~ | ~~To Google APIs user authorizes~~ | ~~Cloud backup (Pro)~~ (Cancelled) |
+| Google account (name/email) | **Optional** — only if user links Drive | To Google APIs user authorizes | Drive sync (Pro/Ultra tier limits) |
 | Purchase history | Via Play Billing | Google Play | Pro unlock |
+
+**Why the live data-safety card says what it says (2026-08-08):** the live
+declaration ("Personal info, Photos and videos and 3 others", "Data can't be
+deleted") is **explained by Google Drive sync**, not over-declared. Personal
+info = the Google account used for Sign-In; Photos and videos = vault media /
+downloaded media uploaded to the user's own Drive; "can't be deleted" = the app
+cannot delete files from the user's personal Drive — only the user can
+(uninstall removes local copies; Drive copies persist until the user deletes
+them). This is the accurate and defensible reading; do not "fix" the form to
+look smaller.
 
 **Privacy policy URL:** required before production. Host a page that covers:
 
 - Local storage of queue, tabs, cookies in app sandbox  
-- ~~Optional Google Drive sync~~ (Cancelled)  
+- Optional Google Drive sync — user's own Drive, only the files Aurora creates  
 - Play Billing purchases  
 - No sale of personal data  
 - Contact email for privacy requests  
@@ -464,7 +507,7 @@ Suggested path later: `https://<your-domain>/aurora-privacy` or GitHub Pages.
 Account status: **approved developer account** (you already have this).
 
 1. **Create app** → name `Aurora Downloader`, language EN, free app, declarations  
-2. **App access** → all features available without login ~~(Drive optional)~~  
+2. **App access** → all features available without login; Drive sync optional (Google Sign-In only if the user enables it)  
 3. **Ads** → declare if you show ads (default: no ads in Aurora)  
 4. **Content rating** → complete questionnaire  
 5. **Target audience** → not primarily children  
@@ -525,7 +568,7 @@ Upload AAB under **Production** or start with **Internal testing** track.
 - [ ] Screenshots clean of third-party brand download flows  
 - [ ] **No markdown syntax pasted into Console** — no `~~`, `**`, `|`, or `#`  
 - [ ] **No screenshot shows torrent/magnet UI** (audit §9)  
-- [ ] **No screenshot shows a removed feature** (Drive sync, "upcoming" strings)  
+- [ ] **No screenshot shows a removed feature** ("upcoming" strings; Drive sync itself is live, so showing it is fine)  
 - [ ] **Screenshots taken against the submitted version**, not an older build  
 - [ ] All three Play Billing products live: `aurora_pro_unlock`, `aurora_ultra_unlock`, `aurora_ultra_upgrade`  
 - [ ] No GitHub donate / Stripe unlock links in Play APK  
