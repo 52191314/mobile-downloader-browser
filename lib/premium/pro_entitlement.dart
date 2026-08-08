@@ -86,6 +86,24 @@ class ProEntitlement extends ChangeNotifier {
   /// interleave partial writes.
   Future<void>? _writeChain;
 
+  /// Effective tier for a fresh install (no purchases, no license).
+  ///
+  /// OSS channel (GitHub / F-Droid / sideload) **release** builds are the
+  /// fully unlocked open-source edition: there is no Play billing path to sell
+  /// into, and F-Droid requires the shipped build to be functional with every
+  /// advertised feature. Debug/profile builds fall through to the
+  /// purchase-derived [storeTier] so the freemium UX stays testable via
+  /// [setDebugTier]. Pure function — the caller wires [kReleaseMode] and
+  /// [BuildChannel.isGithub].
+  static EntitlementTier freshInstallTier(
+    EntitlementTier storeTier, {
+    required bool releaseMode,
+    required bool githubChannel,
+  }) {
+    if (releaseMode && githubChannel) return EntitlementTier.ultra;
+    return storeTier;
+  }
+
   /// Effective tier — what every feature gate reads.
   ///
   /// When server-side licensing is active, a tier is only real if the license
@@ -96,13 +114,11 @@ class ProEntitlement extends ChangeNotifier {
     final override = _debugOverride;
     if (override != null) return override;
     if (_licenseGating) return _licensedTier ?? EntitlementTier.free;
-    // OSS channel (GitHub / F-Droid / sideload) **release** builds are the
-    // fully unlocked open-source edition: there is no Play billing path to
-    // sell into, and F-Droid requires the shipped build to be functional with
-    // every advertised feature. Debug/profile builds keep the real (usually
-    // free) tier so the freemium UX stays testable via [setDebugTier].
-    if (kReleaseMode && BuildChannel.isGithub) return EntitlementTier.ultra;
-    return _tier;
+    return freshInstallTier(
+      _tier,
+      releaseMode: kReleaseMode,
+      githubChannel: BuildChannel.isGithub,
+    );
   }
 
   /// Tier implied by the Play purchases this device knows about, independent of
