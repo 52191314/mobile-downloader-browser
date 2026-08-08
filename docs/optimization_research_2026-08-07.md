@@ -271,6 +271,24 @@ player for the entire playback session; only the clock changes. Wrap the clock i
 4. **P10** vault chunked + isolate encrypt/decrypt — kills the OOM class bug.
 5. **P11** watchdog deltas + callback progress — removes per-chunk stat churn.
 
+## 7. Implementation status (2026-08-08, branch `optimize-perf-size`)
+
+Batch 1 implemented and verified (flutter analyze clean on touched files, 453 tests
+green, debug play AAB builds):
+
+| Item | What landed | Verification |
+|---|---|---|
+| P8 | Notification `show()` throttled: ≥1 s AND ≥1% progress gate per task (`download_notification_service.dart`); throttle map cleared on cancel/dispose | analyze + tests |
+| S6 | `qr_flutter`, `animations`, `dynamic_color` removed from pubspec (+4 packages incl. transitive `qr`) | pub get clean |
+| S1 | `assets/fonts/Inter-subset.ttf` — variable font subset (Latin/ext/Greek/Cyrillic + UI symbol ranges, wght 100-900 kept, opsz pinned 14, tnum kept for the player clocks): 876 KB → 373 KB. Tooling: `tooling/subset_inter_font.sh` + `tooling/check_font_subset.py` | fontTools checks PASS (glyph coverage vs original, wght axis, all app special chars) |
+| P2 | Shell 500 ms `_queueRebuildTimer` removed (`main.dart`) — QueuePage self-throttles, dock badge is notifier-driven; also pruned the `_prevTaskStates` leak (P13) | analyze |
+| P10 | New `lib/premium/vault_crypto.dart`: streaming AES-256-GCM (pointycastle `processBytes`/`doFinal`, 1 MiB chunks) — **byte-identical** to the old one-shot path. Vault store/export stream in `Isolate.run` (tmp-file + rename); sync upload/restore stream through chunked base64 + `StreamedRequest`. Legacy CBC export kept | 13 new tests incl. byte-compat both directions, tamper/wrong-key rejection, odd chunk sizes; legacy test still green |
+| P1b | Per-task `ValueNotifier` on the queue (deduped no-op ticks) + `queueVersion` for the header; queue page rebuilds only on state transitions (speed-sort exception); `DownloadCard` live section (progress bar/percent/bytes/speed/ETA/status) rebuilt via `ValueListenableBuilder` | analyze + full suite |
+
+Not in this batch: S2 (drop armeabi-v7a — product decision), S3 (custom ffmpeg-kit),
+S8 (R8 keep narrowing), P9 (flat-mode filter/sort cache — deferred, needs the same
+fingerprint machinery re-audit), P11 (native-chunk watchdog), P12 (player 1 Hz clock).
+
 ## Verification steps used
 - `unzip -l` on the release AAB; per-module and per-ABI byte accounting.
 - Font table inspection via Python struct parse (fvar/gvar/STAT present = variable).
