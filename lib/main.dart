@@ -418,7 +418,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   late final ValueNotifier<int> _sniffedCountNotifier;
   DateTime? _lastBackPress;
   Timer? _adblockRefreshTimer;
-  Timer? _queueRebuildTimer;
   Timer? _resniffModeTimer;
   final Map<String, DownloadState> _prevTaskStates = {};
   bool _isDisposed = false;
@@ -487,17 +486,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       if (mounted) _showSnack(message);
     };
     _queueSubscription = _downloadQueue.onTaskUpdated.listen((task) {
-      // QueuePage listens to task updates and throttles its own rebuilds.
-      // The shell only needs a rebuild for visible queue UI or when the queue
-      // tab has not been constructed yet.
-      final shouldRebuildShell =
-          _currentTabIndex == 0 || !_visitedMainTabs.contains(0);
-      if (shouldRebuildShell &&
-          (_queueRebuildTimer == null || !_queueRebuildTimer!.isActive)) {
-        _queueRebuildTimer = Timer(const Duration(milliseconds: 500), () {
-          if (mounted) setState(() {});
-        });
-      }
+      // QueuePage subscribes to the same stream and throttles its own
+      // rebuilds (500 ms); the dock badge is ValueNotifier-driven. The
+      // shell therefore does NOT need to rebuild on progress ticks — a
+      // per-tick setState here would double every queue-page rebuild
+      // (2026-08-07 optimization research, P2).
       // Log download state transitions.
       final fileName = task.savePath.split('/').last;
       final prevState = _prevTaskStates[task.id];
@@ -505,6 +498,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         _prevTaskStates[task.id] = task.state;
         if (!_isDisposed) {
           debugPrint('Task "$fileName": ${prevState?.name ?? "new"} → ${task.state.name}');
+        }
+        // Prune terminal tasks so the map stays bounded over a long session
+        // (optimization research 2026-08-07, P13).
+        if (task.state == DownloadState.completed ||
+            task.state == DownloadState.failed) {
+          _prevTaskStates.remove(task.id);
         }
       }
       // Soft battery-opt prompt on first download if launch path has not
@@ -863,7 +862,6 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
   void dispose() {
     _isDisposed = true;
     _adblockRefreshTimer?.cancel();
-    _queueRebuildTimer?.cancel();
     _resniffModeTimer?.cancel();
     _queueSubscription?.cancel();
     _driveSubscription?.cancel();

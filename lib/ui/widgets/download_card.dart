@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../downloader/downloader.dart';
@@ -108,9 +109,16 @@ class DownloadCard extends StatelessWidget {
     this.onToggleSelected,
     this.enableSwipe = true,
     this.dense = false,
+    this.progressListenable,
   });
 
   final DownloadTask task;
+
+  /// Live per-task notifier (P1b). When provided, the progress-dependent
+  /// section (progress bar, percent, bytes/speed/ETA line, status message)
+  /// rebuilds from this notifier's value on every tick instead of the whole
+  /// card waiting for a page rebuild. Null = card is fully static.
+  final ValueListenable<DownloadTask>? progressListenable;
 
   final Future<void> Function(DownloadTask task) onOpenDownload;
   final VoidCallback? onPause;
@@ -167,20 +175,20 @@ class DownloadCard extends StatelessWidget {
         .trim();
   }
 
-  String _metadataLabel() {
+  String _metadataLabel(DownloadTask t) {
     final parts = <String>[];
-    if (task.state == DownloadState.scheduled) {
-      if (task.scheduledStartAt != null) {
-        final diff = task.scheduledStartAt!.difference(DateTime.now());
+    if (t.state == DownloadState.scheduled) {
+      if (t.scheduledStartAt != null) {
+        final diff = t.scheduledStartAt!.difference(DateTime.now());
         if (diff.isNegative) {
           parts.add('Starting…');
         } else {
           String pad(int n) => n.toString().padLeft(2, '0');
           if (diff.inDays > 1) {
-            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)} '
-                '${task.scheduledStartAt!.month}/${task.scheduledStartAt!.day}');
+            parts.add('Scheduled ${pad(t.scheduledStartAt!.hour)}:${pad(t.scheduledStartAt!.minute)} '
+                '${t.scheduledStartAt!.month}/${t.scheduledStartAt!.day}');
           } else {
-            parts.add('Scheduled ${pad(task.scheduledStartAt!.hour)}:${pad(task.scheduledStartAt!.minute)}');
+            parts.add('Scheduled ${pad(t.scheduledStartAt!.hour)}:${pad(t.scheduledStartAt!.minute)}');
           }
           if (diff.inMinutes < 60) {
             parts.add('${diff.inMinutes}m left');
@@ -191,67 +199,67 @@ class DownloadCard extends StatelessWidget {
       } else {
         parts.add('Scheduled');
       }
-    } else if (task.state == DownloadState.downloading ||
-        task.state == DownloadState.idle) {
-      if (task.totalBytes > 0) {
-        final totalLabel = task.downloadedBytes > task.totalBytes
-            ? '~${formatBytes(task.downloadedBytes)}+'
-            : formatBytes(task.totalBytes);
+    } else if (t.state == DownloadState.downloading ||
+        t.state == DownloadState.idle) {
+      if (t.totalBytes > 0) {
+        final totalLabel = t.downloadedBytes > t.totalBytes
+            ? '~${formatBytes(t.downloadedBytes)}+'
+            : formatBytes(t.totalBytes);
         parts.add(
-          '${formatBytes(task.downloadedBytes)} / $totalLabel',
+          '${formatBytes(t.downloadedBytes)} / $totalLabel',
         );
-      } else if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
+      } else if (t.downloadedBytes > 0) {
+        parts.add('${formatBytes(t.downloadedBytes)} downloaded');
       }
-      parts.add(formatSpeed(task.speed));
+      parts.add(formatSpeed(t.speed));
       // ETA: for HLS prefer remaining parts × avg speed when total bytes lag.
-      if (task.speed > 0) {
-        if (task.totalParts > 0 &&
-            task.completedParts < task.totalParts &&
-            task.completedParts > 0 &&
-            task.downloadedBytes > 0) {
-          final avgPerPart = task.downloadedBytes / task.completedParts;
+      if (t.speed > 0) {
+        if (t.totalParts > 0 &&
+            t.completedParts < t.totalParts &&
+            t.completedParts > 0 &&
+            t.downloadedBytes > 0) {
+          final avgPerPart = t.downloadedBytes / t.completedParts;
           final remainBytes =
-              ((task.totalParts - task.completedParts) * avgPerPart).round();
+              ((t.totalParts - t.completedParts) * avgPerPart).round();
           final eta = formatEta(
             downloadedBytes: 0,
             totalBytes: remainBytes,
-            speedEmaBytesPerSec: task.speed,
+            speedEmaBytesPerSec: t.speed,
           );
           if (eta != null) parts.add(eta);
-        } else if (task.totalBytes > 0 &&
-            task.downloadedBytes < task.totalBytes) {
+        } else if (t.totalBytes > 0 &&
+            t.downloadedBytes < t.totalBytes) {
           final eta = formatEta(
-            downloadedBytes: task.downloadedBytes,
-            totalBytes: task.totalBytes,
-            speedEmaBytesPerSec: task.speed,
+            downloadedBytes: t.downloadedBytes,
+            totalBytes: t.totalBytes,
+            speedEmaBytesPerSec: t.speed,
           );
           if (eta != null) parts.add(eta);
         }
       }
-      final elapsed = DateTime.now().difference(task.createdAt);
+      final elapsed = DateTime.now().difference(t.createdAt);
       final m = elapsed.inMinutes;
       final s = elapsed.inSeconds % 60;
       parts.add('${m}m ${s}s');
-    } else if (task.state == DownloadState.completed && task.totalBytes > 0) {
-      parts.add(formatBytes(task.totalBytes));
-    } else if (task.state == DownloadState.completed && task.downloadedBytes > 0) {
-      parts.add('${formatBytes(task.downloadedBytes)} downloaded');
-    } else if (task.state == DownloadState.failed) {
-      if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} saved');
+    } else if (t.state == DownloadState.completed && t.totalBytes > 0) {
+      parts.add(formatBytes(t.totalBytes));
+    } else if (t.state == DownloadState.completed && t.downloadedBytes > 0) {
+      parts.add('${formatBytes(t.downloadedBytes)} downloaded');
+    } else if (t.state == DownloadState.failed) {
+      if (t.downloadedBytes > 0) {
+        parts.add('${formatBytes(t.downloadedBytes)} saved');
       }
       parts.add('Failed');
-    } else if (task.state == DownloadState.paused) {
-      if (task.totalBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}');
-      } else if (task.downloadedBytes > 0) {
-        parts.add('${formatBytes(task.downloadedBytes)} downloaded');
+    } else if (t.state == DownloadState.paused) {
+      if (t.totalBytes > 0) {
+        parts.add('${formatBytes(t.downloadedBytes)} / ${formatBytes(t.totalBytes)}');
+      } else if (t.downloadedBytes > 0) {
+        parts.add('${formatBytes(t.downloadedBytes)} downloaded');
       }
       parts.add('Paused');
-    } else if (task.state == DownloadState.merging) {
-      if (task.totalBytes > 0 && task.downloadedBytes > 0) {
-        parts.add('Merging chunk ${task.downloadedBytes} of ${task.totalBytes}');
+    } else if (t.state == DownloadState.merging) {
+      if (t.totalBytes > 0 && t.downloadedBytes > 0) {
+        parts.add('Merging chunk ${t.downloadedBytes} of ${t.totalBytes}');
       } else {
         parts.add('Merging…');
       }
@@ -295,13 +303,6 @@ class DownloadCard extends StatelessWidget {
     final ac = context.ac;
     final color = _statusColor(ac);
     final isMerging = task.state == DownloadState.merging;
-    // Prefer segment/chunk progress (task.progress); fall back to null only
-    // when nothing is known yet so the bar can stay indeterminate-looking.
-    final progress = (task.totalParts > 0 ||
-            task.chunks.isNotEmpty ||
-            task.totalBytes > 0)
-        ? task.progress
-        : null;
 
     // ── Swipe backgrounds ──────────────────────────────────────────
     Widget? rightSwipeBg() {
@@ -487,116 +488,18 @@ class DownloadCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    // Progress bar (download / idle)
-                    if (task.state == DownloadState.downloading ||
-                        task.state == DownloadState.idle)
-                      RepaintBoundary(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: ac.borderStrong, width: 0.5),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(2.5),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              minHeight: 6,
-                              backgroundColor: ac.surfaceElevated,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(color),
-                            ),
-                          ),
-                        ),
-                      ),
-                    // Paused frozen progress bar
-                    if (task.state == DownloadState.paused &&
-                        task.totalBytes > 0)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: ac.borderStrong, width: 0.5),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(2.5),
-                            child: LinearProgressIndicator(
-                              value: (task.downloadedBytes /
-                                      task.totalBytes)
-                                  .clamp(0.0, 1.0),
-                              minHeight: 6,
-                              backgroundColor: ac.surfaceElevated,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                ac.accentAmber.withValues(alpha: 0.6),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    // Percent label for downloading state
-                    if (task.state == DownloadState.downloading &&
-                        progress != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 1),
-                        child: Text(
-                          task.totalParts > 0
-                              ? '${task.progressPercent}% · ${task.completedParts}/${task.totalParts} segs'
-                              : '${task.progressPercent}%',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontFamily: 'JetBrainsMono',
-                            fontWeight: FontWeight.w500,
-                            color: ac.textSecondary,
-                          ),
-                        ),
-                      ),
-                    // Metadata line
-                    Text(
-                      _metadataLabel(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'JetBrainsMono',
-                        color: ac.textTertiary,
-                      ),
-                    ),
-                    // Transient status message
-                    if (task.statusMessage != null &&
-                        task.statusMessage!.isNotEmpty &&
-                        task.state != DownloadState.completed &&
-                        task.state != DownloadState.failed)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          task.statusMessage!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'Inter',
-                            color: ac.accentFrost,
-                          ),
-                        ),
-                      ),
-                    // Failed error text
-                    if (task.state == DownloadState.failed &&
-                        task.errorMessage != null &&
-                        task.errorMessage!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6, right: 4),
-                        child: SelectableText(
-                          _displayErrorMessage(task.errorMessage!),
-                          style: TextStyle(
-                            fontSize: 11,
-                            height: 1.35,
-                            fontFamily: 'Inter',
-                            color: ac.statusError,
-                          ),
-                        ),
-                      ),
+                    // Live section: progress bar, percent, bytes/speed/ETA,
+                    // status/error text. Rebuilds per tick from the
+                    // per-task notifier when one is provided (P1b); the
+                    // rest of the card stays static between transitions.
+                    if (progressListenable != null)
+                      ValueListenableBuilder<DownloadTask>(
+                        valueListenable: progressListenable!,
+                        builder: (context, liveTask, _) =>
+                            _buildLiveSection(liveTask, ac, color),
+                      )
+                    else
+                      _buildLiveSection(task, ac, color),
                   ],
                 ),
               ),
@@ -653,6 +556,126 @@ class DownloadCard extends StatelessWidget {
       label: '$name, $stateText$progressText',
       button: true,
       child: card,
+    );
+  }
+
+  /// Progress-dependent column children (P1b). Rebuilt from the live task
+  /// on every progress tick; everything else in the card stays static
+  /// between state transitions.
+  Widget _buildLiveSection(DownloadTask liveTask, AColors ac, Color color) {
+    final progress = (liveTask.totalParts > 0 ||
+            liveTask.chunks.isNotEmpty ||
+            liveTask.totalBytes > 0)
+        ? liveTask.progress
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Progress bar (download / idle)
+        if (liveTask.state == DownloadState.downloading ||
+            liveTask.state == DownloadState.idle)
+          RepaintBoundary(
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: ac.borderStrong, width: 0.5),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2.5),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 6,
+                  backgroundColor: ac.surfaceElevated,
+                  valueColor: AlwaysStoppedAnimation<Color>(color),
+                ),
+              ),
+            ),
+          ),
+        // Paused frozen progress bar
+        if (liveTask.state == DownloadState.paused && liveTask.totalBytes > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: ac.borderStrong, width: 0.5),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2.5),
+                child: LinearProgressIndicator(
+                  value: (liveTask.downloadedBytes / liveTask.totalBytes)
+                      .clamp(0.0, 1.0),
+                  minHeight: 6,
+                  backgroundColor: ac.surfaceElevated,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    ac.accentAmber.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // Percent label for downloading state
+        if (liveTask.state == DownloadState.downloading && progress != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(
+              liveTask.totalParts > 0
+                  ? '${liveTask.progressPercent}% · ${liveTask.completedParts}/${liveTask.totalParts} segs'
+                  : '${liveTask.progressPercent}%',
+              style: TextStyle(
+                fontSize: 10,
+                fontFamily: 'JetBrainsMono',
+                fontWeight: FontWeight.w500,
+                color: ac.textSecondary,
+              ),
+            ),
+          ),
+        // Metadata line
+        Text(
+          _metadataLabel(liveTask),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11,
+            fontFamily: 'JetBrainsMono',
+            color: ac.textTertiary,
+          ),
+        ),
+        // Transient status message
+        if (liveTask.statusMessage != null &&
+            liveTask.statusMessage!.isNotEmpty &&
+            liveTask.state != DownloadState.completed &&
+            liveTask.state != DownloadState.failed)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              liveTask.statusMessage!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'Inter',
+                color: ac.accentFrost,
+              ),
+            ),
+          ),
+        // Failed error text
+        if (liveTask.state == DownloadState.failed &&
+            liveTask.errorMessage != null &&
+            liveTask.errorMessage!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, right: 4),
+            child: SelectableText(
+              _displayErrorMessage(liveTask.errorMessage!),
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.35,
+                fontFamily: 'Inter',
+                color: ac.statusError,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

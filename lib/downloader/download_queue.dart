@@ -144,6 +144,26 @@ class DownloadQueue {
   final StreamController<String> _taskRemovedController =
       StreamController<String>.broadcast();
   Stream<String> get onTaskRemoved => _taskRemovedController.stream;
+
+  /// Per-task progress notifiers (P1b): the queue page drives each card's
+  /// live progress area with these instead of rebuilding the whole list on
+  /// every tick. Created lazily on first emit; disposed on removal/close.
+  final Map<String, ValueNotifier<DownloadTask>> _taskNotifiers = {};
+
+  /// Bumped on every task emit. The queue page's header (aggregate speed /
+  /// counts) listens to this instead of rebuilding the whole list per tick.
+  final ValueNotifier<int> queueVersion = ValueNotifier<int>(0);
+
+  /// Live per-task notifier, or null until the task first emits.
+  ValueNotifier<DownloadTask>? taskNotifierFor(String taskId) =>
+      _taskNotifiers[taskId];
+
+  /// Set once [close] runs; stops [queueVersion] bumps after disposal.
+  bool _notifiersClosed = false;
+
+  void _disposeTaskNotifier(String taskId) {
+    _taskNotifiers.remove(taskId)?.dispose();
+  }
   final StreamController<String> _warningController =
       StreamController<String>.broadcast();
   Stream<String> get onWarning => _warningController.stream;
@@ -610,6 +630,7 @@ class DownloadQueue {
     }
 
     _tasks.remove(taskId);
+    _disposeTaskNotifier(taskId);
     if (!_taskRemovedController.isClosed) _taskRemovedController.add(taskId);
     _schedule();
     if (queuePath != null && !_isLoading) {
@@ -1804,6 +1825,7 @@ class DownloadQueue {
         }());
       }
       _tasks.remove(id);
+      _disposeTaskNotifier(id);
       if (!_taskRemovedController.isClosed) _taskRemovedController.add(id);
       _splitters.remove(id);
       _downloaderSubscriptions.remove(id)?.cancel();
@@ -1875,6 +1897,12 @@ class DownloadQueue {
     _scheduleTimer?.cancel();
     _startupHoldTimer?.cancel();
     _startupHold = false;
+    _notifiersClosed = true;
+    for (final notifier in _taskNotifiers.values) {
+      notifier.dispose();
+    }
+    _taskNotifiers.clear();
+    queueVersion.dispose();
     if (!_taskUpdateController.isClosed) {
       await _taskUpdateController.close();
     }
@@ -1932,6 +1960,23 @@ class DownloadQueue {
     if (_isLoading) return;
     if (!_taskUpdateController.isClosed) {
       _taskUpdateController.add(task);
+    }
+    // P1b: per-task notifier for live card UI. Skip no-op notifications
+    // (pure ticks where nothing the card renders changed).
+    final notifier = _taskNotifiers[task.id];
+    if (notifier != null) {
+      final prev = notifier.value;
+      if (prev.downloadedBytes != task.downloadedBytes ||
+          prev.speed != task.speed ||
+          prev.state != task.state ||
+          prev.statusMessage != task.statusMessage) {
+        notifier.value = task;
+      }
+    } else {
+      _taskNotifiers[task.id] = ValueNotifier<DownloadTask>(task);
+    }
+    if (!_notifiersClosed) {
+      queueVersion.value++;
     }
     if (queuePath != null && !_isLoading) {
       // Debounce saves to prevent I/O saturation — the speed timer in

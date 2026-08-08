@@ -116,6 +116,10 @@ class _QueuePageState extends State<QueuePage> {
   final FocusNode _urlFocusNode = FocusNode();
   bool _hasUrlText = false;
 
+  /// Last-seen state per task id — the listener rebuilds the page only on
+  /// transitions (P1b); progress ticks update per-card notifiers instead.
+  final Map<String, DownloadState> _lastTaskStates = {};
+
   // -- Search/sort/filter state --
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -160,7 +164,20 @@ class _QueuePageState extends State<QueuePage> {
     // when a duplicate URL is detected during manual resniff.
     widget.queue.onResniffDuplicate = _handleResniffDuplicate;
     _sub = widget.queue.onTaskUpdated.listen((task) {
-      if (_rebuildTimer == null || !_rebuildTimer!.isActive) {
+      // P1b: rebuild the whole page only when something structural changed
+      // (task added / state transitioned). Pure progress ticks update the
+      // per-card ValueNotifier and the header's queueVersion instead —
+      // rebuilding all cards at 250 ms × active downloads was the top jank
+      // vector during downloads. Exception: flat-mode sort by speed depends
+      // on live speed, so keep the periodic rebuild while that is active.
+      final prevState = _lastTaskStates[task.id];
+      if (prevState != task.state) {
+        _lastTaskStates[task.id] = task.state;
+        if (mounted) setState(() {});
+      } else if (_flatList &&
+          _sortBy == TaskSortField.speed &&
+          mounted &&
+          (_rebuildTimer == null || !_rebuildTimer!.isActive)) {
         _rebuildTimer = Timer(const Duration(milliseconds: 500), () {
           if (mounted) setState(() {});
         });
@@ -172,7 +189,8 @@ class _QueuePageState extends State<QueuePage> {
         _showPartialMergeDialog(task);
       }
     });
-    _removedSub = widget.queue.onTaskRemoved.listen((_) {
+    _removedSub = widget.queue.onTaskRemoved.listen((taskId) {
+      _lastTaskStates.remove(taskId);
       if (mounted) setState(() {});
     });
     if (_searchQuery.isNotEmpty) {
@@ -1640,6 +1658,16 @@ class _QueuePageState extends State<QueuePage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildStatusLine() {
+    // P1b: the aggregate speed/counts line updates on every progress tick
+    // but only this subtree rebuilds — the cards rebuild via their own
+    // per-task notifiers.
+    return ValueListenableBuilder<int>(
+      valueListenable: widget.queue.queueVersion,
+      builder: (context, _, _) => _buildStatusLineContent(),
+    );
+  }
+
+  Widget _buildStatusLineContent() {
     final ac = context.ac;
     // Single pass over the queue (one list allocation) collects every count
     // the status line needs. Previously this ran 5 separate O(n) scans, and
@@ -1809,6 +1837,9 @@ class _QueuePageState extends State<QueuePage> {
 
     return DownloadCard(
       task: task,
+      // P1b: the card's live progress area listens to the per-task
+      // notifier instead of waiting for whole-list rebuilds.
+      progressListenable: widget.queue.taskNotifierFor(task.id),
       onOpenDownload: widget.onOpenDownload,
       onPause: onPauseClosure,
       onResume: onResumeClosure,
