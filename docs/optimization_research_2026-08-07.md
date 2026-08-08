@@ -289,6 +289,56 @@ Not in this batch: S2 (drop armeabi-v7a — product decision), S3 (custom ffmpeg
 S8 (R8 keep narrowing), P9 (flat-mode filter/sort cache — deferred, needs the same
 fingerprint machinery re-audit), P11 (native-chunk watchdog), P12 (player 1 Hz clock).
 
+## 8. 16 KB page-size audit (2026-08-08) — ELF32 aligner bug found and fixed
+
+Follow-up on the user question "does the 16 KB alignment work in theory?" —
+the theory holds (see below), but a real bug was found in the tooling while
+re-verifying:
+
+**The bug (fixed in de1f9bf):** `tooling/align_elf_16k.py` parsed program
+headers with the ELF64 field order for both ELF classes. ELF32 phdrs are
+`(p_type, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_flags, p_align)` —
+no `p_flags` gap — so for 32-bit libs:
+- padding was computed from `(p_paddr - p_vaddr) % 0x4000` = always 0 → no
+  inter-segment padding inserted;
+- the "already 16 KB aligned" gate compared `p_paddr - p_vaddr` → always
+  true for any file whose `p_align` was already ≥ 0x4000.
+
+The vendored + pub-cache `armeabi-v7a` libtorrent prebuilt was exactly that
+artifact: `p_align = 0x4000` but `(p_vaddr - p_offset) % 0x4000` =
+0x1000/0x2000/0x3000 (4 KB-congruent only) — the naive p_align-bump failure
+mode the script's own docstring warns about (passes Play's static check,
+breaks on real 16 KB devices). It would have been packaged into the next
+AAB (extractTorrentJni always re-runs from the package dir).
+
+**What the shipped AABs contain:** both the release AAB (2026-08-07) and the
+debug AAB (2026-08-08) carry the correctly aligned v7a (byte-congruent,
+verified via llvm-readelf + independent ELF parse) — they packaged from the
+Gradle transform cache, which held the good file. No shipped artifact was
+affected.
+
+**Fix + verification:** per-class `P_OFF`/`P_VADDR`/`p_filesz` indices
+threaded through the aligner; `prepare_torrent_16k.sh` re-run — v7a now
+gets +12288 bytes of padding and every PT_LOAD of both ABIs satisfies
+`(p_vaddr - p_offset) % 0x4000 == 0` with `p_align = 0x4000`. Verified with
+13 ad-hoc checks (synthetic ELF32 4 KB + naive-bump fixtures, ELF64
+regression, idempotency, real vendored libs) plus llvm-readelf on the
+artifacts. AGENTS.md's verify snippet now covers BOTH ABIs and the
+congruence column, not just arm64 p_align.
+
+**The theory, stated precisely** (why the fix is correct): the Android
+linker maps each PT_LOAD with `mmap(load_bias + page_start(p_vaddr),
+MAP_FIXED, fd, page_start(p_offset))`; the kernel requires
+`(addr - offset) % PAGE_SIZE == 0`. On 16 KB-page devices that means
+`page_start(p_vaddr) ≡ page_start(p_offset) (mod 0x4000)` — which the
+byte-level `(p_vaddr - p_offset) % 0x4000 == 0` invariant implies. Virtual
+addresses are never changed by the aligner, so no relocations, symbols, or
+.dynamic entries move; only file offsets shift (loaders map segments
+independently). 16 KB alignment is a superset of 4 KB, so aligned libs also
+work on current 4 KB devices. The one thing not exercised is a live
+16 KB-page device (Pixel with 16 KB mode / emulator) — no such device is
+available in this environment; static + structural verification is complete.
+
 ## Verification steps used
 - `unzip -l` on the release AAB; per-module and per-ABI byte accounting.
 - Font table inspection via Python struct parse (fvar/gvar/STAT present = variable).
