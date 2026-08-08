@@ -15,8 +15,8 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as enc;
@@ -26,6 +26,7 @@ import 'package:http/http.dart' as http;
 
 import 'pro_entitlement.dart';
 import 'pro_features.dart';
+import 'vault_crypto.dart';
 
 /// Key length in bytes (AES-256).
 const _kKeyLength = 32;
@@ -180,6 +181,10 @@ class VaultSyncService {
   }
 
   /// Uploads a single encrypted vault blob to WebDAV.
+  ///
+  /// Streams the vault file through AES-GCM into a temp blob file, then
+  /// streams a chunked-base64 body into the PUT (optimization research
+  /// P10) — a multi-GB vault file no longer needs 3 in-memory copies.
   Future<bool> uploadVaultBlob({
     required String passphrase,
     required String vaultName,
@@ -188,23 +193,40 @@ class VaultSyncService {
     try {
       final salt = await _getOrCreateSalt();
       final keyBytes = _deriveKey(passphrase, salt);
-      final key = enc.Key(Uint8List.fromList(keyBytes));
       final nonce = _generateNonce();
-      final iv = enc.IV(Uint8List.fromList(nonce));
-      final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
 
-      final sourceBytes = await vaultFile.readAsBytes();
-      final encrypted = encrypter.encryptBytes(sourceBytes, iv: iv);
+      final blobTmp = File('${vaultFile.path}.blob.tmp');
+      try {
+        // Pass only sendable values into the isolate (paths + key material).
+        final srcPath = vaultFile.path;
+        final tmpPath = blobTmp.path;
+        final keyU8 = Uint8List.fromList(keyBytes);
+        final nonceU8 = Uint8List.fromList(nonce);
+        final saltU8 = Uint8List.fromList(salt);
+        await Isolate.run(() async {
+          await encryptGcmStream(
+            src: File(srcPath),
+            dst: File(tmpPath),
+            key: keyU8,
+            nonce: nonceU8,
+            header: Uint8List.fromList([...saltU8, ...nonceU8]),
+          );
+        });
 
-      final blob = <int>[...salt, ...nonce, ...encrypted.bytes];
-      final blobBase64 = base64.encode(blob);
-
-      final response = await _webdavRequest(
-        'PUT',
-        '$_syncPath/blobs/$vaultName',
-        body: blobBase64,
-      );
-      return response.statusCode == 201 || response.statusCode == 204;
+        final expectedLen =
+            await vaultFile.length() + _kSaltLength + 12 + kVaultGcmTagBytes;
+        final response = await _webdavRequestStreamed(
+          'PUT',
+          '$_syncPath/blobs/$vaultName',
+          body: _streamBase64File(blobTmp),
+          contentLength: ((expectedLen + 2) ~/ 3) * 4,
+        );
+        return response.statusCode == 201 || response.statusCode == 204;
+      } finally {
+        try {
+          if (await blobTmp.exists()) await blobTmp.delete();
+        } catch (_) {}
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[VaultSyncService] blob upload failed: $e');
       return false;
@@ -212,35 +234,78 @@ class VaultSyncService {
   }
 
   /// Downloads and restores a single encrypted vault blob from WebDAV.
+  ///
+  /// Streams the response body through a chunked base64 decoder into a temp
+  /// blob file, then decrypts off the UI isolate (P10) — bounded memory for
+  /// multi-GB vault blobs.
   Future<bool> downloadAndRestoreVaultBlob({
     required String passphrase,
     required String vaultName,
     required Directory vaultDir,
   }) async {
     try {
-      final response = await _webdavRequest('GET', '$_syncPath/blobs/$vaultName');
-      if (response.statusCode != 200) return false;
-
-      final blob = base64.decode(response.body);
-      if (blob.length < _kSaltLength + 12 + 16) return false;
-
-      final salt = blob.sublist(0, _kSaltLength);
-      final nonce = blob.sublist(_kSaltLength, _kSaltLength + 12);
-      final ciphertext = blob.sublist(_kSaltLength + 12);
-
-      final keyBytes = _deriveKey(passphrase, salt);
-      final key = enc.Key(Uint8List.fromList(keyBytes));
-      final iv = enc.IV(Uint8List.fromList(nonce));
-      final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
-
-      final decrypted = encrypter.decryptBytes(
-        enc.Encrypted(Uint8List.fromList(ciphertext)),
-        iv: iv,
-      );
-
+      final uri = Uri.parse('$_syncPath/blobs/$vaultName');
+      final request = http.Request('GET', uri);
+      _applyAuth(request);
+      final client = http.Client();
+      final blobTmp = File('${vaultDir.path}/.restore-$vaultName.tmp');
       final dest = File('${vaultDir.path}/$vaultName');
-      await dest.writeAsBytes(decrypted, flush: true);
-      return true;
+      final destTmp = File('${dest.path}.restore.tmp');
+      try {
+        final streamedResponse = await client.send(request);
+        if (streamedResponse.statusCode != 200) return false;
+
+        final sink = blobTmp.openWrite();
+        final decoder = ChunkedBase64Decoder();
+        try {
+          await for (final chunk in streamedResponse.stream) {
+            final decoded = decoder.add(utf8.decode(chunk, allowMalformed: true));
+            if (decoded.isNotEmpty) sink.add(decoded);
+          }
+          final tail = decoder.close();
+          if (tail.isNotEmpty) sink.add(tail);
+        } finally {
+          await sink.close();
+        }
+
+        if (await blobTmp.length() < _kSaltLength + 12 + 16) return false;
+
+        final salt = (await blobTmp
+                .openRead(0, _kSaltLength)
+                .expand((c) => c)
+                .toList())
+            .cast<int>();
+        final nonce = (await blobTmp
+                .openRead(_kSaltLength, _kSaltLength + 12)
+                .expand((c) => c)
+                .toList())
+            .cast<int>();
+
+        final keyBytes = _deriveKey(passphrase, salt);
+        final srcPath = blobTmp.path;
+        final tmpPath = destTmp.path;
+        final keyU8 = Uint8List.fromList(keyBytes);
+        final nonceU8 = Uint8List.fromList(nonce);
+        await Isolate.run(() async {
+          await decryptGcmStream(
+            src: File(srcPath),
+            dst: File(tmpPath),
+            key: keyU8,
+            nonce: nonceU8,
+            skipBytes: _kSaltLength + 12,
+          );
+        });
+        await destTmp.rename(dest.path);
+        return true;
+      } finally {
+        client.close();
+        try {
+          if (await blobTmp.exists()) await blobTmp.delete();
+        } catch (_) {}
+        try {
+          if (await destTmp.exists()) await destTmp.delete();
+        } catch (_) {}
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[VaultSyncService] blob restore failed: $e');
       return false;
@@ -333,12 +398,7 @@ class VaultSyncService {
       request.body = body;
     }
 
-    // Basic auth
-    final credentials = base64.encode(
-      utf8.encode('$_webdavUsername:$_webdavPassword'),
-    );
-    request.headers['Authorization'] = 'Basic $credentials';
-    request.headers['Content-Type'] = 'application/octet-stream';
+    _applyAuth(request);
 
     final client = http.Client();
     try {
@@ -347,6 +407,59 @@ class VaultSyncService {
     } finally {
       client.close();
     }
+  }
+
+  /// Applies Basic auth + content type to a request.
+  void _applyAuth(http.BaseRequest request) {
+    final credentials = base64.encode(
+      utf8.encode('$_webdavUsername:$_webdavPassword'),
+    );
+    request.headers['Authorization'] = 'Basic $credentials';
+    request.headers['Content-Type'] = 'application/octet-stream';
+  }
+
+  /// PUT/POST variant that streams [body] with a known [contentLength]
+  /// (used by the vault blob upload so a multi-GB blob never materializes
+  /// in memory — P10).
+  Future<http.Response> _webdavRequestStreamed(
+    String method,
+    String url, {
+    required Stream<List<int>> body,
+    required int contentLength,
+  }) async {
+    final uri = Uri.parse(url);
+    // Create parent directories if needed (MKCOL)
+    if (method == 'PUT') {
+      await _ensureParentDirectories(uri);
+    }
+
+    final request = http.StreamedRequest(method, uri);
+    request.contentLength = contentLength;
+    _applyAuth(request);
+
+    final client = http.Client();
+    try {
+      final responseFuture = client.send(request);
+      await for (final chunk in body) {
+        request.sink.add(chunk);
+      }
+      await request.sink.close();
+      return await http.Response.fromStream(await responseFuture);
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Streams [file] as chunked-base64 UTF-8 bytes (stateful encoder keeps
+  /// 3-byte groups intact across chunk boundaries).
+  Stream<List<int>> _streamBase64File(File file) async* {
+    final encoder = ChunkedBase64Encoder();
+    await for (final chunk in file.openRead()) {
+      final s = encoder.add(chunk);
+      if (s.isNotEmpty) yield utf8.encode(s);
+    }
+    final tail = encoder.close();
+    if (tail.isNotEmpty) yield utf8.encode(tail);
   }
 
   Future<void> _ensureParentDirectories(Uri uri) async {

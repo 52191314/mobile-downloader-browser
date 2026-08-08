@@ -10,6 +10,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:encrypt/encrypt.dart' as enc;
@@ -21,6 +22,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'phase2_caps.dart';
 import 'pro_entitlement.dart';
+import 'vault_crypto.dart';
 
 /// How long an unlocked session lasts before biometric is required again.
 const Duration _kUnlockDuration = Duration(minutes: 5);
@@ -239,32 +241,54 @@ class VaultService {
 
   /// Encrypts [source] into the vault with AES-256-GCM.
   /// Returns vault filename on success, null on failure.
+  ///
+  /// Streams the file (1 MiB chunks) inside a background isolate — a
+  /// multi-GB import no longer loads the whole file + ciphertext into
+  /// memory on the UI isolate (optimization research P10). Output is
+  /// byte-identical to the previous one-shot path (v1 format), so older
+  /// app versions can still export files vaulted by this build.
   Future<String?> store(File source, {EntitlementTier? tier}) async {
     final effectiveTier = tier ?? EntitlementTier.free;
     if (!await canAccept(effectiveTier)) return null;
     if (!await authenticate(reason: 'Store file in private vault')) return null;
-
-    final dir = await vaultDir;
-    final sourceBytes = await source.readAsBytes();
-    if (sourceBytes.isEmpty) return null;
+    if (await source.length() == 0) return null;
 
     final key = _sessionKey;
     if (key == null) return null;
 
+    final dir = await vaultDir;
     final nonce = enc.IV.fromSecureRandom(12);
-    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
-    final encrypted = encrypter.encryptBytes(sourceBytes, iv: nonce);
-
     final vaultName = '${DateTime.now().millisecondsSinceEpoch}.vault';
     final dest = File(p.join(dir.path, vaultName));
-    // v1: version | nonce(12) | ciphertext+tag
-    final outBytes = Uint8List.fromList([
-      _kVaultFormatGcm,
-      ...nonce.bytes,
-      ...encrypted.bytes,
-    ]);
-    await dest.writeAsBytes(outBytes, flush: true);
-    return vaultName;
+    final tmp = File('${dest.path}.tmp');
+    try {
+      // File objects cannot cross isolate boundaries — pass paths + key
+      // material (all sendable) and reconstruct inside the isolate.
+      final srcPath = source.path;
+      final tmpPath = tmp.path;
+      final keyBytes = key.bytes;
+      final nonceBytes = nonce.bytes;
+      await Isolate.run(() async {
+        // v1: version | nonce(12) | ciphertext+tag
+        final header = Uint8List.fromList([_kVaultFormatGcm, ...nonceBytes]);
+        await encryptGcmStream(
+          src: File(srcPath),
+          dst: File(tmpPath),
+          key: keyBytes,
+          nonce: nonceBytes,
+          header: header,
+        );
+      });
+      // Atomic-ish: only a fully written blob becomes a vault entry.
+      await tmp.rename(dest.path);
+      return vaultName;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Vault] store failed: $e');
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -296,6 +320,48 @@ class VaultService {
     final key = _sessionKey;
     if (key == null) return false;
 
+    // v1 blobs stream-decrypt off the UI isolate (P10: a multi-GB vault
+    // export no longer loads blob + plaintext into memory). The first byte
+    // distinguishes v1 (0x01) from legacy CBC blobs.
+    try {
+      final firstByte = await src.openRead(0, 1).first;
+      if (firstByte.isNotEmpty && firstByte[0] == _kVaultFormatGcm) {
+        final nonceBytes = (await src.openRead(1, 13).expand((c) => c).toList())
+            .cast<int>();
+        if (nonceBytes.length != 12) return false;
+        final dest = File(destination);
+        await dest.parent.create(recursive: true);
+        final tmp = File('${dest.path}.tmp');
+        try {
+          final srcPath = src.path;
+          final tmpPath = tmp.path;
+          final keyBytes = key.bytes;
+          final nonceU8 = Uint8List.fromList(nonceBytes);
+          await Isolate.run(() async {
+            await decryptGcmStream(
+              src: File(srcPath),
+              dst: File(tmpPath),
+              key: keyBytes,
+              nonce: nonceU8,
+              skipBytes: 13,
+            );
+          });
+          await tmp.rename(dest.path);
+          return true;
+        } catch (e) {
+          if (kDebugMode) debugPrint('[Vault] export decrypt failed: $e');
+          try {
+            if (await tmp.exists()) await tmp.delete();
+          } catch (_) {}
+          return false;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Vault] export open failed: $e');
+      return false;
+    }
+
+    // Legacy CBC blob — rare, keep the one-shot path.
     final blob = await src.readAsBytes();
     final plain = _decryptBlob(key, blob);
     if (plain == null) return false;
