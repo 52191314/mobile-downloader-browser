@@ -647,6 +647,19 @@ class DownloadQueue {
     final task = _tasks[taskId];
     if (task == null) return false;
 
+    if (_isTorrentTask(task)) {
+      // The native torrent engine writes pieces directly to its save dir —
+      // there are never per-chunk files in tempDir to merge. Force merge
+      // is a splitter/HTTP concept; for torrents, resume or redownload.
+      debugPrint('Force merge refused for '
+          '${task.savePath.split("/").last}: native torrent task.');
+      task.failureReason = DownloadFailure.mergeFailed;
+      task.errorMessage =
+          'Torrent downloads are managed by the engine — resume or redownload instead.';
+      _emitTask(task);
+      return false;
+    }
+
     if (task.state == DownloadState.downloading) {
       debugPrint('Force merge refused for '
         '${task.savePath.split("/").last}: task is still downloading.');
@@ -958,7 +971,7 @@ class DownloadQueue {
     if (task.url.startsWith('blob:')) return;
 
     BaseDownloader downloader;
-    if (task.url.startsWith('magnet:') || task.url.endsWith('.torrent')) {
+    if (_isTorrentTask(task)) {
       downloader = TorrentDownloader(
         task: task,
         client: _client,
@@ -1750,12 +1763,28 @@ class DownloadQueue {
     return purged;
   }
 
+  /// True for tasks handled by the native torrent engine (magnet links and
+  /// `.torrent` URLs). The engine manages its own on-disk save directory
+  /// (files may land under a torrent-name subdir), so the task model's
+  /// savePath must stay stable — see [_applyAutoClassification].
+  bool _isTorrentTask(DownloadTask task) =>
+      task.url.startsWith('magnet:') ||
+      task.url.toLowerCase().endsWith('.torrent');
+
   /// Applies auto-classification to [task.savePath], inserting a category
   /// subfolder (e.g. "Videos", "Documents") between `/completed/` and the
   /// filename. Honors [autoClassifyMappings] for per-extension folder overrides.
   /// No-op when the path already has a user-chosen subfolder or does not live
   /// under `/completed/`. Avoids on-disk collisions with ` (1)`, ` (2)`, …
+  ///
+  /// Torrent engine tasks are SKIPPED: re-classifying them mid-flight makes
+  /// [DownloadTask.savePath] diverge from the engine's real on-disk
+  /// directory — [FilenameService.uniquePath] appends a ` (1)` collision
+  /// suffix because the engine's dir already exists, and the subsequent
+  /// rename no-ops on a directory. Publishing then fails with
+  /// "Couldn't publish — completed file not found".
   void _applyAutoClassification(DownloadTask task) {
+    if (_isTorrentTask(task)) return;
     final normalized = task.savePath.replaceAll('\\', '/');
     const sep = '/completed/';
     final idx = normalized.lastIndexOf(sep);
@@ -1849,6 +1878,8 @@ class DownloadQueue {
         task.publicPathLabel = published.pathLabel;
         task.publishErrorMessage = null;
         // Delete the internal copy — the file is now in public Downloads.
+        // (Directory savePaths — torrent engine outputs — are intentionally
+        // kept: the engine may still seed from them.)
         try {
           final internalFile = File(task.savePath);
           if (await internalFile.exists()) {

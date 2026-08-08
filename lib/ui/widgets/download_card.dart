@@ -813,6 +813,11 @@ class DownloadCard extends StatelessWidget {
         task.sourcePageUrl!.trim().isNotEmpty;
     final isMagnet = task.url.startsWith('magnet:');
     final isBlob = task.url.startsWith('blob:');
+    // Native-engine torrent tasks have no mergeable chunks (the engine
+    // writes pieces straight to its save dir) — force merge can never
+    // succeed for them, so don't offer it.
+    final isTorrentEngineTask =
+        isMagnet || task.url.toLowerCase().endsWith('.torrent');
 
     // Open file (completed) — same as primary; kept for menu discoverability.
     if (isCompleted) {
@@ -890,9 +895,10 @@ class DownloadCard extends StatelessWidget {
       );
     }
 
-    // Force merge (partial / interrupted only)
+    // Force merge (partial / interrupted only — never for native torrents)
     if (!isCompleted &&
         !isActive &&
+        !isTorrentEngineTask &&
         onForceMerge != null) {
       popupItems.add(
         PopupMenuItem(

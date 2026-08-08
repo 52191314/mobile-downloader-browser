@@ -1138,7 +1138,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         id: id,
         url: rawUrl,
         headers: headers,
-        savePath: baseDir.path,
+        // Task-scoped save dir: the engine writes the torrent content into
+        // this directory (possibly under a torrent-name subdir). Sharing the
+        // completed workspace root as savePath would make the folder
+        // publisher mirror EVERY completed download into public storage.
+        savePath: FilenameService.uniquePath(
+          '${baseDir.path}/${_torrentTaskName(rawUrl)}',
+          reservedPaths: _downloadQueue.allTasks.map((t) => t.savePath),
+        ),
         tempDir: '${tempDir.path}/$id',
       );
       if (_downloadQueue.urlExists(rawUrl)) {
@@ -1830,6 +1837,28 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   bool _isTorrentFileUrl(Uri uri) {
     return uri.path.toLowerCase().endsWith('.torrent');
+  }
+
+  /// Derives a filesystem-safe task name for a pasted magnet / .torrent URL
+  /// (the media-picker flow uses the sniffer item name instead). Falls back
+  /// to "torrent" when nothing usable can be extracted.
+  String _torrentTaskName(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri != null && uri.scheme == 'magnet') {
+      final dn = uri.queryParameters['dn'];
+      if (dn != null && dn.trim().isNotEmpty) {
+        final clean = FilenameService.sanitize(dn);
+        if (clean.isNotEmpty && clean != '.') return clean;
+      }
+      return 'torrent';
+    }
+    final path = uri?.path ?? rawUrl;
+    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.isNotEmpty) {
+      final clean = FilenameService.sanitize(segments.last);
+      if (clean.isNotEmpty && clean != '.') return clean;
+    }
+    return 'torrent';
   }
 
   void _showSnack(String message) {

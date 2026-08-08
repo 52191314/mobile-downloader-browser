@@ -58,12 +58,32 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
       throw StateError("Couldn't publish — completed file not found: ${task.savePath}");
     }
     if (entityType == FileSystemEntityType.directory) {
-      throw UnsupportedError(
-        "Aurora can publish single files to Downloads. Folder publishing isn't available yet.",
-      );
+      // Folder output (e.g. the native torrent engine's save dir, possibly
+      // with a torrent-name subdir). Mirror the whole tree into MediaStore —
+      // multi-file torrents have no single "the file" to publish.
+      return _publishFolder(task);
     }
 
-    final normalized = p.normalize(task.savePath).replaceAll('\\', '/');
+    final folderBase = _mediaStoreBaseFor(task.savePath);
+    final result = await _channel
+        .invokeMapMethod<String, Object?>('publishFile', {
+          'sourcePath': task.savePath,
+          'displayName': p.basename(task.savePath),
+          'mimeType': mimeTypeForName(task.savePath),
+          'relativePath': folderBase,
+        });
+
+    final uri = result?['uri'] as String?;
+    final label = result?['pathLabel'] as String? ?? pathLabel;
+    if (uri == null || uri.isEmpty) return null;
+    return PublishedDownload(uri: uri, pathLabel: label);
+  }
+
+  /// MediaStore RELATIVE_PATH root for a completed internal file/folder:
+  /// `rootRelativePath` + the category subfolder (e.g. `Other`) derived from
+  /// the path under `/completed/`.
+  String _mediaStoreBaseFor(String path) {
+    final normalized = p.normalize(path).replaceAll('\\', '/');
     int completedIndex = normalized.lastIndexOf('/completed/');
     int prefixLen = '/completed/'.length;
     if (completedIndex == -1 && normalized.startsWith('completed/')) {
@@ -91,19 +111,51 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
         relativePath = '$root/$subFolder';
       }
     }
+    return relativePath;
+  }
 
-    final result = await _channel
-        .invokeMapMethod<String, Object?>('publishFile', {
-          'sourcePath': task.savePath,
-          'displayName': p.basename(task.savePath),
-          'mimeType': mimeTypeForName(task.savePath),
-          'relativePath': relativePath,
-        });
+  /// Publishes every file under [task.savePath] (recursively), preserving
+  /// the on-disk structure below the folder inside the MediaStore root.
+  /// Returns a handle for the first published file (its URI drives "Open").
+  Future<PublishedDownload?> _publishFolder(DownloadTask task) async {
+    final dir = Directory(task.savePath);
+    final files = <File>[];
+    await for (final entity
+        in dir.list(recursive: true, followLinks: false)) {
+      if (entity is File) files.add(entity);
+    }
+    files.sort((a, b) => a.path.compareTo(b.path));
+    if (files.isEmpty) {
+      throw StateError("Folder is empty — nothing to publish: ${task.savePath}");
+    }
 
-    final uri = result?['uri'] as String?;
-    final label = result?['pathLabel'] as String? ?? pathLabel;
-    if (uri == null || uri.isEmpty) return null;
-    return PublishedDownload(uri: uri, pathLabel: label);
+    final folderRel = p.join(
+      _mediaStoreBaseFor(task.savePath),
+      p.basename(task.savePath),
+    ).replaceAll('\\', '/');
+
+    Uri? firstUri;
+    String label = pathLabel;
+    for (final file in files) {
+      final rel = p.join(
+        folderRel,
+        p.relative(file.path, from: task.savePath),
+      ).replaceAll('\\', '/');
+      final result = await _channel
+          .invokeMapMethod<String, Object?>('publishFile', {
+            'sourcePath': file.path,
+            'displayName': p.basename(file.path),
+            'mimeType': mimeTypeForName(file.path),
+            'relativePath': rel,
+          });
+      final uri = result?['uri'] as String?;
+      if (uri != null && uri.isNotEmpty) {
+        firstUri ??= Uri.parse(uri);
+        label = result?['pathLabel'] as String? ?? pathLabel;
+      }
+    }
+    if (firstUri == null) return null;
+    return PublishedDownload(uri: firstUri.toString(), pathLabel: label);
   }
 
   Future<void> open(DownloadTask task) async {
