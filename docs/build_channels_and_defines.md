@@ -23,7 +23,7 @@ If we later add real Gradle `productFlavors` (`play` / `github`), they should wi
 
 | Value | Default? | Purpose |
 |-------|----------|---------|
-| `github` | **Yes** (if unset) | Open-source / sideload / GitHub releases. Full sniffer (incl. YouTube). **No** Play Billing purchase path. |
+| `github` | **Yes** (if unset) | Open-source / sideload / GitHub releases. Full sniffer (incl. YouTube). **No** Play Billing purchase path. **Release** builds default the entitlement tier to **Ultra** (everything unlocked) — debug/profile keep free-tier caps so the freemium UX stays testable. |
 | `play` | No | Google Play edition. YouTube media sniff/download **blocked**. Play Billing for Aurora Pro. No external checkout links. |
 
 **Code:** `lib/premium/build_channel.dart`  
@@ -184,8 +184,8 @@ flutter build appbundle --release \
 | YouTube sniff / download | Allowed | **Blocked** |
 | Play Billing buy/restore | No-op / “get on Play” copy | Active (`aurora_pro_unlock`) |
 | External Pro checkout links | None | None |
-| Free-tier Pro feature caps | Yes (unless debug Force Pro) | Yes until purchase |
-| Typical distribution | GitHub Releases, sideload | Play Console AAB |
+| Free-tier Pro feature caps | Release: **none — Ultra unlocked**; debug/profile: Yes (unless debug Force Pro) | Yes until purchase |
+| Typical distribution | GitHub Releases, F-Droid, sideload | Play Console AAB |
 
 ---
 

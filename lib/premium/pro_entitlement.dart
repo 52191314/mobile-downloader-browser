@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'build_channel.dart';
 import 'pro_entitlement_store.dart';
 
 /// Distribution tier derived from owned Play product IDs.
@@ -53,9 +54,12 @@ EntitlementTier maxTierForOwned(Iterable<String> owned) {
 /// Pro entitlement service — the single source of truth for the user's
 /// Aurora tier (free / pro / ultra) and the set of owned product IDs.
 ///
-/// Tier is always **derived** from [ownedProductIds] as
-/// `max(tierForProductId(id) for id in ownedProductIds)`. The [tier] field
-/// is a fast cache of that maximum.
+/// Tier is **derived** from [ownedProductIds] as
+/// `max(tierForProductId(id) for id in ownedProductIds)` — except for OSS
+/// channel **release** builds (GitHub / F-Droid / sideload), where the
+/// effective [tier] defaults to [EntitlementTier.ultra] (fully unlocked
+/// edition; no billing path exists to sell into). The [tier] field is a fast
+/// cache of the purchase-derived maximum.
 ///
 /// In **debug/profile** builds, you can override the tier for testing via
 /// [setDebugTier]. The override is **never** persisted to disk and resets on
@@ -92,6 +96,12 @@ class ProEntitlement extends ChangeNotifier {
     final override = _debugOverride;
     if (override != null) return override;
     if (_licenseGating) return _licensedTier ?? EntitlementTier.free;
+    // OSS channel (GitHub / F-Droid / sideload) **release** builds are the
+    // fully unlocked open-source edition: there is no Play billing path to
+    // sell into, and F-Droid requires the shipped build to be functional with
+    // every advertised feature. Debug/profile builds keep the real (usually
+    // free) tier so the freemium UX stays testable via [setDebugTier].
+    if (kReleaseMode && BuildChannel.isGithub) return EntitlementTier.ultra;
     return _tier;
   }
 

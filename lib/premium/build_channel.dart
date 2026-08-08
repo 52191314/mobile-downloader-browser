@@ -8,6 +8,11 @@
 ///
 /// Default is `github` so open-source / sideload APKs never ship a billing
 /// client path by accident.
+///
+/// OSS edition note: **release** builds on this channel default the effective
+/// entitlement tier to Ultra — everything is unlocked, because there is no
+/// billing path to sell into (see `ProEntitlement.tier`). Debug/profile builds
+/// keep the purchase-derived tier so free-tier flows stay testable.
 class BuildChannel {
   BuildChannel._();
 
