@@ -65,6 +65,10 @@ class SettingsPage extends StatefulWidget {
   final VoidCallback? onRulesChanged;
   final void Function(String url)? onOpenUrlInBrowser;
 
+  /// Opens imported backup tabs live in the browser, inserted right after
+  /// the current tab (no restart needed).
+  final void Function(List<String> urls)? onImportTabs;
+
   /// Which sub-page to show as the root of this route.
   /// Pushed from Browser menu; system back returns to Browser (no hub tab).
   final SettingsSection launchSection;
@@ -89,6 +93,7 @@ class SettingsPage extends StatefulWidget {
     required this.vaultService,
     this.onRulesChanged,
     this.onOpenUrlInBrowser,
+    this.onImportTabs,
     required this.launchSection,
   });
 
@@ -2565,6 +2570,8 @@ class _SettingsPageState extends State<SettingsPage> {
       libraryUpdateNotifier: widget.libraryUpdateNotifier,
       autoBackupService: widget.autoBackupService,
       proEntitlement: widget.proEntitlement,
+      onOpenUrlInBrowser: widget.onOpenUrlInBrowser,
+      onImportTabs: widget.onImportTabs,
     );
   }
 
@@ -3116,6 +3123,9 @@ class BackupPage extends StatefulWidget {
   final ProEntitlement proEntitlement;
   final void Function(String url)? onOpenUrlInBrowser;
 
+  /// Opens imported backup tabs live in the browser, beside the current tab.
+  final void Function(List<String> urls)? onImportTabs;
+
   const BackupPage({
     super.key,
     required this.downloadQueue,
@@ -3125,6 +3135,7 @@ class BackupPage extends StatefulWidget {
     required this.autoBackupService,
     required this.proEntitlement,
     this.onOpenUrlInBrowser,
+    this.onImportTabs,
   });
 
   @override
@@ -3211,7 +3222,9 @@ class _BackupPageState extends State<BackupPage> {
               tabsJson = decodedTabs.whereType<Map<String, dynamic>>().toList();
             }
           }
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[Export] browser_tabs.json read failed: $e');
+        }
       }
 
       if (exportRules) {
@@ -3240,7 +3253,6 @@ class _BackupPageState extends State<BackupPage> {
               'download_queue',
               'download_settings',
               'browser_tabs',
-              'tab_groups',
               'browser_library',
               'download_rules',
             ].contains(key)) {
@@ -3506,6 +3518,7 @@ class _BackupPageState extends State<BackupPage> {
       bool importedSettings = false;
       bool importedRules = false;
       String? activeTabUrlToReopen;
+      final List<String> importedTabUrls = [];
 
       BrowserLibrary updatedLibrary = await const BrowserLibraryStore().load();
 
@@ -3766,6 +3779,13 @@ class _BackupPageState extends State<BackupPage> {
           await tabsFile.writeAsString(jsonEncode(tabsList));
           importedTabsCount = tabsList.length;
 
+          // Collect every imported URL for the live restore below.
+          importedTabUrls.addAll(
+            tabsList.whereType<Map>().map(
+              (item) => (item['url'] as String? ?? '').trim(),
+            ).where((u) => u.isNotEmpty),
+          );
+
           if (decoded.containsKey('tabGroups')) {
             final groupsFile = File('$baseDir/tab_groups.json');
             await groupsFile.writeAsString(jsonEncode(decoded['tabGroups']));
@@ -3859,13 +3879,21 @@ class _BackupPageState extends State<BackupPage> {
 
       widget.libraryUpdateNotifier.value++;
 
-      // Open active restored tab in browser view if requested
-      final targetUrl = activeTabUrlToReopen;
-      if (targetUrl != null && targetUrl.isNotEmpty) {
+      // Open imported tabs live in the browser, beside the current tab.
+      if (importedTabUrls.isNotEmpty) {
         if (mounted) {
           Navigator.of(context, rootNavigator: true).maybePop();
         }
-        widget.onOpenUrlInBrowser?.call(targetUrl);
+        final openTabs = widget.onImportTabs;
+        if (openTabs != null) {
+          openTabs(importedTabUrls);
+        } else {
+          // Fallback: reopen only the active tab URL in the current tab.
+          final targetUrl = activeTabUrlToReopen;
+          if (targetUrl != null && targetUrl.isNotEmpty) {
+            widget.onOpenUrlInBrowser?.call(targetUrl);
+          }
+        }
       }
     } catch (error) {
       _showSnack('Couldn\'t import backup. $error. Make sure the file is a valid backup.');

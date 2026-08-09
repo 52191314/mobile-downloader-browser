@@ -223,6 +223,14 @@ abstract interface class SnifferBrowserController {
   /// Registers a callback for [openUrlInNewTab]. Passing `null` clears it.
   void setOnOpenUrlInNewTab(void Function(String url)? callback);
 
+  /// Opens several URLs as new tabs placed right after the currently active
+  /// tab, without switching to them (used by backup import to restore a
+  /// browser session live instead of waiting for the next restart).
+  void openUrlsInNewTabs(List<String> urls);
+
+  /// Registers a callback for [openUrlsInNewTabs]. Passing `null` clears it.
+  void setOnOpenUrlsInNewTabs(void Function(List<String> urls)? callback);
+
   /// Registers a callback for the active-tab system-back handler.
   /// [SnifferScreen] sets this to a closure that navigates the active
   /// tab's WebView back. Returns `true` if the back was handled
@@ -1988,6 +1996,36 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
   }
 
+  void Function(List<String> urls)? _onOpenUrlsInNewTabs;
+  final List<String> _pendingOpenUrlsInNewTabs = [];
+
+  @override
+  void openUrlsInNewTabs(List<String> urls) {
+    final trimmed = urls.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
+    if (trimmed.isEmpty) return;
+    final callback = _onOpenUrlsInNewTabs;
+    if (callback == null) {
+      debugPrint(
+        '[BrowserController] openUrlsInNewTabs(${trimmed.length}) — callback '
+        'null, queued (pending=${_pendingOpenUrlsInNewTabs.length + trimmed.length})',
+      );
+      _pendingOpenUrlsInNewTabs.addAll(trimmed);
+      return;
+    }
+    callback(trimmed);
+  }
+
+  /// Registers a callback for [openUrlsInNewTabs]. Passing `null` clears it.
+  @override
+  void setOnOpenUrlsInNewTabs(void Function(List<String> urls)? callback) {
+    _onOpenUrlsInNewTabs = callback;
+    if (callback != null && _pendingOpenUrlsInNewTabs.isNotEmpty) {
+      final pending = List<String>.from(_pendingOpenUrlsInNewTabs);
+      _pendingOpenUrlsInNewTabs.clear();
+      scheduleMicrotask(() => callback(pending));
+    }
+  }
+
   @override
   void setOnSystemBackRequested(Future<bool> Function()? callback) {
     _onSystemBackRequested = callback;
@@ -2094,6 +2132,31 @@ class MockBrowserController implements SnifferBrowserController {
           callback(u);
         }
       });
+    }
+  }
+
+  void Function(List<String> urls)? _onOpenUrlsInNewTabs;
+  final List<String> _pendingOpenUrlsInNewTabs = [];
+
+  @override
+  void openUrlsInNewTabs(List<String> urls) {
+    final trimmed = urls.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
+    if (trimmed.isEmpty) return;
+    final callback = _onOpenUrlsInNewTabs;
+    if (callback == null) {
+      _pendingOpenUrlsInNewTabs.addAll(trimmed);
+      return;
+    }
+    callback(trimmed);
+  }
+
+  @override
+  void setOnOpenUrlsInNewTabs(void Function(List<String> urls)? callback) {
+    _onOpenUrlsInNewTabs = callback;
+    if (callback != null && _pendingOpenUrlsInNewTabs.isNotEmpty) {
+      final pending = List<String>.from(_pendingOpenUrlsInNewTabs);
+      _pendingOpenUrlsInNewTabs.clear();
+      scheduleMicrotask(() => callback(pending));
     }
   }
 

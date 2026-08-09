@@ -817,6 +817,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           onRulesChanged: _reloadRules,
           launchSection: section,
           onOpenUrlInBrowser: _openUrlInBrowser,
+          onImportTabs: (urls) => _browserController.openUrlsInNewTabs(urls),
           speedLimitKbps: _speedLimitKbps,
           onSpeedLimitChanged: (value) {
             setState(() => _speedLimitKbps = value);
