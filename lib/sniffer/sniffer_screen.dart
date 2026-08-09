@@ -14,6 +14,8 @@ import 'package:path_provider/path_provider.dart';
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
 import '../downloader/download_rules.dart';
+import '../platform/network_binding_service.dart';
+import '../premium/free_taste.dart';
 import '../premium/pro_entitlement.dart';
 import '../premium/pro_features.dart';
 import '../premium/premium_flags.dart';
@@ -52,6 +54,7 @@ import 'autofill_store.dart';
 import 'safe_browsing_service.dart';
 import 'sniffer_url_utils.dart';
 import 'sniffer_url_utils.dart' as url_utils;
+import 'listing_page_crawler.dart';
 import 'native_html_media_extractor.dart';
 import 'cct_browser.dart';
 import 'sheets/download_prompt_sheet.dart';
@@ -2686,6 +2689,182 @@ class _SnifferScreenState extends State<SnifferScreen>
     _showSnack('Page re-scanned for media');
   }
 
+  /// Fetches [url]'s HTML for the listing crawler. Tries the WebView's JS
+  /// network stack first (rides the browser's WAF-bypass + cookies), then
+  /// falls back to the native HttpURLConnection fetch (TLS fingerprint).
+  ///
+  /// The controller is captured from [tab] so a mid-crawl tab switch cannot
+  /// swap the transport under the crawler.
+  Future<String?> _fetchHtmlForCrawl(BrowserTab tab, String url) async {
+    final viaWebView = await tab.controller.fetchViaJavaScript(url);
+    if (viaWebView != null && viaWebView.isNotEmpty) return viaWebView;
+    final native = await NetworkBindingService.fetchUrl(url);
+    final body = native?['body'];
+    return body is String && body.isNotEmpty ? body : null;
+  }
+
+  /// Crawls the active tab's page for every linked video and enqueues them
+  /// all in one batch (Tools → "Download all on this page").
+  ///
+  /// Follows pagination on the listing page and fetches each detail page to
+  /// find its real media URL, so a whole channel/tag/user page downloads in
+  /// one tap instead of one-at-a-time.
+  Future<void> _runListingBatchDownload() async {
+    final tab = _activeTab;
+    final listingUrl = tab.currentUrl ?? tab.addressController.text;
+    if (listingUrl.isEmpty || !listingUrl.startsWith('http')) {
+      _showSnack('No page URL to scan');
+      return;
+    }
+
+    // --- Progress dialog with cancel ---
+    var cancelled = false;
+    final progressText = ValueNotifier<String>('Scanning page…');
+    final dialogContext = context;
+    if (dialogContext.mounted) {
+      showDialog<void>(
+        context: dialogContext,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (ctx) => ValueListenableBuilder<String>(
+          valueListenable: progressText,
+          builder: (ctx, text, _) {
+            return AlertDialog(
+              title: const Text('Download all on this page'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(text, style: const TextStyle(fontSize: 13)),
+                  const SizedBox(height: 14),
+                  const LinearProgressIndicator(),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    cancelled = true;
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    final crawler = ListingPageCrawler(
+      fetchHtml: (url) => _fetchHtmlForCrawl(tab, url),
+      isCancelled: () => cancelled,
+      onProgress: (p) {
+        progressText.value =
+            'Page ${p.pagesScanned} scanned — ${p.totalMediaFound} video(s) found';
+      },
+    );
+
+    final result = await crawler.crawlListing(listingUrl);
+
+    // Close the progress dialog.
+    progressText.dispose();
+    if (dialogContext.mounted) {
+      Navigator.of(dialogContext, rootNavigator: true).pop();
+    }
+
+    if (!mounted) return;
+
+    if (result.cancelled) {
+      _showSnack('Scan cancelled — nothing added');
+      return;
+    }
+    if (result.media.isEmpty) {
+      _showSnack('No videos found on this page or its linked pages');
+      return;
+    }
+
+    // --- Free-taste gate, same as the capture sheet's batch download ---
+    final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final decision = await FreeTaste.evaluate(
+      feature: ProFeature.batchCapture,
+      tier: tier,
+      actionSize: result.media.length,
+    );
+    if (!decision.allowed) {
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            context,
+            feature: ProFeature.batchCapture,
+            userTier: tier,
+          ),
+        );
+      }
+      return;
+    }
+
+    var toEnqueue = result.media;
+    if (decision.allowedCount != null &&
+        decision.allowedCount! < result.media.length) {
+      toEnqueue = result.media.take(decision.allowedCount!).toList();
+      if (mounted) {
+        unawaited(
+          UpsellController.show(
+            context,
+            feature: ProFeature.batchCapture,
+            userTier: tier,
+          ),
+        );
+      }
+    }
+
+    // --- Enqueue all, skipping anything already queued ---
+    var added = 0;
+    var skipped = 0;
+    for (final media in toEnqueue) {
+      if (!mounted) break;
+      if (RestrictedMediaPolicy.isBlocked(
+        mediaUrl: media.url,
+        sourcePageUrl: media.sourcePageUrl,
+      )) {
+        skipped++;
+        continue;
+      }
+      if (_downloadQueue.urlExists(media.url)) {
+        skipped++;
+        continue;
+      }
+      final pageUri = Uri.tryParse(media.sourcePageUrl);
+      await enqueueDirectDownload(
+        context: context,
+        tab: tab,
+        url: media.url,
+        suggestedFilename: media.pageTitle,
+        downloadQueue: _downloadQueue,
+        settings: widget.settings,
+        baseDir: _baseDir,
+        baseTemp: _baseTemp,
+        getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+        showSnack: _showSnack,
+        isMounted: () => mounted,
+        ruleEngine: widget.ruleEngine,
+        pageHost: pageUri?.host,
+        silent: true,
+      );
+      if (_downloadQueue.urlExists(media.url)) {
+        added++;
+      } else {
+        skipped++;
+      }
+    }
+
+    if (!mounted) return;
+    final summary = added > 0
+        ? 'Added $added video(s) to the queue'
+        : 'Nothing new to add';
+    final skipNote = skipped > 0 ? ' ($skipped already queued)' : '';
+    _showSnack('$summary$skipNote');
+  }
+
   /// Re-enqueues HLS playlist items in the active tab's sniffer engine
   /// for enrichment.  The [MediaEnricher] checks [hlsPlaylistCache] first
   /// (which is preserved across navigations), so variants can be
@@ -3882,6 +4061,12 @@ class _SnifferScreenState extends State<SnifferScreen>
         icon: Icons.refresh_rounded,
         label: 'Re-scan media',
         onTap: () => unawaited(_rescanPageMedia()),
+      ),
+      OverflowMenuEntry(
+        icon: Icons.playlist_add_rounded,
+        label: 'Download all on this page',
+        color: ac.accentFrost,
+        onTap: () => unawaited(_runListingBatchDownload()),
       ),
       OverflowMenuEntry(
         icon: Icons.cookie_rounded,

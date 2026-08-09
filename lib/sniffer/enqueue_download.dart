@@ -91,6 +91,10 @@ String resolveSuggestedDownloadName({
 }
 
 /// Directly enqueues a download without the Add-to-Queue dialog.
+///
+/// When [silent] is true (batch flows like listing-page crawl), already-queued
+/// URLs are skipped quietly instead of prompting, and the per-item "Started
+/// downloading" snackbar is suppressed — the caller shows one summary instead.
 Future<void> enqueueDirectDownload({
   required BuildContext context,
   required BrowserTab tab,
@@ -106,6 +110,7 @@ Future<void> enqueueDirectDownload({
   DownloadRuleEngine? ruleEngine,
   String? pageHost,
   String? mediaTypeForRule,
+  bool silent = false,
 }) async {
   final media = tab.snifferEngine.detectedMedia
       .where((m) => m.url == url)
@@ -243,6 +248,7 @@ Future<void> enqueueDirectDownload({
         suggestedName,
         media?.sourcePageUrl ?? currentUrl,
       )) {
+    if (silent) return; // batch: skip already-queued quietly
     if (!context.mounted) return;
     final choice = await showDuplicateDownloadDialog(
       context: context,
@@ -284,7 +290,7 @@ Future<void> enqueueDirectDownload({
     }
   }
 
-  if (isMounted()) {
+  if (!silent && isMounted()) {
     showSnack('Started downloading $suggestedName');
   }
 }
