@@ -339,6 +339,50 @@ work on current 4 KB devices. The one thing not exercised is a live
 16 KB-page device (Pixel with 16 KB mode / emulator) — no such device is
 available in this environment; static + structural verification is complete.
 
+## 9. Batch 2 — in flight (2026-08-09, uncommitted working tree)
+
+Three changes sit uncommitted; two are genuine findings surfaced while
+exercising batch 1, one is a feature. Not yet analyze/test-verified.
+
+### F1. P1b per-card notifiers were silently dead — ValueNotifier swallows same-instance assigns (BUG)
+Batch 1's P1b published `ValueNotifier<DownloadTask>` with a skip-no-op
+dedup (`notifier.value = task` only when fields changed). But the queue and
+engines mutate ONE `DownloadTask` object in place — every emit assigns the
+*same instance*, so `ValueNotifier`'s identical-instance check suppressed
+every notification: card progress bars froze after the first emit and only
+repainted on full-list rebuilds (state transitions). Fix (working tree):
+`_TaskLiveNotifier` in `download_queue.dart` — a push-style `ChangeNotifier`
+implementing `ValueListenable<DownloadTask>` that records the current task
+reference and fires unconditionally on `push(task)`; `taskNotifierFor`
+returns `ValueListenable<DownloadTask>`. `queueVersion` keeps driving the
+header. **Lesson: with in-place-mutated models, `ValueNotifier` is the
+wrong primitive — never dedup on an instance identity you don't control.**
+
+### F2. Native-chunk progress poll vs speed-timer mismatch — 2 fps bar + alternating 0 KB/s (BUG, P11 stopgap)
+P11 (2026-08-07) flagged the per-chunk 500 ms `chunkFile.length()` stat poll
+as churn to remove. But the splitter's speed display ticks at 250 ms — so
+native downloads repainted progress at 2 fps AND the speed readouts
+alternated with 0 KB/s (poll and speed timer interleave). The working tree
+moves the poll to 250 ms to match cadence (`download_splitter.dart:914`) — a
+UX stopgap that *doubles* the stat churn P11 wants gone. P11's real fix
+(byte-delta tracking in the stream listener + native callback progress, no
+stat loop) is still open.
+
+### FEAT. FFmpeg Studio outputs now land in public Downloads
+`ffmpeg_studio_page.dart`: on job completion the output is published via
+`PublicDownloadsService.publishToPublicDownloads(...)` — generalized from
+`backupFileToDownloads`: takes a `mimeType`, returns the content URI instead
+of bool — into `Download/Aurora Downloader/FFmpeg/…` (MediaStore form); the
+private scratch copy is then deleted and a snackbar confirms
+(`Downloads/Aurora Downloader/FFmpeg/<name>`). Output preview and job paths
+share one `_outputFileName()` builder, which is byte-aware:
+- **255-byte filesystem component limit**: truncates the base name by
+  UTF-8 byte budget (255 − suffix bytes), never splitting a multibyte char
+  mid-sequence — ENAMETOOLONG would otherwise fail jobs whose source
+  filename came from an unbounded download title.
+- Publish failure keeps the output at its scratch path + snackbar — no
+  silent loss.
+
 ## Verification steps used
 - `unzip -l` on the release AAB; per-module and per-ABI byte accounting.
 - Font table inspection via Python struct parse (fvar/gvar/STAT present = variable).

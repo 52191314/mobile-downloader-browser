@@ -1104,6 +1104,28 @@ class _SettingsPageState extends State<SettingsPage> {
             PanelHeader(icon: Icons.palette_outlined, title: 'Appearance'),
             const SizedBox(height: 8),
             Panel(child: Column(children: [
+              DropdownButtonFormField<String>(
+                value: _settings.appLanguageCode,
+                decoration: InputDecoration(
+                  labelText: 'App language',
+                  helperText: 'Choose display language for Aurora Downloader interface',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                items: kAppSupportedLanguages
+                    .map((lang) => DropdownMenuItem(
+                          value: lang.code,
+                          child: Text(lang.name),
+                        ))
+                    .toList(),
+                onChanged: (langCode) {
+                  if (langCode == null) return;
+                  setLocal(() {});
+                  _update(_settings.copyWith(appLanguageCode: langCode));
+                },
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<DarkModePreference>(
                 value: localPref,
                 decoration: InputDecoration(
@@ -1968,7 +1990,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Downloader',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.0.1', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v1.1.0', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),

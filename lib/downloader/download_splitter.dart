@@ -911,8 +911,11 @@ class DownloadSplitter implements BaseDownloader {
 
       var lastNativeBytes = diskBytes;
       var nativeStallSeconds = 0.0;
-      // Start progress polling + stall watchdog timer every 500ms
-      final progressTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      // Progress polling + stall watchdog every 250ms — matches the speed
+      // timer so every speed tick also advances the progress bar (a 500ms
+      // poll made native downloads look 2 fps and the 250ms speed calc
+      // report 0 KB/s on every other tick).
+      final progressTimer = Timer.periodic(const Duration(milliseconds: 250), (_) async {
         try {
           if (await chunkFile.exists()) {
             final actualBytes = await chunkFile.length();

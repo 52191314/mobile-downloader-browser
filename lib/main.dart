@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'l10n/app_localizations.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -19,6 +20,7 @@ import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
 import 'sniffer/sniffer_url_utils.dart';
 import 'theme/aurora_glass_background.dart';
+import 'theme/aurora_palette.dart';
 import 'theme/aurora_theme.dart';
 import 'theme/aurora_tokens.dart';
 import 'ui/pages/queue_page.dart';
@@ -67,6 +69,10 @@ final ValueNotifier<ThemeMode> appThemeModeNotifier =
 /// Set to `true` when [DarkModePreference.forced] is active (the setting
 /// is labelled "Dark (OLED black)" in the UI).
 final ValueNotifier<bool> appOledDarkNotifier = ValueNotifier(false);
+
+/// Top-level notifier for the app display language (locale).
+/// Updated by [_AuroraHomeState] whenever the user changes [DownloadSettings.appLanguageCode].
+final ValueNotifier<Locale?> appLocaleNotifier = ValueNotifier(null);
 
 enum BatteryOptChoice {
   openSettings,
@@ -181,10 +187,12 @@ class MyApp extends StatelessWidget {
         appThemeModeNotifier,
         appOledDarkNotifier,
         appAccentPackNotifier,
+        appLocaleNotifier,
       ]),
       builder: (context, _) {
         final mode = appThemeModeNotifier.value;
         final isOled = appOledDarkNotifier.value;
+        final locale = appLocaleNotifier.value;
         // Accent packs must paint both Material ThemeData (sliders, nav,
         // progress) and the AuroraPalette InheritedWidget.  Build both
         // palettes once so light/dark ThemeData stay consistent with
@@ -195,6 +203,9 @@ class MyApp extends StatelessWidget {
           title: 'Aurora Downloader',
           debugShowCheckedModeBanner: false,
           navigatorKey: FeatureModuleLoader.navigatorKey,
+          locale: locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           themeMode: mode,
           theme: buildLightTheme(colors: lightColors),
           // OLED black: only when the user explicitly selected
@@ -335,6 +346,133 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         // Unlock + request only after finish / skip.
         _permissionPromptsAllowed = true;
         unawaited(_requestPostOnboardingPermissions());
+      },
+    );
+  }
+
+  /// Displays the first-launch language selector dialog before the onboarding tour.
+  /// Pre-selects the user's detected system language by default.
+  Future<void> _showFirstLaunchLanguageSheetIfNeeded() async {
+    if (!mounted) return;
+    String selectedCode = _settings.appLanguageCode;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final ac = context.ac;
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F172A),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: ac.accentFrost.withValues(alpha: 0.3)),
+              ),
+              title: Row(
+                children: [
+                  Icon(Icons.language_rounded, color: ac.accentFrost, size: 24),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'App Language',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Select your display language for Aurora Downloader interface:',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      ...kAppSupportedLanguages.map((lang) {
+                        final isSelected = selectedCode == lang.code;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? ac.accentFrost.withValues(alpha: 0.15)
+                                : const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected
+                                  ? ac.accentFrost
+                                  : Colors.transparent,
+                            ),
+                          ),
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 2,
+                            ),
+                            leading: Icon(
+                              isSelected
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_off,
+                              color: isSelected
+                                  ? ac.accentFrost
+                                  : const Color(0xFF64748B),
+                              size: 20,
+                            ),
+                            title: Text(
+                              lang.name,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.white
+                                    : const Color(0xFFCBD5E1),
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                fontSize: 14,
+                              ),
+                            ),
+                            onTap: () {
+                              setDialogState(() => selectedCode = lang.code);
+                              _updateSettings(
+                                _settings.copyWith(appLanguageCode: lang.code),
+                              );
+                            },
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: ac.accentFrost,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      'Continue',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -532,6 +670,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       debugPrint('[OnboardingCheck] shouldAutoShowTour=$showTour');
       if (showTour) {
         // Keep _permissionPromptsAllowed false for the whole tour.
+        await _showFirstLaunchLanguageSheetIfNeeded();
+        if (!mounted) return;
         _showOnboardingSpotlight();
         return;
       }
@@ -1684,6 +1824,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     );
     appOledDarkNotifier.value =
         settings.darkModePreference == DarkModePreference.forced;
+    appLocaleNotifier.value =
+        _localeFromLanguageCode(settings.appLanguageCode);
+  }
+
+  static Locale? _localeFromLanguageCode(String code) {
+    if (code == 'system' || code.isEmpty) return null;
+    return Locale(code);
   }
 
   /// Maps [DarkModePreference] to the Flutter [ThemeMode] used by MaterialApp.

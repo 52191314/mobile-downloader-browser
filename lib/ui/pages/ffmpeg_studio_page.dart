@@ -6,6 +6,7 @@
 /// Gate: Ultra tier only. Free/Pro users see an upsell.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../platform/public_downloads_service.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/panel.dart';
@@ -55,6 +57,13 @@ class FfmpegStudioItem {
   });
 }
 
+/// MediaStore RELATIVE_PATH for FFmpeg Studio outputs
+/// (same destination root as downloads/auto-backups).
+const String _ffmpegOutputRelativePath = 'Download/Aurora Downloader/FFmpeg';
+
+/// User-facing label for the output destination (`Downloads/...`).
+const String _ffmpegOutputLabel = 'Downloads/Aurora Downloader/FFmpeg';
+
 class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
   FfmpegOp _selectedOp = FfmpegOp.compress;
   int _selectedItemIndex = 0;
@@ -75,6 +84,9 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
   int _gifWidth = 320;
   final _gifStartController = TextEditingController(text: '0');
   final _gifDurationController = TextEditingController(text: '5');
+
+  /// Job ids whose output has already been published to public Downloads.
+  final Set<String> _publishedJobIds = {};
 
   @override
   void dispose() {
@@ -103,6 +115,50 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
 
   void _onServiceChanged() {
     if (mounted) setState(() {});
+    _publishCompletedOutput();
+  }
+
+  /// Publishes a just-completed job's output into public Downloads
+  /// (`Downloads/Aurora Downloader/FFmpeg/…`) and deletes the private scratch
+  /// copy. FFmpeg itself must write to a real local path, so outputs are
+  /// produced next to the (private) source and only moved to MediaStore once
+  /// the job succeeds.
+  Future<void> _publishCompletedOutput() async {
+    final job = widget.ffmpegService.current;
+    if (job == null ||
+        job.state != FfmpegJobState.completed ||
+        _publishedJobIds.contains(job.id)) {
+      return;
+    }
+    final outputPath = job.outputPath;
+    final outputFile = File(outputPath);
+    if (!outputFile.existsSync()) return;
+    _publishedJobIds.add(job.id);
+
+    final displayName = outputPath.replaceAll('\\', '/').split('/').last;
+    final uri = await PublicDownloadsService.publishToPublicDownloads(
+      sourcePath: outputPath,
+      displayName: displayName,
+      relativePath: _ffmpegOutputRelativePath,
+      mimeType: PublicDownloadsService.mimeTypeForName(outputPath),
+    );
+
+    if (uri != null) {
+      // Published — drop the private scratch copy.
+      try {
+        await outputFile.delete();
+      } catch (_) {}
+      if (mounted) {
+        AuroraSnackbar.show(context, 'Saved to $_ffmpegOutputLabel/$displayName');
+      }
+    } else {
+      if (mounted) {
+        AuroraSnackbar.show(
+          context,
+          'Couldn\'t publish to $_ffmpegOutputLabel — output kept at $outputPath',
+        );
+      }
+    }
   }
 
   /// Ensures the FFmpeg on-demand module is installed (Play) or ready (GitHub).
@@ -561,7 +617,8 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
   }
 
   // ── Output preview ──
-  Widget _buildOutputPreview(FfmpegStudioItem item) {
+  /// Output file name (e.g. `video_compressed.mp4`) for the selected operation.
+  String _outputFileName(FfmpegStudioItem item) {
     final baseName = item.name.replaceAll(RegExp(r'\.[^.]+$'), '');
     String suffix;
     switch (_selectedOp) {
@@ -581,7 +638,22 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
         suffix = '.gif';
         break;
     }
-    final outputPath = '${Directory(item.filePath).parent.path}/$baseName$suffix';
+    // Android filesystems cap filename components at 255 BYTES, and the
+    // completed download's name is not length-bounded upstream. A long
+    // video title + the operation suffix would overflow the limit and the
+    // job would fail (ENAMETOOLONG) at write/publish. Truncate byte-aware
+    // (UTF-8) so multibyte titles keep their tail without cutting a
+    // character in half.
+    final budget = 255 - utf8.encode(suffix).length;
+    var name = baseName;
+    while (name.isNotEmpty && utf8.encode(name).length > budget) {
+      name = name.substring(0, name.length - 1);
+    }
+    return '$name$suffix';
+  }
+
+  Widget _buildOutputPreview(FfmpegStudioItem item) {
+    final outputPath = '$_ffmpegOutputLabel/${_outputFileName(item)}';
 
     return Panel(
       child: Padding(
@@ -761,27 +833,8 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
       if (!ok || !mounted) return;
     }
 
-    final baseName = item.name.replaceAll(RegExp(r'\.[^.]+$'), '');
-    String suffix;
-    switch (_selectedOp) {
-      case FfmpegOp.compress:
-        suffix = '_compressed.mp4';
-        break;
-      case FfmpegOp.trim:
-        suffix = '_trimmed.mp4';
-        break;
-      case FfmpegOp.audioExtract:
-        suffix = '.$_audioFormat';
-        break;
-      case FfmpegOp.remux:
-        suffix = '.mp4';
-        break;
-      case FfmpegOp.gif:
-        suffix = '.gif';
-        break;
-    }
     final outputPath =
-        '${Directory(item.filePath).parent.path}/$baseName$suffix';
+        '${Directory(item.filePath).parent.path}/${_outputFileName(item)}';
 
     FfmpegJob job;
     switch (_selectedOp) {

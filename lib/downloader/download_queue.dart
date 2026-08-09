@@ -148,14 +148,17 @@ class DownloadQueue {
   /// Per-task progress notifiers (P1b): the queue page drives each card's
   /// live progress area with these instead of rebuilding the whole list on
   /// every tick. Created lazily on first emit; disposed on removal/close.
-  final Map<String, ValueNotifier<DownloadTask>> _taskNotifiers = {};
+  /// A plain [ValueNotifier] would swallow same-instance assignments (the
+  /// queue and engines mutate one DownloadTask object in place), so this is
+  /// a push-style notifier that fires unconditionally.
+  final Map<String, _TaskLiveNotifier> _taskNotifiers = {};
 
   /// Bumped on every task emit. The queue page's header (aggregate speed /
   /// counts) listens to this instead of rebuilding the whole list per tick.
   final ValueNotifier<int> queueVersion = ValueNotifier<int>(0);
 
   /// Live per-task notifier, or null until the task first emits.
-  ValueNotifier<DownloadTask>? taskNotifierFor(String taskId) =>
+  ValueListenable<DownloadTask>? taskNotifierFor(String taskId) =>
       _taskNotifiers[taskId];
 
   /// Set once [close] runs; stops [queueVersion] bumps after disposal.
@@ -1992,19 +1995,14 @@ class DownloadQueue {
     if (!_taskUpdateController.isClosed) {
       _taskUpdateController.add(task);
     }
-    // P1b: per-task notifier for live card UI. Skip no-op notifications
-    // (pure ticks where nothing the card renders changed).
+    // P1b: per-task notifier for live card UI. Fire unconditionally — the
+    // card's live section is cheap to rebuild and must track every speed
+    // tick so progress/speed feel live (the top-left header already does).
     final notifier = _taskNotifiers[task.id];
     if (notifier != null) {
-      final prev = notifier.value;
-      if (prev.downloadedBytes != task.downloadedBytes ||
-          prev.speed != task.speed ||
-          prev.state != task.state ||
-          prev.statusMessage != task.statusMessage) {
-        notifier.value = task;
-      }
+      notifier.push(task);
     } else {
-      _taskNotifiers[task.id] = ValueNotifier<DownloadTask>(task);
+      _taskNotifiers[task.id] = _TaskLiveNotifier(task);
     }
     if (!_notifiersClosed) {
       queueVersion.value++;
@@ -2253,5 +2251,29 @@ class DownloadQueue {
       return false;
     }
     return false;
+  }
+}
+
+
+/// Push-style per-task notifier (P1b). [ValueNotifier] suppresses
+/// notifications when the assigned value is `==` to the current one — and
+/// since the queue and engines mutate ONE [DownloadTask] instance in place,
+/// assigning that same instance would never notify. This notifier fires
+/// unconditionally on [push]; the card reads [value] (the current, already
+/// mutated task) on every rebuild.
+class _TaskLiveNotifier extends ChangeNotifier
+    implements ValueListenable<DownloadTask> {
+  DownloadTask _task;
+
+  _TaskLiveNotifier(this._task);
+
+  @override
+  DownloadTask get value => _task;
+
+  /// Records the current task reference and notifies listeners regardless
+  /// of whether the instance changed (it usually didn't — it was mutated).
+  void push(DownloadTask task) {
+    _task = task;
+    notifyListeners();
   }
 }

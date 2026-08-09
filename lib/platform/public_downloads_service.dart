@@ -292,10 +292,14 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
     return result ?? false;
   }
 
-  static Future<bool> backupFileToDownloads({
+  /// Publishes [sourcePath] into the public Downloads collection under
+  /// [relativePath] (MediaStore form, e.g. `Download/Aurora Downloader/…`).
+  /// Returns the new content URI, or null on failure.
+  static Future<String?> publishToPublicDownloads({
     required String sourcePath,
     required String displayName,
     required String relativePath,
+    required String mimeType,
   }) async {
     try {
       final result = await _channel.invokeMapMethod<String, Object?>(
@@ -303,15 +307,29 @@ class PublicDownloadsService implements CompletedDownloadPublisher {
         {
           'sourcePath': sourcePath,
           'displayName': displayName,
-          'mimeType': 'application/json',
+          'mimeType': mimeType,
           'relativePath': relativePath,
         },
       );
       final uri = result?['uri'] as String?;
-      return uri != null && uri.isNotEmpty;
+      return (uri != null && uri.isNotEmpty) ? uri : null;
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  static Future<bool> backupFileToDownloads({
+    required String sourcePath,
+    required String displayName,
+    required String relativePath,
+  }) async {
+    final uri = await publishToPublicDownloads(
+      sourcePath: sourcePath,
+      displayName: displayName,
+      relativePath: relativePath,
+      mimeType: 'application/json',
+    );
+    return uri != null;
   }
 
   static Future<List<AutoBackupFile>> listAutoBackups() async {

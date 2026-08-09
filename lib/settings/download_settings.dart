@@ -80,6 +80,27 @@ const kTranslateLanguages = <TranslateLanguage>[
   TranslateLanguage(id: 'id', label: 'Indonesian'),
 ];
 
+class AppSupportedLanguage {
+  final String code;
+  final String name;
+
+  const AppSupportedLanguage({required this.code, required this.name});
+}
+
+const kAppSupportedLanguages = <AppSupportedLanguage>[
+  AppSupportedLanguage(code: 'system', name: 'System Default'),
+  AppSupportedLanguage(code: 'en', name: 'English'),
+  AppSupportedLanguage(code: 'es', name: 'Español'),
+  AppSupportedLanguage(code: 'zh', name: '中文 (简体)'),
+  AppSupportedLanguage(code: 'hi', name: 'हिन्दी'),
+  AppSupportedLanguage(code: 'ar', name: 'العربية'),
+  AppSupportedLanguage(code: 'id', name: 'Bahasa Indonesia'),
+  AppSupportedLanguage(code: 'ja', name: '日本語'),
+  AppSupportedLanguage(code: 'pt', name: 'Português'),
+  AppSupportedLanguage(code: 'ru', name: 'Русский'),
+  AppSupportedLanguage(code: 'de', name: 'Deutsch'),
+];
+
 TranslateLanguage translateLanguageById(String id) {
   for (final lang in kTranslateLanguages) {
     if (lang.id == id) return lang;
@@ -575,6 +596,7 @@ class DownloadSettings {
   final List<String> customVideoHosts;
   final List<String> externalBrowserHosts;
   final DarkModePreference darkModePreference;
+  final String appLanguageCode;
   final String translateTargetLang;
   final Map<String, double> siteZoomLevels;
   final Map<String, String> siteUserAgents;
@@ -670,6 +692,7 @@ class DownloadSettings {
     this.customVideoHosts = const [],
     this.externalBrowserHosts = const [],
     this.darkModePreference = DarkModePreference.system,
+    this.appLanguageCode = 'system',
     this.translateTargetLang = 'en',
     this.siteZoomLevels = const {},
     this.siteUserAgents = const {},
@@ -767,6 +790,7 @@ class DownloadSettings {
     List<String>? customVideoHosts,
     List<String>? externalBrowserHosts,
     DarkModePreference? darkModePreference,
+    String? appLanguageCode,
     String? translateTargetLang,
     Map<String, double>? siteZoomLevels,
     Map<String, String>? siteUserAgents,
@@ -869,6 +893,7 @@ class DownloadSettings {
       customVideoHosts: customVideoHosts ?? this.customVideoHosts,
       externalBrowserHosts: externalBrowserHosts ?? this.externalBrowserHosts,
       darkModePreference: darkModePreference ?? this.darkModePreference,
+      appLanguageCode: appLanguageCode ?? this.appLanguageCode,
       translateTargetLang:
           translateTargetLang ?? this.translateTargetLang,
       siteZoomLevels: siteZoomLevels ?? this.siteZoomLevels,
@@ -923,7 +948,8 @@ class DownloadSettings {
     'customVideoHosts': customVideoHosts,
     'externalBrowserHosts': externalBrowserHosts,
       'darkModePreference': darkModePreference.name,
-    'translateTargetLang': translateTargetLang,
+      'appLanguageCode': appLanguageCode,
+      'translateTargetLang': translateTargetLang,
     'siteZoomLevels': siteZoomLevels,
     'siteUserAgents': siteUserAgents,
     'menuSettingsOrder': menuSettingsOrder,
@@ -1050,6 +1076,8 @@ class DownloadSettings {
         json['darkModePreference'] as String? ??
             defaults.darkModePreference.name,
       ),
+      appLanguageCode:
+          json['appLanguageCode'] as String? ?? defaults.appLanguageCode,
       translateTargetLang: json['translateTargetLang'] as String? ??
           defaults.translateTargetLang,
       siteZoomLevels: _parseZoomLevels(
