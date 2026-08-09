@@ -7,11 +7,11 @@
 
 **Mobile Downloader Browser solves the friction of capturing and downloading media on Android.** It seamlessly transforms web browsing into background media capture with an integrated network sniffer, multi-threaded segmented HTTP engine, native HLS/DASH remuxing, and BitTorrent support — all wrapped in a sleek Nordic Glass UI.
 
-> ℹ️ **Branding Note**: This open-source repository and GitHub distribution is titled **Mobile Downloader Browser**. On the Google Play Store, the application retains its published store brand, **`Aurora: Browser & Downloader`**.
+> **Branding Note**: This open-source repository and GitHub distribution is titled **Mobile Downloader Browser**. On the Google Play Store, the application retains its published store brand, **`Aurora: Browser & Downloader`**.
 
 ---
 
-## ⚡ Quick Start (One Command)
+## Quick Start (One Command)
 
 Test, analyze, and spin up Mobile Downloader Browser on your Android device or emulator with a single command:
 
@@ -21,7 +21,7 @@ git clone https://github.com/52191314/mobile-downloader-browser.git && cd mobile
 
 ---
 
-## 🏗️ Architecture & Workflows
+## Architecture & Workflows
 
 Mobile Downloader Browser decouples media detection from downloading, running background isolation workers to prevent UI main-thread jank and handling complex protocols seamlessly.
 
@@ -93,7 +93,7 @@ flowchart TD
 ```
 
 <details>
-<summary><b>🔍 View Detailed Subsystem Diagrams (Bootstrapping, Sniffer, Multi-Protocol Engine, FFmpeg Studio & Vault)</b></summary>
+<summary><b> View Detailed Subsystem Diagrams (Bootstrapping, Sniffer, Multi-Protocol Engine, FFmpeg Studio & Vault)</b></summary>
 
 #### Bootstrapping & Tier Entitlement
 ```mermaid
@@ -205,7 +205,7 @@ flowchart TD
 
 ---
 
-## ✨ Why Mobile Downloader Browser?
+## Why Mobile Downloader Browser?
 
 - **Catch Media While Browsing** — Automatically hook DOM, `fetch`/`XHR`, media elements, and resource streams without manual copy-pasting.
 - **Survive Real-World CDNs** — Retains session cookies, Referer, custom User-Agents, and WebView-bound fetch routines for WAF/Cloudflare-protected hosts.
@@ -214,20 +214,20 @@ flowchart TD
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| 📥 **Segmented HTTP Downloads** | Multi-threaded range requests, speed limiter, auto-retry, stall detection, auto-classification, and SHA-256 verification. |
-| 🎬 **HLS & DASH Streaming** | Master/media playlist parsing, representation extraction, AES-128 decryption, fMP4/TS segment validation, and native `MediaMuxer` TS→MP4 remuxing. |
-| 🧲 **Native BitTorrent** | BitTorrent and magnet link intake powered by high-performance native `libtorrent` bindings. |
-| 🌐 **In-App Browser & Sniffer** | Multi-tab support, Samsung-style tab groups, User-Agent switcher, element picker adblock rules, cosmetic block engine, and capture tray. |
-| 🛡️ **Hybrid Adblock** | Native C++ adblock engine (`libaurora_adblock.so`: domain trie + Aho-Corasick) with Dart fallback. |
-| 🎥 **In-App Player** | Custom video player with full-screen controls, aspect-ratio toggles, speed controls, and automatic header/cookie passthrough. |
+| **Segmented HTTP Downloads** | Multi-threaded range requests, speed limiter, auto-retry, stall detection, auto-classification, and SHA-256 verification. |
+| **HLS & DASH Streaming** | Master/media playlist parsing, representation extraction, AES-128 decryption, fMP4/TS segment validation, and native `MediaMuxer` TS→MP4 remuxing. |
+| **Native BitTorrent** | BitTorrent and magnet link intake powered by high-performance native `libtorrent` bindings. |
+| **In-App Browser & Sniffer** | Multi-tab support, Samsung-style tab groups, User-Agent switcher, element picker adblock rules, cosmetic block engine, and capture tray. |
+| **Hybrid Adblock** | Native C++ adblock engine (`libaurora_adblock.so`: domain trie + Aho-Corasick) with Dart fallback. |
+| **In-App Player** | Custom video player with full-screen controls, aspect-ratio toggles, speed controls, and automatic header/cookie passthrough. |
 
 ---
 
-## 📦 Build Channels & Distribution
+## Build Channels & Distribution
 
 Mobile Downloader Browser supports two distinct build configurations controlled by `--dart-define=AURORA_BUILD_CHANNEL`:
 
@@ -248,28 +248,28 @@ flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
 
 ---
 
-## 🌟 Awesome Ecosystem & Community
+## Awesome Ecosystem & Community
 
 Mobile Downloader Browser is designed for developers and open-source enthusiasts. It fits into curated developer indices:
 
-- 💙 **[Awesome Flutter](https://github.com/Solido/awesome-flutter)** — Open-source production Flutter applications.
-- 🤖 **[Awesome Android](https://github.com/JStumpp/awesome-android)** — Top open-source Android utilities and download managers.
-- 🔓 **[Awesome Open Source Apps](https://github.com/serhii-londar/open-source-mac-os-apps)** — Privacy-respecting mobile tools.
+-  **[Awesome Flutter](https://github.com/Solido/awesome-flutter)** — Open-source production Flutter applications.
+-  **[Awesome Android](https://github.com/JStumpp/awesome-android)** — Top open-source Android utilities and download managers.
+-  **[Awesome Open Source Apps](https://github.com/serhii-londar/open-source-mac-os-apps)** — Privacy-respecting mobile tools.
 
 Have a feedback idea or feature request? Join our community discussions on [GitHub Discussions](https://github.com/52191314/mobile-downloader-browser/discussions) or submit issues via the [Issue Tracker](https://github.com/52191314/mobile-downloader-browser/issues).
 
 ---
 
-## 🤝 Open for Contributions
+## Open for Contributions
 
 We love contributions! Check out our detailed **[CONTRIBUTING.md](CONTRIBUTING.md)** guide to get started.
 
-- 🐛 **[Good First Issues](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)** — Perfect for newcomers looking for quick, high-impact fixes.
-- 💡 **[Help Wanted](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)** — Feature requests and sniffer enhancements seeking community pull requests.
+-  **[Good First Issues](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)** — Perfect for newcomers looking for quick, high-impact fixes.
+-  **[Help Wanted](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)** — Feature requests and sniffer enhancements seeking community pull requests.
 
 ---
 
-## 📜 Requirements & License
+## Requirements & License
 
 - **Flutter SDK**: Dart `^3.8.1`
 - **Android SDK**: Min API **24**, Compile API **36**, NDK **27.0.12077973**
