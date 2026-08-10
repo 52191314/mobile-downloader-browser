@@ -157,6 +157,40 @@ to be the second spot was removed by the 2026-08-07 dead-code sweep):
 Search for the previous version string before committing a release bump:
 `grep -rn "v[0-9]*\." lib/ui/pages/settings_page.dart | grep -i "v[0-9]"`.
 
+## Play Console release notes — language tags (2026-08-11)
+
+Release notes pasted into Play Console ("What's new" / release notes editor) must
+use the editor's own language tags — one `<code>...</code>` block per language,
+2 lines max each. Play Console **rejects** any tag not in its list with
+"Unsupported language translation found: <tag>". The 10 tags that pass (verified
+2026-08-11 on release 1.1.1+69):
+
+```
+<en-US>  English (US)
+<zh-CN>  Simplified Chinese
+<ru-RU>  Russian
+<pt-BR>  Portuguese (Brazil)
+<ja-JP>  Japanese
+<id>     Indonesian   ← bare "id" only; Play Console REJECTS "id-ID" and "in-ID"
+<hi-IN>  Hindi
+<fr-FR>  French
+<es-ES>  Spanish (Spain)
+<de-DE>  German
+```
+
+Gotchas:
+
+- **Indonesian is `id`** (bare language code). Standard BCP 47 `id-ID` and
+  Android-legacy `in-ID` are both rejected by Play Console. Android resource
+  folders still use `values-in/` — that is unrelated to Play Console tags.
+- All other tags use the `xx-YY` region-suffixed form exactly as above (e.g.
+  `pt-BR`, not `pt`; `hi-IN`, not `hi`).
+- Play Console reports "Release notes provided for N language" counting the
+  tags; an unsupported tag errors the whole block until deleted/replaced.
+- The current app has 11 locales (`lib/l10n/app_localizations_*.dart` incl.
+  Arabic `ar`); the release-notes block above covers 10. Arabic is accepted by
+  Play Console as `<ar>` if a future release needs it.
+
 ## Play Console recommendations (release 54, 1.0.1) — status
 
 - **Edge-to-edge** — FIXED (commit a917ca3): `enableEdgeToEdge()` in

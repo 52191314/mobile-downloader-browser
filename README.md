@@ -32,7 +32,7 @@ flowchart TD
     subgraph Launch ["1. App Launch & Bootstrapping"]
         A["App Start main()"] --> B["Initialize Native Bindings & System UI"]
         B --> C["Load SharedPreferences & Local DB Hive/Isar"]
-        C --> D["Detect Build Channel (Play Store vs GitHub)"]
+        C --> D["Resolve Build Channel (Play)"]
         D --> E["Evaluate License & Entitlement Tier (Free / Pro / Ultra)"]
         E --> F{"First Launch / Onboarding?"}
         F -- Yes --> G["Show Interactive App Tour"]
@@ -104,9 +104,7 @@ flowchart TD
 
     subgraph ChannelResolution ["Build Channel Resolution"]
         InitDB --> ReadChannel["Read AURORA_BUILD_CHANNEL"]
-        ReadChannel --> IsPlay{"Channel is Play Store?"}
-        IsPlay -- Yes --> PlaySetup["Set Play Store Mode: Play Billing Active, Dynamic FFmpeg Module On-Demand"]
-        IsPlay -- No --> GithubSetup["Set GitHub Mode: Billing Disabled, Fat APK with FFmpeg Included"]
+        ReadChannel --> PlaySetup["Play Store Mode: Play Billing Active, Dynamic FFmpeg Module On-Demand"]
     end
 
     subgraph LicenseCheck ["Entitlement & License Evaluation"]
@@ -227,45 +225,34 @@ flowchart TD
 
 ---
 
+
+---
+
+
+---
+
+
+---
+
 ## Build Channels & Distribution
 
-Mobile Downloader Browser supports two distinct build configurations controlled by `--dart-define=AURORA_BUILD_CHANNEL`:
+This repository is the Play Store release line. The open-source fat-APK edition
+(GitHub releases / F-Droid / sideload) is maintained separately at
+[github.com/52191314/Aurora_Download_Manager](https://github.com/52191314/Aurora_Download_Manager).
 
-| Channel | `--dart-define` | App Branding & Distribution | Use Case & Capabilities |
-|---------|-----------------|-----------------------------|-------------------------|
-| **GitHub / Open Source** (Default) | `AURORA_BUILD_CHANNEL=github` | **Mobile Downloader Browser** | GitHub releases / F-Droid / Sideload builds. No billing client, fat APK with native engines included, full sniffer enabled. |
-| **Play Store** | `AURORA_BUILD_CHANNEL=play` | **Aurora: Browser & Downloader** | Google Play Store release with Play Billing one-time unlock and on-demand Play Feature Modules. |
+| Channel | App Branding & Distribution |
+|---------|-----------------------------|
+| **Play Store** | **Aurora: Browser & Downloader** — Google Play release with Play Billing one-time unlock and on-demand Play Feature Modules. |
 
 ### Build Commands
 
 ```bash
-# Debug build (fat APK, default GitHub channel)
-flutter build apk --debug --target-platform android-arm64
+# Debug build (fat APK)
+flutter build apk --debug
 
 # Release build for Play Store (AAB)
-flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play
+flutter build appbundle --release --dart-define=AURORA_LICENSE_URL=https://ahjie521.store/license
 ```
-
----
-
-## Awesome Ecosystem & Community
-
-Mobile Downloader Browser is designed for developers and open-source enthusiasts. It fits into curated developer indices:
-
--  **[Awesome Flutter](https://github.com/Solido/awesome-flutter)** — Open-source production Flutter applications.
--  **[Awesome Android](https://github.com/JStumpp/awesome-android)** — Top open-source Android utilities and download managers.
--  **[Awesome Open Source Apps](https://github.com/serhii-londar/open-source-mac-os-apps)** — Privacy-respecting mobile tools.
-
-Have a feedback idea or feature request? Join our community discussions on [GitHub Discussions](https://github.com/52191314/mobile-downloader-browser/discussions) or submit issues via the [Issue Tracker](https://github.com/52191314/mobile-downloader-browser/issues).
-
----
-
-## Open for Contributions
-
-We love contributions! Check out our detailed **[CONTRIBUTING.md](CONTRIBUTING.md)** guide to get started.
-
--  **[Good First Issues](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)** — Perfect for newcomers looking for quick, high-impact fixes.
--  **[Help Wanted](https://github.com/52191314/mobile-downloader-browser/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)** — Feature requests and sniffer enhancements seeking community pull requests.
 
 ---
 
