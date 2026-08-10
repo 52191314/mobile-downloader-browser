@@ -805,19 +805,30 @@ class DownloadQueue {
       _autoRetryAttempts.remove(taskId);
     }
     final task = _tasks[taskId];
-    if (task != null) {
-      await prepareBrowserContext(task);
-    }
+    if (task == null) return;
+
+    await prepareBrowserContext(task);
+
     final splitter = _splitters[taskId];
     if (splitter is HlsDownloader) {
+      task.state = DownloadState.idle;
+      task.errorMessage = null;
+      _emitTask(task);
+
+      if (!_executionQueue.contains(taskId) && !_activeTasks.contains(taskId)) {
+        _executionQueue.add(taskId);
+      }
+
       await _runTaskOperation(taskId, () async {
         try {
-          await splitter.retryWithRefresh(forceReload: forceReload);
+          await splitter.prepareRetryWithRefresh(forceReload: forceReload);
         } catch (e, s) {
-          _logError('Retry failed for task $taskId', e, s);
-          _warn('Retry failed for task "$taskId": $e');
+          _logError('Retry refresh failed for task $taskId', e, s);
+          _warn('Retry refresh failed for task "$taskId": $e');
         }
       });
+
+      _schedule();
     } else {
       // Non-HLS task — just resume
       await resumeTaskAsync(taskId, isAutoRetry: isAutoRetry);

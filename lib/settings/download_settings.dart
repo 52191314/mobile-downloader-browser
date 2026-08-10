@@ -90,6 +90,7 @@ class AppSupportedLanguage {
 const kAppSupportedLanguages = <AppSupportedLanguage>[
   AppSupportedLanguage(code: 'system', name: 'System Default'),
   AppSupportedLanguage(code: 'en', name: 'English'),
+  AppSupportedLanguage(code: 'fr', name: 'Français'),
   AppSupportedLanguage(code: 'es', name: 'Español'),
   AppSupportedLanguage(code: 'zh', name: '中文 (简体)'),
   AppSupportedLanguage(code: 'hi', name: 'हिन्दी'),

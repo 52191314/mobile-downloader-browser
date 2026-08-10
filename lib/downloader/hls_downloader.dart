@@ -787,9 +787,8 @@ class HlsDownloader implements BaseDownloader {
   }
 
   /// Retry the download by first asking the sniffer for a fresh URL, then
-  /// re-running start() with that URL. If no fresh URL is obtained, just
-  /// re-runs start() with the original URL.
-  Future<void> retryWithRefresh({bool forceReload = false}) async {
+  /// Refreshes the task's token and resets state for a retry without directly calling start().
+  Future<void> prepareRetryWithRefresh({bool forceReload = false}) async {
     if (task.onTokenExpired != null) {
       task.statusMessage = 'Refreshing link from the page.';
       task.errorMessage = null;
@@ -856,6 +855,11 @@ class HlsDownloader implements BaseDownloader {
     _staleSegmentIndexes.clear();
     _countedSegmentIndexes.clear();
     _taskUpdateController.add(task);
+  }
+
+  /// Refreshes token and immediately begins download (for direct/single retries).
+  Future<void> retryWithRefresh({bool forceReload = false}) async {
+    await prepareRetryWithRefresh(forceReload: forceReload);
     await start();
   }
 
