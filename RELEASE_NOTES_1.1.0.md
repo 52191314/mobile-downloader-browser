@@ -1,8 +1,14 @@
 # Aurora Downloader 1.1.0 Release Notes
 
-**Build Version**: 1.1.0+67  
+**Build Version**: 1.1.0+68  
 **Release Date**: August 10, 2026  
 **Build Channel**: Google Play Store (`AURORA_BUILD_CHANNEL=play`)
+
+## Build 68 - 100% Full French (Français) Localization Completion
+
+### Complete French Translation
+- **194 Untranslated Keys Resolved**: Audited French dictionary (`app_fr.arb`) against English (`app_en.arb`) and Chinese (`app_zh.arb`). Translated all 194 remaining untranslated keys into natural, native French across all subpages, settings sections, option descriptions, onboarding tour steps, tools menus, and dialogs.
+- **100% Full App Coverage**: French localization now covers 100% of all UI strings in the app, matching the coverage of English, Simplified Chinese, Japanese, German, Spanish, Portuguese, Russian, Hindi, Arabic, and Indonesian.
 
 ## Build 67 - Capture Sheet Batch Download & Duplicate Wiring Fix
 
