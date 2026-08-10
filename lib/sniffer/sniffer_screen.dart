@@ -859,16 +859,20 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.canSeedWebViewUrl = true;
     if (mounted) setState(() {});
 
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    if (!mounted || !_tabs.contains(tab)) return;
-
-    unawaited(
-      _loadUrlWithHostSettings(
-        tab,
-        Uri.parse(url),
-        addToHistory: false,
-      ),
-    );
+    // Start URL load on the next frame — the WebView widget tree is now
+    // built, so loadRequest will find a ready platform view. Previously
+    // a 350ms Future.delayed caused a visible white-screen gap (sometimes
+    // with a stale progress bar animating over nothing).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tabs.contains(tab)) return;
+      unawaited(
+        _loadUrlWithHostSettings(
+          tab,
+          Uri.parse(url),
+          addToHistory: false,
+        ),
+      );
+    });
     unawaited(() async {
       try {
         final ua = await tab.controller.evaluateJavaScript(

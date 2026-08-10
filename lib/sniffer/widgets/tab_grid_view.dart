@@ -133,6 +133,7 @@ class TabGridView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: _GridCardLayout(
                 tabs: memberTabs,
+                allTabs: tabs,
                 cardWidth: cardWidth,
                 twoColumns: twoColumns,
                 accent: accent,
@@ -196,6 +197,7 @@ class TabGridView extends StatelessWidget {
   }) {
     return _GridCardLayout(
       tabs: ungroupedTabs,
+      allTabs: tabs,
       cardWidth: cardWidth,
       twoColumns: twoColumns,
       accent: null,
@@ -211,7 +213,12 @@ class TabGridView extends StatelessWidget {
 }
 
 class _GridCardLayout extends StatelessWidget {
+  /// The sub-list of tabs to render (e.g. group members or ungrouped).
   final List<BrowserTab> tabs;
+
+  /// The full global tab list — used to resolve the correct index for
+  /// [onCloseTab] and [onSwitchToActiveTab] which expect a global index.
+  final List<BrowserTab> allTabs;
   final double cardWidth;
   final bool twoColumns;
   final Color? accent;
@@ -225,6 +232,7 @@ class _GridCardLayout extends StatelessWidget {
 
   const _GridCardLayout({
     required this.tabs,
+    required this.allTabs,
     required this.cardWidth,
     required this.twoColumns,
     required this.accent,
@@ -254,11 +262,9 @@ class _GridCardLayout extends StatelessWidget {
     final children = <Widget>[];
     for (var i = 0; i < tabs.length; i++) {
       final tab = tabs[i];
-      final originalIndex = tabs.indexOf(tab);
-      // Resolve the actual index in the full tab list via getTabLabel
-      // callback context — but since we only have a closure-free list,
-      // we trust the caller's activeIndex mapping. Active state is
-      // visual only here.
+      // Look up the global index in the full tab list, not the sub-list.
+      // onCloseTab / onSwitchToActiveTab expect a global index.
+      final globalIndex = allTabs.indexOf(tab);
       children.add(_GridCard(
         tab: tab,
         cardWidth: cardWidth,
@@ -267,13 +273,13 @@ class _GridCardLayout extends StatelessWidget {
               colorIndex: tab.groupColorIndex,
               groupName: tab.groupName,
             ),
-        isActive: originalIndex == activeIndex,
+        isActive: globalIndex == activeIndex,
         label: getTabLabel(tab),
-        showClose: tabs.length > 1,
+        showClose: allTabs.length > 1,
         snoozed:
             !builtWebViewTabIds.contains(tab.id),
-        onClose: () => onCloseTab(originalIndex),
-        onTap: () => onSwitchToActiveTab(originalIndex),
+        onClose: () => onCloseTab(globalIndex),
+        onTap: () => onSwitchToActiveTab(globalIndex),
       ));
       children.add(
         TabListDropSlot(
