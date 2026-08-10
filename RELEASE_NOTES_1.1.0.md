@@ -1,8 +1,15 @@
 # Aurora Downloader 1.1.0 Release Notes
 
-**Build Version**: 1.1.0+65  
+**Build Version**: 1.1.0+67  
 **Release Date**: August 10, 2026  
 **Build Channel**: Google Play Store (`AURORA_BUILD_CHANNEL=play`)
+
+## Build 67 - Capture Sheet Batch Download & Duplicate Wiring Fix
+
+### Capture Sheet Multi-Select Batch Enqueuing
+- **Direct Batch Enqueuing**: Fixed multi-select batch downloads from the caught-media bottom sheet (`SniffedMediaSheet`). Clicking "Download selected" or "Series grab" when multiple items are checked now streams all files directly to the queue with a shared `DuplicatePolicy`, instead of popping up the per-item `AddQueueDialog` for every single file.
+- **Single Prompt Duplicate Handling**: If duplicate files exist within the batch, the WinRAR-style duplicate dialog displays **once** for the first duplicate. Picking an action (Skip / Replace / Create New) with "Apply to all duplicates" automatically applies that choice to all subsequent duplicates in the batch without repeating dialogs.
+- **Repository Alignment**: Fully removed legacy GitHub channel fallbacks from the application logic so this repository operates strictly as a Play Store build with server-side Cloudflare Worker licensing and Play Billing.
 
 ## Build 65 - WinRAR-style Duplicate Download Handling
 

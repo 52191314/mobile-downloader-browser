@@ -4777,6 +4777,32 @@ class _SnifferScreenState extends State<SnifferScreen>
     onInfo: (ctx, item) => _showMediaInfoSheet(ctx, item),
     onAddToQueue: (ctx, media, {List<SniffedMedia> variants = const []}) async =>
         _showAddQueueDialog(ctx, media, variants: variants),
+    onBatchEnqueue: (ctx, items) async {
+      final tab = _activeTab;
+      final duplicatePolicy = DuplicatePolicy(choice: DuplicateChoice.skip);
+      for (final media in items) {
+        if (!mounted) break;
+        final currentUrl = await tab.controller.currentUrl() ?? '';
+        final pageUri = Uri.tryParse(currentUrl);
+        await enqueueDirectDownload(
+          context: ctx,
+          tab: tab,
+          url: media.url,
+          suggestedFilename: media.name.isNotEmpty ? media.name : media.pageTitle,
+          downloadQueue: _downloadQueue,
+          settings: widget.settings,
+          baseDir: _baseDir,
+          baseTemp: _baseTemp,
+          getCookiesForUrl: _sniffIntakeController.getCookiesForUrl,
+          showSnack: _showSnack,
+          isMounted: () => mounted,
+          ruleEngine: widget.ruleEngine,
+          pageHost: pageUri?.host,
+          mediaTypeForRule: media.contentType,
+          batchDuplicatePolicy: duplicatePolicy,
+        );
+      }
+    },
     onRescan: () => unawaited(_activeTab.controller.rescanPage()),
   );
 

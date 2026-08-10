@@ -110,6 +110,10 @@ void showSniffedMediaSheet(
     SniffedMedia media, {
     List<SniffedMedia> variants,
   }) onAddToQueue,
+  required Future<void> Function(
+    BuildContext context,
+    List<SniffedMedia> items,
+  ) onBatchEnqueue,
   required VoidCallback onRescan,
 }) {
   if (!isMounted) return;
@@ -140,6 +144,7 @@ void showSniffedMediaSheet(
         onPreview: onPreview,
         onInfo: onInfo,
         onAddToQueue: onAddToQueue,
+        onBatchEnqueue: onBatchEnqueue,
         onRescan: onRescan,
         parentContext: context,
       );
@@ -161,6 +166,7 @@ class _CaptureSheetScaffold extends StatefulWidget {
     required this.onPreview,
     required this.onInfo,
     required this.onAddToQueue,
+    required this.onBatchEnqueue,
     required this.onRescan,
     required this.parentContext,
   });
@@ -180,6 +186,10 @@ class _CaptureSheetScaffold extends StatefulWidget {
     SniffedMedia media, {
     List<SniffedMedia> variants,
   }) onAddToQueue;
+  final Future<void> Function(
+    BuildContext context,
+    List<SniffedMedia> items,
+  ) onBatchEnqueue;
   final VoidCallback onRescan;
   final BuildContext parentContext;
 
@@ -370,14 +380,17 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
     _closing = true;
     final nav = Navigator.of(context);
     nav.pop();
-    for (final group in toEnqueue) {
-      if (!widget.parentContext.mounted) break;
-      final ok = await widget.onAddToQueue(
+
+    if (toEnqueue.length > 1) {
+      final items = toEnqueue.map((g) => g.primary.media).toList();
+      await widget.onBatchEnqueue(widget.parentContext, items);
+    } else if (toEnqueue.length == 1) {
+      final group = toEnqueue.first;
+      await widget.onAddToQueue(
         widget.parentContext,
         group.primary.media,
         variants: group.candidates.map((c) => c.media).toList(),
       );
-      if (!ok) break;
     }
   }
 
