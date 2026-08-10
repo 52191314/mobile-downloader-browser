@@ -426,4 +426,384 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get notifCompleteTitle => 'Unduhan Selesai';
+
+  @override
+  String get lblMaxConcurrentDownloads => 'Max concurrent downloads';
+
+  @override
+  String get lblChunksPerDownload => 'Chunks per download';
+
+  @override
+  String get lblDownloadDestination => 'Destination (under Downloads)';
+
+  @override
+  String get lblAutoRetryFailed => 'Auto-retry failed downloads';
+
+  @override
+  String get lblRetryLimit => 'Retry limit';
+
+  @override
+  String get lblAutoClassify => 'Auto-classify downloads';
+
+  @override
+  String get lblAutoClassifyDesc =>
+      'Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.';
+
+  @override
+  String get lblConvertTsToMp4 => 'Convert .ts to .mp4';
+
+  @override
+  String get lblConvertTsToMp4Desc =>
+      'After download, Aurora remuxes MPEG-TS (.ts) — including HLS — to .mp4 so files play in any app. Turn off to keep the original .ts.';
+
+  @override
+  String get lblIncludeQualitySuffix => 'Include quality suffix';
+
+  @override
+  String get lblIncludeQualitySuffixDesc =>
+      'Appends \" (720p)\" etc. to filenames when a resolution is detected.';
+
+  @override
+  String get lblMaxDetectedMedia => 'Max detected media';
+
+  @override
+  String get lblDownloadLinkBehavior => 'Download link behavior';
+
+  @override
+  String get lblWifiOnly => 'Wi-Fi only downloads';
+
+  @override
+  String get lblWifiOnlyDescOn =>
+      'Downloads only proceed on Wi-Fi. Turn off to use mobile data.';
+
+  @override
+  String get lblWifiOnlyDescOff =>
+      'Enable to restrict downloads to Wi-Fi networks.';
+
+  @override
+  String get lblProStallControls => 'Pro: Advanced stall controls';
+
+  @override
+  String get lblStallTimeout => 'Stall timeout (seconds)';
+
+  @override
+  String get lblMinSpeedThreshold => 'Min speed threshold (KB/s)';
+
+  @override
+  String get lblPartialMergeThreshold => 'Partial download merge threshold';
+
+  @override
+  String get lblAdvancedStallControls => 'Advanced stall controls';
+
+  @override
+  String get lblAdvancedStallDesc =>
+      'Stall timeout, speed threshold, and partial merge (Pro)';
+
+  @override
+  String get lblSpeedLimit => 'Speed limit';
+
+  @override
+  String get lblSpeedLimitHelp =>
+      'Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)';
+
+  @override
+  String get lblUnlimited => 'Unlimited';
+
+  @override
+  String get lblAdblockHeader => 'Adblock';
+
+  @override
+  String get lblEnableAdblock => 'Enable adblock';
+
+  @override
+  String get lblBlockPopups => 'Block popups';
+
+  @override
+  String get lblBlockPopupsDescOn =>
+      'Block popups Aurora didn\'t expect. Turn off to allow sites to open popups.';
+
+  @override
+  String get lblBlockPopupsDescOff =>
+      'Let sites open popups when you tap a link. Turn on to block unexpected ones.';
+
+  @override
+  String get lblBlockInvisibleRedirects => 'Block invisible redirects';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOn =>
+      'Intercept redirects and ask before navigating. Use this to avoid being sent to unexpected pages.';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOff =>
+      'Let redirects navigate without asking. Turn on if a site keeps sending you away.';
+
+  @override
+  String get lblBlockTrackers => 'Block trackers (Pro)';
+
+  @override
+  String get lblBlockTrackersDescOn =>
+      'Block known tracker domains and analytics scripts. Requires Aurora Pro.';
+
+  @override
+  String get lblBlockTrackersDescOff =>
+      'Block known tracker domains. Pro feature.';
+
+  @override
+  String get lblPerSiteAllowlist => 'Per-site allowlist';
+
+  @override
+  String get lblPerSiteAllowlistEmpty =>
+      'No sites are allowlisted. Tap the shield in the browser toolbar to allowlist a site.';
+
+  @override
+  String get lblEnableAll => 'Enable all';
+
+  @override
+  String get lblDisableAll => 'Disable all';
+
+  @override
+  String get lblAddCustomFilterUrl => 'Add custom filter URL';
+
+  @override
+  String get lblCustomFilterUrlsPro => 'Custom filter URLs (Pro only)';
+
+  @override
+  String get lblBlockedElementsSite => 'Blocked elements by site';
+
+  @override
+  String get lblNoBlockedElements => 'No elements or hosts manually blocked.';
+
+  @override
+  String get lblPrivateBrowsingHeader => 'Private Browsing';
+
+  @override
+  String get lblIncognitoMode => 'Private / Incognito mode';
+
+  @override
+  String get lblIncognitoModeDescOn =>
+      'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.';
+
+  @override
+  String get lblIncognitoModeDescOff =>
+      'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.';
+
+  @override
+  String get lblSearchEngineHeader => 'Search Engine';
+
+  @override
+  String get lblSearchEngine => 'Search engine';
+
+  @override
+  String get lblCustomUrlTemplate => 'Custom URL template (use %s for query)';
+
+  @override
+  String get lblInAppPlayerHeader => 'In-app player';
+
+  @override
+  String get lblAutoOpenAuroraPlay => 'Auto-open Aurora on site play';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOn =>
+      'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOff =>
+      'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.';
+
+  @override
+  String get lblPlaybackEngineHeader => 'Playback engine';
+
+  @override
+  String get lblPlaybackEngineDesc =>
+      'Which decoder plays video. If a stream loads but stays black or silent, switch engines — they use completely different decoders, so one often plays what the other cannot.';
+
+  @override
+  String get lblEngineSystem => 'System (ExoPlayer)';
+
+  @override
+  String get lblEngineSystemDesc =>
+      'Android\'s own player. Lightest on battery and memory.';
+
+  @override
+  String get lblEngineMediaKit => 'libmpv (media_kit)';
+
+  @override
+  String get lblEngineMediaKitDesc =>
+      'Bundled decoders. Handles streams ExoPlayer refuses.';
+
+  @override
+  String get lblDisabledMediaTypes => 'Disabled Media Types';
+
+  @override
+  String get lblExtraVideoHosts => 'Extra Video Hosts';
+
+  @override
+  String get lblExtraVideoHostsDesc =>
+      'Additional domains that serve video files. One host per line (e.g. example.com). URLs from these hosts are probed for video content.';
+
+  @override
+  String get lblAppearanceHeader => 'Appearance';
+
+  @override
+  String get lblDarkModePreference => 'Dark mode preference';
+
+  @override
+  String get lblSystemDefault => 'System default';
+
+  @override
+  String get lblLight => 'Light';
+
+  @override
+  String get lblDarkOled => 'Dark (OLED black)';
+
+  @override
+  String get lblAccentColorPack => 'Accent color pack';
+
+  @override
+  String get lblCompactQueue => 'Compact queue items';
+
+  @override
+  String get lblCompactQueueDesc =>
+      'Display smaller download progress cards in the Queue view.';
+
+  @override
+  String get lblHttpProxyHeader => 'HTTP / SOCKS Proxy';
+
+  @override
+  String get lblEnableProxy => 'Enable proxy server';
+
+  @override
+  String get lblProxyServer => 'Proxy Host & Port';
+
+  @override
+  String get lblProxyType => 'Proxy Type';
+
+  @override
+  String get lblUserAgentProfile => 'User-Agent Profile';
+
+  @override
+  String get lblPerSiteUserAgents => 'Per-site User-Agents';
+
+  @override
+  String get lblTlsSslCertificates => 'Ignore TLS / SSL errors';
+
+  @override
+  String get lblTlsSslCertificatesDesc =>
+      'Allows connecting to sites with invalid or self-signed HTTPS certificates.';
+
+  @override
+  String get lblExportBackup => 'Export Backup File';
+
+  @override
+  String get lblImportBackup => 'Import Backup File';
+
+  @override
+  String get lblBackupDatabaseDesc =>
+      'Backup downloads, history, bookmarks, adblock filters, and app settings into a single file.';
+
+  @override
+  String get lblRestoreDatabaseDesc =>
+      'Restore app data from a previously created backup file.';
+
+  @override
+  String get lblVaultTitle => 'Private Vault';
+
+  @override
+  String get lblVaultDesc =>
+      'Store sensitive downloads and private files behind a PIN passcode or biometric lock.';
+
+  @override
+  String get lblSetPinPasscode => 'Set PIN Passcode';
+
+  @override
+  String get lblChangePin => 'Change PIN';
+
+  @override
+  String get lblUnlockVault => 'Unlock Private Vault';
+
+  @override
+  String get lblEnterPin => 'Enter 4-digit PIN';
+
+  @override
+  String get lblFfmpegStudioTitle => 'FFmpeg Studio';
+
+  @override
+  String get lblRemuxVideo => 'Remux Video';
+
+  @override
+  String get lblExtractAudio => 'Extract Audio (MP3 / AAC)';
+
+  @override
+  String get lblTrimCutVideo => 'Trim / Cut Video';
+
+  @override
+  String get lblCompressVideo => 'Compress Video';
+
+  @override
+  String get lblConvertFormat => 'Convert Format';
+
+  @override
+  String get lblStartProcessing => 'Start Processing';
+
+  @override
+  String get lblWatcherTitle => 'Aurora Watcher';
+
+  @override
+  String get lblClipboardMonitor => 'Clipboard Monitor';
+
+  @override
+  String get lblClipboardMonitorDesc =>
+      'Automatically detect media links copied to your system clipboard and prompt to download.';
+
+  @override
+  String get lblWebdavTitle => 'WebDAV Backup';
+
+  @override
+  String get lblServerUrl => 'Server URL';
+
+  @override
+  String get lblUsername => 'Username';
+
+  @override
+  String get lblPassword => 'Password';
+
+  @override
+  String get lblTestConnection => 'Test Connection';
+
+  @override
+  String get lblSyncNow => 'Sync Now';
+
+  @override
+  String get lblUserGuideTitle => 'User Guide & Help';
+
+  @override
+  String get lblUserGuideDesc =>
+      'Learn how to capture streams, use private vault, configure adblock rules, and optimize download speed.';
+
+  @override
+  String get lblFilterAll => 'All';
+
+  @override
+  String get lblFilterDownloading => 'Downloading';
+
+  @override
+  String get lblFilterCompleted => 'Completed';
+
+  @override
+  String get lblFilterPaused => 'Paused';
+
+  @override
+  String get lblFilterFailed => 'Failed';
+
+  @override
+  String get lblPauseAll => 'Pause All';
+
+  @override
+  String get lblResumeAll => 'Resume All';
+
+  @override
+  String get lblClearCompleted => 'Clear Completed';
+
+  @override
+  String get lblSearchQueue => 'Search downloads...';
 }

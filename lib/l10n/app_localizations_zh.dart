@@ -418,4 +418,359 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get notifCompleteTitle => '下载完成';
+
+  @override
+  String get lblMaxConcurrentDownloads => '最大同时下载数';
+
+  @override
+  String get lblChunksPerDownload => '单任务分块数';
+
+  @override
+  String get lblDownloadDestination => '下载保存路径';
+
+  @override
+  String get lblAutoRetryFailed => '失败自动重试';
+
+  @override
+  String get lblRetryLimit => '重试次数限制';
+
+  @override
+  String get lblAutoClassify => '自动分类下载文件';
+
+  @override
+  String get lblAutoClassifyDesc => '下载完成后自动按视频、音频、图片和文档分类归档。';
+
+  @override
+  String get lblConvertTsToMp4 => '自动转换 .ts 为 .mp4';
+
+  @override
+  String get lblConvertTsToMp4Desc =>
+      '下载完成后将 MPEG-TS（含 HLS 流）转码为 .mp4 以便在任意播放器播放。';
+
+  @override
+  String get lblIncludeQualitySuffix => '文件名附加清晰度后缀';
+
+  @override
+  String get lblIncludeQualitySuffixDesc => '检测到分辨率时自动在文件名后追加\" (720p)\"等后缀。';
+
+  @override
+  String get lblMaxDetectedMedia => '最大检测媒体数';
+
+  @override
+  String get lblDownloadLinkBehavior => '下载链接处理方式';
+
+  @override
+  String get lblWifiOnly => '仅限 Wi-Fi 下载';
+
+  @override
+  String get lblWifiOnlyDescOn => '仅在连接 Wi-Fi 时下载。关闭可使用移动数据。';
+
+  @override
+  String get lblWifiOnlyDescOff => '开启后将限制仅在 Wi-Fi 网络下下载。';
+
+  @override
+  String get lblProStallControls => 'Pro: 高级停滞控制';
+
+  @override
+  String get lblStallTimeout => '超时停滞判定（秒）';
+
+  @override
+  String get lblMinSpeedThreshold => '最低速度阈值 (KB/s)';
+
+  @override
+  String get lblPartialMergeThreshold => '分块合并百分比';
+
+  @override
+  String get lblAdvancedStallControls => '高级停滞控制';
+
+  @override
+  String get lblAdvancedStallDesc => '停滞超时、最低速度限制及分块合并 (Pro)';
+
+  @override
+  String get lblSpeedLimit => '全局限速';
+
+  @override
+  String get lblSpeedLimitHelp => '设置为 0 不限速，向右滑动可设置上限（最高 500 MB/s）';
+
+  @override
+  String get lblUnlimited => '无限制';
+
+  @override
+  String get lblAdblockHeader => '广告拦截';
+
+  @override
+  String get lblEnableAdblock => '启用广告拦截';
+
+  @override
+  String get lblBlockPopups => '拦截弹窗';
+
+  @override
+  String get lblBlockPopupsDescOn => '拦截非预期的弹窗窗口。关闭以允许网站弹窗。';
+
+  @override
+  String get lblBlockPopupsDescOff => '允许网站在点击链接时弹窗。开启以拦截广告弹窗。';
+
+  @override
+  String get lblBlockInvisibleRedirects => '拦截隐形重定向';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOn => '拦截跳转并提示确认，防止被非法重定向到广告页面。';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOff => '允许网页自由重定向。';
+
+  @override
+  String get lblBlockTrackers => '拦截追踪器 (Pro)';
+
+  @override
+  String get lblBlockTrackersDescOn => '拦截已知追踪域名和统计脚本。需要 Aurora Pro。';
+
+  @override
+  String get lblBlockTrackersDescOff => '拦截已知追踪域名（Pro 功能）。';
+
+  @override
+  String get lblPerSiteAllowlist => '网站白名单';
+
+  @override
+  String get lblPerSiteAllowlistEmpty => '暂无白名单网站。在浏览器工具栏点击盾牌图标可添加。';
+
+  @override
+  String get lblEnableAll => '全部启用';
+
+  @override
+  String get lblDisableAll => '全部禁用';
+
+  @override
+  String get lblAddCustomFilterUrl => '添加自定义规则 URL';
+
+  @override
+  String get lblCustomFilterUrlsPro => '自定义规则 URL（仅限 Pro）';
+
+  @override
+  String get lblBlockedElementsSite => '按网站查看已拦截元素';
+
+  @override
+  String get lblNoBlockedElements => '暂无手动拦截的元素或域名。';
+
+  @override
+  String get lblPrivateBrowsingHeader => '隐私无痕浏览';
+
+  @override
+  String get lblIncognitoMode => '无痕模式';
+
+  @override
+  String get lblIncognitoModeDescOn => '无痕模式已开启。不保存浏览历史和 Cookie，标签页显示紫色盾牌。';
+
+  @override
+  String get lblIncognitoModeDescOff => '浏览时不保存历史记录或 Cookie。';
+
+  @override
+  String get lblSearchEngineHeader => '搜索引擎';
+
+  @override
+  String get lblSearchEngine => '搜索引擎';
+
+  @override
+  String get lblCustomUrlTemplate => '自定义搜索模板（使用 %s 代替关键词）';
+
+  @override
+  String get lblInAppPlayerHeader => '应用内播放器';
+
+  @override
+  String get lblAutoOpenAuroraPlay => '播放网页视频时自动唤起 Aurora';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOn =>
+      '点击网页播放时立即唤起内置播放器（保留登录 Cookie）。关闭以使用网页播放器。';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOff =>
+      '网页正常播放。探测到媒体流时显示悬浮图标（类似 IDM）— 点击即可开启内置播放器。';
+
+  @override
+  String get lblPlaybackEngineHeader => '解码引擎';
+
+  @override
+  String get lblPlaybackEngineDesc => '选择视频解码器。若视频黑屏或无声，请尝试切换解码引擎。';
+
+  @override
+  String get lblEngineSystem => '系统原生 (ExoPlayer)';
+
+  @override
+  String get lblEngineSystemDesc => 'Android 系统播放器，省电省内存。';
+
+  @override
+  String get lblEngineMediaKit => 'libmpv (media_kit)';
+
+  @override
+  String get lblEngineMediaKitDesc => '内置全功能解码器，支持 ExoPlayer 无法播放的流格式。';
+
+  @override
+  String get lblDisabledMediaTypes => '已禁用的媒体类型';
+
+  @override
+  String get lblExtraVideoHosts => '自定义视频域名';
+
+  @override
+  String get lblExtraVideoHostsDesc =>
+      '额外的视频服务域名，每行一个（如 example.com）。自动探测这些域名的媒体流。';
+
+  @override
+  String get lblAppearanceHeader => '外观设置';
+
+  @override
+  String get lblDarkModePreference => '深色模式首选项';
+
+  @override
+  String get lblSystemDefault => '跟随系统';
+
+  @override
+  String get lblLight => '浅色';
+
+  @override
+  String get lblDarkOled => '深色（OLED 纯黑）';
+
+  @override
+  String get lblAccentColorPack => '主题配色包';
+
+  @override
+  String get lblCompactQueue => '紧凑型下载卡片';
+
+  @override
+  String get lblCompactQueueDesc => '在下载列表中显示更小的卡片。';
+
+  @override
+  String get lblHttpProxyHeader => 'HTTP / SOCKS 代理';
+
+  @override
+  String get lblEnableProxy => '启用代理服务器';
+
+  @override
+  String get lblProxyServer => '代理地址与端口';
+
+  @override
+  String get lblProxyType => '代理类型';
+
+  @override
+  String get lblUserAgentProfile => 'User-Agent 配置';
+
+  @override
+  String get lblPerSiteUserAgents => '分域名 User-Agent';
+
+  @override
+  String get lblTlsSslCertificates => '忽略 TLS / SSL 证书错误';
+
+  @override
+  String get lblTlsSslCertificatesDesc => '允许连接使用自签名或无效证书的 HTTPS 网站。';
+
+  @override
+  String get lblExportBackup => '导出备份文件';
+
+  @override
+  String get lblImportBackup => '导入备份文件';
+
+  @override
+  String get lblBackupDatabaseDesc => '将下载记录、历史、书签、过滤规则及配置备份为单个文件。';
+
+  @override
+  String get lblRestoreDatabaseDesc => '从备份文件恢复应用数据。';
+
+  @override
+  String get lblVaultTitle => '私密保险箱';
+
+  @override
+  String get lblVaultDesc => '使用密码或指纹加密保护敏感下载文件。';
+
+  @override
+  String get lblSetPinPasscode => '设置密码';
+
+  @override
+  String get lblChangePin => '修改密码';
+
+  @override
+  String get lblUnlockVault => '解锁保险箱';
+
+  @override
+  String get lblEnterPin => '请输入 4 位密码';
+
+  @override
+  String get lblFfmpegStudioTitle => 'FFmpeg 工作室';
+
+  @override
+  String get lblRemuxVideo => '视频重封装';
+
+  @override
+  String get lblExtractAudio => '提取音频 (MP3 / AAC)';
+
+  @override
+  String get lblTrimCutVideo => '剪辑 / 裁剪视频';
+
+  @override
+  String get lblCompressVideo => '压缩视频';
+
+  @override
+  String get lblConvertFormat => '格式转换';
+
+  @override
+  String get lblStartProcessing => '开始处理';
+
+  @override
+  String get lblWatcherTitle => '剪贴板监听器';
+
+  @override
+  String get lblClipboardMonitor => '剪贴板监听';
+
+  @override
+  String get lblClipboardMonitorDesc => '自动识别剪贴板中的媒体链接并弹窗提示下载。';
+
+  @override
+  String get lblWebdavTitle => 'WebDAV 云备份';
+
+  @override
+  String get lblServerUrl => '服务器 URL';
+
+  @override
+  String get lblUsername => '用户名';
+
+  @override
+  String get lblPassword => '密码';
+
+  @override
+  String get lblTestConnection => '测试连接';
+
+  @override
+  String get lblSyncNow => '立即同步';
+
+  @override
+  String get lblUserGuideTitle => '用户指南与帮助';
+
+  @override
+  String get lblUserGuideDesc => '了解如何嗅探媒体流、使用保险箱、设置广告拦截规则及优化下载速度。';
+
+  @override
+  String get lblFilterAll => '全部';
+
+  @override
+  String get lblFilterDownloading => '下载中';
+
+  @override
+  String get lblFilterCompleted => '已完成';
+
+  @override
+  String get lblFilterPaused => '已暂停';
+
+  @override
+  String get lblFilterFailed => '已失败';
+
+  @override
+  String get lblPauseAll => '全部暂停';
+
+  @override
+  String get lblResumeAll => '全部继续';
+
+  @override
+  String get lblClearCompleted => '清除已完成';
+
+  @override
+  String get lblSearchQueue => '搜索下载任务...';
 }

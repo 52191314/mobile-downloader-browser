@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import '../../settings/onboarding_experiment.dart';
@@ -37,7 +38,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('User Guide & Tutorial'),
+        title: Text(AppLocalizations.of(context)?.lblUserGuideTitle ?? 'User Guide & Tutorial'),
       ),
       body: Column(
         children: [

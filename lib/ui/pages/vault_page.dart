@@ -16,6 +16,7 @@ import '../../premium/pro_upsell_sheet.dart';
 import '../../premium/vault_service.dart';
 import '../../premium/vault_sync_service.dart';
 import '../../premium/webdav_backup_service.dart';
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import 'webdav_settings_page.dart';
@@ -614,7 +615,7 @@ class _VaultPageState extends State<VaultPage> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: ac.surfaceField,
       appBar: AppBar(
-        title: const Text('Private Vault'),
+        title: Text(AppLocalizations.of(context)?.lblVaultTitle ?? 'Private Vault'),
         backgroundColor: ac.surfacePanel,
         actions: [
           if (_unlocked) ...[

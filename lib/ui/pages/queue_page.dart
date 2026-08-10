@@ -12,6 +12,7 @@ import '../../premium/ffmpeg/ffmpeg_service.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../theme/aurora_tokens.dart';
 import '../notifications/aurora_snackbar.dart';
@@ -1108,7 +1109,16 @@ class _QueuePageState extends State<QueuePage> {
 
   Widget _buildStateChip(_StateFilterOption option) {
     final ac = context.ac;
+    final l = AppLocalizations.of(context);
     final isSelected = _stateFilter == option.states;
+    final labelText = switch (option.label) {
+      'All' => l?.lblFilterAll ?? 'All',
+      'Active' => l?.lblFilterDownloading ?? 'Active',
+      'Paused' => l?.lblFilterPaused ?? 'Paused',
+      'Done' => l?.lblFilterCompleted ?? 'Done',
+      'Failed' => l?.lblFilterFailed ?? 'Failed',
+      _ => option.label,
+    };
     return ChoiceChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1116,7 +1126,7 @@ class _QueuePageState extends State<QueuePage> {
           Icon(option.icon, size: 13,
               color: isSelected ? ac.accentFrost : ac.textSecondary),
           const SizedBox(width: 4),
-          Text(option.label, style: TextStyle(fontFamily: 'Inter', fontSize: 11)),
+          Text(labelText, style: TextStyle(fontFamily: 'Inter', fontSize: 11)),
         ],
       ),
       selected: isSelected,

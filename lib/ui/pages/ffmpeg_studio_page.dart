@@ -18,6 +18,7 @@ import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
 import '../../platform/public_downloads_service.dart';
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../notifications/aurora_snackbar.dart';
 import '../widgets/panel.dart';
@@ -254,7 +255,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
 
     if (widget.items.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: const Text('FFmpeg Studio')),
+        appBar: AppBar(title: Text(AppLocalizations.of(context)?.lblFfmpegStudioTitle ?? 'FFmpeg Studio')),
         body: Center(
           child: Text(
             'No completed downloads available.',
@@ -270,7 +271,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('FFmpeg Studio'),
+        title: Text(AppLocalizations.of(context)?.lblFfmpegStudioTitle ?? 'FFmpeg Studio'),
       ),
       body: ListenableBuilder(
         listenable: widget.ffmpegService,

@@ -11,6 +11,7 @@ import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
 import '../../premium/watcher/watcher_models.dart';
 import '../../premium/watcher/watcher_service.dart';
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../widgets/panel.dart';
 
@@ -62,7 +63,7 @@ class _WatcherPageState extends State<WatcherPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Aurora Watcher'),
+        title: Text(AppLocalizations.of(context)?.lblWatcherTitle ?? 'Aurora Watcher'),
         actions: [
           TextButton.icon(
             icon: const Icon(Icons.add, size: 18),

@@ -257,8 +257,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildDefaultsPage() {
     var local = _settings;
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleDefaults ?? 'Download Defaults')),
+      appBar: AppBar(title: Text(l?.pageTitleDefaults ?? 'Download Defaults')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -270,7 +271,7 @@ class _SettingsPageState extends State<SettingsPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _label('Max concurrent downloads'),
+                  _label(l?.lblMaxConcurrentDownloads ?? 'Max concurrent downloads'),
                   _slider(local.maxConcurrentDownloads.toDouble(), 1,
                       maxConcurrent.toDouble(), maxConcurrent - 1,
                       '${local.maxConcurrentDownloads}', (v) {
@@ -279,7 +280,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     _update(local);
                   }),
                   const SizedBox(height: 16),
-                  _label('Chunks per download'),
+                  _label(l?.lblChunksPerDownload ?? 'Chunks per download'),
                   _slider(local.chunksPerTask.toDouble(), 1, maxChunks.toDouble(),
                       maxChunks - 1, '${local.chunksPerTask}', (v) {
                     setLocal(() =>
@@ -290,13 +291,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               );
             }),
-            const ListTile(
-                leading: Icon(Icons.download_rounded),
-                title: Text('Download Defaults'),
+            ListTile(
+                leading: const Icon(Icons.download_rounded),
+                title: Text(l?.pageTitleDefaults ?? 'Download Defaults'),
                 contentPadding: EdgeInsets.zero),
             const SizedBox(height: 8),
             Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _label('Destination (under Downloads)'),
+              _label(l?.lblDownloadDestination ?? 'Destination (under Downloads)'),
               const SizedBox(height: 6),
               _DownloadDestinationEditor(
                 value: local.downloadDestination,
@@ -310,7 +311,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 16),
               SwitchListTile(
-                  title: const Text('Auto-retry failed downloads'),
+                  title: Text(l?.lblAutoRetryFailed ?? 'Auto-retry failed downloads'),
                   value: local.autoRetry,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(autoRetry: v));
@@ -319,7 +320,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   contentPadding: EdgeInsets.zero),
               if (local.autoRetry) ...[
                 const SizedBox(height: 8),
-                _label('Retry limit'),
+                _label(l?.lblRetryLimit ?? 'Retry limit'),
                 _slider(
                     _getRetryLimitIndex(local.retryLimit).toDouble(),
                     0,
@@ -334,8 +335,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
               const SizedBox(height: 8),
               SwitchListTile(
-                title: const Text('Auto-classify downloads'),
-                subtitle: const Text('Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.'),
+                title: Text(l?.lblAutoClassify ?? 'Auto-classify downloads'),
+                subtitle: Text(l?.lblAutoClassifyDesc ?? 'Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.'),
                 value: local.autoClassifyEnabled,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(autoClassifyEnabled: v));
@@ -345,8 +346,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 8),
               SwitchListTile(
-                title: const Text('Convert .ts to .mp4'),
-                subtitle: const Text('After download, Aurora remuxes MPEG-TS (.ts) — including HLS — to .mp4 so files play in any app. Turn off to keep the original .ts.'),
+                title: Text(l?.lblConvertTsToMp4 ?? 'Convert .ts to .mp4'),
+                subtitle: Text(l?.lblConvertTsToMp4Desc ?? 'After download, Aurora remuxes MPEG-TS (.ts) — including HLS — to .mp4 so files play in any app. Turn off to keep the original .ts.'),
                 value: local.remuxTsToMp4,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(remuxTsToMp4: v));
@@ -356,8 +357,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 8),
               SwitchListTile(
-                title: const Text('Include quality suffix'),
-                subtitle: const Text('Appends " (720p)" etc. to filenames when a resolution is detected.'),
+                title: Text(l?.lblIncludeQualitySuffix ?? 'Include quality suffix'),
+                subtitle: Text(l?.lblIncludeQualitySuffixDesc ?? 'Appends " (720p)" etc. to filenames when a resolution is detected.'),
                 value: local.includeQualitySuffix,
                 onChanged: (v) {
                   setLocal(() => local = local.copyWith(includeQualitySuffix: v));
@@ -366,7 +367,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 contentPadding: EdgeInsets.zero,
               ),
               const SizedBox(height: 16),
-              _label('Max detected media'),
+              _label(l?.lblMaxDetectedMedia ?? 'Max detected media'),
               _slider(local.maxDetectedMedia.toDouble(), 20, 150, 13,
                   '${local.maxDetectedMedia}',
                   (v) {
@@ -374,7 +375,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     _update(local);
                   }),
               const SizedBox(height: 16),
-              _label('Download link behavior'),
+              _label(l?.lblDownloadLinkBehavior ?? 'Download link behavior'),
               const SizedBox(height: 4),
               _buildDownloadBehaviorDropdown(local, setLocal),
               const SizedBox(height: 20),
@@ -382,11 +383,11 @@ class _SettingsPageState extends State<SettingsPage> {
               const Divider(height: 24),
               // Wi-Fi only — Pro-gated
               SwitchListTile(
-                title: const Text('Wi-Fi only downloads'),
+                title: Text(l?.lblWifiOnly ?? 'Wi-Fi only downloads'),
                 subtitle: Text(
                   local.wifiOnly
-                      ? 'Downloads only proceed on Wi-Fi. Turn off to use mobile data.'
-                      : 'Enable to restrict downloads to Wi-Fi networks.',
+                      ? (l?.lblWifiOnlyDescOn ?? 'Downloads only proceed on Wi-Fi. Turn off to use mobile data.')
+                      : (l?.lblWifiOnlyDescOff ?? 'Enable to restrict downloads to Wi-Fi networks.'),
                   style: TextStyle(
                       fontSize: 12, color: context.ac.textSecondary),
                 ),
@@ -403,13 +404,13 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               if (widget.proEntitlement.isPro) ...[
                 const SizedBox(height: 8),
-                Text('Pro: Advanced stall controls',
+                Text(l?.lblProStallControls ?? 'Pro: Advanced stall controls',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: context.ac.accentFrost)),
                 const SizedBox(height: 8),
-                _label('Stall timeout (seconds)'),
+                _label(l?.lblStallTimeout ?? 'Stall timeout (seconds)'),
                 _slider(
                     local.stallTimeoutSeconds.toDouble(), 5, 120, 23,
                     '${local.stallTimeoutSeconds}s',
@@ -419,7 +420,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       _update(local);
                     }),
                 const SizedBox(height: 8),
-                _label('Min speed threshold (KB/s)'),
+                _label(l?.lblMinSpeedThreshold ?? 'Min speed threshold (KB/s)'),
                 _slider(
                     local.minSpeedThresholdKbps.toDouble(), 1, 500, 50,
                     '${local.minSpeedThresholdKbps} KB/s',
@@ -429,7 +430,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       _update(local);
                     }),
                 const SizedBox(height: 8),
-                _label('Partial download merge threshold'),
+                _label(l?.lblPartialMergeThreshold ?? 'Partial download merge threshold'),
                 _slider(
                     (local.partialDownloadThreshold * 100).roundToDouble(),
                     50, 100, 50,
@@ -444,11 +445,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 ListTile(
                   leading: Icon(Icons.lock_outline,
                       size: 18, color: context.ac.textTertiary),
-                  title: Text('Advanced stall controls',
+                  title: Text(l?.lblAdvancedStallControls ?? 'Advanced stall controls',
                       style: TextStyle(
                           fontSize: 13, color: context.ac.textSecondary)),
                   subtitle: Text(
-                      'Stall timeout, speed threshold, and partial merge (Pro)',
+                      l?.lblAdvancedStallDesc ?? 'Stall timeout, speed threshold, and partial merge (Pro)',
                       style: TextStyle(
                           fontSize: 12, color: context.ac.textTertiary)),
                   dense: true,
@@ -494,11 +495,12 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildSpeedSection(DownloadSettings local, StateSetter setLocal) {
+    final l = AppLocalizations.of(context);
     // _speedLimitKbps is in KB/s — convert to MB/s for the slider
     final speedMbps = _speedLimitKbps / 1024;
     final sliderPos = _speedMbpsToPosition(speedMbps).toDouble();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _label('Speed limit'),
+      _label(l?.lblSpeedLimit ?? 'Speed limit'),
       Row(children: [
         Icon(Icons.speed, color: context.ac.accentFrost, size: 22),
         const SizedBox(width: 8),
@@ -528,24 +530,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 widget.onSpeedLimitChanged(mbps * 1024);
                 setLocal(() {});
               })),
-      Text('Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)',
+      Text(l?.lblSpeedLimitHelp ?? 'Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)',
           style: TextStyle(fontSize: 10, color: context.ac.textTertiary)),
     ]);
   }
 
   Widget _buildAdblockPage() {
     var local = _settings;
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleAdblock ?? 'Adblock & Filters')),
+      appBar: AppBar(title: Text(l?.pageTitleAdblock ?? 'Adblock & Filters')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(icon: Icons.shield_rounded, title: 'Adblock'),
+            PanelHeader(icon: Icons.shield_rounded, title: l?.lblAdblockHeader ?? 'Adblock'),
             const SizedBox(height: 8),
             Panel(child: Column(children: [
               SwitchListTile(
-                  title: const Text('Enable adblock'),
+                  title: Text(l?.lblEnableAdblock ?? 'Enable adblock'),
                   value: local.adblockEnabled,
                   onChanged: (v) {
                     setLocal(() => local = local.copyWith(adblockEnabled: v));
@@ -553,11 +556,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                   contentPadding: EdgeInsets.zero),
               SwitchListTile(
-                  title: const Text('Block popups'),
+                  title: Text(l?.lblBlockPopups ?? 'Block popups'),
                   subtitle: Text(
                       local.popupBlockingEnabled
-                          ? 'Block popups Aurora didn\'t expect. Turn off to allow sites to open popups.'
-                          : 'Let sites open popups when you tap a link. Turn on to block unexpected ones.',
+                          ? (l?.lblBlockPopupsDescOn ?? 'Block popups Aurora didn\'t expect. Turn off to allow sites to open popups.')
+                          : (l?.lblBlockPopupsDescOff ?? 'Let sites open popups when you tap a link. Turn on to block unexpected ones.'),
                       style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                   value: local.popupBlockingEnabled,
                   onChanged: (v) {
@@ -566,11 +569,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                   contentPadding: EdgeInsets.zero),
               SwitchListTile(
-                  title: const Text('Block invisible redirects'),
+                  title: Text(l?.lblBlockInvisibleRedirects ?? 'Block invisible redirects'),
                   subtitle: Text(
                       local.invisibleRedirectBlockingEnabled
-                          ? 'Intercept redirects and ask before navigating. Use this to avoid being sent to unexpected pages.'
-                          : 'Let redirects navigate without asking. Turn on if a site keeps sending you away.',
+                          ? (l?.lblBlockInvisibleRedirectsDescOn ?? 'Intercept redirects and ask before navigating. Use this to avoid being sent to unexpected pages.')
+                          : (l?.lblBlockInvisibleRedirectsDescOff ?? 'Let redirects navigate without asking. Turn on if a site keeps sending you away.'),
                       style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                   value: local.invisibleRedirectBlockingEnabled,
                   onChanged: (v) {
@@ -580,12 +583,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   contentPadding: EdgeInsets.zero),
               // Tracker blocking (Pro-gated)
               SwitchListTile(
-                  title: const Text('Block trackers (Pro)'),
+                  title: Text(l?.lblBlockTrackers ?? 'Block trackers (Pro)'),
                   subtitle: Text(
                       local.trackerBlockingEnabled
-                          ? 'Block known tracker domains and analytics scripts. '
-                              'Requires Aurora Pro.'
-                          : 'Block known tracker domains. Pro feature.',
+                          ? (l?.lblBlockTrackersDescOn ?? 'Block known tracker domains and analytics scripts. Requires Aurora Pro.')
+                          : (l?.lblBlockTrackersDescOff ?? 'Block known tracker domains. Pro feature.'),
                       style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                   value: local.trackerBlockingEnabled,
                   onChanged: (v) {
@@ -598,10 +600,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                   contentPadding: EdgeInsets.zero),
               ListTile(
-                title: const Text('Per-site allowlist'),
+                title: Text(l?.lblPerSiteAllowlist ?? 'Per-site allowlist'),
                 subtitle: Text(
                     local.adblockAllowlist.isEmpty
-                        ? 'No sites are allowlisted. Tap the shield in the browser toolbar to allowlist a site.'
+                        ? (l?.lblPerSiteAllowlistEmpty ?? 'No sites are allowlisted. Tap the shield in the browser toolbar to allowlist a site.')
                         : '${local.adblockAllowlist.length} site${local.adblockAllowlist.length == 1 ? "" : "s"} allowlisted',
                     style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
                 trailing: local.adblockAllowlist.isEmpty
@@ -612,7 +614,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           setLocal(() => local = updated);
                           _update(updated);
                         },
-                        child: const Text('Clear all'),
+                        child: Text(l?.actionClear ?? 'Clear all'),
                       ),
                 contentPadding: EdgeInsets.zero,
               ),
@@ -646,7 +648,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           minimumSize: const Size(0, 32),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text('Enable all', style: TextStyle(fontSize: 12)),
+                        child: Text(l?.lblEnableAll ?? 'Enable all', style: const TextStyle(fontSize: 12)),
                       ),
                       TextButton(
                         onPressed: () {
@@ -662,7 +664,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           minimumSize: const Size(0, 32),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text('Disable all', style: TextStyle(fontSize: 12)),
+                        child: Text(l?.lblDisableAll ?? 'Disable all', style: const TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
@@ -675,8 +677,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   controller: widget.adblockSourceController,
                   decoration: InputDecoration(
                     hintText: widget.proEntitlement.isPro
-                        ? 'Add custom filter URL'
-                        : 'Custom filter URLs (Pro only)',
+                        ? (l?.lblAddCustomFilterUrl ?? 'Add custom filter URL')
+                        : (l?.lblCustomFilterUrlsPro ?? 'Custom filter URLs (Pro only)'),
                     suffixIcon: IconButton(
                         icon: const Icon(Icons.add),
                         onPressed: () {
@@ -714,6 +716,7 @@ class _SettingsPageState extends State<SettingsPage> {
     DownloadSettings local,
     void Function(void Function()) setLocal,
   ) {
+    final l = AppLocalizations.of(context);
     final bySite = <String, List<_BlockedRuleEntry>>{};
     for (final r in local.manualAdBlockRules) {
       final site =
@@ -737,7 +740,7 @@ class _SettingsPageState extends State<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Blocked elements by site ($total)',
+          '${l?.lblBlockedElementsSite ?? "Blocked elements by site"} ($total)',
           style: TextStyle(
             fontWeight: FontWeight.w600,
             color: context.ac.textPrimary,
@@ -848,21 +851,22 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSearchPage() {
     var local = _settings;
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleSearch ?? 'Search & Privacy')),
+      appBar: AppBar(title: Text(l?.pageTitleSearch ?? 'Search & Privacy')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(icon: Icons.visibility_off_outlined, title: 'Private Browsing'),
+            PanelHeader(icon: Icons.visibility_off_outlined, title: l?.lblPrivateBrowsingHeader ?? 'Private Browsing'),
             const SizedBox(height: 8),
             Panel(
               child: SwitchListTile(
-                title: const Text('Private / Incognito mode'),
+                title: Text(l?.lblIncognitoMode ?? 'Private / Incognito mode'),
                 subtitle: Text(
                   local.privateMode
-                      ? 'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.'
-                      : 'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.',
+                      ? (l?.lblIncognitoModeDescOn ?? 'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.')
+                      : (l?.lblIncognitoModeDescOff ?? 'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.'),
                   style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                 ),
                 value: local.privateMode,
@@ -875,7 +879,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 20),
-            PanelHeader(icon: Icons.search_rounded, title: 'Search Engine'),
+            PanelHeader(icon: Icons.search_rounded, title: l?.lblSearchEngineHeader ?? 'Search Engine'),
             const SizedBox(height: 8),
             Panel(child: Column(children: [
             DropdownButtonFormField<String>(
@@ -883,7 +887,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ? 'custom'
                     : _settings.searchEngine.id,
                 decoration: InputDecoration(
-                    labelText: 'Search engine',
+                    labelText: l?.lblSearchEngine ?? 'Search engine',
                     border:
                         OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
                 items: ['google', 'duckduckgo', 'bing', 'brave', 'custom']
@@ -921,7 +925,7 @@ class _SettingsPageState extends State<SettingsPage> {
               TextField(
                   controller: widget.customSearchController,
                   decoration: InputDecoration(
-                      labelText: 'Custom URL template (use %s for query)',
+                      labelText: l?.lblCustomUrlTemplate ?? 'Custom URL template (use %s for query)',
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8))),
                   onChanged: (v) => _update(_settings.copyWith(
@@ -939,21 +943,22 @@ class _SettingsPageState extends State<SettingsPage> {
     var localDisabled = Set<MediaType>.from(_settings.disabledMediaTypes);
     var localReplacePlayer = _settings.replaceSitePlayer;
     var localEngine = _settings.playbackEngine;
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleSniffer ?? 'Media Sniffer')),
+      appBar: AppBar(title: Text(l?.pageTitleSniffer ?? 'Media Sniffer')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(icon: Icons.play_circle_outline_rounded, title: 'In-app player'),
+            PanelHeader(icon: Icons.play_circle_outline_rounded, title: l?.lblInAppPlayerHeader ?? 'In-app player'),
             const SizedBox(height: 8),
             Panel(
               child: SwitchListTile(
-                title: const Text('Auto-open Aurora on site play'),
+                title: Text(l?.lblAutoOpenAuroraPlay ?? 'Auto-open Aurora on site play'),
                 subtitle: Text(
                   localReplacePlayer
-                      ? 'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.'
-                      : 'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.',
+                      ? (l?.lblAutoOpenAuroraPlayDescOn ?? 'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.')
+                      : (l?.lblAutoOpenAuroraPlayDescOff ?? 'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.'),
                   style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
                 ),
                 value: localReplacePlayer,
@@ -967,7 +972,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 16),
             PanelHeader(
               icon: Icons.memory_rounded,
-              title: 'Playback engine',
+              title: l?.lblPlaybackEngineHeader ?? 'Playback engine',
             ),
             const SizedBox(height: 8),
             Panel(
@@ -977,6 +982,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
+                      l?.lblPlaybackEngineDesc ??
                       'Which decoder plays video. If a stream loads but stays '
                       'black or silent, switch engines — they use completely '
                       'different decoders, so one often plays what the other '
@@ -997,17 +1003,17 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: Text(
                         switch (option) {
                           PlaybackEngineSetting.videoPlayer =>
-                            'System (ExoPlayer)',
-                          PlaybackEngineSetting.mediaKit => 'libmpv (media_kit)',
+                            l?.lblEngineSystem ?? 'System (ExoPlayer)',
+                          PlaybackEngineSetting.mediaKit => l?.lblEngineMediaKit ?? 'libmpv (media_kit)',
                         },
                         style: const TextStyle(fontSize: 14),
                       ),
                       subtitle: Text(
                         switch (option) {
                           PlaybackEngineSetting.videoPlayer =>
-                            'Android\'s own player. Lightest on battery and memory.',
+                            l?.lblEngineSystemDesc ?? 'Android\'s own player. Lightest on battery and memory.',
                           PlaybackEngineSetting.mediaKit =>
-                            'Bundled decoders. Handles streams ExoPlayer refuses.',
+                            l?.lblEngineMediaKitDesc ?? 'Bundled decoders. Handles streams ExoPlayer refuses.',
                         },
                         style: TextStyle(
                           fontSize: 11,
@@ -1025,7 +1031,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 16),
-            PanelHeader(icon: Icons.tune_rounded, title: 'Disabled Media Types'),
+            PanelHeader(icon: Icons.tune_rounded, title: l?.lblDisabledMediaTypes ?? 'Disabled Media Types'),
             const SizedBox(height: 8),
             Panel(child: Wrap(
               spacing: 8,
@@ -1049,13 +1055,14 @@ class _SettingsPageState extends State<SettingsPage> {
               }).toList(),
             )),
             const SizedBox(height: 16),
-            PanelHeader(icon: Icons.language_rounded, title: 'Extra Video Hosts'),
+            PanelHeader(icon: Icons.language_rounded, title: l?.lblExtraVideoHosts ?? 'Extra Video Hosts'),
             const SizedBox(height: 8),
             Panel(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
+                    l?.lblExtraVideoHostsDesc ??
                     'Additional domains that serve video files. '
                     'One host per line (e.g. `example.com`). '
                     'URLs from these hosts are probed for video content.',
@@ -1096,20 +1103,21 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildAppearancePage() {
     var localPref = _settings.darkModePreference;
+    final l = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleTheme ?? 'Appearance & Theme')),
+      appBar: AppBar(title: Text(l?.pageTitleTheme ?? 'Appearance & Theme')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            PanelHeader(icon: Icons.palette_outlined, title: 'Appearance'),
+            PanelHeader(icon: Icons.palette_outlined, title: l?.lblAppearanceHeader ?? 'Appearance'),
             const SizedBox(height: 8),
             Panel(child: Column(children: [
               DropdownButtonFormField<String>(
                 value: _settings.appLanguageCode,
                 decoration: InputDecoration(
-                  labelText: AppLocalizations.of(context)?.settingsLanguage ?? 'App language',
-                  helperText: AppLocalizations.of(context)?.settingsLanguageDesc ??
+                  labelText: l?.settingsLanguage ?? 'App language',
+                  helperText: l?.settingsLanguageDesc ??
                       'Choose display language for Aurora Downloader interface',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -1131,7 +1139,7 @@ class _SettingsPageState extends State<SettingsPage> {
               DropdownButtonFormField<DarkModePreference>(
                 value: localPref,
                 decoration: InputDecoration(
-                  labelText: 'Dark mode preference',
+                  labelText: l?.lblDarkModePreference ?? 'Dark mode preference',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -1140,9 +1148,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     .map((pref) => DropdownMenuItem(
                           value: pref,
                           child: Text(switch (pref) {
-                            DarkModePreference.system => 'System default',
-                            DarkModePreference.off => 'Light',
-                            DarkModePreference.forced => 'Dark (OLED black)',
+                            DarkModePreference.system => l?.lblSystemDefault ?? 'System default',
+                            DarkModePreference.off => l?.lblLight ?? 'Light',
+                            DarkModePreference.forced => l?.lblDarkOled ?? 'Dark (OLED black)',
                           }),
                         ))
                     .toList(),

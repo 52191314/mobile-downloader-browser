@@ -935,6 +935,708 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download Complete'**
   String get notifCompleteTitle;
+
+  /// No description provided for @lblMaxConcurrentDownloads.
+  ///
+  /// In en, this message translates to:
+  /// **'Max concurrent downloads'**
+  String get lblMaxConcurrentDownloads;
+
+  /// No description provided for @lblChunksPerDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Chunks per download'**
+  String get lblChunksPerDownload;
+
+  /// No description provided for @lblDownloadDestination.
+  ///
+  /// In en, this message translates to:
+  /// **'Destination (under Downloads)'**
+  String get lblDownloadDestination;
+
+  /// No description provided for @lblAutoRetryFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-retry failed downloads'**
+  String get lblAutoRetryFailed;
+
+  /// No description provided for @lblRetryLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry limit'**
+  String get lblRetryLimit;
+
+  /// No description provided for @lblAutoClassify.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-classify downloads'**
+  String get lblAutoClassify;
+
+  /// No description provided for @lblAutoClassifyDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.'**
+  String get lblAutoClassifyDesc;
+
+  /// No description provided for @lblConvertTsToMp4.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert .ts to .mp4'**
+  String get lblConvertTsToMp4;
+
+  /// No description provided for @lblConvertTsToMp4Desc.
+  ///
+  /// In en, this message translates to:
+  /// **'After download, Aurora remuxes MPEG-TS (.ts) — including HLS — to .mp4 so files play in any app. Turn off to keep the original .ts.'**
+  String get lblConvertTsToMp4Desc;
+
+  /// No description provided for @lblIncludeQualitySuffix.
+  ///
+  /// In en, this message translates to:
+  /// **'Include quality suffix'**
+  String get lblIncludeQualitySuffix;
+
+  /// No description provided for @lblIncludeQualitySuffixDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Appends \" (720p)\" etc. to filenames when a resolution is detected.'**
+  String get lblIncludeQualitySuffixDesc;
+
+  /// No description provided for @lblMaxDetectedMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Max detected media'**
+  String get lblMaxDetectedMedia;
+
+  /// No description provided for @lblDownloadLinkBehavior.
+  ///
+  /// In en, this message translates to:
+  /// **'Download link behavior'**
+  String get lblDownloadLinkBehavior;
+
+  /// No description provided for @lblWifiOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi only downloads'**
+  String get lblWifiOnly;
+
+  /// No description provided for @lblWifiOnlyDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloads only proceed on Wi-Fi. Turn off to use mobile data.'**
+  String get lblWifiOnlyDescOn;
+
+  /// No description provided for @lblWifiOnlyDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable to restrict downloads to Wi-Fi networks.'**
+  String get lblWifiOnlyDescOff;
+
+  /// No description provided for @lblProStallControls.
+  ///
+  /// In en, this message translates to:
+  /// **'Pro: Advanced stall controls'**
+  String get lblProStallControls;
+
+  /// No description provided for @lblStallTimeout.
+  ///
+  /// In en, this message translates to:
+  /// **'Stall timeout (seconds)'**
+  String get lblStallTimeout;
+
+  /// No description provided for @lblMinSpeedThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Min speed threshold (KB/s)'**
+  String get lblMinSpeedThreshold;
+
+  /// No description provided for @lblPartialMergeThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial download merge threshold'**
+  String get lblPartialMergeThreshold;
+
+  /// No description provided for @lblAdvancedStallControls.
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced stall controls'**
+  String get lblAdvancedStallControls;
+
+  /// No description provided for @lblAdvancedStallDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Stall timeout, speed threshold, and partial merge (Pro)'**
+  String get lblAdvancedStallDesc;
+
+  /// No description provided for @lblSpeedLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Speed limit'**
+  String get lblSpeedLimit;
+
+  /// No description provided for @lblSpeedLimitHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)'**
+  String get lblSpeedLimitHelp;
+
+  /// No description provided for @lblUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited'**
+  String get lblUnlimited;
+
+  /// No description provided for @lblAdblockHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Adblock'**
+  String get lblAdblockHeader;
+
+  /// No description provided for @lblEnableAdblock.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable adblock'**
+  String get lblEnableAdblock;
+
+  /// No description provided for @lblBlockPopups.
+  ///
+  /// In en, this message translates to:
+  /// **'Block popups'**
+  String get lblBlockPopups;
+
+  /// No description provided for @lblBlockPopupsDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Block popups Aurora didn\'t expect. Turn off to allow sites to open popups.'**
+  String get lblBlockPopupsDescOn;
+
+  /// No description provided for @lblBlockPopupsDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Let sites open popups when you tap a link. Turn on to block unexpected ones.'**
+  String get lblBlockPopupsDescOff;
+
+  /// No description provided for @lblBlockInvisibleRedirects.
+  ///
+  /// In en, this message translates to:
+  /// **'Block invisible redirects'**
+  String get lblBlockInvisibleRedirects;
+
+  /// No description provided for @lblBlockInvisibleRedirectsDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Intercept redirects and ask before navigating. Use this to avoid being sent to unexpected pages.'**
+  String get lblBlockInvisibleRedirectsDescOn;
+
+  /// No description provided for @lblBlockInvisibleRedirectsDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Let redirects navigate without asking. Turn on if a site keeps sending you away.'**
+  String get lblBlockInvisibleRedirectsDescOff;
+
+  /// No description provided for @lblBlockTrackers.
+  ///
+  /// In en, this message translates to:
+  /// **'Block trackers (Pro)'**
+  String get lblBlockTrackers;
+
+  /// No description provided for @lblBlockTrackersDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Block known tracker domains and analytics scripts. Requires Aurora Pro.'**
+  String get lblBlockTrackersDescOn;
+
+  /// No description provided for @lblBlockTrackersDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Block known tracker domains. Pro feature.'**
+  String get lblBlockTrackersDescOff;
+
+  /// No description provided for @lblPerSiteAllowlist.
+  ///
+  /// In en, this message translates to:
+  /// **'Per-site allowlist'**
+  String get lblPerSiteAllowlist;
+
+  /// No description provided for @lblPerSiteAllowlistEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No sites are allowlisted. Tap the shield in the browser toolbar to allowlist a site.'**
+  String get lblPerSiteAllowlistEmpty;
+
+  /// No description provided for @lblEnableAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable all'**
+  String get lblEnableAll;
+
+  /// No description provided for @lblDisableAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable all'**
+  String get lblDisableAll;
+
+  /// No description provided for @lblAddCustomFilterUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Add custom filter URL'**
+  String get lblAddCustomFilterUrl;
+
+  /// No description provided for @lblCustomFilterUrlsPro.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom filter URLs (Pro only)'**
+  String get lblCustomFilterUrlsPro;
+
+  /// No description provided for @lblBlockedElementsSite.
+  ///
+  /// In en, this message translates to:
+  /// **'Blocked elements by site'**
+  String get lblBlockedElementsSite;
+
+  /// No description provided for @lblNoBlockedElements.
+  ///
+  /// In en, this message translates to:
+  /// **'No elements or hosts manually blocked.'**
+  String get lblNoBlockedElements;
+
+  /// No description provided for @lblPrivateBrowsingHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Private Browsing'**
+  String get lblPrivateBrowsingHeader;
+
+  /// No description provided for @lblIncognitoMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Private / Incognito mode'**
+  String get lblIncognitoMode;
+
+  /// No description provided for @lblIncognitoModeDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.'**
+  String get lblIncognitoModeDescOn;
+
+  /// No description provided for @lblIncognitoModeDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.'**
+  String get lblIncognitoModeDescOff;
+
+  /// No description provided for @lblSearchEngineHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Search Engine'**
+  String get lblSearchEngineHeader;
+
+  /// No description provided for @lblSearchEngine.
+  ///
+  /// In en, this message translates to:
+  /// **'Search engine'**
+  String get lblSearchEngine;
+
+  /// No description provided for @lblCustomUrlTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom URL template (use %s for query)'**
+  String get lblCustomUrlTemplate;
+
+  /// No description provided for @lblInAppPlayerHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'In-app player'**
+  String get lblInAppPlayerHeader;
+
+  /// No description provided for @lblAutoOpenAuroraPlay.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-open Aurora on site play'**
+  String get lblAutoOpenAuroraPlay;
+
+  /// No description provided for @lblAutoOpenAuroraPlayDescOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Tapping play on a page opens Aurora\'s player immediately (cookies/session preserved). Turn off to keep the site player and use the floating play icon instead.'**
+  String get lblAutoOpenAuroraPlayDescOn;
+
+  /// No description provided for @lblAutoOpenAuroraPlayDescOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Site players run normally. When Aurora sniffs a stream, a floating play icon appears over the video (like IDM) — tap it to open Aurora\'s player.'**
+  String get lblAutoOpenAuroraPlayDescOff;
+
+  /// No description provided for @lblPlaybackEngineHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Playback engine'**
+  String get lblPlaybackEngineHeader;
+
+  /// No description provided for @lblPlaybackEngineDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Which decoder plays video. If a stream loads but stays black or silent, switch engines — they use completely different decoders, so one often plays what the other cannot.'**
+  String get lblPlaybackEngineDesc;
+
+  /// No description provided for @lblEngineSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System (ExoPlayer)'**
+  String get lblEngineSystem;
+
+  /// No description provided for @lblEngineSystemDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Android\'s own player. Lightest on battery and memory.'**
+  String get lblEngineSystemDesc;
+
+  /// No description provided for @lblEngineMediaKit.
+  ///
+  /// In en, this message translates to:
+  /// **'libmpv (media_kit)'**
+  String get lblEngineMediaKit;
+
+  /// No description provided for @lblEngineMediaKitDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundled decoders. Handles streams ExoPlayer refuses.'**
+  String get lblEngineMediaKitDesc;
+
+  /// No description provided for @lblDisabledMediaTypes.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled Media Types'**
+  String get lblDisabledMediaTypes;
+
+  /// No description provided for @lblExtraVideoHosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra Video Hosts'**
+  String get lblExtraVideoHosts;
+
+  /// No description provided for @lblExtraVideoHostsDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional domains that serve video files. One host per line (e.g. example.com). URLs from these hosts are probed for video content.'**
+  String get lblExtraVideoHostsDesc;
+
+  /// No description provided for @lblAppearanceHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get lblAppearanceHeader;
+
+  /// No description provided for @lblDarkModePreference.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark mode preference'**
+  String get lblDarkModePreference;
+
+  /// No description provided for @lblSystemDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'System default'**
+  String get lblSystemDefault;
+
+  /// No description provided for @lblLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get lblLight;
+
+  /// No description provided for @lblDarkOled.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark (OLED black)'**
+  String get lblDarkOled;
+
+  /// No description provided for @lblAccentColorPack.
+  ///
+  /// In en, this message translates to:
+  /// **'Accent color pack'**
+  String get lblAccentColorPack;
+
+  /// No description provided for @lblCompactQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact queue items'**
+  String get lblCompactQueue;
+
+  /// No description provided for @lblCompactQueueDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Display smaller download progress cards in the Queue view.'**
+  String get lblCompactQueueDesc;
+
+  /// No description provided for @lblHttpProxyHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'HTTP / SOCKS Proxy'**
+  String get lblHttpProxyHeader;
+
+  /// No description provided for @lblEnableProxy.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable proxy server'**
+  String get lblEnableProxy;
+
+  /// No description provided for @lblProxyServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy Host & Port'**
+  String get lblProxyServer;
+
+  /// No description provided for @lblProxyType.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy Type'**
+  String get lblProxyType;
+
+  /// No description provided for @lblUserAgentProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'User-Agent Profile'**
+  String get lblUserAgentProfile;
+
+  /// No description provided for @lblPerSiteUserAgents.
+  ///
+  /// In en, this message translates to:
+  /// **'Per-site User-Agents'**
+  String get lblPerSiteUserAgents;
+
+  /// No description provided for @lblTlsSslCertificates.
+  ///
+  /// In en, this message translates to:
+  /// **'Ignore TLS / SSL errors'**
+  String get lblTlsSslCertificates;
+
+  /// No description provided for @lblTlsSslCertificatesDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Allows connecting to sites with invalid or self-signed HTTPS certificates.'**
+  String get lblTlsSslCertificatesDesc;
+
+  /// No description provided for @lblExportBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Export Backup File'**
+  String get lblExportBackup;
+
+  /// No description provided for @lblImportBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Import Backup File'**
+  String get lblImportBackup;
+
+  /// No description provided for @lblBackupDatabaseDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup downloads, history, bookmarks, adblock filters, and app settings into a single file.'**
+  String get lblBackupDatabaseDesc;
+
+  /// No description provided for @lblRestoreDatabaseDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore app data from a previously created backup file.'**
+  String get lblRestoreDatabaseDesc;
+
+  /// No description provided for @lblVaultTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Private Vault'**
+  String get lblVaultTitle;
+
+  /// No description provided for @lblVaultDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Store sensitive downloads and private files behind a PIN passcode or biometric lock.'**
+  String get lblVaultDesc;
+
+  /// No description provided for @lblSetPinPasscode.
+  ///
+  /// In en, this message translates to:
+  /// **'Set PIN Passcode'**
+  String get lblSetPinPasscode;
+
+  /// No description provided for @lblChangePin.
+  ///
+  /// In en, this message translates to:
+  /// **'Change PIN'**
+  String get lblChangePin;
+
+  /// No description provided for @lblUnlockVault.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock Private Vault'**
+  String get lblUnlockVault;
+
+  /// No description provided for @lblEnterPin.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter 4-digit PIN'**
+  String get lblEnterPin;
+
+  /// No description provided for @lblFfmpegStudioTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'FFmpeg Studio'**
+  String get lblFfmpegStudioTitle;
+
+  /// No description provided for @lblRemuxVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Remux Video'**
+  String get lblRemuxVideo;
+
+  /// No description provided for @lblExtractAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Extract Audio (MP3 / AAC)'**
+  String get lblExtractAudio;
+
+  /// No description provided for @lblTrimCutVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Trim / Cut Video'**
+  String get lblTrimCutVideo;
+
+  /// No description provided for @lblCompressVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Compress Video'**
+  String get lblCompressVideo;
+
+  /// No description provided for @lblConvertFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert Format'**
+  String get lblConvertFormat;
+
+  /// No description provided for @lblStartProcessing.
+  ///
+  /// In en, this message translates to:
+  /// **'Start Processing'**
+  String get lblStartProcessing;
+
+  /// No description provided for @lblWatcherTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Aurora Watcher'**
+  String get lblWatcherTitle;
+
+  /// No description provided for @lblClipboardMonitor.
+  ///
+  /// In en, this message translates to:
+  /// **'Clipboard Monitor'**
+  String get lblClipboardMonitor;
+
+  /// No description provided for @lblClipboardMonitorDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically detect media links copied to your system clipboard and prompt to download.'**
+  String get lblClipboardMonitorDesc;
+
+  /// No description provided for @lblWebdavTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'WebDAV Backup'**
+  String get lblWebdavTitle;
+
+  /// No description provided for @lblServerUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Server URL'**
+  String get lblServerUrl;
+
+  /// No description provided for @lblUsername.
+  ///
+  /// In en, this message translates to:
+  /// **'Username'**
+  String get lblUsername;
+
+  /// No description provided for @lblPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get lblPassword;
+
+  /// No description provided for @lblTestConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Test Connection'**
+  String get lblTestConnection;
+
+  /// No description provided for @lblSyncNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync Now'**
+  String get lblSyncNow;
+
+  /// No description provided for @lblUserGuideTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'User Guide & Help'**
+  String get lblUserGuideTitle;
+
+  /// No description provided for @lblUserGuideDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Learn how to capture streams, use private vault, configure adblock rules, and optimize download speed.'**
+  String get lblUserGuideDesc;
+
+  /// No description provided for @lblFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get lblFilterAll;
+
+  /// No description provided for @lblFilterDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading'**
+  String get lblFilterDownloading;
+
+  /// No description provided for @lblFilterCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get lblFilterCompleted;
+
+  /// No description provided for @lblFilterPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get lblFilterPaused;
+
+  /// No description provided for @lblFilterFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get lblFilterFailed;
+
+  /// No description provided for @lblPauseAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause All'**
+  String get lblPauseAll;
+
+  /// No description provided for @lblResumeAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume All'**
+  String get lblResumeAll;
+
+  /// No description provided for @lblClearCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear Completed'**
+  String get lblClearCompleted;
+
+  /// No description provided for @lblSearchQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Search downloads...'**
+  String get lblSearchQueue;
 }
 
 class _AppLocalizationsDelegate

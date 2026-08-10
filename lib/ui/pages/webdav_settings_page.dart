@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../premium/webdav_backup_service.dart';
 import '../../theme/aurora_palette.dart';
 
@@ -175,7 +176,7 @@ class _WebdavSettingsPageState extends State<WebdavSettingsPage> {
     return Scaffold(
       backgroundColor: ac.surfaceField,
       appBar: AppBar(
-        title: const Text('WebDAV Backup'),
+        title: Text(AppLocalizations.of(context)?.lblWebdavTitle ?? 'WebDAV Backup'),
         backgroundColor: ac.surfacePanel,
         actions: [
           IconButton(

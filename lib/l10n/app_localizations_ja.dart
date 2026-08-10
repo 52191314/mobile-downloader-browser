@@ -421,4 +421,367 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get notifCompleteTitle => 'ダウンロード完了';
+
+  @override
+  String get lblMaxConcurrentDownloads => '最大同时ダウンロード数';
+
+  @override
+  String get lblChunksPerDownload => 'タスクごとの分割数';
+
+  @override
+  String get lblDownloadDestination => '保存先フォルダ';
+
+  @override
+  String get lblAutoRetryFailed => '失敗時の自動再試行';
+
+  @override
+  String get lblRetryLimit => '再試行回数制限';
+
+  @override
+  String get lblAutoClassify => 'ダウンロードの自動分類';
+
+  @override
+  String get lblAutoClassifyDesc => '完了したファイルを動画、音声、画像、ドキュメントに自動分類します。';
+
+  @override
+  String get lblConvertTsToMp4 => '.ts を .mp4 に自動変換';
+
+  @override
+  String get lblConvertTsToMp4Desc =>
+      'ダウンロード後に MPEG-TS (.ts) や HLS を .mp4 に変換して互換性を向上させます。';
+
+  @override
+  String get lblIncludeQualitySuffix => 'ファイル名に画質接尾辞を追加';
+
+  @override
+  String get lblIncludeQualitySuffixDesc =>
+      '解像度が検出された場合、ファイル名に「(720p)」などを追加します。';
+
+  @override
+  String get lblMaxDetectedMedia => '検出可能な最大メディア数';
+
+  @override
+  String get lblDownloadLinkBehavior => 'ダウンロードリンクの動作';
+
+  @override
+  String get lblWifiOnly => 'Wi-Fi 接続時のみダウンロード';
+
+  @override
+  String get lblWifiOnlyDescOn => 'Wi-Fi 接続時のみダウンロードします。モバイルデータを使用する場合はオフにします。';
+
+  @override
+  String get lblWifiOnlyDescOff => '有効にすると Wi-Fi ネットワーク接続時のみダウンロードします。';
+
+  @override
+  String get lblProStallControls => 'Pro: 高度な停滞制御';
+
+  @override
+  String get lblStallTimeout => 'タイムアウト判定時間（秒）';
+
+  @override
+  String get lblMinSpeedThreshold => '最低速度しきい値 (KB/s)';
+
+  @override
+  String get lblPartialMergeThreshold => '分割結合割合';
+
+  @override
+  String get lblAdvancedStallControls => '高度な停滞制御';
+
+  @override
+  String get lblAdvancedStallDesc => 'タイムアウト、最低速度、分割結合設定 (Pro)';
+
+  @override
+  String get lblSpeedLimit => '速度制限';
+
+  @override
+  String get lblSpeedLimitHelp => '0 で無制限。スライダーを右に引くと制限（最大 500 MB/s）';
+
+  @override
+  String get lblUnlimited => '無制限';
+
+  @override
+  String get lblAdblockHeader => '広告ブロック';
+
+  @override
+  String get lblEnableAdblock => '広告ブロックを有効化';
+
+  @override
+  String get lblBlockPopups => 'ポップアップをブロック';
+
+  @override
+  String get lblBlockPopupsDescOn =>
+      '予期しないポップアップをブロックします。サイトのポップアップを許可するにはオフにします。';
+
+  @override
+  String get lblBlockPopupsDescOff =>
+      'リンクタップ時のポップアップを許可します。オンにすると不要なポップアップをブロックします。';
+
+  @override
+  String get lblBlockInvisibleRedirects => '透明なリダイレクトをブロック';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOn =>
+      'リダイレクトを検知して確認画面を表示し、不審なページへの遷移を防ぎます。';
+
+  @override
+  String get lblBlockInvisibleRedirectsDescOff => 'リダイレクトの自動遷移を許可します。';
+
+  @override
+  String get lblBlockTrackers => 'トラッカーをブロック (Pro)';
+
+  @override
+  String get lblBlockTrackersDescOn =>
+      '知られたトラッキングドメインおよび解析スクリプトをブロックします。Aurora Pro が必要です。';
+
+  @override
+  String get lblBlockTrackersDescOff => 'トラッキングドメインをブロック（Pro 機能）。';
+
+  @override
+  String get lblPerSiteAllowlist => 'サイトごとの許可リスト';
+
+  @override
+  String get lblPerSiteAllowlistEmpty =>
+      '許可されたサイトはありません。ブラウザの盾アイコンをタップして追加できます。';
+
+  @override
+  String get lblEnableAll => 'すべて有効';
+
+  @override
+  String get lblDisableAll => 'すべて無効';
+
+  @override
+  String get lblAddCustomFilterUrl => 'カスタムフィルター URL を追加';
+
+  @override
+  String get lblCustomFilterUrlsPro => 'カスタムフィルター URL（Pro 限定）';
+
+  @override
+  String get lblBlockedElementsSite => 'サイト別のブロック済み要素';
+
+  @override
+  String get lblNoBlockedElements => '手動でブロックされた要素やホストはありません。';
+
+  @override
+  String get lblPrivateBrowsingHeader => 'プライベートブラウジング';
+
+  @override
+  String get lblIncognitoMode => 'シークレットモード';
+
+  @override
+  String get lblIncognitoModeDescOn =>
+      'シークレットモードがオンです。履歴やクッキーは保存されず、紫の盾が表示されます。';
+
+  @override
+  String get lblIncognitoModeDescOff => '閲覧履歴やクッキーを保存せずにブラウジングします。';
+
+  @override
+  String get lblSearchEngineHeader => '検索エンジン';
+
+  @override
+  String get lblSearchEngine => '検索エンジン';
+
+  @override
+  String get lblCustomUrlTemplate => 'カスタム検索テンプレート（キーワードに %s を使用）';
+
+  @override
+  String get lblInAppPlayerHeader => 'アプリ内プレイヤー';
+
+  @override
+  String get lblAutoOpenAuroraPlay => '再生時に自動で Aurora プレイヤーを開く';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOn =>
+      'ページの再生時に Aurora プレイヤーを起動します。オフにすると標準プレイヤーを使用します。';
+
+  @override
+  String get lblAutoOpenAuroraPlayDescOff =>
+      'ページの標準プレイヤーで再生されます。ストリーム検知時に浮動アイコンが表示されます。';
+
+  @override
+  String get lblPlaybackEngineHeader => '再生エンジン';
+
+  @override
+  String get lblPlaybackEngineDesc =>
+      '動画再生用デコーダーを選択します。再生に失敗した場合はエンジンを切り替えてください。';
+
+  @override
+  String get lblEngineSystem => 'システム標準 (ExoPlayer)';
+
+  @override
+  String get lblEngineSystemDesc => 'Android 標準プレイヤー。バッテリーとメモリの使用量を抑えます。';
+
+  @override
+  String get lblEngineMediaKit => 'libmpv (media_kit)';
+
+  @override
+  String get lblEngineMediaKitDesc => '内蔵デコーダー。ExoPlayer で再生できないストリームに対応します。';
+
+  @override
+  String get lblDisabledMediaTypes => '無効なメディアタイプ';
+
+  @override
+  String get lblExtraVideoHosts => '追加の動画ドメイン';
+
+  @override
+  String get lblExtraVideoHostsDesc =>
+      '動画を提供する追加ドメイン（1 行に 1 つ）。これらのドメインからのメディアを自動検知します。';
+
+  @override
+  String get lblAppearanceHeader => '外観とテーマ';
+
+  @override
+  String get lblDarkModePreference => 'ダークモード設定';
+
+  @override
+  String get lblSystemDefault => 'システムに従う';
+
+  @override
+  String get lblLight => 'ライト';
+
+  @override
+  String get lblDarkOled => 'ダーク (OLED 黒)';
+
+  @override
+  String get lblAccentColorPack => 'アクセントカラーパック';
+
+  @override
+  String get lblCompactQueue => 'コンパクトなキュー表示';
+
+  @override
+  String get lblCompactQueueDesc => 'ダウンロード一覧をコンパクトなカードで表示します。';
+
+  @override
+  String get lblHttpProxyHeader => 'HTTP / SOCKS プロキシ';
+
+  @override
+  String get lblEnableProxy => 'プロキシサーバーを有効化';
+
+  @override
+  String get lblProxyServer => 'プロキシホストとポート';
+
+  @override
+  String get lblProxyType => 'プロキシタイプ';
+
+  @override
+  String get lblUserAgentProfile => 'User-Agent プロファイル';
+
+  @override
+  String get lblPerSiteUserAgents => 'サイト別 User-Agent';
+
+  @override
+  String get lblTlsSslCertificates => 'TLS / SSL エラーを無視';
+
+  @override
+  String get lblTlsSslCertificatesDesc => '自己署名証明書や無効な HTTPS サイトへの接続を許可します。';
+
+  @override
+  String get lblExportBackup => 'バックアップをエクスポート';
+
+  @override
+  String get lblImportBackup => 'バックアップをインポート';
+
+  @override
+  String get lblBackupDatabaseDesc => '履歴、ブックマーク、フィルター、設定を1つのファイルにバックアップします。';
+
+  @override
+  String get lblRestoreDatabaseDesc => '作成したバックアップファイルからデータを復元します。';
+
+  @override
+  String get lblVaultTitle => 'プライベート金庫';
+
+  @override
+  String get lblVaultDesc => '暗証番号や指紋認証でプライベートなダウンロードファイルを保護します。';
+
+  @override
+  String get lblSetPinPasscode => '暗証番号を設定';
+
+  @override
+  String get lblChangePin => '暗証番号を変更';
+
+  @override
+  String get lblUnlockVault => '金庫のロックを解除';
+
+  @override
+  String get lblEnterPin => '4桁の暗証番号を入力';
+
+  @override
+  String get lblFfmpegStudioTitle => 'FFmpeg スタジオ';
+
+  @override
+  String get lblRemuxVideo => '動画の再変換 (Remux)';
+
+  @override
+  String get lblExtractAudio => '音声抽出 (MP3 / AAC)';
+
+  @override
+  String get lblTrimCutVideo => '動画のトリミング / カット';
+
+  @override
+  String get lblCompressVideo => '動画圧縮';
+
+  @override
+  String get lblConvertFormat => 'フォーマット変換';
+
+  @override
+  String get lblStartProcessing => '処理を開始';
+
+  @override
+  String get lblWatcherTitle => 'クリップボード監視';
+
+  @override
+  String get lblClipboardMonitor => 'クリップボードモニター';
+
+  @override
+  String get lblClipboardMonitorDesc => 'コピーしたメディアリンクを自動検知してダウンロードを提案します。';
+
+  @override
+  String get lblWebdavTitle => 'WebDAV バックアップ';
+
+  @override
+  String get lblServerUrl => 'サーバー URL';
+
+  @override
+  String get lblUsername => 'ユーザー名';
+
+  @override
+  String get lblPassword => 'パスワード';
+
+  @override
+  String get lblTestConnection => '接続テスト';
+
+  @override
+  String get lblSyncNow => '今すぐ同期';
+
+  @override
+  String get lblUserGuideTitle => 'ユーザーガイドとヘルプ';
+
+  @override
+  String get lblUserGuideDesc => 'メディアの検知方法、金庫の使い方、広告ブロックの設定方法を学びます。';
+
+  @override
+  String get lblFilterAll => 'すべて';
+
+  @override
+  String get lblFilterDownloading => 'ダウンロード中';
+
+  @override
+  String get lblFilterCompleted => '完了';
+
+  @override
+  String get lblFilterPaused => '一時停止中';
+
+  @override
+  String get lblFilterFailed => '失敗';
+
+  @override
+  String get lblPauseAll => 'すべて一時停止';
+
+  @override
+  String get lblResumeAll => 'すべて再開';
+
+  @override
+  String get lblClearCompleted => '完了分を消去';
+
+  @override
+  String get lblSearchQueue => 'ダウンロードを検索...';
 }
