@@ -621,6 +621,12 @@ class _CaptureSheetScaffoldState extends State<_CaptureSheetScaffold> {
                                       .toggleSelection(index);
                                 });
                               },
+                              onLongPress: () {
+                                setState(() {
+                                  widget.mediaCatchController
+                                      .selectRange(index);
+                                });
+                              },
                               onPreview: canPreview
                                   ? () {
                                       Navigator.of(context).pop();

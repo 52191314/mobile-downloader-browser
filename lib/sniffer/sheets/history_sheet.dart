@@ -128,6 +128,12 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
     });
   }
 
+  List<BrowserHistoryEntry> get _currentSectionItems {
+    return _section == LibrarySection.videos
+        ? _library.videoHistory
+        : _filteredItems;
+  }
+
   /// Called on long press / range-select gesture.
   void _handleLongPress(BrowserHistoryEntry item, int index) {
     if (!_selectionMode) {
@@ -152,9 +158,10 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
     final start = _rangeAnchorIndex! < index ? _rangeAnchorIndex! : index;
     final end = _rangeAnchorIndex! < index ? index : _rangeAnchorIndex!;
     setState(() {
+      final items = _currentSectionItems;
       for (var i = start; i <= end; i++) {
-        if (i >= 0 && i < _filteredItems.length) {
-          _selectedUrls.add(_filteredItems[i].url);
+        if (i >= 0 && i < items.length) {
+          _selectedUrls.add(items[i].url);
         }
       }
       // Clear anchor after range selection so the next long press sets a
@@ -201,10 +208,13 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
   }
 
   void _deleteAllSelected() {
-    // Selection only ever contains site rows — leave video history alone.
+    final kindToMatch = _section == LibrarySection.videos
+        ? LibraryEntryKind.video
+        : LibraryEntryKind.site;
+
     final remaining = _library.history
         .where((e) =>
-            e.kind != LibraryEntryKind.site || !_selectedUrls.contains(e.url))
+            e.kind != kindToMatch || !_selectedUrls.contains(e.url))
         .toList(growable: false);
     _exitSelectionMode();
     unawaited(
@@ -312,6 +322,10 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
         Expanded(
           child: VideoHistoryList(
             items: videos,
+            selectionMode: _selectionMode,
+            selectedUrls: _selectedUrls,
+            onToggleSelected: _toggleSelection,
+            onSelectRange: _handleLongPress,
             onOpen: (entry) async {
               Navigator.pop(context);
               final play = widget.onPlayVideo;
@@ -412,18 +426,20 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
             onPressed: () {
               setState(() {
                 _selectedUrls
-                    .addAll(_filteredItems.map((e) => e.url));
+                    .addAll(_currentSectionItems.map((e) => e.url));
               });
             },
           ),
           const Spacer(),
           // Open all selected
-          TextButton.icon(
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: Text('Open all (${_selectedUrls.length})'),
-            onPressed: _openAllSelected,
-          ),
-          const SizedBox(width: 4),
+          if (_section != LibrarySection.videos)
+            TextButton.icon(
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: Text('Open all (${_selectedUrls.length})'),
+              onPressed: _openAllSelected,
+            ),
+          if (_section != LibrarySection.videos)
+            const SizedBox(width: 4),
           // Delete selected
           if (_selectedUrls.isNotEmpty)
             IconButton(

@@ -15,6 +15,7 @@ class MediaCatchController {
   bool captureShowAllMedia = false;
   MediaType? activeFilter;
   final Set<int> selectedIndices = {};
+  int? _lastToggledIndex;
   final MediaCaptureAnalyzer captureAnalyzer =
       const MediaCaptureAnalyzer();
 
@@ -25,7 +26,10 @@ class MediaCatchController {
   // ---------------------------------------------------------------------------
 
   /// Clear the current selection.
-  void clearSelection() => selectedIndices.clear();
+  void clearSelection() {
+    selectedIndices.clear();
+    _lastToggledIndex = null;
+  }
 
   /// Toggle selection of a **displayed-group** [index].
   void toggleSelection(int index) {
@@ -34,6 +38,21 @@ class MediaCatchController {
     } else {
       selectedIndices.add(index);
     }
+    _lastToggledIndex = index;
+  }
+
+  /// Select a range of items from the last toggled index to [index].
+  void selectRange(int index) {
+    if (_lastToggledIndex == null) {
+      toggleSelection(index);
+      return;
+    }
+    final start = _lastToggledIndex! < index ? _lastToggledIndex! : index;
+    final end = _lastToggledIndex! < index ? index : _lastToggledIndex!;
+    for (var i = start; i <= end; i++) {
+      selectedIndices.add(i);
+    }
+    _lastToggledIndex = index;
   }
 
   /// Select all visible groups. Caller passes the count of displayed groups.

@@ -1,11 +1,21 @@
-enum DownloadState { scheduled, idle, downloading, paused, completed, failed, merging }
+enum DownloadState {
+  scheduled,
+  idle,
+  downloading,
+  paused,
+  completed,
+  failed,
+  merging,
+}
 
 /// How to handle a download whose URL or filename already exists in the queue.
 enum DuplicateChoice {
   /// Skip this item (do nothing).
   skip,
+
   /// Replace the existing task — delete it from queue, add the new one.
   replace,
+
   /// Create a new separate task alongside the existing one.
   createNew,
 }
@@ -24,54 +34,73 @@ enum DownloadFailure {
   // ── Network ──
   /// Device has no network connectivity.
   noInternet,
+
   /// Could not resolve hostname (DNS failure).
   dnsLookupFailed,
+
   /// Server refused the TCP connection.
   connectionRefused,
+
   /// TCP connect timed out before the server responded.
   connectionTimeout,
+
   /// Server accepted the connection but never sent a response.
   responseTimeout,
+
   /// TCP connection was reset mid-stream (ISP/CDN killed it).
   connectionReset,
 
   // ── HTTP ──
   /// 401 — credentials or authentication required.
   httpUnauthorized,
+
   /// 403 — access denied, WAF blocked, or IP rate-limited.
   httpForbidden,
+
   /// 404 — resource not found or removed.
   httpNotFound,
+
   /// 429 — too many requests / rate-limited.
   httpRateLimited,
+
   /// 500/502/503/504 — server-side problem.
   httpServerError,
+
   /// Any other non-2xx status code.
   httpUnexpectedStatus,
 
   // ── Content ──
   /// Signed URL or authentication token has expired.
   urlExpired,
+
   /// Malformed, unsupported, or invalid URL (blob:, empty, etc.).
   urlInvalid,
+
   /// Server returned an HTML error page instead of the media file.
   contentMismatch,
+
   /// SHA-256 hash verification failed after download.
   hashMismatch,
+
   /// Server returned 0 bytes — the response was empty.
   emptyResponse,
+
   /// ETag or Last-Modified changed mid-download — file was modified.
   resourceChanged,
 
   // ── HLS-specific ──
   /// HLS playlist contained no media segments.
   hlsPlaylistEmpty,
+
   /// All fetch tiers failed to retrieve the HLS playlist.
   hlsPlaylistFetchFailed,
+
   /// Could not fetch the HLS encryption key.
   hlsKeyFetchFailed,
+
   /// Token refresh exhausted — the stream URL has expired.
   hlsTokenExpired,
+
   /// Too many consecutive 403s — CDN blocked access.
   hlsCircuitBreaker,
 
@@ -81,30 +110,37 @@ enum DownloadFailure {
   // ── File I/O ──
   /// No space left on device.
   diskFull,
+
   /// Cannot write to the output directory (missing permissions).
   permissionDenied,
+
   /// Other filesystem error (corrupt FS, path too long, etc.).
   fileSystemError,
 
   // ── Download integrity ──
   /// Not all chunks/segments completed successfully.
   chunkIncomplete,
+
   /// A chunk file was truncated, missing, or corrupt.
   chunkCorrupt,
+
   /// Merge was interrupted on a previous run.
   mergeInterrupted,
+
   /// Force merge failed.
   mergeFailed,
 
   // ── Stall / Speed ──
   /// Speed stayed below the configured threshold for too long.
   speedStall,
+
   /// Download stalled near completion — partial file is salvageable.
   partialDownload,
 
   // ── Torrent ──
   /// Could not parse the torrent file or fetch torrent metadata.
   torrentMetadataFailed,
+
   /// The libtorrent engine reported an error.
   torrentEngineError,
 
@@ -128,6 +164,7 @@ enum DownloadPriority implements Comparable<DownloadPriority> {
 class DownloadChunk {
   final int index;
   final int start;
+
   /// The end byte of this chunk's range.  Mutable so dynamic chunk
   /// splitting (Phase 4) can shrink a slow chunk and redistribute its
   /// remaining range to a newly-created child chunk.
@@ -189,7 +226,12 @@ class DownloadTask implements Comparable<DownloadTask> {
   DownloadPriority priority;
   DownloadState state;
   int totalBytes;
+
+  /// True once the task has used its one size-estimation opportunity.
+  /// A positive size supplied by the sniffer counts as already estimated.
+  bool sizeProbeAttempted;
   int downloadedBytes;
+
   /// Discrete progress for HLS (segments) or multi-chunk HTTP.
   /// When [totalParts] > 0, [progress] uses completed/total parts instead of
   /// byte estimates — keeps Queue + notifications consistent.
@@ -198,9 +240,11 @@ class DownloadTask implements Comparable<DownloadTask> {
   double speed; // In bytes/second
   String? actualHash;
   String? errorMessage;
+
   /// Transient UI status (resuming, converting, token refresh, rate-limit
   /// waits). Not persisted — cleared on terminal state transitions.
   String? statusMessage;
+
   /// Structured failure reason — set alongside [errorMessage] when the
   /// download fails.  Enables programmatic error handling (e.g. different
   /// retry strategies per failure type) without string-matching.
@@ -212,23 +256,29 @@ class DownloadTask implements Comparable<DownloadTask> {
   String? lastModified;
   List<DownloadChunk> chunks;
   final DateTime createdAt;
+
   /// When set, the download will start at this time (Pro scheduled/night queue).
   DateTime? scheduledStartAt;
   Future<String?> Function({bool forceReload})? onTokenExpired;
+
   /// Optional callback that fetches a playlist/text URL through the WebView
   /// (sniffer-grade `fetchPlaylistBodyViaJavaScript`), bypassing Cloudflare
   /// WAF blocks that affect Dart's HTTP client.  Set when the task is created
   /// from a browser tab context (sniffed media or in-app-pasted URL).
-  Future<String?> Function(String url, {Map<String, String>? headers})? fetchViaWebView;
+  Future<String?> Function(String url, {Map<String, String>? headers})?
+  fetchViaWebView;
+
   /// Optional lookup for HLS playlist response bodies captured by
   /// browser_guard.js during page load. Returns the cached playlist text
   /// for a given URL, or null if not cached. Avoids any network request
   /// when the playlist body was already captured.
   String? Function(String url)? hlsPlaylistCache;
+
   /// Optional callback that fetches binary data (e.g. HLS .ts segments)
   /// through the WebView's JavaScript XHR with arraybuffer response type.
   /// Returns the raw bytes as List<int>, or null on failure.
   Future<List<int>?> Function(String url)? fetchBinaryViaWebView;
+
   /// Optional callback that returns cookies from the WebView's cookie jar
   /// for a given URL.  Used by [HlsDownloader] to add Cloudflare cf_clearance
   /// and session cookies to Dart HTTP requests when the WebView XHR fetch
@@ -254,6 +304,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.priority = DownloadPriority.medium,
     this.state = DownloadState.idle,
     this.totalBytes = -1,
+    bool? sizeProbeAttempted,
     this.downloadedBytes = 0,
     this.completedParts = 0,
     this.totalParts = 0,
@@ -273,7 +324,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     this.isBackupImport = false,
     this.exportUri,
     this.exportDirectoryUri,
-  }) : url = _cleanUrl(url),
+  }) : sizeProbeAttempted = sizeProbeAttempted ?? totalBytes > 0,
+       url = _cleanUrl(url),
        createdAt = createdAt ?? DateTime.now();
 
   static String _cleanUrl(String rawUrl) {
@@ -319,7 +371,8 @@ class DownloadTask implements Comparable<DownloadTask> {
   int get progressPercent => (progress * 100).round().clamp(0, 100);
 
   /// True when this task is scheduled to start at a future time.
-  bool get isScheduled => scheduledStartAt != null && scheduledStartAt!.isAfter(DateTime.now());
+  bool get isScheduled =>
+      scheduledStartAt != null && scheduledStartAt!.isAfter(DateTime.now());
 
   /// Copies runtime browser bridges from [donor]. These closures cannot be
   /// persisted to JSON and are lost after app restart / queue reload — they
@@ -361,6 +414,7 @@ class DownloadTask implements Comparable<DownloadTask> {
     'priority': priority.name,
     'state': state.name,
     'totalBytes': totalBytes,
+    'sizeProbeAttempted': sizeProbeAttempted,
     'downloadedBytes': downloadedBytes,
     'completedParts': completedParts,
     'totalParts': totalParts,
@@ -403,6 +457,8 @@ class DownloadTask implements Comparable<DownloadTask> {
     final priorityStr = optString('priority', 'medium');
     final stateStr = optString('state', 'paused');
     final totalBytes = optInt('totalBytes', 0);
+    final sizeProbeAttempted =
+        json['sizeProbeAttempted'] as bool? ?? totalBytes > 0;
     final downloadedBytes = optInt('downloadedBytes', 0);
     final completedParts = optInt('completedParts', 0);
     final totalParts = optInt('totalParts', 0);
@@ -447,6 +503,7 @@ class DownloadTask implements Comparable<DownloadTask> {
       priority: priority,
       state: state,
       totalBytes: totalBytes,
+      sizeProbeAttempted: sizeProbeAttempted,
       downloadedBytes: downloadedBytes,
       completedParts: completedParts,
       totalParts: totalParts,
@@ -528,4 +585,3 @@ abstract interface class BaseDownloader {
   Future<void> pause({DownloadState targetState});
   Future<void> dispose();
 }
-

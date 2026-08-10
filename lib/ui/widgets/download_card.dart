@@ -108,6 +108,7 @@ class DownloadCard extends StatelessWidget {
     this.selectionMode = false,
     this.selected = false,
     this.onToggleSelected,
+    this.onSelectRange,
     this.enableSwipe = true,
     this.dense = false,
     this.progressListenable,
@@ -144,6 +145,7 @@ class DownloadCard extends StatelessWidget {
   final bool selectionMode;
   final bool selected;
   final VoidCallback? onToggleSelected;
+  final VoidCallback? onSelectRange;
 
   final bool enableSwipe;
   final bool dense;
@@ -171,9 +173,24 @@ class DownloadCard extends StatelessWidget {
   }
 
   String _displayErrorMessage(String raw) {
-    return raw
-        .replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '')
-        .trim();
+    var msg = raw.replaceAll(RegExp(r'\[PARTIAL:[\d.]+\]\s*'), '').trim();
+    if (msg.contains('\n')) {
+      msg = msg.split('\n').first.trim();
+    }
+    final prefixes = [
+      'Exception: ',
+      'SocketException: ',
+      'HttpException: ',
+      'FileSystemException: ',
+      'FormatException: ',
+      'DioException [unknown]: ',
+    ];
+    for (final p in prefixes) {
+      if (msg.startsWith(p)) {
+        msg = msg.substring(p.length).trim();
+      }
+    }
+    return msg;
   }
 
   String _metadataLabel(DownloadTask t, AppLocalizations l10n) {
@@ -553,6 +570,7 @@ class DownloadCard extends StatelessWidget {
     if (selectionMode) {
       card = GestureDetector(
         onTap: onToggleSelected,
+        onLongPress: onSelectRange,
         child: card,
       );
     }
@@ -676,8 +694,10 @@ class DownloadCard extends StatelessWidget {
             liveTask.errorMessage!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6, right: 4),
-            child: SelectableText(
+            child: Text(
               _displayErrorMessage(liveTask.errorMessage!),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
                 height: 1.35,

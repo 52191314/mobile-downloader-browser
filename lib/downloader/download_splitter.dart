@@ -50,6 +50,7 @@ class DownloadSplitter implements BaseDownloader {
 
   Timer? _speedTimer;
   int _lastBytesTick = 0;
+
   /// Diagnostic: counts consecutive 500ms ticks where speed was 0 while
   /// the task is in downloading state.  Reset to 0 whenever data flows.
   int _zeroSpeedTickCount = 0;
@@ -70,8 +71,6 @@ class DownloadSplitter implements BaseDownloader {
 
   /// Map of chunk index to active native downloadId.
   final Map<int, String> _activeNativeChunkIds = {};
-
-
 
   /// Per-chunk bytesDownloaded at last split-check sample point.
   final Map<int, int> _lastChunkBytes = {};
@@ -145,6 +144,7 @@ class DownloadSplitter implements BaseDownloader {
         final loadedTask = DownloadTask.fromJson(json);
         if (loadedTask.url == task.url) {
           task.totalBytes = loadedTask.totalBytes;
+          task.sizeProbeAttempted = loadedTask.sizeProbeAttempted;
           task.etag = loadedTask.etag;
           task.lastModified = loadedTask.lastModified;
           task.chunks = loadedTask.chunks;
@@ -159,6 +159,14 @@ class DownloadSplitter implements BaseDownloader {
   }
 
   Future<void> _probeServerAndInit() async {
+    // Only probe once. A failed probe must not be repeated on automatic
+    // retries/resumes because repeated HEAD/range requests can trigger WAFs.
+    task.sizeProbeAttempted = true;
+    try {
+      await _saveMeta();
+    } catch (_) {
+      // Keep going; the in-memory guard still prevents another probe.
+    }
     int totalBytes = -1;
     bool supportsRanges = false;
     String? etag;
@@ -305,7 +313,8 @@ class DownloadSplitter implements BaseDownloader {
         currentLastModified =
             headResponse.headers['last-modified'] ??
             headResponse.headers['Last-Modified'];
-        final cl = headResponse.headers['content-length'] ??
+        final cl =
+            headResponse.headers['content-length'] ??
             headResponse.headers['Content-Length'];
         if (cl != null) {
           currentTotalBytes = int.tryParse(cl) ?? -1;
@@ -328,8 +337,7 @@ class DownloadSplitter implements BaseDownloader {
       }
       getRequest.headers['Range'] = 'bytes=0-0';
       try {
-        final getResponse =
-            await client.send(getRequest).timeout(probeTimeout);
+        final getResponse = await client.send(getRequest).timeout(probeTimeout);
         try {
           currentEtag =
               getResponse.headers['etag'] ?? getResponse.headers['ETag'];
@@ -337,7 +345,8 @@ class DownloadSplitter implements BaseDownloader {
               getResponse.headers['last-modified'] ??
               getResponse.headers['Last-Modified'];
           if (getResponse.statusCode == 206) {
-            final cr = getResponse.headers['content-range'] ??
+            final cr =
+                getResponse.headers['content-range'] ??
                 getResponse.headers['Content-Range'];
             if (cr != null) {
               final m = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(cr);
@@ -347,7 +356,8 @@ class DownloadSplitter implements BaseDownloader {
             }
           } else if (getResponse.statusCode >= 200 &&
               getResponse.statusCode < 300) {
-            final cl = getResponse.headers['content-length'] ??
+            final cl =
+                getResponse.headers['content-length'] ??
                 getResponse.headers['Content-Length'];
             if (cl != null) {
               currentTotalBytes = int.tryParse(cl) ?? -1;
@@ -380,8 +390,7 @@ class DownloadSplitter implements BaseDownloader {
     bool changed = false;
     String reason = '';
 
-    if (task.etag != null && currentEtag != null &&
-        task.etag != currentEtag) {
+    if (task.etag != null && currentEtag != null && task.etag != currentEtag) {
       changed = true;
       reason = 'etag changed from "${task.etag}" to "$currentEtag"';
     } else if (task.etag == null && currentEtag != null) {
@@ -393,7 +402,8 @@ class DownloadSplitter implements BaseDownloader {
       reason = 'server stopped providing etag';
     }
 
-    if (!changed && task.lastModified != null &&
+    if (!changed &&
+        task.lastModified != null &&
         currentLastModified != null &&
         task.lastModified != currentLastModified) {
       changed = true;
@@ -401,8 +411,11 @@ class DownloadSplitter implements BaseDownloader {
           'Last-Modified changed from "${task.lastModified}" to "$currentLastModified"';
     }
 
-    if (!changed && task.etag == null && task.lastModified == null &&
-        currentTotalBytes > 0 && task.totalBytes > 0 &&
+    if (!changed &&
+        task.etag == null &&
+        task.lastModified == null &&
+        currentTotalBytes > 0 &&
+        task.totalBytes > 0 &&
         currentTotalBytes != task.totalBytes) {
       // No etag or Last-Modified to compare — fall back to content-length
       // as a weak indicator of change.
@@ -416,8 +429,10 @@ class DownloadSplitter implements BaseDownloader {
         '[DownloadSplitter] Resource changed ($reason) for ${task.url}. '
         'Wiping partials and restarting fresh.',
       );
-      debugPrint('Resource changed ($reason). '
-        'Wiping partials for ${task.savePath.split("/").last}.');
+      debugPrint(
+        'Resource changed ($reason). '
+        'Wiping partials for ${task.savePath.split("/").last}.',
+      );
 
       // Delete tempDir to discard all partial chunks.
       final dir = Directory(task.tempDir);
@@ -467,9 +482,25 @@ class DownloadSplitter implements BaseDownloader {
         final metaLoaded = await _loadMeta();
 
         if (metaLoaded) {
-          await _revalidateOnResume();
+          // Do not re-estimate an existing task. The persisted/sniffed size is
+          // retained; the actual response remains authoritative at merge.
+          if (!task.sizeProbeAttempted) {
+            await _revalidateOnResume();
+          }
         } else {
-          await _probeServerAndInit();
+          if (task.sizeProbeAttempted) {
+            // The sniffer supplied a size. Initialize one conservative chunk
+            // without issuing a preflight request.
+            task.chunks = [
+              DownloadChunk(
+                index: 0,
+                start: 0,
+                end: task.totalBytes > 0 ? task.totalBytes - 1 : -1,
+              ),
+            ];
+          } else {
+            await _probeServerAndInit();
+          }
         }
 
         await _saveMeta();
@@ -477,7 +508,9 @@ class DownloadSplitter implements BaseDownloader {
         if (_isPaused) return;
 
         _lastBytesTick = task.downloadedBytes;
-        _speedTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) {
+        _speedTimer = Timer.periodic(const Duration(milliseconds: 250), (
+          timer,
+        ) {
           _updateProgress();
           final currentBytes = task.downloadedBytes;
           task.speed = (currentBytes - _lastBytesTick) * 4.0;
@@ -521,18 +554,23 @@ class DownloadSplitter implements BaseDownloader {
                 '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
                 '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
               );
-              debugPrint('Speed 0 for ${_zeroSpeedTickCount * 0.25}s '
+              debugPrint(
+                'Speed 0 for ${_zeroSpeedTickCount * 0.25}s '
                 'on ${task.savePath.split("/").last} '
                 '(downloaded ${task.downloadedBytes}/${task.totalBytes} bytes, '
-                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)');
-            } else if (_zeroSpeedTickCount > 4 && _zeroSpeedTickCount % 10 == 0) {
+                '${task.chunks.where((c) => c.isCompleted).length}/${task.chunks.length} chunks complete)',
+              );
+            } else if (_zeroSpeedTickCount > 4 &&
+                _zeroSpeedTickCount % 10 == 0) {
               // Every 2.5 s after the initial warning
               debugPrint(
                 '[DownloadSplitter] ⚠ Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
                 'on ${task.savePath.split("/").last}',
               );
-              debugPrint('Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
-                'on ${task.savePath.split("/").last}');
+              debugPrint(
+                'Speed still 0 after ${_zeroSpeedTickCount * 0.25}s '
+                'on ${task.savePath.split("/").last}',
+              );
             }
           } else {
             _zeroSpeedTickCount = 0;
@@ -718,8 +756,10 @@ class DownloadSplitter implements BaseDownloader {
             task.statusMessage = null;
             task.errorMessage = null;
           } else {
-            debugPrint('TS→MP4 remux failed for ${task.savePath.split("/").last}: '
-              '${remux.error ?? "unknown"}');
+            debugPrint(
+              'TS→MP4 remux failed for ${task.savePath.split("/").last}: '
+              '${remux.error ?? "unknown"}',
+            );
             task.statusMessage = null;
             task.errorMessage =
                 'Couldn\'t convert to .mp4 — keeping original .ts. '
@@ -882,7 +922,8 @@ class DownloadSplitter implements BaseDownloader {
     // overhead of the Dart HTTP path, and uses a native TLS fingerprint
     // that is less likely to trigger CDN blocks.
     if (!_isPaused && !_stallDetected) {
-      final downloadId = '${task.id}_${chunk.index}_${DateTime.now().millisecondsSinceEpoch}';
+      final downloadId =
+          '${task.id}_${chunk.index}_${DateTime.now().millisecondsSinceEpoch}';
       _activeNativeChunkIds[chunk.index] = downloadId;
       _activeNativeChunks.add(chunk.index);
 
@@ -897,17 +938,20 @@ class DownloadSplitter implements BaseDownloader {
       // partial bytes already on disk).
       final nativeCompleter = Completer<NativeChunkResult?>();
       NativeDownloadClient.downloadChunk(
-        url: task.url,
-        filePath: chunkPath,
-        rangeStart: rangeStart,
-        rangeEnd: rangeEnd,
-        headers: task.headers,
-        downloadId: downloadId,
-      ).then((r) {
-        if (!nativeCompleter.isCompleted) nativeCompleter.complete(r);
-      }).catchError((Object e, StackTrace s) {
-        if (!nativeCompleter.isCompleted) nativeCompleter.completeError(e, s);
-      });
+            url: task.url,
+            filePath: chunkPath,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            headers: task.headers,
+            downloadId: downloadId,
+          )
+          .then((r) {
+            if (!nativeCompleter.isCompleted) nativeCompleter.complete(r);
+          })
+          .catchError((Object e, StackTrace s) {
+            if (!nativeCompleter.isCompleted)
+              nativeCompleter.completeError(e, s);
+          });
 
       var lastNativeBytes = diskBytes;
       var nativeStallSeconds = 0.0;
@@ -915,7 +959,9 @@ class DownloadSplitter implements BaseDownloader {
       // timer so every speed tick also advances the progress bar (a 500ms
       // poll made native downloads look 2 fps and the 250ms speed calc
       // report 0 KB/s on every other tick).
-      final progressTimer = Timer.periodic(const Duration(milliseconds: 250), (_) async {
+      final progressTimer = Timer.periodic(const Duration(milliseconds: 250), (
+        _,
+      ) async {
         try {
           if (await chunkFile.exists()) {
             final actualBytes = await chunkFile.length();
@@ -964,7 +1010,7 @@ class DownloadSplitter implements BaseDownloader {
         // Native path returned no data or non-2xx — fall through to Dart.
         _logError(
           'Native download returned status ${nativeResult?.statusCode} '
-          'bytes=${nativeResult?.bytesWritten} for chunk ${chunk.index}',
+              'bytes=${nativeResult?.bytesWritten} for chunk ${chunk.index}',
           'Falling back to Dart HTTP',
         );
       } catch (e, s) {
@@ -1041,8 +1087,10 @@ class DownloadSplitter implements BaseDownloader {
           }
         }
         // Exponential: attempt 0→1×, 1→2×, 2→4×, capped at 2 min
-        final waitSecs = (backoff.inSeconds * (1 << attempt.clamp(0, 2)))
-            .clamp(5, 120);
+        final waitSecs = (backoff.inSeconds * (1 << attempt.clamp(0, 2))).clamp(
+          5,
+          120,
+        );
         // Add random jitter of 0-2s to avoid thundering-herd retries.
         final jitterSecs = math.Random().nextInt(3); // 0, 1, or 2
         final wait = Duration(seconds: waitSecs + jitterSecs);
@@ -1068,7 +1116,8 @@ class DownloadSplitter implements BaseDownloader {
         }
         retriedWithRefresh = true;
         try {
-          task.errorMessage = 'Access token expired. Aurora is fetching a fresh one.';
+          task.errorMessage =
+              'Access token expired. Aurora is fetching a fresh one.';
           _emitTask();
           final newUrl = await task.onTokenExpired!(forceReload: false);
           if (newUrl == null || newUrl == task.url) {
@@ -1115,7 +1164,8 @@ class DownloadSplitter implements BaseDownloader {
       // (which would cause the full body to be appended after existing
       // partial data, producing a doubled, corrupt chunk).
       if (diskBytes > 0 && !chunk.isOpenEnded) {
-        final contentRange = response.headers['content-range'] ??
+        final contentRange =
+            response.headers['content-range'] ??
             response.headers['Content-Range'];
         if (contentRange != null) {
           final match = RegExp(r'bytes (\d+)-').firstMatch(contentRange);
@@ -1135,9 +1185,11 @@ class DownloadSplitter implements BaseDownloader {
                   '${chunk.start} instead of $rangeStart for chunk '
                   '${chunk.index}; truncated file for fresh re-download.',
                 );
-                debugPrint('206 Content-Range started at ${chunk.start} '
+                debugPrint(
+                  '206 Content-Range started at ${chunk.start} '
                   'instead of $rangeStart for chunk ${chunk.index}; '
-                  'truncated file for fresh re-download.');
+                  'truncated file for fresh re-download.',
+                );
               } else {
                 // Server returned 206 from a completely different
                 // offset — cannot safely use this response.
@@ -1170,8 +1222,7 @@ class DownloadSplitter implements BaseDownloader {
           'Server returned status ${response.statusCode} instead of 200 OK',
         );
       }
-      if (chunk.isOpenEnded && diskBytes > 0 &&
-          response.statusCode == 200) {
+      if (chunk.isOpenEnded && diskBytes > 0 && response.statusCode == 200) {
         // Open-ended resume was answered with 200 OK — the server ignored
         // the Range header and is re-sending the full body. Truncate the
         // file and reset diskBytes so the full body is written fresh from
@@ -1183,8 +1234,10 @@ class DownloadSplitter implements BaseDownloader {
           '[DownloadSplitter] Open-ended resume returned 200 OK for '
           'chunk ${chunk.index}; truncated file for fresh re-download.',
         );
-        debugPrint('Open-ended resume returned 200 OK for '
-          'chunk ${chunk.index}; truncated file for fresh re-download.');
+        debugPrint(
+          'Open-ended resume returned 200 OK for '
+          'chunk ${chunk.index}; truncated file for fresh re-download.',
+        );
       }
     }
 
@@ -1195,8 +1248,13 @@ class DownloadSplitter implements BaseDownloader {
 
     try {
       await _streamAndWriteChunk(
-        chunk, chunkFile, response, rangeSupported, rangeStart,
-        rangeEnd, diskBytes,
+        chunk,
+        chunkFile,
+        response,
+        rangeSupported,
+        rangeStart,
+        rangeEnd,
+        diskBytes,
       );
     } finally {
       // Clean up any remaining subscription/sink from reconnect attempts
@@ -1311,8 +1369,10 @@ class DownloadSplitter implements BaseDownloader {
                 '[DownloadSplitter] Clamped oversized chunk ${chunk.index} '
                 'from $actualSize to ${chunk.size} bytes (excess $excess).',
               );
-              debugPrint('Clamped oversized chunk ${chunk.index} '
-                'from $actualSize to ${chunk.size} bytes (excess $excess).');
+              debugPrint(
+                'Clamped oversized chunk ${chunk.index} '
+                'from $actualSize to ${chunk.size} bytes (excess $excess).',
+              );
             }
           }
         }
@@ -1328,12 +1388,16 @@ class DownloadSplitter implements BaseDownloader {
         return; // ── Success ──
       } on TimeoutException {
         shouldRetry = true;
-        if (reconnectAttempt >= _maxReconnectsPerChunk || _isPaused || _stallDetected) {
+        if (reconnectAttempt >= _maxReconnectsPerChunk ||
+            _isPaused ||
+            _stallDetected) {
           rethrow;
         }
       } catch (_) {
         shouldRetry = true;
-        if (reconnectAttempt >= _maxReconnectsPerChunk || _isPaused || _stallDetected) {
+        if (reconnectAttempt >= _maxReconnectsPerChunk ||
+            _isPaused ||
+            _stallDetected) {
           rethrow;
         }
       } finally {
@@ -1403,7 +1467,8 @@ class DownloadSplitter implements BaseDownloader {
         throw StateError('Download paused/stalled during reconnect');
       }
 
-      if (currentResponse.statusCode == 206 || currentResponse.statusCode == 200) {
+      if (currentResponse.statusCode == 206 ||
+          currentResponse.statusCode == 200) {
         if (rangeSupported && currentResponse.statusCode != 206) {
           // Server ignored our Range — can't resume safely.
           throw Exception(
@@ -1704,5 +1769,3 @@ class DownloadSplitter implements BaseDownloader {
     _emitTask();
   }
 }
-
-

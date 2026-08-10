@@ -134,6 +134,7 @@ class _QueuePageState extends State<QueuePage> {
   bool _sectionsInitialized = false;
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
+  String? _lastToggledId;
 
   /// Task ids with a "Save partial file?" dialog currently on screen — used
   /// to dedup [DownloadQueue.onTaskUpdated] emissions so auto-retry
@@ -720,7 +721,7 @@ class _QueuePageState extends State<QueuePage> {
     if (_flatList) {
       return SliverList(
         delegate: SliverChildBuilderDelegate(
-          (context, index) => _buildTaskRow(context, filteredTasks[index]),
+          (context, index) => _buildTaskRow(context, filteredTasks[index], filteredTasks),
           childCount: filteredTasks.length,
         ),
       );
@@ -760,7 +761,7 @@ class _QueuePageState extends State<QueuePage> {
 
       if (!isCollapsed) {
         for (final task in section.tasks) {
-          items.add(_buildTaskRow(context, task));
+          items.add(_buildTaskRow(context, task, filteredTasks));
         }
       }
     }
@@ -1449,10 +1450,10 @@ class _QueuePageState extends State<QueuePage> {
   // ---------------------------------------------------------------------------
 
   void _enterSelectionMode() =>
-      setState(() { _selectionMode = true; _selectedIds.clear(); });
+      setState(() { _selectionMode = true; _selectedIds.clear(); _lastToggledId = null; });
 
   void _exitSelectionMode() =>
-      setState(() { _selectionMode = false; _selectedIds.clear(); });
+      setState(() { _selectionMode = false; _selectedIds.clear(); _lastToggledId = null; });
 
   /// P12 duplicateFinder: scans all tasks (from [widget.queue]) for duplicate
   /// URLs and similar filenames.  Gated behind Pro — free users see an upsell.
@@ -1839,7 +1840,7 @@ class _QueuePageState extends State<QueuePage> {
   // Task row (list view) — delegates to DownloadCard
   // ---------------------------------------------------------------------------
 
-  Widget _buildTaskRow(BuildContext context, DownloadTask task) {
+  Widget _buildTaskRow(BuildContext context, DownloadTask task, List<DownloadTask> filteredTasks) {
     final isMerging = task.state == DownloadState.merging;
 
     final onPauseClosure = widget.onPauseTask?.call(task);
@@ -1885,6 +1886,24 @@ class _QueuePageState extends State<QueuePage> {
         } else {
           _selectedIds.add(task.id);
         }
+        _lastToggledId = task.id;
+      }),
+      onSelectRange: () => setState(() {
+        if (_lastToggledId == null) {
+          _selectedIds.add(task.id);
+          _lastToggledId = task.id;
+          return;
+        }
+        final startIndex = filteredTasks.indexWhere((t) => t.id == _lastToggledId);
+        final endIndex = filteredTasks.indexWhere((t) => t.id == task.id);
+        if (startIndex != -1 && endIndex != -1) {
+          final minIdx = startIndex < endIndex ? startIndex : endIndex;
+          final maxIdx = startIndex > endIndex ? startIndex : endIndex;
+          for (var i = minIdx; i <= maxIdx; i++) {
+            _selectedIds.add(filteredTasks[i].id);
+          }
+        }
+        _lastToggledId = task.id;
       }),
     );
   }

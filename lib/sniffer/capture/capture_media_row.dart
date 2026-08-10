@@ -20,6 +20,7 @@ class CaptureMediaRow extends StatelessWidget {
     required this.group,
     required this.selected,
     required this.onSelectedChanged,
+    this.onLongPress,
     required this.onPreview,
     required this.onInfo,
     this.displayMode = SniffedMediaDisplayMode.both,
@@ -30,6 +31,7 @@ class CaptureMediaRow extends StatelessWidget {
   final CaptureGroup group;
   final bool selected;
   final ValueChanged<bool> onSelectedChanged;
+  final VoidCallback? onLongPress;
   final VoidCallback? onPreview;
   final VoidCallback onInfo;
 
@@ -111,6 +113,7 @@ class CaptureMediaRow extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onInfo,
+              onLongPress: onLongPress,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(2, 8, 4, 8),
                 child: Row(

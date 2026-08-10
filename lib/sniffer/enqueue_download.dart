@@ -81,9 +81,7 @@ String resolveSuggestedDownloadName({
   }
   final parsed = Uri.tryParse(url);
   final nameFromUrl = parsed != null
-      ? parsed.path
-            .split('/')
-            .lastWhere((s) => s.isNotEmpty, orElse: () => '')
+      ? parsed.path.split('/').lastWhere((s) => s.isNotEmpty, orElse: () => '')
       : url.split('/').last;
   return buildFromMediaName(
     media?.name ?? (nameFromUrl.isNotEmpty ? nameFromUrl : 'download'),
@@ -134,9 +132,7 @@ Future<void> enqueueDirectDownload({
   if (suggestedName.isEmpty) return;
 
   final cookieHeaders = await getCookiesForUrl(url);
-  final headerMap = <String, String>{
-    'User-Agent': downloadUserAgent(url, tab),
-  };
+  final headerMap = <String, String>{'User-Agent': downloadUserAgent(url, tab)};
   mergeHeaders(headerMap, tab.controller.currentHeaders);
   if (media != null) {
     mergeHeaders(headerMap, sanitizeSniffedMediaHeaders(media.headers));
@@ -185,7 +181,8 @@ Future<void> enqueueDirectDownload({
   // Match on source page host when available so download rules follow the
   // browsing site, not a CDN host for the media URL.
   final profiles = await loadProfiles();
-  final profileMatchUrl = firstNonEmpty([
+  final profileMatchUrl =
+      firstNonEmpty([
         media?.sourcePageUrl,
         currentUrl,
         tab.addressController.text,
@@ -209,7 +206,8 @@ Future<void> enqueueDirectDownload({
       mediaType: mediaTypeForRule,
       pageHost: pageHost,
     );
-    if (matchedRule?.renameTemplate != null && matchedRule!.renameTemplate!.isNotEmpty) {
+    if (matchedRule?.renameTemplate != null &&
+        matchedRule!.renameTemplate!.isNotEmpty) {
       suggestedName = ruleEngine.applyRename(matchedRule, suggestedName);
     }
     final ruleDest = ruleEngine.getDestinationFolder(matchedRule);
@@ -223,17 +221,17 @@ Future<void> enqueueDirectDownload({
     url: url,
     sourcePageUrl: media?.sourcePageUrl ?? currentUrl,
     savePath: '$saveDir${Platform.pathSeparator}$suggestedName',
-    tempDir:
-        '${baseTemp ?? '.'}${Platform.pathSeparator}temp_$taskId',
+    tempDir: '${baseTemp ?? '.'}${Platform.pathSeparator}temp_$taskId',
     priority: DownloadPriority.medium,
     contentType: resolvedContentType ?? media?.contentType,
     headers: headerMap,
     totalBytes: media?.contentLengthBytes ?? -1,
+    sizeProbeAttempted: (media?.contentLengthBytes ?? -1) > 0,
   );
   task.fetchViaWebView = (fetchUrl, {Map<String, String>? headers}) =>
       tab.controller.fetchPlaylistBodyViaJavaScript(fetchUrl);
-  task.hlsPlaylistCache =
-      (cacheUrl) => lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
+  task.hlsPlaylistCache = (cacheUrl) =>
+      lookupHlsPlaylistCache(tab.hlsPlaylistCache, cacheUrl);
   task.fetchBinaryViaWebView = (binaryUrl) =>
       tab.controller.fetchBinaryViaJavaScript(binaryUrl);
   task.cookieProvider = (cookieUrl) =>
@@ -249,7 +247,8 @@ Future<void> enqueueDirectDownload({
         suggestedName,
         media?.sourcePageUrl ?? currentUrl,
       )) {
-    if (silent && batchDuplicatePolicy == null) return; // batch: skip already-queued quietly
+    if (silent && batchDuplicatePolicy == null)
+      return; // batch: skip already-queued quietly
     if (!context.mounted) return;
 
     late final DuplicateChoice choice;
@@ -285,7 +284,8 @@ Future<void> enqueueDirectDownload({
   // Apply rule time window constraint
   if (matchedRule != null) {
     final now = DateTime.now();
-    if (matchedRule.timeWindowStartHour != null && matchedRule.timeWindowEndHour != null) {
+    if (matchedRule.timeWindowStartHour != null &&
+        matchedRule.timeWindowEndHour != null) {
       final currentHour = now.hour;
       final startH = matchedRule.timeWindowStartHour!;
       final endH = matchedRule.timeWindowEndHour!;

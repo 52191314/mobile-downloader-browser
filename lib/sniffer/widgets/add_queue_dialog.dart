@@ -34,7 +34,7 @@ class AddQueueDialogContent extends StatefulWidget {
   final DownloadQueue downloadQueue;
   final Future<String?> Function({bool forceReload})? onTokenExpired;
   final Future<List<SniffedMedia>> Function(String url)?
-      fetchMasterPlaylistVariants;
+  fetchMasterPlaylistVariants;
 
   const AddQueueDialogContent({
     super.key,
@@ -58,8 +58,10 @@ class AddQueueDialogContent extends StatefulWidget {
 class AddQueueDialogContentState extends State<AddQueueDialogContent> {
   late TextEditingController filenameController;
   DownloadPriority selectedPriority = DownloadPriority.medium;
+
   /// True while master-playlist variants are loading for the quality dropdown.
   bool isResolvingVariants = false;
+
   /// True while the Download button handler is running (cookies + enqueue).
   bool isSubmitting = false;
   String selectedFolder = '';
@@ -95,7 +97,6 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
     final category = FileClassifier.classify(widget.suggestedName);
     selectedFolder = FileClassifier.categoryLabel(category);
   }
-
 
   @override
   void dispose() {
@@ -139,8 +140,9 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
       if (!mounted || fetched.isEmpty) return;
 
       final existingUrls = _variants.map((v) => v.url).toSet();
-      final newVariants =
-          fetched.where((v) => !existingUrls.contains(v.url)).toList();
+      final newVariants = fetched
+          .where((v) => !existingUrls.contains(v.url))
+          .toList();
       if (newVariants.isEmpty) return;
 
       setState(() {
@@ -163,7 +165,9 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
           final preferredHeight = selectedMedia.height;
           SniffedMedia? match;
           if (preferredHeight != null) {
-            match = _variants.where((v) => v.height == preferredHeight).firstOrNull;
+            match = _variants
+                .where((v) => v.height == preferredHeight)
+                .firstOrNull;
           }
           // Also try matching by bandwidth if height is not available.
           match ??= _variants
@@ -201,7 +205,8 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
 
     if (newName != null && mounted) {
       var finalName = newName;
-      if (ext.isNotEmpty && !newName.toLowerCase().endsWith(ext.toLowerCase())) {
+      if (ext.isNotEmpty &&
+          !newName.toLowerCase().endsWith(ext.toLowerCase())) {
         finalName = '$newName$ext';
       }
       if (FilenameService.utf8ByteLength(finalName) >
@@ -262,7 +267,8 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
       final mediaUrl = selectedMedia.url;
       if (RestrictedMediaPolicy.isBlocked(
         mediaUrl: mediaUrl,
-        sourcePageUrl: widget.currentUrl ??
+        sourcePageUrl:
+            widget.currentUrl ??
             widget.tab.currentUrl ??
             selectedMedia.sourcePageUrl,
       )) {
@@ -308,6 +314,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
         contentType: selectedMedia.contentType,
         headers: taskHeaders,
         totalBytes: selectedMedia.contentLengthBytes ?? -1,
+        sizeProbeAttempted: (selectedMedia.contentLengthBytes ?? -1) > 0,
       );
       // Wire up the token-refresh hook so the HLS downloader can recover
       // from 403 by re-sniffing the page URL.
@@ -322,21 +329,24 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
       // browser-captured playlist bodies directly.
       task.hlsPlaylistCache = (url) =>
           lookupHlsPlaylistCache(widget.tab.hlsPlaylistCache, url);
-      task.fetchBinaryViaWebView =
-          (url) => widget.tab.controller.fetchBinaryViaJavaScript(url);
-      task.cookieProvider =
-          (url) => widget.tab.controller.getCookiesForDomain(url: url);
+      task.fetchBinaryViaWebView = (url) =>
+          widget.tab.controller.fetchBinaryViaJavaScript(url);
+      task.cookieProvider = (url) =>
+          widget.tab.controller.getCookiesForDomain(url: url);
 
       bool force = false;
-      final hasDuplicate = widget.downloadQueue.urlExists(mediaUrl) ||
+      final hasDuplicate =
+          widget.downloadQueue.urlExists(mediaUrl) ||
           widget.downloadQueue.samePageFilenameExists(
             filename,
             selectedMedia.sourcePageUrl,
           );
       if (hasDuplicate) {
         if (!mounted) return;
-        final result =
-            await showDuplicateDownloadDialog(context: context, filename: filename);
+        final result = await showDuplicateDownloadDialog(
+          context: context,
+          filename: filename,
+        );
         if (result.choice == DuplicateChoice.skip) {
           if (mounted) {
             setState(() => isSubmitting = false);
@@ -344,7 +354,8 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
           return;
         }
         if (result.choice == DuplicateChoice.replace) {
-          final existingId = widget.downloadQueue.resniffPendingTaskId ??
+          final existingId =
+              widget.downloadQueue.resniffPendingTaskId ??
               widget.downloadQueue.getTaskByUrl(mediaUrl)?.id ??
               widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
           if (existingId != null) {
@@ -358,7 +369,9 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
         // scheduleTask owns persistence + scheduled state; ignore force —
         // a new id always creates a distinct scheduled entry.
         widget.downloadQueue.scheduleTask(task, startAt);
-        debugPrint('Media scheduled: "$filename" for $startAt (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}');
+        debugPrint(
+          'Media scheduled: "$filename" for $startAt (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
+        );
         if (!mounted) return;
         navigator.pop(true);
         final hh = startAt.hour.toString().padLeft(2, '0');
@@ -369,7 +382,9 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
         );
       } else {
         widget.downloadQueue.addTask(task, force: force);
-        debugPrint('Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}');
+        debugPrint(
+          'Media added to queue: "$filename" (${task.contentType ?? "unknown type"}) from ${task.sourcePageUrl ?? "unknown"}',
+        );
         if (!mounted) return;
         navigator.pop(true);
         AuroraSnackbar.show(context, 'Added "$filename" to queue.');
@@ -393,170 +408,166 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
     return PopScope(
       canPop: !isSubmitting,
       child: AlertDialog(
-      title: const Text('Add to Download Queue'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'From: ${selectedMedia.sourcePageUrl ?? widget.tab.addressController.text}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: context.ac.textSecondary,
+        title: const Text('Add to Download Queue'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'From: ${selectedMedia.sourcePageUrl ?? widget.tab.addressController.text}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Link: ${selectedMedia.url}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: context.ac.textSecondary,
+              const SizedBox(height: 4),
+              Text(
+                'Link: ${selectedMedia.url}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
               ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Filename',
-                        style: TextStyle(
-                          color: context.ac.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        filenameController.text,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: context.ac.textPrimary,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (FilenameService.utf8ByteLength(widget.suggestedName) >
-                              FilenameService.defaultMaxFileNameBytes ||
-                          FilenameService.utf8ByteLength(
-                                filenameController.text,
-                              ) >=
-                              FilenameService.defaultMaxFileNameBytes) ...[
-                        const SizedBox(height: 6),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          'Filename is long and was auto-truncated to fit Android\'s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
-                          style: const TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                          'Filename',
+                          style: TextStyle(
+                            color: context.ac.textSecondary,
+                            fontSize: 12,
                           ),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          filenameController.text,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: context.ac.textPrimary,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (FilenameService.utf8ByteLength(
+                                  widget.suggestedName,
+                                ) >
+                                FilenameService.defaultMaxFileNameBytes ||
+                            FilenameService.utf8ByteLength(
+                                  filenameController.text,
+                                ) >=
+                                FilenameService.defaultMaxFileNameBytes) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Filename is long and was auto-truncated to fit Android\'s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
+                            style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  key: const Key('dialog_rename_pencil_button'),
-                  icon: Icon(Icons.edit, color: context.ac.accentFrost),
-                  onPressed: _busy ? null : _showRenameDialog,
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            FolderSelector(
-              baseDir: widget.baseDir,
-              onChanged: (val) {
-                setState(() {
-                  selectedFolder = val ?? '';
-                });
-              },
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<DownloadPriority>(
-              key: const Key('dialog_priority_dropdown'),
-              value: selectedPriority,
-              decoration: const InputDecoration(
-                labelText: 'Priority',
-                border: OutlineInputBorder(),
-              ),
-              items: DownloadPriority.values.map((priority) {
-                return DropdownMenuItem<DownloadPriority>(
-                  value: priority,
-                  child: Text(priority.name.toUpperCase()),
-                );
-              }).toList(),
-              onChanged: _busy
-                  ? null
-                  : (val) {
-                      if (val != null) {
-                        setState(() => selectedPriority = val);
-                      }
-                    },
-            ),
-            // Only show spinner while loading quality options — not on Download.
-            // Pre-download m3u8 "refresh" was removed: the selected quality URL
-            // is already the right media playlist; mid-download onTokenExpired
-            // handles real 403 recovery.
-            if (isResolvingVariants) ...[
-              const SizedBox(height: 16),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 12),
-                  Text(
-                    'Loading quality options...',
-                    style: TextStyle(fontSize: 13),
+                  IconButton(
+                    key: const Key('dialog_rename_pencil_button'),
+                    icon: Icon(Icons.edit, color: context.ac.accentFrost),
+                    onPressed: _busy ? null : _showRenameDialog,
                   ),
                 ],
               ),
+              const SizedBox(height: 14),
+              FolderSelector(
+                baseDir: widget.baseDir,
+                onChanged: (val) {
+                  setState(() {
+                    selectedFolder = val ?? '';
+                  });
+                },
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<DownloadPriority>(
+                key: const Key('dialog_priority_dropdown'),
+                value: selectedPriority,
+                decoration: const InputDecoration(
+                  labelText: 'Priority',
+                  border: OutlineInputBorder(),
+                ),
+                items: DownloadPriority.values.map((priority) {
+                  return DropdownMenuItem<DownloadPriority>(
+                    value: priority,
+                    child: Text(priority.name.toUpperCase()),
+                  );
+                }).toList(),
+                onChanged: _busy
+                    ? null
+                    : (val) {
+                        if (val != null) {
+                          setState(() => selectedPriority = val);
+                        }
+                      },
+              ),
+              // Only show spinner while loading quality options — not on Download.
+              // Pre-download m3u8 "refresh" was removed: the selected quality URL
+              // is already the right media playlist; mid-download onTokenExpired
+              // handles real 403 recovery.
+              if (isResolvingVariants) ...[
+                const SizedBox(height: 16),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      'Loading quality options...',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-      actions: [
-        TextButton(
-          key: const Key('dialog_cancel_button'),
-          onPressed: isSubmitting
-              ? null
-              : () {
-                  Navigator.of(context).pop(false);
-                },
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          key: const Key('dialog_download_later_button'),
-          onPressed: isSubmitting
-              ? null
-              : () async {
-                  final startAt = await _pickScheduleStartAt();
-                  if (startAt == null || !mounted) return;
-                  await _submit(startAt: startAt);
-                },
-          child: const Text('Download later'),
-        ),
-        ElevatedButton(
-          key: const Key('dialog_add_button'),
-          onPressed: isSubmitting ? null : () => _submit(),
-          child: isSubmitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Download'),
-        ),
-      ],
+        actions: [
+          TextButton(
+            key: const Key('dialog_cancel_button'),
+            onPressed: isSubmitting
+                ? null
+                : () {
+                    Navigator.of(context).pop(false);
+                  },
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const Key('dialog_download_later_button'),
+            onPressed: isSubmitting
+                ? null
+                : () async {
+                    final startAt = await _pickScheduleStartAt();
+                    if (startAt == null || !mounted) return;
+                    await _submit(startAt: startAt);
+                  },
+            child: const Text('Download later'),
+          ),
+          ElevatedButton(
+            key: const Key('dialog_add_button'),
+            onPressed: isSubmitting ? null : () => _submit(),
+            child: isSubmitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Download'),
+          ),
+        ],
       ),
     );
   }

@@ -171,12 +171,20 @@ class VideoFavoritesList extends StatelessWidget {
     required this.onOpen,
     required this.onRemove,
     this.onOpenSourcePage,
+    this.selectionMode = false,
+    this.selectedUrls = const {},
+    this.onToggleSelected,
+    this.onSelectRange,
   });
 
   final List<BrowserFavorite> items;
   final ValueChanged<BrowserFavorite> onOpen;
   final ValueChanged<BrowserFavorite> onRemove;
   final ValueChanged<BrowserFavorite>? onOpenSourcePage;
+  final bool selectionMode;
+  final Set<String> selectedUrls;
+  final ValueChanged<BrowserFavorite>? onToggleSelected;
+  final void Function(BrowserFavorite favorite, int index)? onSelectRange;
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +199,11 @@ class VideoFavoritesList extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final fav = items[i];
+        final isSelected = selectedUrls.contains(fav.url);
+        final theme = Theme.of(context);
         return ListTile(
+          selected: isSelected,
+          selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.15),
           leading: _VideoThumb(url: fav.thumbnailUrl),
           title: Text(fav.title, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
@@ -200,23 +212,30 @@ class VideoFavoritesList extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11),
           ),
-          onTap: () => onOpen(fav),
-          trailing: PopupMenuButton<String>(
-            onSelected: (a) {
-              if (a == 'remove') onRemove(fav);
-              if (a == 'page') onOpenSourcePage?.call(fav);
-            },
-            itemBuilder: (_) => [
-              // A stored CDN link expires long before the page does, so this
-              // is usually the one that still works.
-              if (fav.sourcePageUrl != null && onOpenSourcePage != null)
-                const PopupMenuItem(value: 'page', child: Text('Open page')),
-              const PopupMenuItem(
-                value: 'remove',
-                child: Text('Remove'),
-              ),
-            ],
-          ),
+          onTap: () {
+            if (selectionMode) {
+              onToggleSelected?.call(fav);
+            } else {
+              onOpen(fav);
+            }
+          },
+          onLongPress: () => onSelectRange?.call(fav, i),
+          trailing: selectionMode
+              ? null
+              : PopupMenuButton<String>(
+                  onSelected: (a) {
+                    if (a == 'remove') onRemove(fav);
+                    if (a == 'page') onOpenSourcePage?.call(fav);
+                  },
+                  itemBuilder: (_) => [
+                    if (fav.sourcePageUrl != null && onOpenSourcePage != null)
+                      const PopupMenuItem(value: 'page', child: Text('Open page')),
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove'),
+                    ),
+                  ],
+                ),
         );
       },
     );
@@ -230,11 +249,19 @@ class VideoHistoryList extends StatelessWidget {
     required this.items,
     required this.onOpen,
     this.onOpenSourcePage,
+    this.selectionMode = false,
+    this.selectedUrls = const {},
+    this.onToggleSelected,
+    this.onSelectRange,
   });
 
   final List<BrowserHistoryEntry> items;
   final ValueChanged<BrowserHistoryEntry> onOpen;
   final ValueChanged<BrowserHistoryEntry>? onOpenSourcePage;
+  final bool selectionMode;
+  final Set<String> selectedUrls;
+  final ValueChanged<BrowserHistoryEntry>? onToggleSelected;
+  final void Function(BrowserHistoryEntry entry, int index)? onSelectRange;
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +276,11 @@ class VideoHistoryList extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final entry = items[i];
+        final isSelected = selectedUrls.contains(entry.url);
+        final theme = Theme.of(context);
         return ListTile(
+          selected: isSelected,
+          selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.15),
           leading: _VideoThumb(url: entry.thumbnailUrl),
           title:
               Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -257,14 +288,23 @@ class VideoHistoryList extends StatelessWidget {
             _relative(entry.visitedAt),
             style: const TextStyle(fontSize: 11),
           ),
-          onTap: () => onOpen(entry),
-          trailing: entry.sourcePageUrl != null && onOpenSourcePage != null
-              ? IconButton(
-                  tooltip: 'Open page',
-                  icon: const Icon(Icons.open_in_new, size: 18),
-                  onPressed: () => onOpenSourcePage!(entry),
-                )
-              : null,
+          onTap: () {
+            if (selectionMode) {
+              onToggleSelected?.call(entry);
+            } else {
+              onOpen(entry);
+            }
+          },
+          onLongPress: () => onSelectRange?.call(entry, i),
+          trailing: selectionMode
+              ? null
+              : (entry.sourcePageUrl != null && onOpenSourcePage != null
+                  ? IconButton(
+                      tooltip: 'Open page',
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      onPressed: () => onOpenSourcePage!(entry),
+                    )
+                  : null),
         );
       },
     );

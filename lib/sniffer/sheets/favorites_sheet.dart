@@ -86,6 +86,70 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
   late List<BookmarkFolder> _folders;
   LibrarySection _section = LibrarySection.sites;
 
+  bool _selectionMode = false;
+  final Set<String> _selectedUrls = {};
+  int? _rangeAnchorIndex;
+
+  void _enterSelectionMode(BrowserFavorite item, int index) {
+    setState(() {
+      _selectionMode = true;
+      _selectedUrls.add(item.url);
+      _rangeAnchorIndex = index;
+    });
+  }
+
+  void _toggleSelection(BrowserFavorite item) {
+    setState(() {
+      if (_selectedUrls.contains(item.url)) {
+        _selectedUrls.remove(item.url);
+        if (_selectedUrls.isEmpty) {
+          _selectionMode = false;
+          _rangeAnchorIndex = null;
+        }
+      } else {
+        _selectedUrls.add(item.url);
+      }
+    });
+  }
+
+  void _handleLongPress(BrowserFavorite item, int index) {
+    if (!_selectionMode) {
+      _enterSelectionMode(item, index);
+      return;
+    }
+    if (_rangeAnchorIndex == null) {
+      setState(() {
+        _rangeAnchorIndex = index;
+        if (!_selectedUrls.contains(item.url)) _selectedUrls.add(item.url);
+      });
+      return;
+    }
+    final start = _rangeAnchorIndex! < index ? _rangeAnchorIndex! : index;
+    final end = _rangeAnchorIndex! < index ? index : _rangeAnchorIndex!;
+    setState(() {
+      final items = _currentLibrary.videoFavorites;
+      for (var i = start; i <= end; i++) {
+        if (i >= 0 && i < items.length) {
+          _selectedUrls.add(items[i].url);
+        }
+      }
+      _rangeAnchorIndex = null;
+    });
+  }
+
+  void _deleteAllSelected() {
+    final remaining = _currentLibrary.favorites
+        .where((e) => e.kind != LibraryEntryKind.video || !_selectedUrls.contains(e.url))
+        .toList(growable: false);
+    setState(() {
+      _selectionMode = false;
+      _selectedUrls.clear();
+      _rangeAnchorIndex = null;
+    });
+    _onLibrarySaved(_currentLibrary.copyWith(favorites: remaining));
+  }
+
+
   /// Controllers waiting for a safe post-frame dispose (after TabBar has
   /// detached). Prevents `_dependents.isEmpty` crashes when recreating
   /// the controller after "New folder".
@@ -275,7 +339,12 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
           LibrarySectionBar(
             current: _section,
             videoCount: _currentLibrary.videoFavorites.length,
-            onChanged: (s) => setState(() => _section = s),
+            onChanged: (s) => setState(() {
+              _section = s;
+              _selectionMode = false;
+              _selectedUrls.clear();
+              _rangeAnchorIndex = null;
+            }),
           ),
           if (_section == LibrarySection.videos)
             _buildVideosSection(context)
@@ -288,6 +357,38 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
 
   /// Saved videos. Flat, and gated by the free inventory cap — folders are a
   /// page-organising idea and every saved video would land in "Unsorted".
+
+  Widget _buildSelectionBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+        border: const Border(
+          bottom: BorderSide(color: Colors.black12),
+        ),
+      ),
+      child: Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.select_all, size: 18),
+            label: const Text('Select all'),
+            onPressed: () {
+              setState(() {
+                _selectedUrls.addAll(_currentLibrary.videoFavorites.map((e) => e.url));
+              });
+            },
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Delete selected',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _deleteAllSelected,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildVideosSection(BuildContext context) {
     final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
     final limit = VideoLibrary.freeLimitFor(tier);
@@ -306,9 +407,15 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
               tier: tier,
               message: 'Pro saves unlimited videos',
             ),
+          if (_selectionMode && _selectedUrls.isNotEmpty)
+            _buildSelectionBar(),
           Expanded(
             child: VideoFavoritesList(
               items: videos,
+              selectionMode: _selectionMode,
+              selectedUrls: _selectedUrls,
+              onToggleSelected: _toggleSelection,
+              onSelectRange: _handleLongPress,
               onOpen: (fav) async {
                 Navigator.of(context).pop();
                 final play = widget.onPlayVideo;

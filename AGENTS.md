@@ -141,6 +141,7 @@ Practical guidance:
   own comment documents why: parallel workers raise peak memory on this 7.8 GB host
   (documented OOM history) and the build cache can serve stale feature-module metadata
   when switching between play/github channels. This is a deliberate, known-good config.
+- **CONCURRENT BUILDS WARNING:** Do NOT run builds in this repository simultaneously with the `aurora_downloader_oss` repository or any other heavy task. The host machine has limited RAM (7.8 GB) and concurrent builds will cause OOM crashes. Wait for other build tasks to finish before starting one here.
 - Gradle daemons are killed under memory pressure (`gradlew --status` shows `STOPPED`); a cold
   daemon adds ~30–60 s. If the build suddenly feels slower than usual, check daemon status first.
 
