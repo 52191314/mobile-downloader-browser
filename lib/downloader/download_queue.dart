@@ -68,6 +68,7 @@ class DownloadQueue {
   bool wifiOnly = false;
   bool autoClassifyEnabled = true;
   bool remuxTsToMp4 = true;
+
   /// Optional overrides: file extension → folder name (e.g. `.mp4` → `Movies`).
   Map<String, String> autoClassifyMappings = const {};
   bool autoRetry = true;
@@ -167,6 +168,7 @@ class DownloadQueue {
   void _disposeTaskNotifier(String taskId) {
     _taskNotifiers.remove(taskId)?.dispose();
   }
+
   final StreamController<String> _warningController =
       StreamController<String>.broadcast();
   Stream<String> get onWarning => _warningController.stream;
@@ -185,7 +187,7 @@ class DownloadQueue {
   /// Previously only the URL was passed, so "Update link" after restart
   /// left tasks without WAF-bypass bridges and they kept failing.
   void Function(String existingTaskId, DownloadTask newTask)?
-      onResniffDuplicate;
+  onResniffDuplicate;
 
   /// Optional host-provided binder that re-attaches runtime browser
   /// bridges (`fetchViaWebView`, `cookieProvider`, `onTokenExpired`, …)
@@ -210,7 +212,13 @@ class DownloadQueue {
     _client = httpClient ?? _createDefaultClient();
   }
 
-  static http.Client _createDefaultClient({ProxyType proxyType = ProxyType.none, String proxyHost = '', int proxyPort = 8080, String proxyUsername = '', String proxyPassword = ''}) {
+  static http.Client _createDefaultClient({
+    ProxyType proxyType = ProxyType.none,
+    String proxyHost = '',
+    int proxyPort = 8080,
+    String proxyUsername = '',
+    String proxyPassword = '',
+  }) {
     final inner = HttpClient()
       ..maxConnectionsPerHost = 64
       ..connectionTimeout = const Duration(seconds: 15)
@@ -231,7 +239,13 @@ class DownloadQueue {
 
   /// Applies proxy settings by recreating the shared HTTP client.
   /// Called when the user changes proxy configuration in Settings.
-  void applyProxySettings(ProxyType type, String host, int port, String username, String password) {
+  void applyProxySettings(
+    ProxyType type,
+    String host,
+    int port,
+    String username,
+    String password,
+  ) {
     // Direct assignment replaces the deferred initializer from the constructor
     // or overwrites the existing client. No explicit close needed here because
     // the old client (if it was constructed at all) is garbage-collected and
@@ -267,12 +281,14 @@ class DownloadQueue {
     int? minBytesBeforeFullRetry,
   }) {
     if (maxConcurrentDownloads != null) {
-      this.maxConcurrentDownloads =
-          maxConcurrentDownloads.clamp(1, engineHardMaxConcurrent).toInt();
+      this.maxConcurrentDownloads = maxConcurrentDownloads
+          .clamp(1, engineHardMaxConcurrent)
+          .toInt();
     }
     if (numChunksPerTask != null) {
-      this.numChunksPerTask =
-          numChunksPerTask.clamp(1, engineHardMaxChunks).toInt();
+      this.numChunksPerTask = numChunksPerTask
+          .clamp(1, engineHardMaxChunks)
+          .toInt();
     }
     if (hlsSegmentCap != null) {
       this.hlsSegmentCap = hlsSegmentCap.clamp(1, engineHardMaxChunks).toInt();
@@ -289,7 +305,10 @@ class DownloadQueue {
     if (autoClassifyMappings != null) {
       this.autoClassifyMappings = Map.unmodifiable(
         autoClassifyMappings.map(
-          (k, v) => MapEntry(k.startsWith('.') ? k.toLowerCase() : '.${k.toLowerCase()}', v),
+          (k, v) => MapEntry(
+            k.startsWith('.') ? k.toLowerCase() : '.${k.toLowerCase()}',
+            v,
+          ),
         ),
       );
     }
@@ -300,18 +319,20 @@ class DownloadQueue {
       this.retryLimit = retryLimit.clamp(1, 24).toInt();
     }
     if (minSpeedThresholdBytesPerSec != null) {
-      this.minSpeedThresholdBytesPerSec = minSpeedThresholdBytesPerSec.clamp(0, 100 * 1024 * 1024).toInt();
+      this.minSpeedThresholdBytesPerSec = minSpeedThresholdBytesPerSec
+          .clamp(0, 100 * 1024 * 1024)
+          .toInt();
     }
     if (stallTimeoutSeconds != null) {
       this.stallTimeoutSeconds = stallTimeoutSeconds.clamp(5, 120).toInt();
     }
     if (partialDownloadThreshold != null) {
-      this.partialDownloadThreshold =
-          partialDownloadThreshold.clamp(0.0, 1.0);
+      this.partialDownloadThreshold = partialDownloadThreshold.clamp(0.0, 1.0);
     }
     if (minBytesBeforeFullRetry != null) {
-      this.minBytesBeforeFullRetry =
-          minBytesBeforeFullRetry.clamp(0, 1024 * 1024 * 1024).toInt();
+      this.minBytesBeforeFullRetry = minBytesBeforeFullRetry
+          .clamp(0, 1024 * 1024 * 1024)
+          .toInt();
     }
     _schedule();
   }
@@ -377,7 +398,9 @@ class DownloadQueue {
       headers: task.headers,
     )) {
       _warn(RestrictedMediaPolicy.userMessageRestricted);
-      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(
+        RestrictedMediaPolicy.userMessageRestricted,
+      );
       return;
     }
     task.scheduledStartAt = startAt;
@@ -441,7 +464,9 @@ class DownloadQueue {
       headers: task.headers,
     )) {
       _warn(RestrictedMediaPolicy.userMessageRestricted);
-      onRestrictedMediaBlocked?.call(RestrictedMediaPolicy.userMessageRestricted);
+      onRestrictedMediaBlocked?.call(
+        RestrictedMediaPolicy.userMessageRestricted,
+      );
       return;
     }
     _autoRetryAttempts.remove(task.id);
@@ -579,8 +604,6 @@ class DownloadQueue {
     }
   }
 
-
-
   void resumeTask(String taskId) {
     unawaited(resumeTaskAsync(taskId));
   }
@@ -654,8 +677,10 @@ class DownloadQueue {
       // The native torrent engine writes pieces directly to its save dir —
       // there are never per-chunk files in tempDir to merge. Force merge
       // is a splitter/HTTP concept; for torrents, resume or redownload.
-      debugPrint('Force merge refused for '
-          '${task.savePath.split("/").last}: native torrent task.');
+      debugPrint(
+        'Force merge refused for '
+        '${task.savePath.split("/").last}: native torrent task.',
+      );
       task.failureReason = DownloadFailure.mergeFailed;
       task.errorMessage =
           'Torrent downloads are managed by the engine — resume or redownload instead.';
@@ -664,10 +689,13 @@ class DownloadQueue {
     }
 
     if (task.state == DownloadState.downloading) {
-      debugPrint('Force merge refused for '
-        '${task.savePath.split("/").last}: task is still downloading.');
+      debugPrint(
+        'Force merge refused for '
+        '${task.savePath.split("/").last}: task is still downloading.',
+      );
       task.failureReason = DownloadFailure.mergeFailed;
-      task.errorMessage = 'Can\'t force merge while the task is still downloading.';
+      task.errorMessage =
+          'Can\'t force merge while the task is still downloading.';
       _emitTask(task);
       return false;
     }
@@ -789,11 +817,13 @@ class DownloadQueue {
     bool forceReload = false,
     bool isAutoRetry = false,
   }) {
-    unawaited(retryHlsTaskWithRefreshAsync(
-      taskId,
-      forceReload: forceReload,
-      isAutoRetry: isAutoRetry,
-    ));
+    unawaited(
+      retryHlsTaskWithRefreshAsync(
+        taskId,
+        forceReload: forceReload,
+        isAutoRetry: isAutoRetry,
+      ),
+    );
   }
 
   Future<void> retryHlsTaskWithRefreshAsync(
@@ -835,7 +865,10 @@ class DownloadQueue {
     }
   }
 
-  Future<void> resumeTaskAsync(String taskId, {bool isAutoRetry = false}) async {
+  Future<void> resumeTaskAsync(
+    String taskId, {
+    bool isAutoRetry = false,
+  }) async {
     final task = _tasks[taskId];
     if (task == null) return;
     if (!isAutoRetry) {
@@ -859,6 +892,31 @@ class DownloadQueue {
     } else {
       _schedule();
     }
+    if (queuePath != null && !_isLoading) {
+      unawaited(saveToFile(queuePath!));
+    }
+  }
+
+  /// Batch-friendly reset: clears failure fields and returns a failed or
+  /// interrupted task to the idle queue so it is re-scheduled normally.
+  /// Unlike [retryHlsTaskWithRefreshAsync] this never reloads the source
+  /// page or refreshes tokens — it simply clears the error state and re-runs.
+  Future<void> resetTaskState(String taskId) async {
+    final task = _tasks[taskId];
+    if (task == null) return;
+
+    await prepareBrowserContext(task);
+
+    task.failureReason = null;
+    task.errorMessage = null;
+    task.statusMessage = null;
+    task.state = DownloadState.idle;
+    _autoRetryAttempts.remove(taskId);
+    if (!_executionQueue.contains(taskId) && !_activeTasks.contains(taskId)) {
+      _executionQueue.add(taskId);
+    }
+    _emitTask(task);
+    _schedule();
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
     }
@@ -906,7 +964,8 @@ class DownloadQueue {
     final existing = _tasks[existingTaskId];
     if (existing == null) return;
 
-    final urlChanged = !_isLikelySameMedia(existing.url, donor.url) ||
+    final urlChanged =
+        !_isLikelySameMedia(existing.url, donor.url) ||
         existing.url != donor.url;
     // Query-token change counts as a URL change for wipe purposes even when
     // path matches (signed CDN tokens).
@@ -946,11 +1005,13 @@ class DownloadQueue {
 
     await prepareBrowserContext(existing);
 
-    debugPrint('Updated task $existingTaskId from donor '
+    debugPrint(
+      'Updated task $existingTaskId from donor '
       '(urlChanged=$urlChanged tokenChanged=$tokenChanged '
       'bridges: fetch=${existing.fetchViaWebView != null} '
       'cookie=${existing.cookieProvider != null} '
-      'token=${existing.onTokenExpired != null})');
+      'token=${existing.onTokenExpired != null})',
+    );
 
     await resumeTaskAsync(existingTaskId);
   }
@@ -1039,7 +1100,9 @@ class DownloadQueue {
                 final newFile = File(newPath);
                 await newFile.parent.create(recursive: true);
                 await oldFile.rename(newPath);
-                debugPrint('Auto-classified completed file moved from $oldPath to $newPath');
+                debugPrint(
+                  'Auto-classified completed file moved from $oldPath to $newPath',
+                );
               }
             } catch (e) {
               updatedTask.savePath = oldPath;
@@ -1053,7 +1116,9 @@ class DownloadQueue {
     _schedule();
 
     if (updatedTask.state == DownloadState.failed) {
-      debugPrint('Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}');
+      debugPrint(
+        'Download failed: ${updatedTask.savePath.split("/").last}. Error: ${updatedTask.errorMessage}',
+      );
       if (autoRetry && !updatedTask.isBackupImport) {
         final isStallOrTruncation =
             updatedTask.failureReason == DownloadFailure.speedStall ||
@@ -1062,13 +1127,15 @@ class DownloadQueue {
         final alreadyDownloadedEnough =
             updatedTask.downloadedBytes >= minBytesBeforeFullRetry;
         if (isStallOrTruncation && alreadyDownloadedEnough) {
-          debugPrint('Skipped auto-retry for '
+          debugPrint(
+            'Skipped auto-retry for '
             '${updatedTask.savePath.split("/").last}: '
             'already downloaded '
             '${(updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB. '
-            'User can use Force Merge or manual retry.');
-          final alreadyMb =
-              (updatedTask.downloadedBytes / 1024 / 1024).toStringAsFixed(1);
+            'User can use Force Merge or manual retry.',
+          );
+          final alreadyMb = (updatedTask.downloadedBytes / 1024 / 1024)
+              .toStringAsFixed(1);
           updatedTask.failureReason = DownloadFailure.partialDownload;
           updatedTask.errorMessage =
               'Download stalled at $alreadyMb MB. '
@@ -1096,7 +1163,9 @@ class DownloadQueue {
             }
           });
         } else {
-          debugPrint('Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.');
+          debugPrint(
+            'Auto-retry limits exceeded for ${updatedTask.savePath.split("/").last}.',
+          );
           final originalError = updatedTask.errorMessage ?? 'Unknown error';
           final cleanError = originalError.replaceFirst(
             RegExp(r'^Retrying in [12]s \(attempt \d+/(?:\d+|∞)\)\. '),
@@ -1154,10 +1223,9 @@ class DownloadQueue {
           .where((t) => !_isDisplayOnlyTask(t))
           .map((t) => t.toJson())
           .toList(growable: false);
-      final jsonString = await WorkerIsolatePool.instance.execute(
-        'jsonEncode',
-        {'data': data},
-      ) as String;
+      final jsonString =
+          await WorkerIsolatePool.instance.execute('jsonEncode', {'data': data})
+              as String;
       await tempFile.writeAsString(jsonString, flush: true);
       // Backup existing file (best-effort).
       try {
@@ -1195,10 +1263,9 @@ class DownloadQueue {
       // Run JSON parsing on a background isolate to avoid blocking the UI
       // thread.  This matters when the queue file is large (many completed
       // tasks in history).
-      final decoded = await WorkerIsolatePool.instance.execute(
-        'jsonDecode',
-        {'json': json},
-      );
+      final decoded = await WorkerIsolatePool.instance.execute('jsonDecode', {
+        'json': json,
+      });
       if (decoded is! List) {
         await _preserveCorruptQueueFile(file, 'Queue file was not a list.');
         return;
@@ -1223,8 +1290,7 @@ class DownloadQueue {
               final basename = lastSlash != -1
                   ? normalized.substring(lastSlash + 1)
                   : normalized;
-              item['tempDir'] =
-                  '$persistentDownloadsTmp/$basename';
+              item['tempDir'] = '$persistentDownloadsTmp/$basename';
             }
           }
 
@@ -1248,7 +1314,8 @@ class DownloadQueue {
           } else if (task.state == DownloadState.merging) {
             task.state = DownloadState.failed;
             task.failureReason = DownloadFailure.mergeInterrupted;
-            task.errorMessage = 'Merge was interrupted while combining saved parts. Tap Retry to re-merge.';
+            task.errorMessage =
+                'Merge was interrupted while combining saved parts. Tap Retry to re-merge.';
           }
           // Self-heal: drop staged screenshot fixtures written by an earlier
           // build before the persistence filter existed. Without this they
@@ -1450,9 +1517,21 @@ class DownloadQueue {
   static String _normalizeUrl(String url) {
     // Matches SniffedMediaCache.normalizeUrl — strips common tracking params.
     const trackingParams = {
-      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'fbclid', 'gclid', 'msclkid', 'ref', 'source', 'si', 'pi',
-      '_hsenc', '_hsmi', 'trk',
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'utm_term',
+      'utm_content',
+      'fbclid',
+      'gclid',
+      'msclkid',
+      'ref',
+      'source',
+      'si',
+      'pi',
+      '_hsenc',
+      '_hsmi',
+      'trk',
     };
     if (url.startsWith('blob:')) return url;
     try {
@@ -1513,10 +1592,9 @@ class DownloadQueue {
     final normalizedSource = _normalizeUrl(sourcePageUrl);
     return _tasks.values.any((t) {
       if (t.state == DownloadState.scheduled) return false;
-      if (_normalizeUrl(t.sourcePageUrl ?? '') != normalizedSource) return false;
-      final existingBase = _stripUniqueSuffix(
-        p.basename(t.savePath),
-      );
+      if (_normalizeUrl(t.sourcePageUrl ?? '') != normalizedSource)
+        return false;
+      final existingBase = _stripUniqueSuffix(p.basename(t.savePath));
       return existingBase.toLowerCase() == base.toLowerCase();
     });
   }
@@ -1546,8 +1624,11 @@ class DownloadQueue {
   /// Convenience: all tasks that are currently active (downloading), queued
   /// (idle), or paused — i.e. not in a terminal state.
   List<DownloadTask> get activeAndQueuedTasks => _tasks.values
-      .where((t) => t.state != DownloadState.completed &&
-          t.state != DownloadState.failed)
+      .where(
+        (t) =>
+            t.state != DownloadState.completed &&
+            t.state != DownloadState.failed,
+      )
       .toList();
 
   /// Returns the filename portion of a task's [savePath], URL-decoded.
@@ -1571,7 +1652,11 @@ class DownloadQueue {
     final tasksSource = targetTasks ?? _tasks.values;
     if (trimmed.isEmpty) return tasksSource.toList();
 
-    final tokens = trimmed.toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    final tokens = trimmed
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toList();
     if (tokens.isEmpty) return tasksSource.toList();
 
     final scored = <_ScoredTask>[];
@@ -1653,7 +1738,7 @@ class DownloadQueue {
     String? urlFilter,
     bool includeFailedDetails = false,
   }) {
-      Iterable<DownloadTask> results = _tasks.values;
+    Iterable<DownloadTask> results = _tasks.values;
 
     // 1. State filter
     if (states != null && states.isNotEmpty) {
@@ -1665,8 +1750,9 @@ class DownloadQueue {
       results = results.where((t) => !t.createdAt.isBefore(fromDate));
     }
     if (toDate != null) {
-      results =
-          results.where((t) => !t.createdAt.isAfter(toDate.add(const Duration(days: 1))));
+      results = results.where(
+        (t) => !t.createdAt.isAfter(toDate.add(const Duration(days: 1))),
+      );
     }
 
     // 3. Size range
@@ -1713,9 +1799,9 @@ class DownloadQueue {
         case TaskSortField.date:
           c = a.createdAt.compareTo(b.createdAt);
         case TaskSortField.name:
-          c = _fileName(a.savePath)
-              .toLowerCase()
-              .compareTo(_fileName(b.savePath).toLowerCase());
+          c = _fileName(
+            a.savePath,
+          ).toLowerCase().compareTo(_fileName(b.savePath).toLowerCase());
         case TaskSortField.size:
           final aSize = a.totalBytes;
           final bSize = b.totalBytes;
@@ -1768,7 +1854,9 @@ class DownloadQueue {
         if (await tempDir.exists()) {
           await tempDir.delete(recursive: true);
           purged++;
-          debugPrint('Purged stale failed temp for ${task.savePath.split("/").last}');
+          debugPrint(
+            'Purged stale failed temp for ${task.savePath.split("/").last}',
+          );
         }
       } catch (e, s) {
         _logError('Failed to purge temp for ${task.id}', e, s);
@@ -1905,7 +1993,9 @@ class DownloadQueue {
       }
     } catch (error) {
       task.publishErrorMessage = error.toString();
-      debugPrint('Failed to publish completed file: ${task.savePath.split("/").last}. Error: $error');
+      debugPrint(
+        'Failed to publish completed file: ${task.savePath.split("/").last}. Error: $error',
+      );
     } finally {
       _publishingTasks.remove(task.id);
       _emitTask(task);
@@ -2022,7 +2112,8 @@ class DownloadQueue {
       // Debounce saves to prevent I/O saturation — the speed timer in
       // DownloadSplitter fires every 500ms per active download, and each
       // save does jsonEncode + 3 file operations.
-      final isTerminal = task.state == DownloadState.completed ||
+      final isTerminal =
+          task.state == DownloadState.completed ||
           task.state == DownloadState.failed ||
           task.state == DownloadState.paused;
       if (isTerminal) {
@@ -2128,11 +2219,13 @@ class DownloadQueue {
         percent = task.progressPercent;
       }
     }
-    unawaited(DownloadForegroundService.update(
-      count: count,
-      currentFileName: fileName,
-      percent: percent,
-    ));
+    unawaited(
+      DownloadForegroundService.update(
+        count: count,
+        currentFileName: fileName,
+        percent: percent,
+      ),
+    );
   }
 
   Future<void> _preserveCorruptQueueFile(File file, String reason) async {
@@ -2169,7 +2262,9 @@ class DownloadQueue {
                 for (final item in decoded) {
                   if (item is! Map) continue;
                   try {
-                    final task = DownloadTask.fromJson(Map<String, dynamic>.from(item));
+                    final task = DownloadTask.fromJson(
+                      Map<String, dynamic>.from(item),
+                    );
                     if (!_tasks.containsKey(task.id)) {
                       if (task.state == DownloadState.downloading ||
                           task.state == DownloadState.paused) {
@@ -2187,8 +2282,12 @@ class DownloadQueue {
         }
       }
       if (recoveredCount > 0 && !_isLoading) {
-        debugPrint('[DownloadQueue] INFO: Successfully recovered $recoveredCount tasks from corrupt history backups.');
-        debugPrint('Successfully recovered $recoveredCount tasks from corrupt history backups.');
+        debugPrint(
+          '[DownloadQueue] INFO: Successfully recovered $recoveredCount tasks from corrupt history backups.',
+        );
+        debugPrint(
+          'Successfully recovered $recoveredCount tasks from corrupt history backups.',
+        );
         unawaited(saveToFile(path));
       }
     } catch (e, s) {
@@ -2222,7 +2321,8 @@ class DownloadQueue {
     // Explicit playlist extensions — definitely HLS/DASH
     if (path.endsWith('.m3u8') ||
         path.endsWith('.m3u') ||
-        path.endsWith('.mpd')) return true;
+        path.endsWith('.mpd'))
+      return true;
     // Path hints for disguised playlists (e.g. index.jpg under /hls/).
     // Checked BEFORE the known-direct-media list so that CDNs serving
     // playlists under non-.m3u8 URLs (e.g. .../hls/.../index.jpg) are
@@ -2264,7 +2364,6 @@ class DownloadQueue {
     return false;
   }
 }
-
 
 /// Push-style per-task notifier (P1b). [ValueNotifier] suppresses
 /// notifications when the assigned value is `==` to the current one — and
