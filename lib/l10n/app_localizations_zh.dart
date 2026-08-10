@@ -1081,4 +1081,346 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get queueFlatList => '平面列表（无分节）';
+
+  @override
+  String get guideTitle => '用户指南';
+
+  @override
+  String get guideSearchHint => '搜索指南…';
+
+  @override
+  String get guideQuickStart => '快速入門';
+
+  @override
+  String get guideEngineProtocols => '下载引擎与协议';
+
+  @override
+  String get guideQueueGestures => '队列页面与手势';
+
+  @override
+  String get guideBrowserSniffer => '内置浏览器与嗅探器';
+
+  @override
+  String get guideSiteProfiles => '站点配置文件与批量抓取';
+
+  @override
+  String get guideSendToPc => '发送到电脑（Wi-Fi传输）';
+
+  @override
+  String get guideRulesAutoNaming => '下载规则与自动命名';
+
+  @override
+  String get guideScheduleNight => '计划与夜间下载';
+
+  @override
+  String get guideAdblockPrivacy => '广告拦截与隐私引擎';
+
+  @override
+  String get guideCustomHosts => '自定义视频主机与无后缀探测';
+
+  @override
+  String get guideThemesAccent => '主题与主题色包';
+
+  @override
+  String get guidePrivateVault => '加密私密保险库';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg 工作室';
+
+  @override
+  String get guideBackupTransfer => '备份与数据库迁移';
+
+  @override
+  String get guideWatcherRss => '监视器（RSS与网页监控）';
+
+  @override
+  String get guideAutomationApi => '自动化 API';
+
+  @override
+  String get guidePipMode => '画中画模式 (PiP)';
+
+  @override
+  String get guideIncognitoMode => '无痕 / 隐身模式';
+
+  @override
+  String get guideBuildTiers => '构建通道与功能层级';
+
+  @override
+  String get guideTroubleshootingFaq => '故障排除与常见问题';
+
+  @override
+  String get settingsProxy => '代理';
+
+  @override
+  String get settingsProxyNone => '无';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => '移动端（默认）';
+
+  @override
+  String get settingsUaDesktopChrome => '桌面 Chrome';
+
+  @override
+  String get settingsUaDesktopFirefox => '桌面 Firefox';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => '自定义 User-Agent';
+
+  @override
+  String get settingsProfiles => '配置文件';
+
+  @override
+  String get settingsScheduledDownloads => '计划下载';
+
+  @override
+  String get settingsAutomationApi => '自动化 API';
+
+  @override
+  String get settingsEnableAutomation => '启用自动化 API';
+
+  @override
+  String get settingsRegenerateToken => '重新生成令牌';
+
+  @override
+  String get settingsRegenerateTokenPrompt => '重新生成令牌？';
+
+  @override
+  String get settingsAboutTitle => '关于';
+
+  @override
+  String get settingsAboutDesc => '具有分段下载、流媒体视频、BT种子和浏览器媒体嗅探功能的 Android 下载管理器。';
+
+  @override
+  String get settingsCheckBattery => '启动时检查电池优化';
+
+  @override
+  String get settingsCheckBatteryDesc => '如果未配置后台下载优化则通知';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro 已恢复。';
+
+  @override
+  String get settingsSnackTray => '保存到托盘。Aurora 会保留列表，以便您以后选择要下载的内容。';
+
+  @override
+  String get settingsSnackImmediate => '立即下载。跳过托盘并立即开始提取。';
+
+  @override
+  String get settingsSnackAsk => '每次检测到媒体时询问。当您下载混合内容时最适用。';
+
+  @override
+  String get settingsSnackBlock => '阻止此站点的下载。Aurora 将忽略每个媒体 URL。';
+
+  @override
+  String get settingsDriveSync => 'Google 云端硬盘同步';
+
+  @override
+  String get settingsDriveUnavailable => '云端硬盘同步不可用';
+
+  @override
+  String get settingsSetFolder => '设置文件夹';
+
+  @override
+  String get settingsAutoUploadCompleted => '自动上传已完成的文件';
+
+  @override
+  String get settingsSyncNow => '立即同步';
+
+  @override
+  String get settingsLinkDrive => '关联 Google 云端硬盘';
+
+  @override
+  String get settingsResetExtAppsPrompt => '重置所有外部应用选择？';
+
+  @override
+  String get settingsExtAppsResetDone => '已重置所有外部应用选择。';
+
+  @override
+  String get settingsExternalApps => '外部应用';
+
+  @override
+  String get settingsBackupBookmarks => '收藏 / 书签';
+
+  @override
+  String get settingsBackupHistory => '网页历史';
+
+  @override
+  String get settingsBackupSavedPages => '已保存页面';
+
+  @override
+  String get settingsBackupQueue => '下载历史（队列与计划）';
+
+  @override
+  String get settingsBackupSettings => '应用设置';
+
+  @override
+  String get settingsBackupSessions => '浏览器会话与打开的标签页';
+
+  @override
+  String get settingsBackupRules => '下载规则与整理';
+
+  @override
+  String get settingsBackupImport => '导入';
+
+  @override
+  String get settingsBackupRestoreTitle => '备份与恢复';
+
+  @override
+  String get settingsChooseBackupFile => '选择备份文件';
+
+  @override
+  String get settingsAutoBackup => '自动备份';
+
+  @override
+  String get settingsEnableAutoBackup => '启用自动备份';
+
+  @override
+  String get settingsBackupNow => '立即备份';
+
+  @override
+  String get settingsRestoreBtn => '恢复';
+
+  @override
+  String get settingsRulesTitle => '下载规则';
+
+  @override
+  String get settingsAddRule => '添加规则';
+
+  @override
+  String get settingsCreateFirstRule => '创建您的第一条规则';
+
+  @override
+  String get settingsCategoryVideo => '视频';
+
+  @override
+  String get settingsCategoryAudio => '音频';
+
+  @override
+  String get settingsCategoryHls => 'HLS 流媒体';
+
+  @override
+  String get settingsCategoryImage => '图片';
+
+  @override
+  String get settingsRequireWifi => '仅限 Wi-Fi';
+
+  @override
+  String get settingsRequireCharging => '仅在充电时';
+
+  @override
+  String get settingsTimeWindow => '时间窗口';
+
+  @override
+  String get settingsDeleteRulePrompt => '删除规则';
+
+  @override
+  String get settingsDeleteProfilePrompt => '删除配置文件';
+
+  @override
+  String get settingsNoProfilesYet => '暂无配置文件';
+
+  @override
+  String get settingsAddFirstProfile => '添加您的第一个配置文件';
+
+  @override
+  String get settingsToolbarSlide1 => '幻灯片 1（默认）';
+
+  @override
+  String get settingsToolbarSlide2 => '幻灯片 2（向左滑动）';
+
+  @override
+  String get settingsResetToolbarDefault => '重置工具栏为默认值';
+
+  @override
+  String get ffmpegCompressVideo => '压缩视频';
+
+  @override
+  String get ffmpegTrimVideo => '剪辑视频';
+
+  @override
+  String get ffmpegExtractAudio => '提取音频';
+
+  @override
+  String get ffmpegRemuxMp4 => '封装转为 MP4';
+
+  @override
+  String get ffmpegCreateGif => '制作 GIF 动图';
+
+  @override
+  String get ffmpegSourceFile => '源文件';
+
+  @override
+  String get ffmpegOperation => '操作类型';
+
+  @override
+  String get ffmpegQueuedOps => '排队中的任务';
+
+  @override
+  String get vaultDeleteFromVault => '从保险库中删除？';
+
+  @override
+  String get vaultNothingToImport => '没有可导入的内容';
+
+  @override
+  String get vaultImportTitle => '导入到私密保险库';
+
+  @override
+  String get vaultDeleteOriginal => '加密后删除原文件';
+
+  @override
+  String get vaultLockedTitle => '保险库已被锁定';
+
+  @override
+  String get vaultUnlockBtn => '解锁';
+
+  @override
+  String get vaultEmptyTitle => '保险库为空';
+
+  @override
+  String get vaultEmptyDesc => '将下载的文件移动到此处以保持私密';
+
+  @override
+  String get vaultAddFiles => '添加文件';
+
+  @override
+  String get watcherAddWatch => '添加监视';
+
+  @override
+  String get watcherAddFirstWatch => '添加您的第一个监视';
+
+  @override
+  String get watcherCheckNow => '立即检查';
+
+  @override
+  String get watcherRssFeed => 'RSS 订阅';
+
+  @override
+  String get watcherWebPage => '网页';
+
+  @override
+  String get watcherDeleteRulePrompt => '删除监视规则';
+
+  @override
+  String get webdavServerUrl => '服务器 URL';
+
+  @override
+  String get webdavUsername => '用户名';
+
+  @override
+  String get webdavPassword => '密码';
+
+  @override
+  String get webdavUploadBackupNow => '立即上传备份';
+
+  @override
+  String get webdavRemoteBackups => '远程备份';
+
+  @override
+  String get webdavNoBackupsYet => '尚无备份。轻触上传按钮以创建一个。';
 }

@@ -1126,4 +1126,356 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get queueFlatList => 'Flache Liste (ohne Abschnitte)';
+
+  @override
+  String get guideTitle => 'Benutzerhandbuch';
+
+  @override
+  String get guideSearchHint => 'Handbuch durchsuchen…';
+
+  @override
+  String get guideQuickStart => 'Schnellstart';
+
+  @override
+  String get guideEngineProtocols => 'Download-Engine & Protokolle';
+
+  @override
+  String get guideQueueGestures => 'Warteschlange & Gesten';
+
+  @override
+  String get guideBrowserSniffer => 'Integrierter Browser & Sniffer';
+
+  @override
+  String get guideSiteProfiles => 'Website-Profile & Batch-Grabber';
+
+  @override
+  String get guideSendToPc => 'An PC senden (WLAN-Übertragung)';
+
+  @override
+  String get guideRulesAutoNaming => 'Download-Regeln & Auto-Benennung';
+
+  @override
+  String get guideScheduleNight => 'Zeitplan & Nachtmodus-Download';
+
+  @override
+  String get guideAdblockPrivacy => 'Werbeblocker & Datenschutz-Engine';
+
+  @override
+  String get guideCustomHosts => 'Eigene Video-Hosts & Sonde ohne Endung';
+
+  @override
+  String get guideThemesAccent => 'Themes & Akzentfarben';
+
+  @override
+  String get guidePrivateVault => 'Verschlüsselter Tresor';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg Studio';
+
+  @override
+  String get guideBackupTransfer => 'Sicherung & Datenbank-Transfer';
+
+  @override
+  String get guideWatcherRss => 'Watcher (RSS & Seitenüberwachung)';
+
+  @override
+  String get guideAutomationApi => 'Automatisierungs-API';
+
+  @override
+  String get guidePipMode => 'Bild-im-Bild (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'Inkoknito- / Privater Modus';
+
+  @override
+  String get guideBuildTiers => 'Build-Kanäle & Funktions-Stufen';
+
+  @override
+  String get guideTroubleshootingFaq => 'Fehlerbehebung & FAQ';
+
+  @override
+  String get settingsProxy => 'Proxy';
+
+  @override
+  String get settingsProxyNone => 'Keine';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => 'Mobil (Standard)';
+
+  @override
+  String get settingsUaDesktopChrome => 'Desktop Chrome';
+
+  @override
+  String get settingsUaDesktopFirefox => 'Desktop Firefox';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => 'Benutzerdefinierter User-Agent';
+
+  @override
+  String get settingsProfiles => 'Profile';
+
+  @override
+  String get settingsScheduledDownloads => 'Geplante Downloads';
+
+  @override
+  String get settingsAutomationApi => 'Automatisierungs-API';
+
+  @override
+  String get settingsEnableAutomation => 'Automatisierungs-API aktivieren';
+
+  @override
+  String get settingsRegenerateToken => 'Token neu generieren';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'Token neu generieren?';
+
+  @override
+  String get settingsAboutTitle => 'Über';
+
+  @override
+  String get settingsAboutDesc =>
+      'Android Downloader mit segmentierten Downloads, Video-Streaming, Torrents und Medien-Erkennung.';
+
+  @override
+  String get settingsCheckBattery => 'Akku-Optimierung beim Start prüfen';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'Benachrichtigen, wenn Hintergrund-Download-Optimierungen nicht konfiguriert sind';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro wiederhergestellt.';
+
+  @override
+  String get settingsSnackTray =>
+      'Im Tray speichern. Aurora führt eine Liste zur späteren Auswahl.';
+
+  @override
+  String get settingsSnackImmediate =>
+      'Sofort herunterladen. Aufnahme direkt starten.';
+
+  @override
+  String get settingsSnackAsk =>
+      'Jedes Mal fragen, wenn Medien erkannt werden.';
+
+  @override
+  String get settingsSnackBlock => 'Downloads von dieser Website blockieren.';
+
+  @override
+  String get settingsDriveSync => 'Google Drive Synchronisierung';
+
+  @override
+  String get settingsDriveUnavailable => 'Drive-Synch nicht verfügbar';
+
+  @override
+  String get settingsSetFolder => 'Ordner festlegen';
+
+  @override
+  String get settingsAutoUploadCompleted =>
+      'Fertige Dateien automatisch hochladen';
+
+  @override
+  String get settingsSyncNow => 'Jetzt synchronisieren';
+
+  @override
+  String get settingsLinkDrive => 'Google Drive verknüpfen';
+
+  @override
+  String get settingsResetExtAppsPrompt =>
+      'Alle externen App-Auswahlen zurücksetzen?';
+
+  @override
+  String get settingsExtAppsResetDone =>
+      'Alle externen App-Auswahlen wurden zurückgesetzt.';
+
+  @override
+  String get settingsExternalApps => 'Externe Apps';
+
+  @override
+  String get settingsBackupBookmarks => 'Favoriten / Lesezeichen';
+
+  @override
+  String get settingsBackupHistory => 'Web-Verlauf';
+
+  @override
+  String get settingsBackupSavedPages => 'Gespeicherte Seiten';
+
+  @override
+  String get settingsBackupQueue => 'Download-Verlauf (Warteschlange)';
+
+  @override
+  String get settingsBackupSettings => 'App-Einstellungen';
+
+  @override
+  String get settingsBackupSessions => 'Browser-Sitzungen & Offene Tabs';
+
+  @override
+  String get settingsBackupRules => 'Download-Regeln & Organisation';
+
+  @override
+  String get settingsBackupImport => 'Importieren';
+
+  @override
+  String get settingsBackupRestoreTitle => 'Sicherung & Wiederherstellung';
+
+  @override
+  String get settingsChooseBackupFile => 'Sicherungsdatei auswählen';
+
+  @override
+  String get settingsAutoBackup => 'Automatische Sicherung';
+
+  @override
+  String get settingsEnableAutoBackup => 'Automatische Sicherung aktivieren';
+
+  @override
+  String get settingsBackupNow => 'Jetzt sichern';
+
+  @override
+  String get settingsRestoreBtn => 'Wiederherstellen';
+
+  @override
+  String get settingsRulesTitle => 'Download-Regeln';
+
+  @override
+  String get settingsAddRule => 'Regel hinzufügen';
+
+  @override
+  String get settingsCreateFirstRule => 'Erstellen Sie Ihre erste Regel';
+
+  @override
+  String get settingsCategoryVideo => 'Video';
+
+  @override
+  String get settingsCategoryAudio => 'Audio';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => 'Bild';
+
+  @override
+  String get settingsRequireWifi => 'WLAN erforderlich';
+
+  @override
+  String get settingsRequireCharging => 'Laden erforderlich';
+
+  @override
+  String get settingsTimeWindow => 'Zeitfenster';
+
+  @override
+  String get settingsDeleteRulePrompt => 'Regel löschen';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'Profil löschen';
+
+  @override
+  String get settingsNoProfilesYet => 'Noch keine Profile';
+
+  @override
+  String get settingsAddFirstProfile => 'Fügen Sie Ihr erstes Profil hinzu';
+
+  @override
+  String get settingsToolbarSlide1 => 'Folie 1 (Standard)';
+
+  @override
+  String get settingsToolbarSlide2 => 'Folie 2 (nach links wischen)';
+
+  @override
+  String get settingsResetToolbarDefault =>
+      'Symbolleiste auf Standard zurücksetzen';
+
+  @override
+  String get ffmpegCompressVideo => 'Video komprimieren';
+
+  @override
+  String get ffmpegTrimVideo => 'Video schneiden';
+
+  @override
+  String get ffmpegExtractAudio => 'Audio extrahieren';
+
+  @override
+  String get ffmpegRemuxMp4 => 'In MP4 umwandeln';
+
+  @override
+  String get ffmpegCreateGif => 'GIF erstellen';
+
+  @override
+  String get ffmpegSourceFile => 'Quelldatei';
+
+  @override
+  String get ffmpegOperation => 'Vorgang';
+
+  @override
+  String get ffmpegQueuedOps => 'Wartende Vorgänge';
+
+  @override
+  String get vaultDeleteFromVault => 'Aus Tresor löschen?';
+
+  @override
+  String get vaultNothingToImport => 'Nichts zu importieren';
+
+  @override
+  String get vaultImportTitle => 'In privaten Tresor importieren';
+
+  @override
+  String get vaultDeleteOriginal => 'Original nach Verschlüsselung löschen';
+
+  @override
+  String get vaultLockedTitle => 'Tresor ist gesperrt';
+
+  @override
+  String get vaultUnlockBtn => 'Entsperren';
+
+  @override
+  String get vaultEmptyTitle => 'Tresor ist leer';
+
+  @override
+  String get vaultEmptyDesc => 'Verschieben Sie geschützte Dateien hierher';
+
+  @override
+  String get vaultAddFiles => 'Dateien hinzufügen';
+
+  @override
+  String get watcherAddWatch => 'Überwachung hinzufügen';
+
+  @override
+  String get watcherAddFirstWatch => 'Fügen Sie Ihre erste Überwachung hinzu';
+
+  @override
+  String get watcherCheckNow => 'Jetzt prüfen';
+
+  @override
+  String get watcherRssFeed => 'RSS-Feed';
+
+  @override
+  String get watcherWebPage => 'Webseite';
+
+  @override
+  String get watcherDeleteRulePrompt => 'Überwachungsregel löschen';
+
+  @override
+  String get webdavServerUrl => 'Server-URL';
+
+  @override
+  String get webdavUsername => 'Benutzername';
+
+  @override
+  String get webdavPassword => 'Passwort';
+
+  @override
+  String get webdavUploadBackupNow => 'Sicherung jetzt hochladen';
+
+  @override
+  String get webdavRemoteBackups => 'Remote-Sicherungen';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'Noch keine Sicherungen. Tippen Sie auf Hochladen.';
 }

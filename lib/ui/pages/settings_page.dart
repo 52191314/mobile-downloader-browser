@@ -222,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
         if (widget.watcherService == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Aurora Watcher')),
-            body: const Center(child: Text('Watcher service not available.')),
+            body: Center(child: Text('Watcher service not available.')),
           );
         }
         return WatcherPage(
@@ -1357,7 +1357,7 @@ class _SettingsPageState extends State<SettingsPage> {
         padding: const EdgeInsets.all(16),
         children: [
           // ── Proxy section ──
-          PanelHeader(icon: Icons.wifi_rounded, title: 'Proxy'),
+          PanelHeader(icon: Icons.wifi_rounded, title: AppLocalizations.of(context)!.settingsProxy),
           const SizedBox(height: 8),
           Panel(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1370,15 +1370,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   isDense: true,
                 ),
                 items: [
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: ProxyType.none,
-                    child: Text('None'),
+                    child: Text(AppLocalizations.of(context)!.settingsProxyNone),
                   ),
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: ProxyType.http,
                     child: Text('HTTP / HTTPS'),
                   ),
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: ProxyType.socks5,
                     child: Text('SOCKS5'),
                   ),
@@ -1473,7 +1473,7 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 24),
 
           // ── User-Agent section ──
-          PanelHeader(icon: Icons.devices_rounded, title: 'User-Agent'),
+          PanelHeader(icon: Icons.devices_rounded, title: AppLocalizations.of(context)!.settingsUserAgent),
           const SizedBox(height: 8),
           Panel(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1485,12 +1485,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   labelText: 'Global User-Agent profile',
                   isDense: true,
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'mobile', child: Text('Mobile (default)')),
-                  DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),
-                  DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),
-                  DropdownMenuItem(value: 'safari', child: Text('Safari')),
-                  DropdownMenuItem(value: 'custom', child: Text('Custom User-Agent')),
+                items: [
+                  DropdownMenuItem(value: 'mobile', child: Text(AppLocalizations.of(context)!.settingsUaMobile)),
+                  DropdownMenuItem(value: 'desktop_chrome', child: Text(AppLocalizations.of(context)!.settingsUaDesktopChrome)),
+                  DropdownMenuItem(value: 'desktop_firefox', child: Text(AppLocalizations.of(context)!.settingsUaDesktopFirefox)),
+                  DropdownMenuItem(value: 'safari', child: Text(AppLocalizations.of(context)!.settingsUaSafari)),
+                  DropdownMenuItem(value: 'custom', child: Text(AppLocalizations.of(context)!.settingsUaCustom)),
                 ],
                 onChanged: (v) {
                   localUaProfile = v ?? 'mobile';
@@ -1653,7 +1653,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 labelText: 'User-Agent',
                 isDense: true,
               ),
-              items: const [
+              items: [
                 DropdownMenuItem(value: 'mobile', child: Text('Mobile')),
                 DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),
                 DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),
@@ -1794,7 +1794,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final service = widget.automationApiService;
     final isUltra = widget.proEntitlement.isUltra;
     return Scaffold(
-      appBar: AppBar(title: const Text('Automation API')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)!.settingsAutomationApi)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1818,7 +1818,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 16),
                 if (service != null && isUltra) ...[
                   SwitchListTile(
-                    title: const Text('Enable Automation API'),
+                    title: Text(AppLocalizations.of(context)!.settingsEnableAutomation),
                     subtitle: Text(
                       service.isStarted
                           ? 'API server is running on port ${service.port}'
@@ -1896,7 +1896,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (ctx) => AlertDialog(
-                              title: const Text('Regenerate Token?'),
+                              title: Text(AppLocalizations.of(context)!.settingsRegenerateTokenPrompt),
                               content: const Text(
                                 'Existing API clients will stop working. '
                                 'You will need to update their token.',
@@ -2016,8 +2016,8 @@ class _SettingsPageState extends State<SettingsPage> {
               const Divider(height: 1, indent: 56),
               SwitchListTile(
                 secondary: Icon(Icons.power_settings_new_rounded, color: context.ac.accentFrost),
-                title: const Text('Check battery optimization on launch'),
-                subtitle: const Text('Notify if background download optimizations are not configured'),
+                title: Text(AppLocalizations.of(context)!.settingsCheckBattery),
+                subtitle: Text(AppLocalizations.of(context)!.settingsCheckBatteryDesc),
                 value: !_settings.neverAskBatteryOpt,
                 onChanged: (val) {
                   _update(_settings.copyWith(
@@ -2137,7 +2137,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           horizontal: 12, vertical: 10),
                       border: InputBorder.none,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                         value: EntitlementTier.free,
                         child: Text('Free'),
@@ -2350,7 +2350,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     if (!context.mounted) return;
     if (widget.proEntitlement.isPro) {
-      AuroraSnackbar.show(context, 'Aurora Pro restored.');
+      AuroraSnackbar.show(context, AppLocalizations.of(context)!.settingsProRestored);
     } else {
       AuroraSnackbar.show(
         context,
@@ -2523,7 +2523,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: local.downloadLinkBehavior,
           isExpanded: true,
           icon: Icon(Icons.expand_more, color: context.ac.textSecondary),
-          items: const [
+          items: [
             DropdownMenuItem(
               value: DownloadLinkBehavior.capture,
               child: Text('Save to tray. Aurora keeps a list so you can pick which to download later.'),
@@ -2751,13 +2751,13 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                                 .setDestinationFolder(
                                   widget.folderController.text,
                                 ),
-                            child: const Text('Set folder'),
+                            child: Text(AppLocalizations.of(context)!.settingsSetFolder),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
                       SwitchListTile(
-                        title: const Text('Auto upload completed files'),
+                        title: Text(AppLocalizations.of(context)!.settingsAutoUploadCompleted),
                         value: _state.autoSyncEnabled,
                         onChanged: (v) {
                           if (v && !widget.proEntitlement.isPro) {
@@ -2843,7 +2843,7 @@ class _DriveSyncPageContentState extends State<_DriveSyncPageContent> {
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.link),
-                          label: const Text('Link Google Drive'),
+                          label: Text(AppLocalizations.of(context)!.settingsLinkDrive),
                           onPressed: () {
                             if (!widget.proEntitlement.isPro) {
                               showProUpsell(context, ProFeature.driveSync);
@@ -2932,7 +2932,7 @@ class _ExternalAppsPrefsPageState extends State<ExternalAppsPrefsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reset all external app choices?'),
+        title: Text(AppLocalizations.of(context)!.settingsResetExtAppsPrompt),
         content: const Text(
           'Every app will ask for confirmation again the next time a website '
           'tries to open it.',
@@ -2952,7 +2952,7 @@ class _ExternalAppsPrefsPageState extends State<ExternalAppsPrefsPage> {
     if (confirmed != true) return;
     if (!mounted) return;
     setState(() => _entries = const []);
-    AuroraSnackbar.show(context, 'All external app choices reset.');
+    AuroraSnackbar.show(context, AppLocalizations.of(context)!.settingsExtAppsResetDone);
     await ExternalAppPreferenceStore.instance.clearAll();
   }
 
@@ -4520,7 +4520,7 @@ class _RulesPageState extends State<_RulesPage> {
         actions: [
           TextButton.icon(
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add Rule'),
+            label: Text(AppLocalizations.of(context)!.settingsAddRule),
             onPressed: () => _showRuleDialog(),
           ),
         ],
@@ -4754,25 +4754,25 @@ class _RulesPageState extends State<_RulesPage> {
                       spacing: 6,
                       children: [
                         FilterChip(
-                          label: const Text('Video'),
+                          label: Text(AppLocalizations.of(context)!.settingsCategoryVideo),
                           selected: typeVideo,
                           onSelected: (v) =>
                               setDialogState(() => typeVideo = v),
                         ),
                         FilterChip(
-                          label: const Text('Audio'),
+                          label: Text(AppLocalizations.of(context)!.settingsCategoryAudio),
                           selected: typeAudio,
                           onSelected: (v) =>
                               setDialogState(() => typeAudio = v),
                         ),
                         FilterChip(
-                          label: const Text('HLS'),
+                          label: Text(AppLocalizations.of(context)!.settingsCategoryHls),
                           selected: typeHls,
                           onSelected: (v) =>
                               setDialogState(() => typeHls = v),
                         ),
                         FilterChip(
-                          label: const Text('Image'),
+                          label: Text(AppLocalizations.of(context)!.settingsCategoryImage),
                           selected: typeImage,
                           onSelected: (v) =>
                               setDialogState(() => typeImage = v),
@@ -4807,7 +4807,7 @@ class _RulesPageState extends State<_RulesPage> {
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
-                      title: const Text('Require Wi-Fi'),
+                      title: Text(AppLocalizations.of(context)!.settingsRequireWifi),
                       value: requireWifi,
                       onChanged: (v) =>
                           setDialogState(() => requireWifi = v),
@@ -4815,7 +4815,7 @@ class _RulesPageState extends State<_RulesPage> {
                       dense: true,
                     ),
                     SwitchListTile(
-                      title: const Text('Require charging'),
+                      title: Text(AppLocalizations.of(context)!.settingsRequireCharging),
                       value: requireCharging,
                       onChanged: (v) =>
                           setDialogState(() => requireCharging = v),
@@ -4823,7 +4823,7 @@ class _RulesPageState extends State<_RulesPage> {
                       dense: true,
                     ),
                     SwitchListTile(
-                      title: const Text('Time window'),
+                      title: Text(AppLocalizations.of(context)!.settingsTimeWindow),
                       subtitle: timeWindowEnabled
                           ? Text(
                               '$timeWindowStart:00 - $timeWindowEnd:00',
@@ -5007,7 +5007,7 @@ class _RulesPageState extends State<_RulesPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Rule'),
+        title: Text(AppLocalizations.of(context)!.settingsDeleteRulePrompt),
         content: Text('Delete "${rule.name}"? This cannot be undone.'),
         actions: [
           TextButton(
@@ -5162,7 +5162,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                     context: context,
                     label: 'Desktop mode',
                     value: _triStateBool(desktopMode),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                           value: '',
                           child: Text('Use global setting')),
@@ -5186,7 +5186,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                     context: context,
                     label: 'User-Agent',
                     value: userAgentProfile ?? '',
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                           value: '', child: Text('Use global setting')),
                       DropdownMenuItem(
@@ -5210,7 +5210,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                     context: context,
                     label: 'Adblock',
                     value: _triStateBool(adblockEnabled),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                           value: '',
                           child: Text('Use global setting')),
@@ -5232,7 +5232,7 @@ class _ProfilesPageContentState extends State<_ProfilesPageContent> {
                     context: context,
                     label: 'Replace site player',
                     value: _triStateBool(replaceSitePlayer),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                           value: '',
                           child: Text('Use global setting')),

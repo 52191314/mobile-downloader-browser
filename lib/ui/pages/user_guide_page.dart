@@ -27,7 +27,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
-    final sections = _getGuideSections();
+    final sections = _getGuideSections(context);
     final filteredSections = sections.where((section) {
       if (_searchQuery.isEmpty) return true;
       final q = _searchQuery.toLowerCase();
@@ -48,7 +48,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'Search user guide…',
+                hintText: AppLocalizations.of(context)!.guideSearchHint,
                 prefixIcon: Icon(Icons.search, color: ac.accentFrost),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -146,11 +146,11 @@ class _UserGuidePageState extends State<UserGuidePage> {
     );
   }
 
-  List<_GuideSectionData> _getGuideSections() {
-    return const [
+  List<_GuideSectionData> _getGuideSections(BuildContext context) {
+    return [
       _GuideSectionData(
         number: 1,
-        title: 'Quick Start',
+        title: AppLocalizations.of(context)!.guideQuickStart,
         icon: Icons.rocket_launch_rounded,
         keywords: ['install', 'basic', 'workflow', 'manual', 'url', 'radar', 'sniffer'],
         badge: null,
@@ -170,7 +170,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
       ),
       _GuideSectionData(
         number: 2,
-        title: 'Download Engine & Protocols',
+        title: AppLocalizations.of(context)!.guideEngineProtocols,
         icon: Icons.download_rounded,
         keywords: ['http', 'segmented', 'hls', 'm3u8', 'torrent', 'bittorrent', 'engine', 'chunk'],
         badge: null,
@@ -189,7 +189,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
       ),
       _GuideSectionData(
         number: 3,
-        title: 'Queue Page & Gestures',
+        title: AppLocalizations.of(context)!.guideQueueGestures,
         icon: Icons.queue_music_rounded,
         keywords: ['chips', 'filter', 'sort', 'swipe', 'bulk', 'actions', 'multi-select'],
         badge: null,
@@ -208,7 +208,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
       ),
       _GuideSectionData(
         number: 4,
-        title: 'Built-in Browser & Sniffer',
+        title: AppLocalizations.of(context)!.guideBrowserSniffer,
         icon: Icons.language_rounded,
         keywords: ['browser', 'sniffer', 'radar', 'dock', 'tabs', 'reader', 'autofill', 'security'],
         badge: null,
@@ -228,7 +228,7 @@ class _UserGuidePageState extends State<UserGuidePage> {
       ),
       _GuideSectionData(
         number: 5,
-        title: 'Site Profiles & Batch Grabber',
+        title: AppLocalizations.of(context)!.guideSiteProfiles,
         icon: Icons.collections_bookmark_rounded,
         keywords: ['site profile', 'profile', 'series grab', 'batch', 'grabber', 'user-agent', 'freetaste'],
         badge: 'PRO',
@@ -245,7 +245,7 @@ Extract all video or media links from multi-episode pages, galleries, or playlis
       ),
       _GuideSectionData(
         number: 6,
-        title: 'Send to PC (Wi-Fi Transfer)',
+        title: AppLocalizations.of(context)!.guideSendToPc,
         icon: Icons.qr_code_scanner_rounded,
         keywords: ['send to pc', 'lan', 'wifi', 'transfer', 'qr', 'http server', 'share'],
         badge: 'PRO',
@@ -260,7 +260,7 @@ Transfer completed downloads directly to any PC, Mac, tablet, or secondary smart
       ),
       _GuideSectionData(
         number: 7,
-        title: 'Download Rules & Auto-Naming',
+        title: AppLocalizations.of(context)!.guideRulesAutoNaming,
         icon: Icons.rule_rounded,
         keywords: ['rules', 'rename', 'template', 'destination', 'tokens', 'auto-route'],
         badge: 'PRO',
@@ -280,7 +280,7 @@ Example: `{host}_{title}_{quality}.{ext}` -> `site.com_Tutorial_1080p.mp4`
       ),
       _GuideSectionData(
         number: 8,
-        title: 'Schedule & Night-Mode Downloading',
+        title: AppLocalizations.of(context)!.guideScheduleNight,
         icon: Icons.schedule_rounded,
         keywords: ['schedule', 'clock', 'night mode', 'timer', 'off-peak'],
         badge: 'PRO',
@@ -294,7 +294,7 @@ Queue downloads to run automatically during off-peak hours or night-time Wi-Fi w
       ),
       _GuideSectionData(
         number: 9,
-        title: 'Ad Blocking & Privacy Engine',
+        title: AppLocalizations.of(context)!.guideAdblockPrivacy,
         icon: Icons.shield_rounded,
         keywords: ['adblock', 'ublock', 'aho-corasick', 'popups', 'element blocker', 'cosmetic'],
         badge: null,
@@ -308,7 +308,7 @@ Queue downloads to run automatically during off-peak hours or night-time Wi-Fi w
       ),
       _GuideSectionData(
         number: 10,
-        title: 'Custom Video Hosts & Extensionless Probes',
+        title: AppLocalizations.of(context)!.guideCustomHosts,
         icon: Icons.domain_rounded,
         keywords: ['video hosts', 'cdn', 'extensionless', 'probe', 'doodstream', 'streamtape', 'head probe'],
         badge: null,
@@ -321,7 +321,7 @@ Certain streaming hosts serve video files using dynamic URLs without explicit `.
       ),
       _GuideSectionData(
         number: 11,
-        title: 'Themes & Accent Color Packs',
+        title: AppLocalizations.of(context)!.guideThemesAccent,
         icon: Icons.palette_outlined,
         keywords: ['theme', 'nord', 'oled', 'accent', 'color', 'dark mode'],
         badge: null,
@@ -333,7 +333,7 @@ Certain streaming hosts serve video files using dynamic URLs without explicit `.
       ),
       _GuideSectionData(
         number: 12,
-        title: 'Encrypted Private Vault',
+        title: AppLocalizations.of(context)!.guidePrivateVault,
         icon: Icons.lock_outline_rounded,
         keywords: ['vault', 'encryption', 'aes-256', 'biometric', 'security', 'flag_secure'],
         badge: 'PRO',
@@ -348,7 +348,7 @@ Certain streaming hosts serve video files using dynamic URLs without explicit `.
       ),
       _GuideSectionData(
         number: 13,
-        title: 'FFmpeg Studio',
+        title: AppLocalizations.of(context)!.guideFfmpegStudio,
         icon: Icons.video_settings_rounded,
         keywords: ['ffmpeg', 'compress', 'convert', 'trim', 'audio extract', 'remux'],
         badge: 'ULTRA',
@@ -362,7 +362,7 @@ Process and edit completed video and audio downloads directly on device without 
       ),
       _GuideSectionData(
         number: 14,
-        title: 'Backup & Database Transfer',
+        title: AppLocalizations.of(context)!.guideBackupTransfer,
         icon: Icons.cloud_sync_rounded,
         keywords: ['backup', 'database', '1dm', '1dmbak', 'restore', 'webdav', 'vault sync', 'cloud', 'e2ee', 'synology', 'nextcloud'],
         badge: null,
@@ -376,7 +376,7 @@ Process and edit completed video and audio downloads directly on device without 
       ),
       _GuideSectionData(
         number: 15,
-        title: 'Watcher (RSS & Page Monitor)',
+        title: AppLocalizations.of(context)!.guideWatcherRss,
         icon: Icons.rss_feed_rounded,
         keywords: ['watcher', 'rss', 'atom', 'monitor', 'feed', 'automation'],
         badge: 'ULTRA',
@@ -390,7 +390,7 @@ Monitor RSS/Atom feeds or web pages for new download links automatically in the 
       ),
       _GuideSectionData(
         number: 16,
-        title: 'Automation API',
+        title: AppLocalizations.of(context)!.guideAutomationApi,
         icon: Icons.api_rounded,
         keywords: ['api', 'rest', 'tasker', 'macrodroid', 'localhost', 'token', 'curl'],
         badge: 'ULTRA',
@@ -403,7 +403,7 @@ Integrate Aurora Downloader with Tasker, MacroDroid, shortcuts, or external scri
       ),
       _GuideSectionData(
         number: 17,
-        title: 'Picture-in-Picture (PiP)',
+        title: AppLocalizations.of(context)!.guidePipMode,
         icon: Icons.picture_in_picture_rounded,
         keywords: ['pip', 'picture in picture', 'floating player', 'video', 'background'],
         badge: null,
@@ -414,7 +414,7 @@ Tap the PiP button in Aurora's built-in media player to shrink video into a floa
       ),
       _GuideSectionData(
         number: 18,
-        title: 'Incognito / Private Mode',
+        title: AppLocalizations.of(context)!.guideIncognitoMode,
         icon: Icons.visibility_off_rounded,
         keywords: ['incognito', 'private', 'history', 'cookies', 'shield'],
         badge: null,
@@ -425,7 +425,7 @@ Toggle Private mode via Settings → Search & Privacy or address bar shield butt
       ),
       _GuideSectionData(
         number: 19,
-        title: 'Build Channels & Feature Tiers',
+        title: AppLocalizations.of(context)!.guideBuildTiers,
         icon: Icons.workspace_premium_rounded,
         keywords: ['pro', 'ultra', 'pricing', 'tiers', 'channels', 'play', 'github', 'billing'],
         badge: null,
@@ -442,7 +442,7 @@ Toggle Private mode via Settings → Search & Privacy or address bar shield butt
       ),
       _GuideSectionData(
         number: 20,
-        title: 'Troubleshooting & FAQ',
+        title: AppLocalizations.of(context)!.guideTroubleshootingFaq,
         icon: Icons.help_outline_rounded,
         keywords: ['troubleshooting', 'faq', 'error', 'failed', 'battery', 'cloudflare', 'refresh link'],
         badge: null,

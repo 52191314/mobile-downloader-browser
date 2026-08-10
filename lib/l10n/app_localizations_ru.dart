@@ -1124,4 +1124,356 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get queueFlatList => 'Плоский список (без разделов)';
+
+  @override
+  String get guideTitle => 'Rukovodstvo';
+
+  @override
+  String get guideSearchHint => 'Poisk v rukovodstve…';
+
+  @override
+  String get guideQuickStart => 'Bystryj start';
+
+  @override
+  String get guideEngineProtocols => 'Dvizhok i protokoly';
+
+  @override
+  String get guideQueueGestures => 'Ochered\' i zhesty';
+
+  @override
+  String get guideBrowserSniffer => 'Vstroennyj brauzer i sniffer';
+
+  @override
+  String get guideSiteProfiles => 'Profili sajtov i paketnyj zachvat';
+
+  @override
+  String get guideSendToPc => 'Otpravka na PK (Wi-Fi)';
+
+  @override
+  String get guideRulesAutoNaming => 'Pravila i avto-imena';
+
+  @override
+  String get guideScheduleNight => 'Raspisanie i nochnoj rezhim';
+
+  @override
+  String get guideAdblockPrivacy => 'Blokirovka reklamy i konfidencial\'nost\'';
+
+  @override
+  String get guideCustomHosts => 'Nastrojka video-hostov';
+
+  @override
+  String get guideThemesAccent => 'Temy i akcentnye cveta';
+
+  @override
+  String get guidePrivateVault => 'Zashchishchennoe khranilishche';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg Studiya';
+
+  @override
+  String get guideBackupTransfer => 'Rezervnoe kopirovanie';
+
+  @override
+  String get guideWatcherRss => 'Nablyudatel\' (RSS i monitoring)';
+
+  @override
+  String get guideAutomationApi => 'API avtomatizacii';
+
+  @override
+  String get guidePipMode => 'Kartinka v kartinke (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'Inkognito / privatnyj rezhim';
+
+  @override
+  String get guideBuildTiers => 'Kanaly sborok i urovni';
+
+  @override
+  String get guideTroubleshootingFaq => 'Ustranenie nepoladok i FAQ';
+
+  @override
+  String get settingsProxy => 'Proksi';
+
+  @override
+  String get settingsProxyNone => 'Net';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => 'Mobil\'nyj (po umolchaniyu)';
+
+  @override
+  String get settingsUaDesktopChrome => 'Desktop Chrome';
+
+  @override
+  String get settingsUaDesktopFirefox => 'Desktop Firefox';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => 'Pol\'zovatel\'skij User-Agent';
+
+  @override
+  String get settingsProfiles => 'Profili';
+
+  @override
+  String get settingsScheduledDownloads => 'Zaplanirovannye zagruzki';
+
+  @override
+  String get settingsAutomationApi => 'API avtomatizacii';
+
+  @override
+  String get settingsEnableAutomation => 'Vklyuchit\' API avtomatizacii';
+
+  @override
+  String get settingsRegenerateToken => 'Peregenerirovat\' token';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'Peregenerirovat\' token?';
+
+  @override
+  String get settingsAboutTitle => 'O prilozhenii';
+
+  @override
+  String get settingsAboutDesc =>
+      'Menedzher zagruzok dlya Android s segmentirovannymi zagruzkami, potokovym video i torrentami.';
+
+  @override
+  String get settingsCheckBattery =>
+      'Proveryat\' optimizaciyu batarei pri zapuske';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'Uvedomlyat\', esli optimizaciya fonovykh zagruzok ne nastroena';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro vosstanovlen.';
+
+  @override
+  String get settingsSnackTray =>
+      'Sokhranit\' v trej dlya posleduyushchego vybora.';
+
+  @override
+  String get settingsSnackImmediate => 'Skachivat\' srazu bez treya.';
+
+  @override
+  String get settingsSnackAsk =>
+      'Sprashivat\' kazhdyj raz pri obnaruzhenii media.';
+
+  @override
+  String get settingsSnackBlock => 'Zablokirovat\' zagruzki s etogo sajta.';
+
+  @override
+  String get settingsDriveSync => 'Sinchronizatsiya s Google Drive';
+
+  @override
+  String get settingsDriveUnavailable => 'Sincronizaciya Drive nedostupna';
+
+  @override
+  String get settingsSetFolder => 'Zadat\' papku';
+
+  @override
+  String get settingsAutoUploadCompleted =>
+      'Avto-zagruzka zavershennykh fajlov';
+
+  @override
+  String get settingsSyncNow => 'Sinkhronizirovat\' sejchas';
+
+  @override
+  String get settingsLinkDrive => 'Privyazat\' Google Drive';
+
+  @override
+  String get settingsResetExtAppsPrompt =>
+      'Sbrosit\' vybor vneshnich prilozhenij?';
+
+  @override
+  String get settingsExtAppsResetDone =>
+      'Vybor vneshnich prilozhenij sbroshen.';
+
+  @override
+  String get settingsExternalApps => 'Vneshnie prilozheniya';
+
+  @override
+  String get settingsBackupBookmarks => 'Zakladki';
+
+  @override
+  String get settingsBackupHistory => 'Istoriya brauzera';
+
+  @override
+  String get settingsBackupSavedPages => 'Sokhranennye stranicy';
+
+  @override
+  String get settingsBackupQueue => 'Istoriya zagruzok';
+
+  @override
+  String get settingsBackupSettings => 'Nastrojki prilozheniya';
+
+  @override
+  String get settingsBackupSessions => 'Sessii i otkrytye vkladki';
+
+  @override
+  String get settingsBackupRules => 'Pravila i organizaciya';
+
+  @override
+  String get settingsBackupImport => 'Importirovat\'';
+
+  @override
+  String get settingsBackupRestoreTitle =>
+      'Rezervnoe kopirovanie i vosstanovlenie';
+
+  @override
+  String get settingsChooseBackupFile => 'Vybrat\' fajl rezerva';
+
+  @override
+  String get settingsAutoBackup => 'Avto-rezervnoe kopirovanie';
+
+  @override
+  String get settingsEnableAutoBackup => 'Vklyuchit\' avto-rezerv';
+
+  @override
+  String get settingsBackupNow => 'Sdat\' rezerv sejchas';
+
+  @override
+  String get settingsRestoreBtn => 'Vosstanovit\'';
+
+  @override
+  String get settingsRulesTitle => 'Pravila zagruzki';
+
+  @override
+  String get settingsAddRule => 'Dobavit\' pravilo';
+
+  @override
+  String get settingsCreateFirstRule => 'Sozdajte pervoe pravilo';
+
+  @override
+  String get settingsCategoryVideo => 'Video';
+
+  @override
+  String get settingsCategoryAudio => 'Audio';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => 'Izobrazhenie';
+
+  @override
+  String get settingsRequireWifi => 'Trebovat\' Wi-Fi';
+
+  @override
+  String get settingsRequireCharging => 'Trebovat\' zaryadki';
+
+  @override
+  String get settingsTimeWindow => 'Vremennoe okno';
+
+  @override
+  String get settingsDeleteRulePrompt => 'Udalit\' pravilo';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'Udalit\' profil\'';
+
+  @override
+  String get settingsNoProfilesYet => 'Net profilej';
+
+  @override
+  String get settingsAddFirstProfile => 'Dobav\'te pervyj profil\'';
+
+  @override
+  String get settingsToolbarSlide1 => 'Slajd 1 (po umolchaniyu)';
+
+  @override
+  String get settingsToolbarSlide2 => 'Slajd 2 (smetnik vlevo)';
+
+  @override
+  String get settingsResetToolbarDefault => 'Sbrosit\' panel\' po umolchaniyu';
+
+  @override
+  String get ffmpegCompressVideo => 'Szhat\' video';
+
+  @override
+  String get ffmpegTrimVideo => 'Obrezat\' video';
+
+  @override
+  String get ffmpegExtractAudio => 'Izvlech\' audio';
+
+  @override
+  String get ffmpegRemuxMp4 => 'Perepakovat\' v MP4';
+
+  @override
+  String get ffmpegCreateGif => 'Sozdat\' GIF';
+
+  @override
+  String get ffmpegSourceFile => 'Ishodnyj fajl';
+
+  @override
+  String get ffmpegOperation => 'Operaciya';
+
+  @override
+  String get ffmpegQueuedOps => 'Operacii v ocheredi';
+
+  @override
+  String get vaultDeleteFromVault => 'Udalit\' iz khranilishcha?';
+
+  @override
+  String get vaultNothingToImport => 'Nechego importirovat\'';
+
+  @override
+  String get vaultImportTitle => 'Importirovat\' v khranilishche';
+
+  @override
+  String get vaultDeleteOriginal => 'Udalit\' original posle shifrovaniya';
+
+  @override
+  String get vaultLockedTitle => 'Khranilishche zablokirovano';
+
+  @override
+  String get vaultUnlockBtn => 'Razblokirovat\'';
+
+  @override
+  String get vaultEmptyTitle => 'Khranilishche pusto';
+
+  @override
+  String get vaultEmptyDesc => 'Peremestite skachennye fajly syuda';
+
+  @override
+  String get vaultAddFiles => 'Dobavit\' fajly';
+
+  @override
+  String get watcherAddWatch => 'Dobavit\' nablyudenie';
+
+  @override
+  String get watcherAddFirstWatch => 'Dobav\'te pervoe nablyudenie';
+
+  @override
+  String get watcherCheckNow => 'Proverit\' sejchas';
+
+  @override
+  String get watcherRssFeed => 'RSS-lenta';
+
+  @override
+  String get watcherWebPage => 'Web-stranica';
+
+  @override
+  String get watcherDeleteRulePrompt => 'Udalit\' pravilo nablyudeniya';
+
+  @override
+  String get webdavServerUrl => 'URL servera';
+
+  @override
+  String get webdavUsername => 'Imya pol\'zovatelya';
+
+  @override
+  String get webdavPassword => 'Parol\'';
+
+  @override
+  String get webdavUploadBackupNow => 'Zagruzit\' rezerv sejchas';
+
+  @override
+  String get webdavRemoteBackups => 'Udalennye rezervnye kopii';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'Poka net rezervnykh kopij. Nazhmite knopku zagruzki.';
 }

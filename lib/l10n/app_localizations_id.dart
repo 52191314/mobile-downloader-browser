@@ -1120,4 +1120,354 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get queueFlatList => 'Daftar datar (tanpa bagian)';
+
+  @override
+  String get guideTitle => 'Panduan Pengguna';
+
+  @override
+  String get guideSearchHint => 'Cari panduan…';
+
+  @override
+  String get guideQuickStart => 'Mulai Cepat';
+
+  @override
+  String get guideEngineProtocols => 'Mesin Download & Protokol';
+
+  @override
+  String get guideQueueGestures => 'Halaman Antrean & Gestur';
+
+  @override
+  String get guideBrowserSniffer => 'Browser & Sniffer Bawaan';
+
+  @override
+  String get guideSiteProfiles => 'Profil Situs & Grabber Batch';
+
+  @override
+  String get guideSendToPc => 'Kirim ke PC (Transfer Wi-Fi)';
+
+  @override
+  String get guideRulesAutoNaming => 'Aturan Download & Penamaan Otomatis';
+
+  @override
+  String get guideScheduleNight => 'Jadwal & Download Mode Malam';
+
+  @override
+  String get guideAdblockPrivacy => 'Blokir Iklan & Mesin Privasi';
+
+  @override
+  String get guideCustomHosts => 'Host Video Kustom';
+
+  @override
+  String get guideThemesAccent => 'Tema & Paket Warna Aksen';
+
+  @override
+  String get guidePrivateVault => 'Brankas Pribadi Terenkripsi';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg Studio';
+
+  @override
+  String get guideBackupTransfer => 'Cadangan & Transfer Database';
+
+  @override
+  String get guideWatcherRss => 'Watcher (RSS & Pemantau Halaman)';
+
+  @override
+  String get guideAutomationApi => 'API Otomatisasi';
+
+  @override
+  String get guidePipMode => 'Picture-in-Picture (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'Mode Penyamaran / Pribadi';
+
+  @override
+  String get guideBuildTiers => 'Saluran Build & Tingkat Fitur';
+
+  @override
+  String get guideTroubleshootingFaq => 'Pemecahan Masalah & FAQ';
+
+  @override
+  String get settingsProxy => 'Proksi';
+
+  @override
+  String get settingsProxyNone => 'Tidak Ada';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => 'Seluler (default)';
+
+  @override
+  String get settingsUaDesktopChrome => 'Chrome Desktop';
+
+  @override
+  String get settingsUaDesktopFirefox => 'Firefox Desktop';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => 'User-Agent Kustom';
+
+  @override
+  String get settingsProfiles => 'Profil';
+
+  @override
+  String get settingsScheduledDownloads => 'Download Terjadwal';
+
+  @override
+  String get settingsAutomationApi => 'API Otomatisasi';
+
+  @override
+  String get settingsEnableAutomation => 'Aktifkan API Otomatisasi';
+
+  @override
+  String get settingsRegenerateToken => 'Regenerasi Token';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'Regenerasi Token?';
+
+  @override
+  String get settingsAboutTitle => 'Tentang';
+
+  @override
+  String get settingsAboutDesc =>
+      'Pengelola download Android dengan download tersegmentasi, streaming video, torrent, dan deteksi media.';
+
+  @override
+  String get settingsCheckBattery => 'Cek optimasi baterai saat mulai';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'Beri tahu jika optimasi download latar belakang belum dikonfigurasi';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro dipulihkan.';
+
+  @override
+  String get settingsSnackTray =>
+      'Simpan ke baki. Aurora menyimpan daftar agar Anda dapat memilih nanti.';
+
+  @override
+  String get settingsSnackImmediate =>
+      'Download langsung. Lewati baki dan mulai mengambil segera.';
+
+  @override
+  String get settingsSnackAsk => 'Tanyakan setiap kali media terdeteksi.';
+
+  @override
+  String get settingsSnackBlock => 'Blokir download dari situs ini.';
+
+  @override
+  String get settingsDriveSync => 'Sinkronisasi Google Drive';
+
+  @override
+  String get settingsDriveUnavailable => 'Sinkronisasi Drive tidak tersedia';
+
+  @override
+  String get settingsSetFolder => 'Atur folder';
+
+  @override
+  String get settingsAutoUploadCompleted => 'Unggah otomatis file yang selesai';
+
+  @override
+  String get settingsSyncNow => 'Sinkronkan sekarang';
+
+  @override
+  String get settingsLinkDrive => 'Hubungkan Google Drive';
+
+  @override
+  String get settingsResetExtAppsPrompt =>
+      'Reset semua pilihan aplikasi eksternal?';
+
+  @override
+  String get settingsExtAppsResetDone =>
+      'Semua pilihan aplikasi eksternal direset.';
+
+  @override
+  String get settingsExternalApps => 'Aplikasi Eksternal';
+
+  @override
+  String get settingsBackupBookmarks => 'Favorit / Bookmark';
+
+  @override
+  String get settingsBackupHistory => 'Riwayat Web';
+
+  @override
+  String get settingsBackupSavedPages => 'Halaman Tersimpan';
+
+  @override
+  String get settingsBackupQueue => 'Riwayat Download';
+
+  @override
+  String get settingsBackupSettings => 'Pengaturan Aplikasi';
+
+  @override
+  String get settingsBackupSessions => 'Sesi Browser & Tab Terbuka';
+
+  @override
+  String get settingsBackupRules => 'Aturan & Organisasi Download';
+
+  @override
+  String get settingsBackupImport => 'Impor';
+
+  @override
+  String get settingsBackupRestoreTitle => 'Cadangan & Pulihkan';
+
+  @override
+  String get settingsChooseBackupFile => 'Pilih file cadangan';
+
+  @override
+  String get settingsAutoBackup => 'Cadangan Otomatis';
+
+  @override
+  String get settingsEnableAutoBackup => 'Aktifkan cadangan otomatis';
+
+  @override
+  String get settingsBackupNow => 'Cadangkan sekarang';
+
+  @override
+  String get settingsRestoreBtn => 'Pulihkan';
+
+  @override
+  String get settingsRulesTitle => 'Aturan Download';
+
+  @override
+  String get settingsAddRule => 'Tambah Aturan';
+
+  @override
+  String get settingsCreateFirstRule => 'Buat aturan pertama Anda';
+
+  @override
+  String get settingsCategoryVideo => 'Video';
+
+  @override
+  String get settingsCategoryAudio => 'Audio';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => 'Gambar';
+
+  @override
+  String get settingsRequireWifi => 'Perlukan Wi-Fi';
+
+  @override
+  String get settingsRequireCharging => 'Perlukan pengisian daya';
+
+  @override
+  String get settingsTimeWindow => 'Jendela waktu';
+
+  @override
+  String get settingsDeleteRulePrompt => 'Hapus Aturan';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'Hapus Profil';
+
+  @override
+  String get settingsNoProfilesYet => 'Belum ada profil';
+
+  @override
+  String get settingsAddFirstProfile => 'Tambah profil pertama Anda';
+
+  @override
+  String get settingsToolbarSlide1 => 'Slide 1 (default)';
+
+  @override
+  String get settingsToolbarSlide2 => 'Slide 2 (usap ke kiri)';
+
+  @override
+  String get settingsResetToolbarDefault => 'Reset bilah alat ke default';
+
+  @override
+  String get ffmpegCompressVideo => 'Kompres Video';
+
+  @override
+  String get ffmpegTrimVideo => 'Potong Video';
+
+  @override
+  String get ffmpegExtractAudio => 'Ekstrak Audio';
+
+  @override
+  String get ffmpegRemuxMp4 => 'Remux ke MP4';
+
+  @override
+  String get ffmpegCreateGif => 'Buat GIF';
+
+  @override
+  String get ffmpegSourceFile => 'File sumber';
+
+  @override
+  String get ffmpegOperation => 'Operasi';
+
+  @override
+  String get ffmpegQueuedOps => 'Operasi dalam antrean';
+
+  @override
+  String get vaultDeleteFromVault => 'Hapus dari brankas?';
+
+  @override
+  String get vaultNothingToImport => 'Tidak ada yang diimpor';
+
+  @override
+  String get vaultImportTitle => 'Impor ke Brankas Pribadi';
+
+  @override
+  String get vaultDeleteOriginal => 'Hapus asli setelah dienkripsi';
+
+  @override
+  String get vaultLockedTitle => 'Brankas terkunci';
+
+  @override
+  String get vaultUnlockBtn => 'Buka kunci';
+
+  @override
+  String get vaultEmptyTitle => 'Brankas kosong';
+
+  @override
+  String get vaultEmptyDesc =>
+      'Pindahkan file terunduh ke sini agar tetap pribadi';
+
+  @override
+  String get vaultAddFiles => 'Tambah file';
+
+  @override
+  String get watcherAddWatch => 'Tambah Watch';
+
+  @override
+  String get watcherAddFirstWatch => 'Tambah watch pertama Anda';
+
+  @override
+  String get watcherCheckNow => 'Periksa sekarang';
+
+  @override
+  String get watcherRssFeed => 'Feed RSS';
+
+  @override
+  String get watcherWebPage => 'Halaman Web';
+
+  @override
+  String get watcherDeleteRulePrompt => 'Hapus Aturan Watch';
+
+  @override
+  String get webdavServerUrl => 'URL Server';
+
+  @override
+  String get webdavUsername => 'Nama pengguna';
+
+  @override
+  String get webdavPassword => 'Kata sandi';
+
+  @override
+  String get webdavUploadBackupNow => 'Unggah cadangan sekarang';
+
+  @override
+  String get webdavRemoteBackups => 'Cadangan jarak jauh';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'Belum ada cadangan. Ketuk tombol unggah untuk membuatnya.';
 }

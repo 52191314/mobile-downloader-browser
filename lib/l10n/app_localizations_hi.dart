@@ -1122,4 +1122,357 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get queueFlatList => 'सपाट सूची (कोई अनुभाग नहीं)';
+
+  @override
+  String get guideTitle => 'उपयोगकर्ता पुस्तिका';
+
+  @override
+  String get guideSearchHint => 'मार्गदर्शिका खोजें…';
+
+  @override
+  String get guideQuickStart => 'त्वरित प्रारंभ';
+
+  @override
+  String get guideEngineProtocols => 'डाउनलोड इंजन और प्रोटोकॉल';
+
+  @override
+  String get guideQueueGestures => 'कतार पृष्ठ और इशारे';
+
+  @override
+  String get guideBrowserSniffer => 'अंतर्निहित ब्राउज़र और स्निफ़र';
+
+  @override
+  String get guideSiteProfiles => 'साइट प्रोफाइल और बैच ग्रैबर';
+
+  @override
+  String get guideSendToPc => 'पीसी पर भेजें (वाई-फाई ट्रांसफर)';
+
+  @override
+  String get guideRulesAutoNaming => 'डाउनलोड नियम और स्वचालित नामकरण';
+
+  @override
+  String get guideScheduleNight => 'अनुसूची और रात मोड डाउनलोडिंग';
+
+  @override
+  String get guideAdblockPrivacy => 'विज्ञापन अवरोधन और गोपनीयता इंजन';
+
+  @override
+  String get guideCustomHosts => 'कस्टम वीडियो होस्ट';
+
+  @override
+  String get guideThemesAccent => 'थीम और रंग पैक';
+
+  @override
+  String get guidePrivateVault => 'एनक्रिप्टेड प्राइवेट वॉल्ट';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg स्टूडियो';
+
+  @override
+  String get guideBackupTransfer => 'बैकअप और डेटाबेस ट्रांसफर';
+
+  @override
+  String get guideWatcherRss => 'वाचर (आरएसएस और पेज मॉनिटर)';
+
+  @override
+  String get guideAutomationApi => 'ऑटोमेशन एपीआई';
+
+  @override
+  String get guidePipMode => 'पिक्चर-इन-पिक्चर (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'इन्कॉगनिमो / प्राइवेट मोड';
+
+  @override
+  String get guideBuildTiers => 'बिल्ड चैनल और फीचर टियर';
+
+  @override
+  String get guideTroubleshootingFaq =>
+      'समस्या निवारण और अक्सर पूछे जाने वाले प्रश्न';
+
+  @override
+  String get settingsProxy => 'प्रोक्सी';
+
+  @override
+  String get settingsProxyNone => 'कोई नहीं';
+
+  @override
+  String get settingsUserAgent => 'यूज़र-एजेंट';
+
+  @override
+  String get settingsUaMobile => 'मोबाइल (डिफ़ॉल्ट)';
+
+  @override
+  String get settingsUaDesktopChrome => 'डेस्कटॉप क्रोम';
+
+  @override
+  String get settingsUaDesktopFirefox => 'डेस्कटॉप फ़ायरफ़ॉक्स';
+
+  @override
+  String get settingsUaSafari => 'सफ़ारी';
+
+  @override
+  String get settingsUaCustom => 'कस्टम यूज़र-एजेंट';
+
+  @override
+  String get settingsProfiles => 'प्रोफ़ाइल';
+
+  @override
+  String get settingsScheduledDownloads => 'अनुसूचित डाउनलोड';
+
+  @override
+  String get settingsAutomationApi => 'ऑटोमेशन एपीआई';
+
+  @override
+  String get settingsEnableAutomation => 'ऑटोमेशन एपीआई सक्षम करें';
+
+  @override
+  String get settingsRegenerateToken => 'टोकन को पुनर्जन्म करें';
+
+  @override
+  String get settingsRegenerateTokenPrompt =>
+      'क्या टोकन को पुनर्जन्म करना चाहते हैं?';
+
+  @override
+  String get settingsAboutTitle => 'के बारे में';
+
+  @override
+  String get settingsAboutDesc =>
+      'सेगमेंटेड डाउनलोड, स्ट्रीमिंग वीडियो, टोरेंट और ब्राउज़र मीडिया डिटेक्शन वाला एंड्रॉइड डाउनलोड मैनेजर।';
+
+  @override
+  String get settingsCheckBattery => 'स्टार्टअप पर बैटरी अनुकूलन जांचें';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'यदि बैकग्राउंड डाउनलोड अनुकूलन कॉन्फ़िगर नहीं हैं तो सूचित करें';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro पुनर्स्थापित।';
+
+  @override
+  String get settingsSnackTray =>
+      'ट्रे में सहेजें। Aurora एक सूची रखता है ताकि आप बाद में चुन सकें।';
+
+  @override
+  String get settingsSnackImmediate =>
+      'तुरंत डाउनलोड करें। तुरंत प्राप्त करना शुरू करें।';
+
+  @override
+  String get settingsSnackAsk => 'हर बार पूछें जब मीडिया का पता चले।';
+
+  @override
+  String get settingsSnackBlock => 'इस साइट से डाउनलोड ब्लॉक करें।';
+
+  @override
+  String get settingsDriveSync => 'गूगल ड्राइव सिंक';
+
+  @override
+  String get settingsDriveUnavailable => 'ड्राइव सिंक अनुपलब्ध';
+
+  @override
+  String get settingsSetFolder => 'फ़ोल्डर सेट करें';
+
+  @override
+  String get settingsAutoUploadCompleted =>
+      'पूर्ण फ़ाइलों को स्वचालित अपलोड करें';
+
+  @override
+  String get settingsSyncNow => 'अभी सिंक करें';
+
+  @override
+  String get settingsLinkDrive => 'गूगल ड्राइव लिंक करें';
+
+  @override
+  String get settingsResetExtAppsPrompt =>
+      'क्या सभी बाहरी ऐप विकल्प रीसेट करें?';
+
+  @override
+  String get settingsExtAppsResetDone =>
+      'सभी बाहरी ऐप विकल्प रीसेट कर दिए गए हैं।';
+
+  @override
+  String get settingsExternalApps => 'बाहरी ऐप्स';
+
+  @override
+  String get settingsBackupBookmarks => 'पसंदीदा / बुकमार्क';
+
+  @override
+  String get settingsBackupHistory => 'वेब इतिहास';
+
+  @override
+  String get settingsBackupSavedPages => 'सहेजे गए पृष्ठ';
+
+  @override
+  String get settingsBackupQueue => 'डाउनलोड इतिहास';
+
+  @override
+  String get settingsBackupSettings => 'ऐप सेटिंग्स';
+
+  @override
+  String get settingsBackupSessions => 'ब्राउज़र सत्र और खुले टैब';
+
+  @override
+  String get settingsBackupRules => 'डाउनलोड नियम और संगठन';
+
+  @override
+  String get settingsBackupImport => 'आयात';
+
+  @override
+  String get settingsBackupRestoreTitle => 'बैकअप और पुनर्स्थापना';
+
+  @override
+  String get settingsChooseBackupFile => 'बैकअप फ़ाइल चुनें';
+
+  @override
+  String get settingsAutoBackup => 'स्वचालित बैकअप';
+
+  @override
+  String get settingsEnableAutoBackup => 'स्वचालित बैकअप सक्षम करें';
+
+  @override
+  String get settingsBackupNow => 'अभी बैकअप लें';
+
+  @override
+  String get settingsRestoreBtn => 'पुनर्स्थापित करें';
+
+  @override
+  String get settingsRulesTitle => 'डाउनलोड नियम';
+
+  @override
+  String get settingsAddRule => 'नियम जोड़ें';
+
+  @override
+  String get settingsCreateFirstRule => 'अपना पहला नियम बनाएं';
+
+  @override
+  String get settingsCategoryVideo => 'वीडियो';
+
+  @override
+  String get settingsCategoryAudio => 'ऑडियो';
+
+  @override
+  String get settingsCategoryHls => 'एचएलएस';
+
+  @override
+  String get settingsCategoryImage => 'इमेज';
+
+  @override
+  String get settingsRequireWifi => 'वाई-फ़ाई की आवश्यकता';
+
+  @override
+  String get settingsRequireCharging => 'चार्जिंग की आवश्यकता';
+
+  @override
+  String get settingsTimeWindow => 'समय विंडो';
+
+  @override
+  String get settingsDeleteRulePrompt => 'नियम हटाएं';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'प्रोफ़ाइल हटाएं';
+
+  @override
+  String get settingsNoProfilesYet => 'अभी कोई प्रोफ़ाइल नहीं है';
+
+  @override
+  String get settingsAddFirstProfile => 'अपना पहला प्रोफ़ाइल जोड़ें';
+
+  @override
+  String get settingsToolbarSlide1 => 'स्लाइड 1 (दिसंबर)';
+
+  @override
+  String get settingsToolbarSlide2 => 'स्लाइड 2 (बाईं ओर स्वाइप)';
+
+  @override
+  String get settingsResetToolbarDefault => 'टूलबार को डिफ़ॉल्ट पर रीसेट करें';
+
+  @override
+  String get ffmpegCompressVideo => 'वीडियो कंप्रेस करें';
+
+  @override
+  String get ffmpegTrimVideo => 'वीडियो ट्रिम करें';
+
+  @override
+  String get ffmpegExtractAudio => 'ऑडियो निकालें';
+
+  @override
+  String get ffmpegRemuxMp4 => 'MP4 में रीमिक्स करें';
+
+  @override
+  String get ffmpegCreateGif => 'GIF बनाएं';
+
+  @override
+  String get ffmpegSourceFile => 'स्रोत फ़ाइल';
+
+  @override
+  String get ffmpegOperation => 'ऑपरेशन';
+
+  @override
+  String get ffmpegQueuedOps => 'कतारबद्ध संचालन';
+
+  @override
+  String get vaultDeleteFromVault => 'वॉल्ट से हटाएं?';
+
+  @override
+  String get vaultNothingToImport => 'आयात करने के लिए कुछ नहीं';
+
+  @override
+  String get vaultImportTitle => 'प्राइवेट वॉल्ट में आयात करें';
+
+  @override
+  String get vaultDeleteOriginal => 'एनक्रिप्ट करने के बाद मूल हटाएं';
+
+  @override
+  String get vaultLockedTitle => 'वॉल्ट लॉक है';
+
+  @override
+  String get vaultUnlockBtn => 'अनलाॉक करें';
+
+  @override
+  String get vaultEmptyTitle => 'वॉल्ट खाली है';
+
+  @override
+  String get vaultEmptyDesc =>
+      'उन्हें निजी रखने के लिए डाउनलोड की गई फ़ाइलों को यहां स्थानांतरित करें';
+
+  @override
+  String get vaultAddFiles => 'फ़ाइलें जोड़ें';
+
+  @override
+  String get watcherAddWatch => 'वाच जोड़ें';
+
+  @override
+  String get watcherAddFirstWatch => 'अपना पहला वाच जोड़ें';
+
+  @override
+  String get watcherCheckNow => 'अभी जांचें';
+
+  @override
+  String get watcherRssFeed => 'आरएसएस फीड';
+
+  @override
+  String get watcherWebPage => 'वेब पेज';
+
+  @override
+  String get watcherDeleteRulePrompt => 'वाच नियम हटाएं';
+
+  @override
+  String get webdavServerUrl => 'सर्वर यूआरएल';
+
+  @override
+  String get webdavUsername => 'उपयोगकर्ता नाम';
+
+  @override
+  String get webdavPassword => 'पासवर्ड';
+
+  @override
+  String get webdavUploadBackupNow => 'अभी बैकअप अपलोड करें';
+
+  @override
+  String get webdavRemoteBackups => 'रिमोट बैकअप';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'अभी तक कोई बैकअप नहीं है। एक बनाने के लिए अपलोड बटन दबाएं।';
 }

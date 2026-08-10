@@ -311,7 +311,7 @@ class _WatcherPageState extends State<WatcherPage> {
                       labelText: 'Type',
                       isDense: true,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                           value: WatchKind.rss, child: Text('RSS Feed')),
                       DropdownMenuItem(
@@ -339,7 +339,7 @@ class _WatcherPageState extends State<WatcherPage> {
                       labelText: 'Check interval',
                       isDense: true,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(value: 30, child: Text('30 minutes')),
                       DropdownMenuItem(value: 60, child: Text('1 hour')),
                       DropdownMenuItem(value: 120, child: Text('2 hours')),
@@ -412,7 +412,7 @@ class _WatcherPageState extends State<WatcherPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Watch Rule'),
+        title: Text(AppLocalizations.of(context)!.watcherDeleteRulePrompt),
         content: Text('Delete "${rule.label ?? rule.url}"?'),
         actions: [
           TextButton(

@@ -1123,4 +1123,355 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get queueFlatList => 'قائمة مسطحة (بدون أقسام)';
+
+  @override
+  String get guideTitle => 'دليل المستخدم';
+
+  @override
+  String get guideSearchHint => 'بحث في الدليل…';
+
+  @override
+  String get guideQuickStart => 'البداية السريعة';
+
+  @override
+  String get guideEngineProtocols => 'محرك التنزيل والبروتوكولات';
+
+  @override
+  String get guideQueueGestures => 'صفحة قائمة الانتظار والإيماءات';
+
+  @override
+  String get guideBrowserSniffer => 'المتصفح والمستكشف المدمج';
+
+  @override
+  String get guideSiteProfiles => 'ملفات تعريف المواقع والتنزيل الدفعي';
+
+  @override
+  String get guideSendToPc => 'إرسال إلى الكمبيوتر (Wi-Fi)';
+
+  @override
+  String get guideRulesAutoNaming => 'قواعد التنزيل التسمية التلقائية';
+
+  @override
+  String get guideScheduleNight => 'الجدولة والتنزيل في الليل';
+
+  @override
+  String get guideAdblockPrivacy => 'حظر الإعلانات ومحرك الخصوصية';
+
+  @override
+  String get guideCustomHosts => 'مضيفو الفيديو المخصصون';
+
+  @override
+  String get guideThemesAccent => 'المظاهر وحزم الألوان';
+
+  @override
+  String get guidePrivateVault => 'الخزنة الخاصة المشفرة';
+
+  @override
+  String get guideFfmpegStudio => 'استوديو FFmpeg';
+
+  @override
+  String get guideBackupTransfer => 'النسخ الاحتياطي ونقل البيانات';
+
+  @override
+  String get guideWatcherRss => 'المراقب (RSS ومراقبة الصفحات)';
+
+  @override
+  String get guideAutomationApi => 'واجهة برمجة التطبيقات للأتمتة';
+
+  @override
+  String get guidePipMode => 'صورة داخل صورة (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'وضع التصفح الخفي / الخاص';
+
+  @override
+  String get guideBuildTiers => 'قنوات البناء ومستويات الميزات';
+
+  @override
+  String get guideTroubleshootingFaq =>
+      'استكشاف الأخطاء وإصلاحها والأسئلة الشائعة';
+
+  @override
+  String get settingsProxy => 'الوكيل';
+
+  @override
+  String get settingsProxyNone => 'لا يوجد';
+
+  @override
+  String get settingsUserAgent => 'وكيل المستخدم';
+
+  @override
+  String get settingsUaMobile => 'الجوال (الافتراضي)';
+
+  @override
+  String get settingsUaDesktopChrome => 'كروم لسطح المكتب';
+
+  @override
+  String get settingsUaDesktopFirefox => 'فايرفوكس لسطح المكتب';
+
+  @override
+  String get settingsUaSafari => 'سفاري';
+
+  @override
+  String get settingsUaCustom => 'وكيل مستخدم مخصص';
+
+  @override
+  String get settingsProfiles => 'ملفات التعريف';
+
+  @override
+  String get settingsScheduledDownloads => 'التنزيلات المجدولة';
+
+  @override
+  String get settingsAutomationApi => 'واجهة برمجة التطبيقات للأتمتة';
+
+  @override
+  String get settingsEnableAutomation => 'تمكين واجهة برمجة التطبيقات للأتمتة';
+
+  @override
+  String get settingsRegenerateToken => 'إعادة إنشاء الرمز المميز';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'إعادة إنشاء الرمز المميز؟';
+
+  @override
+  String get settingsAboutTitle => 'حول';
+
+  @override
+  String get settingsAboutDesc =>
+      'مدير تنزيل لأندرويد مع تنزيلات مجزأة وفيديو وتورنت واكتشاف وسائط المتصفح.';
+
+  @override
+  String get settingsCheckBattery => 'فحص تحسين البطارية عند التشغيل';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'الإشعار إذا لم يتم تكوين تحسينات التنزيل في الخلفية';
+
+  @override
+  String get settingsProRestored => 'تم استعادة Aurora Pro.';
+
+  @override
+  String get settingsSnackTray =>
+      'حفظ في اللوحة. يحتفظ Aurora بقائمة لتحديد ما تريد تنزيله لاحقًا.';
+
+  @override
+  String get settingsSnackImmediate => 'التنزيل فورًا. ابدأ الجلب على الفور.';
+
+  @override
+  String get settingsSnackAsk => 'السؤال في كل مرة يتم فيها اكتشاف وسائط.';
+
+  @override
+  String get settingsSnackBlock => 'حظر التنزيلات من هذا الموقع.';
+
+  @override
+  String get settingsDriveSync => 'مزامنة Google Drive';
+
+  @override
+  String get settingsDriveUnavailable => 'مزامنة الدليل غير متوفرة';
+
+  @override
+  String get settingsSetFolder => 'تعيين المجلد';
+
+  @override
+  String get settingsAutoUploadCompleted => 'تحميل الملفات المكتملة تلقائيًا';
+
+  @override
+  String get settingsSyncNow => 'مزامنة الآن';
+
+  @override
+  String get settingsLinkDrive => 'ربط Google Drive';
+
+  @override
+  String get settingsResetExtAppsPrompt =>
+      'إعادة تعيين جميع خيارات التطبيقات الخارجية؟';
+
+  @override
+  String get settingsExtAppsResetDone =>
+      'تمت إعادة تعيين جميع خيارات التطبيقات الخارجية.';
+
+  @override
+  String get settingsExternalApps => 'التطبيقات الخارجية';
+
+  @override
+  String get settingsBackupBookmarks => 'المفضلة / الإشارات المرجعية';
+
+  @override
+  String get settingsBackupHistory => 'سجل الويب';
+
+  @override
+  String get settingsBackupSavedPages => 'الصفحات المحفوظة';
+
+  @override
+  String get settingsBackupQueue => 'سجل التنزيلات';
+
+  @override
+  String get settingsBackupSettings => 'إعدادات التطبيق';
+
+  @override
+  String get settingsBackupSessions => 'جلسات المتصفح وعلامات التبويب المفتوحة';
+
+  @override
+  String get settingsBackupRules => 'قواعد التنزيل والتنظيم';
+
+  @override
+  String get settingsBackupImport => 'استيراد';
+
+  @override
+  String get settingsBackupRestoreTitle => 'النسخ الاحتياطي والاستعادة';
+
+  @override
+  String get settingsChooseBackupFile => 'اختر ملف النسخة الاحتياطية';
+
+  @override
+  String get settingsAutoBackup => 'النسخ الاحتياطي التلقائي';
+
+  @override
+  String get settingsEnableAutoBackup => 'تمكين النسخ الاحتياطي التلقائي';
+
+  @override
+  String get settingsBackupNow => 'نسخ احتياطي الآن';
+
+  @override
+  String get settingsRestoreBtn => 'استعادة';
+
+  @override
+  String get settingsRulesTitle => 'قواعد التنزيل';
+
+  @override
+  String get settingsAddRule => 'إضافة قاعدة';
+
+  @override
+  String get settingsCreateFirstRule => 'أنشئ قاعدتك الأولى';
+
+  @override
+  String get settingsCategoryVideo => 'فيديو';
+
+  @override
+  String get settingsCategoryAudio => 'صوت';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => 'صورة';
+
+  @override
+  String get settingsRequireWifi => 'تطلب Wi-Fi';
+
+  @override
+  String get settingsRequireCharging => 'تطلب الشحن';
+
+  @override
+  String get settingsTimeWindow => 'إطار زمني';
+
+  @override
+  String get settingsDeleteRulePrompt => 'حذف القاعدة';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'حذف ملف التعريف';
+
+  @override
+  String get settingsNoProfilesYet => 'لا توجد ملفات تعريف بعد';
+
+  @override
+  String get settingsAddFirstProfile => 'أضف ملفك الشخصي الأول';
+
+  @override
+  String get settingsToolbarSlide1 => 'الشريحة 1 (الافتراضي)';
+
+  @override
+  String get settingsToolbarSlide2 => 'الشريحة 2 (السحب لليسار)';
+
+  @override
+  String get settingsResetToolbarDefault =>
+      'إعادة تعيين شريط الأدوات إلى الافتراضي';
+
+  @override
+  String get ffmpegCompressVideo => 'ضغط الفيديو';
+
+  @override
+  String get ffmpegTrimVideo => 'قص الفيديو';
+
+  @override
+  String get ffmpegExtractAudio => 'استخراج الصوت';
+
+  @override
+  String get ffmpegRemuxMp4 => 'تحويل الحاوية إلى MP4';
+
+  @override
+  String get ffmpegCreateGif => 'إنشاء GIF';
+
+  @override
+  String get ffmpegSourceFile => 'الملف المصدر';
+
+  @override
+  String get ffmpegOperation => 'العملية';
+
+  @override
+  String get ffmpegQueuedOps => 'العمليات المجدولة';
+
+  @override
+  String get vaultDeleteFromVault => 'الحذف من الخزنة؟';
+
+  @override
+  String get vaultNothingToImport => 'لا يوجد شيء للاسـتيراد';
+
+  @override
+  String get vaultImportTitle => 'استيراد إلى الخزنة الخاصة';
+
+  @override
+  String get vaultDeleteOriginal => 'حذف الأصل بعد التشفير';
+
+  @override
+  String get vaultLockedTitle => 'الخزنة مقفلة';
+
+  @override
+  String get vaultUnlockBtn => 'فتح القفل';
+
+  @override
+  String get vaultEmptyTitle => 'الخزنة فارغة';
+
+  @override
+  String get vaultEmptyDesc =>
+      'انقل الملفات المُنَزَّلة هنا للحفاظ على خصوصيتها';
+
+  @override
+  String get vaultAddFiles => 'إضافة ملفات';
+
+  @override
+  String get watcherAddWatch => 'إضافة مراقبة';
+
+  @override
+  String get watcherAddFirstWatch => 'أضف مراقبتك الأولى';
+
+  @override
+  String get watcherCheckNow => 'الفحص الآن';
+
+  @override
+  String get watcherRssFeed => 'تغذية RSS';
+
+  @override
+  String get watcherWebPage => 'صفحة ويب';
+
+  @override
+  String get watcherDeleteRulePrompt => 'حذف قاعدة المراقبة';
+
+  @override
+  String get webdavServerUrl => 'عنوان URL للخادم';
+
+  @override
+  String get webdavUsername => 'اسم المستخدم';
+
+  @override
+  String get webdavPassword => 'كلمة المرور';
+
+  @override
+  String get webdavUploadBackupNow => 'تحميل النسخة الاحتياطية الآن';
+
+  @override
+  String get webdavRemoteBackups => 'النسخ الاحتياطية البعيدة';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'لا توجد نسخ احتياطية بعد. انقر على زر التحميل لإنشاء واحدة.';
 }

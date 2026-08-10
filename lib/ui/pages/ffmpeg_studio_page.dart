@@ -282,7 +282,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
             padding: const EdgeInsets.all(16),
             children: [
               // File selector
-              PanelHeader(icon: Icons.video_file_outlined, title: 'Source file'),
+              PanelHeader(icon: Icons.video_file_outlined, title: AppLocalizations.of(context)!.ffmpegSourceFile),
               const SizedBox(height: 8),
               Panel(
                 child: _buildItemSelector(item),
@@ -290,7 +290,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
               const SizedBox(height: 16),
 
               // Operation selector
-              PanelHeader(icon: Icons.tune, title: 'Operation'),
+              PanelHeader(icon: Icons.tune, title: AppLocalizations.of(context)!.ffmpegOperation),
               const SizedBox(height: 8),
               Panel(
                 child: Column(
@@ -349,7 +349,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
               if (widget.ffmpegService.pending.isNotEmpty) ...[
                 const SizedBox(height: 20),
                 PanelHeader(
-                    icon: Icons.queue_play_next, title: 'Queued operations'),
+                    icon: Icons.queue_play_next, title: AppLocalizations.of(context)!.ffmpegQueuedOps),
                 const SizedBox(height: 8),
                 Panel(
                   child: Column(
@@ -436,7 +436,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
           labelText: 'Operation',
           isDense: true,
         ),
-        items: const [
+        items: [
           DropdownMenuItem(
               value: FfmpegOp.compress, child: Text('Compress Video')),
           DropdownMenuItem(value: FfmpegOp.trim, child: Text('Trim Video')),
@@ -486,7 +486,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
             value: _preset,
             isExpanded: true,
             decoration: const InputDecoration(isDense: true),
-            items: const [
+            items: [
               DropdownMenuItem(value: 'ultrafast', child: Text('Ultrafast')),
               DropdownMenuItem(value: 'superfast', child: Text('Superfast')),
               DropdownMenuItem(value: 'veryfast', child: Text('Veryfast')),
@@ -549,7 +549,7 @@ class _FfmpegStudioPageState extends State<FfmpegStudioPage> {
             value: _audioFormat,
             isExpanded: true,
             decoration: const InputDecoration(isDense: true),
-            items: const [
+            items: [
               DropdownMenuItem(value: 'm4a', child: Text('M4A (AAC)')),
               DropdownMenuItem(value: 'mp3', child: Text('MP3')),
             ],

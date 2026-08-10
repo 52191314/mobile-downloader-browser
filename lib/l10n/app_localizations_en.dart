@@ -1121,4 +1121,354 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get queueFlatList => 'Flat list (no sections)';
+
+  @override
+  String get guideTitle => 'User Guide';
+
+  @override
+  String get guideSearchHint => 'Search user guide…';
+
+  @override
+  String get guideQuickStart => 'Quick Start';
+
+  @override
+  String get guideEngineProtocols => 'Download Engine & Protocols';
+
+  @override
+  String get guideQueueGestures => 'Queue Page & Gestures';
+
+  @override
+  String get guideBrowserSniffer => 'Built-in Browser & Sniffer';
+
+  @override
+  String get guideSiteProfiles => 'Site Profiles & Batch Grabber';
+
+  @override
+  String get guideSendToPc => 'Send to PC (Wi-Fi Transfer)';
+
+  @override
+  String get guideRulesAutoNaming => 'Download Rules & Auto-Naming';
+
+  @override
+  String get guideScheduleNight => 'Schedule & Night-Mode Downloading';
+
+  @override
+  String get guideAdblockPrivacy => 'Ad Blocking & Privacy Engine';
+
+  @override
+  String get guideCustomHosts => 'Custom Video Hosts & Extensionless Probes';
+
+  @override
+  String get guideThemesAccent => 'Themes & Accent Color Packs';
+
+  @override
+  String get guidePrivateVault => 'Encrypted Private Vault';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg Studio';
+
+  @override
+  String get guideBackupTransfer => 'Backup & Database Transfer';
+
+  @override
+  String get guideWatcherRss => 'Watcher (RSS & Page Monitor)';
+
+  @override
+  String get guideAutomationApi => 'Automation API';
+
+  @override
+  String get guidePipMode => 'Picture-in-Picture (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'Incognito / Private Mode';
+
+  @override
+  String get guideBuildTiers => 'Build Channels & Feature Tiers';
+
+  @override
+  String get guideTroubleshootingFaq => 'Troubleshooting & FAQ';
+
+  @override
+  String get settingsProxy => 'Proxy';
+
+  @override
+  String get settingsProxyNone => 'None';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => 'Mobile (default)';
+
+  @override
+  String get settingsUaDesktopChrome => 'Desktop Chrome';
+
+  @override
+  String get settingsUaDesktopFirefox => 'Desktop Firefox';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => 'Custom User-Agent';
+
+  @override
+  String get settingsProfiles => 'Profiles';
+
+  @override
+  String get settingsScheduledDownloads => 'Scheduled Downloads';
+
+  @override
+  String get settingsAutomationApi => 'Automation API';
+
+  @override
+  String get settingsEnableAutomation => 'Enable Automation API';
+
+  @override
+  String get settingsRegenerateToken => 'Regenerate Token';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'Regenerate Token?';
+
+  @override
+  String get settingsAboutTitle => 'About';
+
+  @override
+  String get settingsAboutDesc =>
+      'Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.';
+
+  @override
+  String get settingsCheckBattery => 'Check battery optimization on launch';
+
+  @override
+  String get settingsCheckBatteryDesc =>
+      'Notify if background download optimizations are not configured';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro restored.';
+
+  @override
+  String get settingsSnackTray =>
+      'Save to tray. Aurora keeps a list so you can pick which to download later.';
+
+  @override
+  String get settingsSnackImmediate =>
+      'Download right away. Skip the tray and start fetching immediately.';
+
+  @override
+  String get settingsSnackAsk =>
+      'Ask each time Aurora spots media. Best when you download a mix of stuff.';
+
+  @override
+  String get settingsSnackBlock =>
+      'Block downloads from this site. Aurora will ignore every media URL.';
+
+  @override
+  String get settingsDriveSync => 'Google Drive Sync';
+
+  @override
+  String get settingsDriveUnavailable => 'Drive sync unavailable';
+
+  @override
+  String get settingsSetFolder => 'Set folder';
+
+  @override
+  String get settingsAutoUploadCompleted => 'Auto upload completed files';
+
+  @override
+  String get settingsSyncNow => 'Sync now';
+
+  @override
+  String get settingsLinkDrive => 'Link Google Drive';
+
+  @override
+  String get settingsResetExtAppsPrompt => 'Reset all external app choices?';
+
+  @override
+  String get settingsExtAppsResetDone => 'All external app choices reset.';
+
+  @override
+  String get settingsExternalApps => 'External Apps';
+
+  @override
+  String get settingsBackupBookmarks => 'Favorites / Bookmarks';
+
+  @override
+  String get settingsBackupHistory => 'Web History';
+
+  @override
+  String get settingsBackupSavedPages => 'Saved Pages';
+
+  @override
+  String get settingsBackupQueue => 'Download History (Queue & Schedule)';
+
+  @override
+  String get settingsBackupSettings => 'App Settings';
+
+  @override
+  String get settingsBackupSessions => 'Browser Sessions & Open Tabs';
+
+  @override
+  String get settingsBackupRules => 'Download Rules & Organization';
+
+  @override
+  String get settingsBackupImport => 'Import';
+
+  @override
+  String get settingsBackupRestoreTitle => 'Backup & Restore';
+
+  @override
+  String get settingsChooseBackupFile => 'Choose backup file';
+
+  @override
+  String get settingsAutoBackup => 'Auto Backup';
+
+  @override
+  String get settingsEnableAutoBackup => 'Enable auto backup';
+
+  @override
+  String get settingsBackupNow => 'Back up now';
+
+  @override
+  String get settingsRestoreBtn => 'Restore';
+
+  @override
+  String get settingsRulesTitle => 'Download Rules';
+
+  @override
+  String get settingsAddRule => 'Add Rule';
+
+  @override
+  String get settingsCreateFirstRule => 'Create your first rule';
+
+  @override
+  String get settingsCategoryVideo => 'Video';
+
+  @override
+  String get settingsCategoryAudio => 'Audio';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => 'Image';
+
+  @override
+  String get settingsRequireWifi => 'Require Wi-Fi';
+
+  @override
+  String get settingsRequireCharging => 'Require charging';
+
+  @override
+  String get settingsTimeWindow => 'Time window';
+
+  @override
+  String get settingsDeleteRulePrompt => 'Delete Rule';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'Delete Profile';
+
+  @override
+  String get settingsNoProfilesYet => 'No profiles yet';
+
+  @override
+  String get settingsAddFirstProfile => 'Add your first profile';
+
+  @override
+  String get settingsToolbarSlide1 => 'Slide 1 (default)';
+
+  @override
+  String get settingsToolbarSlide2 => 'Slide 2 (swipe left)';
+
+  @override
+  String get settingsResetToolbarDefault => 'Reset toolbar to default';
+
+  @override
+  String get ffmpegCompressVideo => 'Compress Video';
+
+  @override
+  String get ffmpegTrimVideo => 'Trim Video';
+
+  @override
+  String get ffmpegExtractAudio => 'Extract Audio';
+
+  @override
+  String get ffmpegRemuxMp4 => 'Remux to MP4';
+
+  @override
+  String get ffmpegCreateGif => 'Create GIF';
+
+  @override
+  String get ffmpegSourceFile => 'Source file';
+
+  @override
+  String get ffmpegOperation => 'Operation';
+
+  @override
+  String get ffmpegQueuedOps => 'Queued operations';
+
+  @override
+  String get vaultDeleteFromVault => 'Delete from vault?';
+
+  @override
+  String get vaultNothingToImport => 'Nothing to import';
+
+  @override
+  String get vaultImportTitle => 'Import into Private Vault';
+
+  @override
+  String get vaultDeleteOriginal => 'Delete original after encrypting';
+
+  @override
+  String get vaultLockedTitle => 'Vault is locked';
+
+  @override
+  String get vaultUnlockBtn => 'Unlock';
+
+  @override
+  String get vaultEmptyTitle => 'Vault is empty';
+
+  @override
+  String get vaultEmptyDesc =>
+      'Move downloaded files here to keep them private';
+
+  @override
+  String get vaultAddFiles => 'Add files';
+
+  @override
+  String get watcherAddWatch => 'Add Watch';
+
+  @override
+  String get watcherAddFirstWatch => 'Add your first watch';
+
+  @override
+  String get watcherCheckNow => 'Check now';
+
+  @override
+  String get watcherRssFeed => 'RSS Feed';
+
+  @override
+  String get watcherWebPage => 'Web Page';
+
+  @override
+  String get watcherDeleteRulePrompt => 'Delete Watch Rule';
+
+  @override
+  String get webdavServerUrl => 'Server URL';
+
+  @override
+  String get webdavUsername => 'Username';
+
+  @override
+  String get webdavPassword => 'Password';
+
+  @override
+  String get webdavUploadBackupNow => 'Upload backup now';
+
+  @override
+  String get webdavRemoteBackups => 'Remote backups';
+
+  @override
+  String get webdavNoBackupsYet =>
+      'No backups yet. Tap the upload button to create one.';
 }

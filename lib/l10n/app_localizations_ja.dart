@@ -1094,4 +1094,347 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get queueFlatList => 'フラットリスト（セクションなし）';
+
+  @override
+  String get guideTitle => 'ユーザーガイド';
+
+  @override
+  String get guideSearchHint => 'ガイドを検索…';
+
+  @override
+  String get guideQuickStart => 'クイックスタート';
+
+  @override
+  String get guideEngineProtocols => 'ダウンロードエンジンとプロトコル';
+
+  @override
+  String get guideQueueGestures => 'キューページとジェスチャー';
+
+  @override
+  String get guideBrowserSniffer => '内蔵ブラウザとスニファー';
+
+  @override
+  String get guideSiteProfiles => 'サイトプロファイルとバッチ取得';
+
+  @override
+  String get guideSendToPc => 'PCへ送信（Wi-Fi転送）';
+
+  @override
+  String get guideRulesAutoNaming => 'ダウンロードルールと自動命名';
+
+  @override
+  String get guideScheduleNight => 'スケジュールとナイトモードダウンロード';
+
+  @override
+  String get guideAdblockPrivacy => '広告ブロックとプライバシーエンジン';
+
+  @override
+  String get guideCustomHosts => 'カスタムビデオホストと拡張子なしプローブ';
+
+  @override
+  String get guideThemesAccent => 'テーマとアクセントカラーパック';
+
+  @override
+  String get guidePrivateVault => '暗号化プライベートボルト';
+
+  @override
+  String get guideFfmpegStudio => 'FFmpeg スタジオ';
+
+  @override
+  String get guideBackupTransfer => 'バックアップとデータベース転送';
+
+  @override
+  String get guideWatcherRss => 'ウォッチャー（RSS＆ページ監視）';
+
+  @override
+  String get guideAutomationApi => '自動化 API';
+
+  @override
+  String get guidePipMode => 'ピクチャー・イン・ピクチャー (PiP)';
+
+  @override
+  String get guideIncognitoMode => 'シークレット / プライベートモード';
+
+  @override
+  String get guideBuildTiers => 'ビルドチャネルと機能ティア';
+
+  @override
+  String get guideTroubleshootingFaq => 'トラブルシューティングとFAQ';
+
+  @override
+  String get settingsProxy => 'プロキシ';
+
+  @override
+  String get settingsProxyNone => 'なし';
+
+  @override
+  String get settingsUserAgent => 'User-Agent';
+
+  @override
+  String get settingsUaMobile => 'モバイル（デフォルト）';
+
+  @override
+  String get settingsUaDesktopChrome => 'デスクトップ Chrome';
+
+  @override
+  String get settingsUaDesktopFirefox => 'デスクトップ Firefox';
+
+  @override
+  String get settingsUaSafari => 'Safari';
+
+  @override
+  String get settingsUaCustom => 'カスタム User-Agent';
+
+  @override
+  String get settingsProfiles => 'プロファイル';
+
+  @override
+  String get settingsScheduledDownloads => 'スケジュールダウンロード';
+
+  @override
+  String get settingsAutomationApi => '自動化 API';
+
+  @override
+  String get settingsEnableAutomation => '自動化 API を有効化';
+
+  @override
+  String get settingsRegenerateToken => 'トークンを再生成';
+
+  @override
+  String get settingsRegenerateTokenPrompt => 'トークンを再生成しますか？';
+
+  @override
+  String get settingsAboutTitle => '情報';
+
+  @override
+  String get settingsAboutDesc =>
+      'セグメントダウンロード、ストリーミングビデオ、トレント、ブラウザ内メディア検出を備えた Android ダウンロードマネージャー。';
+
+  @override
+  String get settingsCheckBattery => '起動時にバッテリー最適化を確認';
+
+  @override
+  String get settingsCheckBatteryDesc => 'バックグラウンドダウンロード最適化が未設定の場合通知';
+
+  @override
+  String get settingsProRestored => 'Aurora Pro が復元されました。';
+
+  @override
+  String get settingsSnackTray => 'トレイに保存。リストを保持し、後で選択してダウンロードできます。';
+
+  @override
+  String get settingsSnackImmediate => 'すぐにダウンロード。トレイをスキップして即座に取得を開始します。';
+
+  @override
+  String get settingsSnackAsk => 'メディアが見つかるたびに確認します。';
+
+  @override
+  String get settingsSnackBlock => 'このサイトからのダウンロードをブロックします。';
+
+  @override
+  String get settingsDriveSync => 'Google ドライブ同期';
+
+  @override
+  String get settingsDriveUnavailable => 'ドライブ同期は利用できません';
+
+  @override
+  String get settingsSetFolder => 'フォルダを設定';
+
+  @override
+  String get settingsAutoUploadCompleted => '完了したファイルを自動アップロード';
+
+  @override
+  String get settingsSyncNow => '今すぐ同期';
+
+  @override
+  String get settingsLinkDrive => 'Google ドライブと連携';
+
+  @override
+  String get settingsResetExtAppsPrompt => 'すべての外部アプリの選択をリセットしますか？';
+
+  @override
+  String get settingsExtAppsResetDone => 'すべての外部アプリの選択がリセットされました。';
+
+  @override
+  String get settingsExternalApps => '外部アプリ';
+
+  @override
+  String get settingsBackupBookmarks => 'お気に入り / ブックマーク';
+
+  @override
+  String get settingsBackupHistory => '閲覧履歴';
+
+  @override
+  String get settingsBackupSavedPages => '保存されたページ';
+
+  @override
+  String get settingsBackupQueue => 'ダウンロード履歴（キュー＆スケジュール）';
+
+  @override
+  String get settingsBackupSettings => 'アプリ設定';
+
+  @override
+  String get settingsBackupSessions => 'ブラウザセッションと開いているタブ';
+
+  @override
+  String get settingsBackupRules => 'ダウンロードルールと整理';
+
+  @override
+  String get settingsBackupImport => 'インポート';
+
+  @override
+  String get settingsBackupRestoreTitle => 'バックアップと復元';
+
+  @override
+  String get settingsChooseBackupFile => 'バックアップファイルを選択';
+
+  @override
+  String get settingsAutoBackup => '自動バックアップ';
+
+  @override
+  String get settingsEnableAutoBackup => '自動バックアップを有効化';
+
+  @override
+  String get settingsBackupNow => '今すぐバックアップ';
+
+  @override
+  String get settingsRestoreBtn => '復元';
+
+  @override
+  String get settingsRulesTitle => 'ダウンロードルール';
+
+  @override
+  String get settingsAddRule => 'ルールを追加';
+
+  @override
+  String get settingsCreateFirstRule => '最初のルールを作成';
+
+  @override
+  String get settingsCategoryVideo => '動画';
+
+  @override
+  String get settingsCategoryAudio => '音声';
+
+  @override
+  String get settingsCategoryHls => 'HLS';
+
+  @override
+  String get settingsCategoryImage => '画像';
+
+  @override
+  String get settingsRequireWifi => 'Wi-Fi のみ';
+
+  @override
+  String get settingsRequireCharging => '充電中のみ';
+
+  @override
+  String get settingsTimeWindow => '時間枠';
+
+  @override
+  String get settingsDeleteRulePrompt => 'ルールを削除';
+
+  @override
+  String get settingsDeleteProfilePrompt => 'プロファイルを削除';
+
+  @override
+  String get settingsNoProfilesYet => 'プロファイルはまだありません';
+
+  @override
+  String get settingsAddFirstProfile => '最初のプロファイルを追加';
+
+  @override
+  String get settingsToolbarSlide1 => 'スライド 1（デフォルト）';
+
+  @override
+  String get settingsToolbarSlide2 => 'スライド 2（左スワイプ）';
+
+  @override
+  String get settingsResetToolbarDefault => 'ツールバーをデフォルトにリセット';
+
+  @override
+  String get ffmpegCompressVideo => '動画を圧縮';
+
+  @override
+  String get ffmpegTrimVideo => '動画をカット';
+
+  @override
+  String get ffmpegExtractAudio => '写真を抽出';
+
+  @override
+  String get ffmpegRemuxMp4 => 'MP4 にリマックス';
+
+  @override
+  String get ffmpegCreateGif => 'GIF を作成';
+
+  @override
+  String get ffmpegSourceFile => 'ソースファイル';
+
+  @override
+  String get ffmpegOperation => '操作';
+
+  @override
+  String get ffmpegQueuedOps => 'キューにある操作';
+
+  @override
+  String get vaultDeleteFromVault => 'ボルトから削除しますか？';
+
+  @override
+  String get vaultNothingToImport => 'インポートするものがありません';
+
+  @override
+  String get vaultImportTitle => 'プライベートボルトにインポート';
+
+  @override
+  String get vaultDeleteOriginal => '暗号化後に元のファイルを削除';
+
+  @override
+  String get vaultLockedTitle => 'ボルトはロックされています';
+
+  @override
+  String get vaultUnlockBtn => 'ロック解除';
+
+  @override
+  String get vaultEmptyTitle => 'ボルトは空です';
+
+  @override
+  String get vaultEmptyDesc => 'ダウンロードしたファイルをここに移動して保護します';
+
+  @override
+  String get vaultAddFiles => 'ファイルを追加';
+
+  @override
+  String get watcherAddWatch => '監視を追加';
+
+  @override
+  String get watcherAddFirstWatch => '最初の監視を追加';
+
+  @override
+  String get watcherCheckNow => '今すぐ確認';
+
+  @override
+  String get watcherRssFeed => 'RSS フィード';
+
+  @override
+  String get watcherWebPage => 'ウェブページ';
+
+  @override
+  String get watcherDeleteRulePrompt => '監視ルールを削除';
+
+  @override
+  String get webdavServerUrl => 'サーバー URL';
+
+  @override
+  String get webdavUsername => 'ユーザー名';
+
+  @override
+  String get webdavPassword => 'パスワード';
+
+  @override
+  String get webdavUploadBackupNow => '今すぐバックアップをアップロード';
+
+  @override
+  String get webdavRemoteBackups => 'リモートバックアップ';
+
+  @override
+  String get webdavNoBackupsYet => 'バックアップはまだありません。アップロードボタンをタップして作成してください。';
 }

@@ -2237,6 +2237,690 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Flat list (no sections)'**
   String get queueFlatList;
+
+  /// No description provided for @guideTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'User Guide'**
+  String get guideTitle;
+
+  /// No description provided for @guideSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search user guide…'**
+  String get guideSearchHint;
+
+  /// No description provided for @guideQuickStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Start'**
+  String get guideQuickStart;
+
+  /// No description provided for @guideEngineProtocols.
+  ///
+  /// In en, this message translates to:
+  /// **'Download Engine & Protocols'**
+  String get guideEngineProtocols;
+
+  /// No description provided for @guideQueueGestures.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue Page & Gestures'**
+  String get guideQueueGestures;
+
+  /// No description provided for @guideBrowserSniffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Built-in Browser & Sniffer'**
+  String get guideBrowserSniffer;
+
+  /// No description provided for @guideSiteProfiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Site Profiles & Batch Grabber'**
+  String get guideSiteProfiles;
+
+  /// No description provided for @guideSendToPc.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to PC (Wi-Fi Transfer)'**
+  String get guideSendToPc;
+
+  /// No description provided for @guideRulesAutoNaming.
+  ///
+  /// In en, this message translates to:
+  /// **'Download Rules & Auto-Naming'**
+  String get guideRulesAutoNaming;
+
+  /// No description provided for @guideScheduleNight.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule & Night-Mode Downloading'**
+  String get guideScheduleNight;
+
+  /// No description provided for @guideAdblockPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Ad Blocking & Privacy Engine'**
+  String get guideAdblockPrivacy;
+
+  /// No description provided for @guideCustomHosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom Video Hosts & Extensionless Probes'**
+  String get guideCustomHosts;
+
+  /// No description provided for @guideThemesAccent.
+  ///
+  /// In en, this message translates to:
+  /// **'Themes & Accent Color Packs'**
+  String get guideThemesAccent;
+
+  /// No description provided for @guidePrivateVault.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted Private Vault'**
+  String get guidePrivateVault;
+
+  /// No description provided for @guideFfmpegStudio.
+  ///
+  /// In en, this message translates to:
+  /// **'FFmpeg Studio'**
+  String get guideFfmpegStudio;
+
+  /// No description provided for @guideBackupTransfer.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup & Database Transfer'**
+  String get guideBackupTransfer;
+
+  /// No description provided for @guideWatcherRss.
+  ///
+  /// In en, this message translates to:
+  /// **'Watcher (RSS & Page Monitor)'**
+  String get guideWatcherRss;
+
+  /// No description provided for @guideAutomationApi.
+  ///
+  /// In en, this message translates to:
+  /// **'Automation API'**
+  String get guideAutomationApi;
+
+  /// No description provided for @guidePipMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Picture-in-Picture (PiP)'**
+  String get guidePipMode;
+
+  /// No description provided for @guideIncognitoMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Incognito / Private Mode'**
+  String get guideIncognitoMode;
+
+  /// No description provided for @guideBuildTiers.
+  ///
+  /// In en, this message translates to:
+  /// **'Build Channels & Feature Tiers'**
+  String get guideBuildTiers;
+
+  /// No description provided for @guideTroubleshootingFaq.
+  ///
+  /// In en, this message translates to:
+  /// **'Troubleshooting & FAQ'**
+  String get guideTroubleshootingFaq;
+
+  /// No description provided for @settingsProxy.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy'**
+  String get settingsProxy;
+
+  /// No description provided for @settingsProxyNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get settingsProxyNone;
+
+  /// No description provided for @settingsUserAgent.
+  ///
+  /// In en, this message translates to:
+  /// **'User-Agent'**
+  String get settingsUserAgent;
+
+  /// No description provided for @settingsUaMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile (default)'**
+  String get settingsUaMobile;
+
+  /// No description provided for @settingsUaDesktopChrome.
+  ///
+  /// In en, this message translates to:
+  /// **'Desktop Chrome'**
+  String get settingsUaDesktopChrome;
+
+  /// No description provided for @settingsUaDesktopFirefox.
+  ///
+  /// In en, this message translates to:
+  /// **'Desktop Firefox'**
+  String get settingsUaDesktopFirefox;
+
+  /// No description provided for @settingsUaSafari.
+  ///
+  /// In en, this message translates to:
+  /// **'Safari'**
+  String get settingsUaSafari;
+
+  /// No description provided for @settingsUaCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom User-Agent'**
+  String get settingsUaCustom;
+
+  /// No description provided for @settingsProfiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Profiles'**
+  String get settingsProfiles;
+
+  /// No description provided for @settingsScheduledDownloads.
+  ///
+  /// In en, this message translates to:
+  /// **'Scheduled Downloads'**
+  String get settingsScheduledDownloads;
+
+  /// No description provided for @settingsAutomationApi.
+  ///
+  /// In en, this message translates to:
+  /// **'Automation API'**
+  String get settingsAutomationApi;
+
+  /// No description provided for @settingsEnableAutomation.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable Automation API'**
+  String get settingsEnableAutomation;
+
+  /// No description provided for @settingsRegenerateToken.
+  ///
+  /// In en, this message translates to:
+  /// **'Regenerate Token'**
+  String get settingsRegenerateToken;
+
+  /// No description provided for @settingsRegenerateTokenPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Regenerate Token?'**
+  String get settingsRegenerateTokenPrompt;
+
+  /// No description provided for @settingsAboutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get settingsAboutTitle;
+
+  /// No description provided for @settingsAboutDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.'**
+  String get settingsAboutDesc;
+
+  /// No description provided for @settingsCheckBattery.
+  ///
+  /// In en, this message translates to:
+  /// **'Check battery optimization on launch'**
+  String get settingsCheckBattery;
+
+  /// No description provided for @settingsCheckBatteryDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Notify if background download optimizations are not configured'**
+  String get settingsCheckBatteryDesc;
+
+  /// No description provided for @settingsProRestored.
+  ///
+  /// In en, this message translates to:
+  /// **'Aurora Pro restored.'**
+  String get settingsProRestored;
+
+  /// No description provided for @settingsSnackTray.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to tray. Aurora keeps a list so you can pick which to download later.'**
+  String get settingsSnackTray;
+
+  /// No description provided for @settingsSnackImmediate.
+  ///
+  /// In en, this message translates to:
+  /// **'Download right away. Skip the tray and start fetching immediately.'**
+  String get settingsSnackImmediate;
+
+  /// No description provided for @settingsSnackAsk.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask each time Aurora spots media. Best when you download a mix of stuff.'**
+  String get settingsSnackAsk;
+
+  /// No description provided for @settingsSnackBlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Block downloads from this site. Aurora will ignore every media URL.'**
+  String get settingsSnackBlock;
+
+  /// No description provided for @settingsDriveSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Drive Sync'**
+  String get settingsDriveSync;
+
+  /// No description provided for @settingsDriveUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Drive sync unavailable'**
+  String get settingsDriveUnavailable;
+
+  /// No description provided for @settingsSetFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Set folder'**
+  String get settingsSetFolder;
+
+  /// No description provided for @settingsAutoUploadCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto upload completed files'**
+  String get settingsAutoUploadCompleted;
+
+  /// No description provided for @settingsSyncNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync now'**
+  String get settingsSyncNow;
+
+  /// No description provided for @settingsLinkDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'Link Google Drive'**
+  String get settingsLinkDrive;
+
+  /// No description provided for @settingsResetExtAppsPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset all external app choices?'**
+  String get settingsResetExtAppsPrompt;
+
+  /// No description provided for @settingsExtAppsResetDone.
+  ///
+  /// In en, this message translates to:
+  /// **'All external app choices reset.'**
+  String get settingsExtAppsResetDone;
+
+  /// No description provided for @settingsExternalApps.
+  ///
+  /// In en, this message translates to:
+  /// **'External Apps'**
+  String get settingsExternalApps;
+
+  /// No description provided for @settingsBackupBookmarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites / Bookmarks'**
+  String get settingsBackupBookmarks;
+
+  /// No description provided for @settingsBackupHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Web History'**
+  String get settingsBackupHistory;
+
+  /// No description provided for @settingsBackupSavedPages.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved Pages'**
+  String get settingsBackupSavedPages;
+
+  /// No description provided for @settingsBackupQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Download History (Queue & Schedule)'**
+  String get settingsBackupQueue;
+
+  /// No description provided for @settingsBackupSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'App Settings'**
+  String get settingsBackupSettings;
+
+  /// No description provided for @settingsBackupSessions.
+  ///
+  /// In en, this message translates to:
+  /// **'Browser Sessions & Open Tabs'**
+  String get settingsBackupSessions;
+
+  /// No description provided for @settingsBackupRules.
+  ///
+  /// In en, this message translates to:
+  /// **'Download Rules & Organization'**
+  String get settingsBackupRules;
+
+  /// No description provided for @settingsBackupImport.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get settingsBackupImport;
+
+  /// No description provided for @settingsBackupRestoreTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup & Restore'**
+  String get settingsBackupRestoreTitle;
+
+  /// No description provided for @settingsChooseBackupFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose backup file'**
+  String get settingsChooseBackupFile;
+
+  /// No description provided for @settingsAutoBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto Backup'**
+  String get settingsAutoBackup;
+
+  /// No description provided for @settingsEnableAutoBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable auto backup'**
+  String get settingsEnableAutoBackup;
+
+  /// No description provided for @settingsBackupNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up now'**
+  String get settingsBackupNow;
+
+  /// No description provided for @settingsRestoreBtn.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get settingsRestoreBtn;
+
+  /// No description provided for @settingsRulesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download Rules'**
+  String get settingsRulesTitle;
+
+  /// No description provided for @settingsAddRule.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Rule'**
+  String get settingsAddRule;
+
+  /// No description provided for @settingsCreateFirstRule.
+  ///
+  /// In en, this message translates to:
+  /// **'Create your first rule'**
+  String get settingsCreateFirstRule;
+
+  /// No description provided for @settingsCategoryVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get settingsCategoryVideo;
+
+  /// No description provided for @settingsCategoryAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get settingsCategoryAudio;
+
+  /// No description provided for @settingsCategoryHls.
+  ///
+  /// In en, this message translates to:
+  /// **'HLS'**
+  String get settingsCategoryHls;
+
+  /// No description provided for @settingsCategoryImage.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get settingsCategoryImage;
+
+  /// No description provided for @settingsRequireWifi.
+  ///
+  /// In en, this message translates to:
+  /// **'Require Wi-Fi'**
+  String get settingsRequireWifi;
+
+  /// No description provided for @settingsRequireCharging.
+  ///
+  /// In en, this message translates to:
+  /// **'Require charging'**
+  String get settingsRequireCharging;
+
+  /// No description provided for @settingsTimeWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'Time window'**
+  String get settingsTimeWindow;
+
+  /// No description provided for @settingsDeleteRulePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Rule'**
+  String get settingsDeleteRulePrompt;
+
+  /// No description provided for @settingsDeleteProfilePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Profile'**
+  String get settingsDeleteProfilePrompt;
+
+  /// No description provided for @settingsNoProfilesYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No profiles yet'**
+  String get settingsNoProfilesYet;
+
+  /// No description provided for @settingsAddFirstProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your first profile'**
+  String get settingsAddFirstProfile;
+
+  /// No description provided for @settingsToolbarSlide1.
+  ///
+  /// In en, this message translates to:
+  /// **'Slide 1 (default)'**
+  String get settingsToolbarSlide1;
+
+  /// No description provided for @settingsToolbarSlide2.
+  ///
+  /// In en, this message translates to:
+  /// **'Slide 2 (swipe left)'**
+  String get settingsToolbarSlide2;
+
+  /// No description provided for @settingsResetToolbarDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset toolbar to default'**
+  String get settingsResetToolbarDefault;
+
+  /// No description provided for @ffmpegCompressVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Compress Video'**
+  String get ffmpegCompressVideo;
+
+  /// No description provided for @ffmpegTrimVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Trim Video'**
+  String get ffmpegTrimVideo;
+
+  /// No description provided for @ffmpegExtractAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Extract Audio'**
+  String get ffmpegExtractAudio;
+
+  /// No description provided for @ffmpegRemuxMp4.
+  ///
+  /// In en, this message translates to:
+  /// **'Remux to MP4'**
+  String get ffmpegRemuxMp4;
+
+  /// No description provided for @ffmpegCreateGif.
+  ///
+  /// In en, this message translates to:
+  /// **'Create GIF'**
+  String get ffmpegCreateGif;
+
+  /// No description provided for @ffmpegSourceFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Source file'**
+  String get ffmpegSourceFile;
+
+  /// No description provided for @ffmpegOperation.
+  ///
+  /// In en, this message translates to:
+  /// **'Operation'**
+  String get ffmpegOperation;
+
+  /// No description provided for @ffmpegQueuedOps.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued operations'**
+  String get ffmpegQueuedOps;
+
+  /// No description provided for @vaultDeleteFromVault.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete from vault?'**
+  String get vaultDeleteFromVault;
+
+  /// No description provided for @vaultNothingToImport.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to import'**
+  String get vaultNothingToImport;
+
+  /// No description provided for @vaultImportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Import into Private Vault'**
+  String get vaultImportTitle;
+
+  /// No description provided for @vaultDeleteOriginal.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete original after encrypting'**
+  String get vaultDeleteOriginal;
+
+  /// No description provided for @vaultLockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Vault is locked'**
+  String get vaultLockedTitle;
+
+  /// No description provided for @vaultUnlockBtn.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock'**
+  String get vaultUnlockBtn;
+
+  /// No description provided for @vaultEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Vault is empty'**
+  String get vaultEmptyTitle;
+
+  /// No description provided for @vaultEmptyDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Move downloaded files here to keep them private'**
+  String get vaultEmptyDesc;
+
+  /// No description provided for @vaultAddFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Add files'**
+  String get vaultAddFiles;
+
+  /// No description provided for @watcherAddWatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Watch'**
+  String get watcherAddWatch;
+
+  /// No description provided for @watcherAddFirstWatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your first watch'**
+  String get watcherAddFirstWatch;
+
+  /// No description provided for @watcherCheckNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Check now'**
+  String get watcherCheckNow;
+
+  /// No description provided for @watcherRssFeed.
+  ///
+  /// In en, this message translates to:
+  /// **'RSS Feed'**
+  String get watcherRssFeed;
+
+  /// No description provided for @watcherWebPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Web Page'**
+  String get watcherWebPage;
+
+  /// No description provided for @watcherDeleteRulePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Watch Rule'**
+  String get watcherDeleteRulePrompt;
+
+  /// No description provided for @webdavServerUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Server URL'**
+  String get webdavServerUrl;
+
+  /// No description provided for @webdavUsername.
+  ///
+  /// In en, this message translates to:
+  /// **'Username'**
+  String get webdavUsername;
+
+  /// No description provided for @webdavPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get webdavPassword;
+
+  /// No description provided for @webdavUploadBackupNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload backup now'**
+  String get webdavUploadBackupNow;
+
+  /// No description provided for @webdavRemoteBackups.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote backups'**
+  String get webdavRemoteBackups;
+
+  /// No description provided for @webdavNoBackupsYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No backups yet. Tap the upload button to create one.'**
+  String get webdavNoBackupsYet;
 }
 
 class _AppLocalizationsDelegate
