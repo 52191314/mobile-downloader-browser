@@ -18,13 +18,13 @@ class BuildChannel {
 
   static const String raw = String.fromEnvironment(
     'AURORA_BUILD_CHANNEL',
-    defaultValue: 'github',
+    defaultValue: 'play',
   );
 
   /// Google Play Store distributed build (Play Billing required for Pro).
-  static bool get isPlay => raw.toLowerCase() == 'play';
+  static bool get isPlay => raw.toLowerCase() != 'github';
 
-  /// GitHub / F-Droid-style / sideload build (no Play Billing).
+  /// Sideload / debug fallback.
   static bool get isGithub => !isPlay;
 
   static String get label => isPlay ? 'play' : 'github';

@@ -70,11 +70,8 @@ fun isPlayBuildChannel(): Boolean {
     if (channelProp == "play") return true
     if (channelProp == "github") return false
 
-    // 4. Default: GitHub fat APK. Do NOT special-case bundle tasks here — doing
-    //    so silently turned every `flutter build appbundle` into a Play build
-    //    that stripped the FFmpeg/libmpv/libtorrent natives from the base and
-    //    crashed on launch (builds 38-44).
-    return false
+    // 4. Default: Play Store build with dynamic feature modules.
+    return true
 }
 
 gradle.extensions.getExtraProperties().set("auroraPlayChannel", isPlayBuildChannel())

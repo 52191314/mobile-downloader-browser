@@ -3,12 +3,7 @@
 ## Build channels
 
 > [!IMPORTANT]
-> **THIS REPO IS PLAY STORE ONLY.** All production/release builds MUST use `AURORA_BUILD_CHANNEL=play` with `--dart-define=AURORA_LICENSE_URL=https://aurora-license-server.fly.dev`. Never build release artifacts with the `github` channel.
-
-| Channel | `--dart-define` | Use case |
-|---------|-----------------|----------|
-| **play** | `AURORA_BUILD_CHANNEL=play` | **MANDATORY for all release builds.** Google Play Store release (enables Play Billing for Pro; FFmpeg as on-demand module). |
-| **github** | `AURORA_BUILD_CHANNEL=github` | Local debug/testing only. Do NOT use for release builds. |
+> **THIS REPO IS PLAY STORE ONLY.** Default build channel is `play` with `--dart-define=AURORA_LICENSE_URL=https://ahjie521.store/license`. (The open-source fat APK edition is maintained in a separate repository at `aurora_downloader_oss`).
 
 ### Release AAB for Play Store
 
@@ -17,7 +12,7 @@
 # no-op on a healthy tree, ~1 s.
 bash tooling/prepare_torrent_16k.sh
 
-flutter build appbundle --release --dart-define=AURORA_BUILD_CHANNEL=play --dart-define=AURORA_LICENSE_URL=https://aurora-license-server.fly.dev --obfuscate --split-debug-info=build/app/outputs/symbols -PlibtorrentFlutterSkipDownload=true
+flutter build appbundle --release --dart-define=AURORA_LICENSE_URL=https://ahjie521.store/license --obfuscate --split-debug-info=build/app/outputs/symbols -PlibtorrentFlutterSkipDownload=true
 ```
 
 `-PlibtorrentFlutterSkipDownload=true` makes the libtorrent_flutter plugin use the
