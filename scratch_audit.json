@@ -1,0 +1,2404 @@
+{
+  "lib/main.dart": [
+    [
+      203,
+      "Aurora Downloader",
+      "title: 'Aurora Downloader',"
+    ],
+    [
+      856,
+      "Battery Optimization",
+      "title: const Text('Battery Optimization'),"
+    ],
+    [
+      864,
+      "Never ask again",
+      "child: const Text('Never ask again'),"
+    ],
+    [
+      868,
+      "Later",
+      "child: const Text('Later'),"
+    ],
+    [
+      872,
+      "Open settings",
+      "child: const Text('Open settings'),"
+    ],
+    [
+      890,
+      "Background downloads on $name",
+      "title: Text('Background downloads on $name'),"
+    ],
+    [
+      899,
+      "Later",
+      "child: const Text('Later'),"
+    ],
+    [
+      906,
+      "Open settings",
+      "child: const Text('Open settings'),"
+    ],
+    [
+      1229,
+      "Link found in clipboard. Add to queue?",
+      "content: const Text('Link found in clipboard. Add to queue?'),"
+    ],
+    [
+      1232,
+      "Add",
+      "label: 'Add',"
+    ],
+    [
+      1490,
+      "New Link Detected",
+      "title: const Text('New Link Detected'),"
+    ],
+    [
+      1498,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      1502,
+      "Create New",
+      "child: const Text('Create New'),"
+    ],
+    [
+      1506,
+      "Update Link",
+      "child: const Text('Update Link'),"
+    ],
+    [
+      2087,
+      "Already in Queue",
+      "title: const Text('Already in Queue'),"
+    ],
+    [
+      2095,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      2099,
+      "Create New",
+      "child: const Text('Create New'),"
+    ],
+    [
+      2103,
+      "Update Existing",
+      "child: const Text('Update Existing'),"
+    ]
+  ],
+  "lib/notifications/download_notification_service.dart": [
+    [
+      299,
+      "Downloading $progress%",
+      "title: 'Downloading $progress%',"
+    ],
+    [
+      351,
+      "Paused",
+      "title: 'Paused',"
+    ],
+    [
+      392,
+      "Finishing…",
+      "title: 'Finishing…',"
+    ],
+    [
+      449,
+      "Done",
+      "title: 'Done',"
+    ],
+    [
+      472,
+      "Couldn",
+      "title: \"Couldn't download\","
+    ]
+  ],
+  "lib/premium/accent_pack.dart": [
+    [
+      65,
+      "Nord Frost",
+      "label: 'Nord Frost',"
+    ],
+    [
+      80,
+      "Aurora Green",
+      "label: 'Aurora Green',"
+    ],
+    [
+      90,
+      "Warm Sunset",
+      "label: 'Warm Sunset',"
+    ],
+    [
+      100,
+      "Deep Purple",
+      "label: 'Deep Purple',"
+    ]
+  ],
+  "lib/premium/send_to_pc_sheet.dart": [
+    [
+      226,
+      "Stop sharing",
+      "label: const Text('Stop sharing'),"
+    ]
+  ],
+  "lib/premium/ffmpeg/ffmpeg_module_loader.dart": [
+    [
+      493,
+      "Restart to finish setup?",
+      "title: const Text('Restart to finish setup?'),"
+    ],
+    [
+      502,
+      "Not now",
+      "child: const Text('Not now'),"
+    ],
+    [
+      506,
+      "Restart now",
+      "child: const Text('Restart now'),"
+    ]
+  ],
+  "lib/settings/download_settings.dart": [
+    [
+      65,
+      "English",
+      "TranslateLanguage(id: 'en', label: 'English'),"
+    ],
+    [
+      66,
+      "Spanish",
+      "TranslateLanguage(id: 'es', label: 'Spanish'),"
+    ],
+    [
+      67,
+      "French",
+      "TranslateLanguage(id: 'fr', label: 'French'),"
+    ],
+    [
+      68,
+      "German",
+      "TranslateLanguage(id: 'de', label: 'German'),"
+    ],
+    [
+      69,
+      "Italian",
+      "TranslateLanguage(id: 'it', label: 'Italian'),"
+    ],
+    [
+      70,
+      "Portuguese",
+      "TranslateLanguage(id: 'pt', label: 'Portuguese'),"
+    ],
+    [
+      71,
+      "Russian",
+      "TranslateLanguage(id: 'ru', label: 'Russian'),"
+    ],
+    [
+      72,
+      "Japanese",
+      "TranslateLanguage(id: 'ja', label: 'Japanese'),"
+    ],
+    [
+      73,
+      "Korean",
+      "TranslateLanguage(id: 'ko', label: 'Korean'),"
+    ],
+    [
+      74,
+      "Chinese (Simplified)",
+      "TranslateLanguage(id: 'zh-CN', label: 'Chinese (Simplified)'),"
+    ],
+    [
+      75,
+      "Chinese (Traditional)",
+      "TranslateLanguage(id: 'zh-TW', label: 'Chinese (Traditional)'),"
+    ],
+    [
+      76,
+      "Arabic",
+      "TranslateLanguage(id: 'ar', label: 'Arabic'),"
+    ],
+    [
+      77,
+      "Hindi",
+      "TranslateLanguage(id: 'hi', label: 'Hindi'),"
+    ],
+    [
+      78,
+      "Vietnamese",
+      "TranslateLanguage(id: 'vi', label: 'Vietnamese'),"
+    ],
+    [
+      79,
+      "Thai",
+      "TranslateLanguage(id: 'th', label: 'Thai'),"
+    ],
+    [
+      80,
+      "Indonesian",
+      "TranslateLanguage(id: 'id', label: 'Indonesian'),"
+    ]
+  ],
+  "lib/sniffer/aurora_video_player.dart": [
+    [
+      1017,
+      "Picture-in-Picture is not available on this device.",
+      "content: Text('Picture-in-Picture is not available on this device.'),"
+    ],
+    [
+      1030,
+      "Picture-in-Picture is not available on this device.",
+      "content: Text('Picture-in-Picture is not available on this device.'),"
+    ],
+    [
+      1069,
+      "Open in browser",
+      "title: Text('Open in browser', style: TextStyle(color: ac.textPrimary, fontSize: 14)),"
+    ],
+    [
+      1078,
+      "Copy video link",
+      "title: Text('Copy video link', style: TextStyle(color: ac.textPrimary, fontSize: 14)),"
+    ],
+    [
+      1087,
+      "Share",
+      "title: Text('Share', style: TextStyle(color: ac.textPrimary, fontSize: 14)),"
+    ],
+    [
+      1104,
+      "Copied video link to clipboard",
+      "content: Text('Copied video link to clipboard'),"
+    ],
+    [
+      1337,
+      "Retry",
+      "label: const Text('Retry'),"
+    ]
+  ],
+  "lib/sniffer/browser_widget.dart": [
+    [
+      90,
+      "Mock WebView Placeholder",
+      "child: const Center(child: Text('Mock WebView Placeholder')),"
+    ]
+  ],
+  "lib/sniffer/media_preview_widget.dart": [
+    [
+      103,
+      "Download this item",
+      "tooltip: 'Download this item',"
+    ]
+  ],
+  "lib/sniffer/reader_mode_widget.dart": [
+    [
+      125,
+      "Smaller text",
+      "tooltip: 'Smaller text',"
+    ],
+    [
+      134,
+      "Larger text",
+      "tooltip: 'Larger text',"
+    ],
+    [
+      301,
+      "No content extracted.",
+      "return const Text('No content extracted.');"
+    ]
+  ],
+  "lib/sniffer/sniffer_screen.dart": [
+    [
+      722,
+      "Close",
+      "label: const Text('Close'),"
+    ],
+    [
+      2324,
+      "Redirect blocked by Aurora",
+      "title: 'Redirect blocked by Aurora',"
+    ],
+    [
+      2653,
+      "Undo",
+      "label: 'Undo',"
+    ],
+    [
+      2762,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      3060,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      3097,
+      "Type a URL or search term",
+      "hintText: 'Type a URL or search term',"
+    ]
+  ],
+  "lib/sniffer/actions/autofill_action.dart": [
+    [
+      36,
+      "Default",
+      "label: 'Default',"
+    ],
+    [
+      162,
+      "Include card details",
+      "title: const Text('Include card details'),"
+    ],
+    [
+      163,
+      "CVV is never stored",
+      "subtitle: const Text('CVV is never stored'),"
+    ],
+    [
+      201,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      205,
+      "Save",
+      "child: const Text('Save'),"
+    ]
+  ],
+  "lib/sniffer/capture/capture_filter_bar.dart": [
+    [
+      75,
+      "Sort and display options",
+      "tooltip: 'Sort and display options',"
+    ]
+  ],
+  "lib/sniffer/capture/capture_media_row.dart": [
+    [
+      204,
+      "Details",
+      "tooltip: 'Details',"
+    ]
+  ],
+  "lib/sniffer/capture/capture_options_row.dart": [
+    [
+      147,
+      "Sort by",
+      "label: 'Sort by',"
+    ],
+    [
+      164,
+      "Show type",
+      "label: 'Show type',"
+    ]
+  ],
+  "lib/sniffer/capture/capture_sheet_header.dart": [
+    [
+      78,
+      "Rescan page for new media",
+      "tooltip: 'Rescan page for new media',"
+    ],
+    [
+      98,
+      "Grab series (episode order)",
+      "tooltip: 'Grab series (episode order)',"
+    ]
+  ],
+  "lib/sniffer/controllers/address_bar_controller.dart": [
+    [
+      114,
+      "Search for",
+      "label: 'Search for \"$query\"',"
+    ]
+  ],
+  "lib/sniffer/player/aurora_player_screen.dart": [
+    [
+      696,
+      "Retry",
+      "label: const Text('Retry'),"
+    ],
+    [
+      705,
+      "Try ${engineKind.other.label}",
+      "label: Text('Try ${engineKind.other.label}'),"
+    ],
+    [
+      834,
+      "Picture-in-picture",
+      "tooltip: 'Picture-in-picture',"
+    ],
+    [
+      840,
+      "Add to favourites",
+      "tooltip: 'Add to favourites',"
+    ],
+    [
+      851,
+      "More",
+      "tooltip: 'More',"
+    ],
+    [
+      863,
+      "Download",
+      "child: Text('Download'),"
+    ],
+    [
+      867,
+      "Playback diagnostics",
+      "child: Text('Playback diagnostics'),"
+    ],
+    [
+      1057,
+      "Playback speed",
+      "tooltip: 'Playback speed',"
+    ],
+    [
+      1075,
+      "Quality",
+      "tooltip: 'Quality',"
+    ],
+    [
+      1089,
+      "Aspect ratio",
+      "tooltip: 'Aspect ratio',"
+    ]
+  ],
+  "lib/sniffer/sheets/download_prompt_sheet.dart": [
+    [
+      372,
+      "Not now",
+      "child: const Text('Not now'),"
+    ]
+  ],
+  "lib/sniffer/sheets/duplicate_download_dialog.dart": [
+    [
+      14,
+      "Already in Queue",
+      "title: const Text('Already in Queue'),"
+    ],
+    [
+      25,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      30,
+      "Create New",
+      "child: const Text('Create New'),"
+    ],
+    [
+      36,
+      "Update Existing",
+      "child: const Text('Update Existing'),"
+    ]
+  ],
+  "lib/sniffer/sheets/external_app_prompt_sheet.dart": [
+    [
+      107,
+      "External app settings",
+      "tooltip: 'External app settings',"
+    ],
+    [
+      205,
+      "Don",
+      "child: const Text(\"Don't open\"),"
+    ],
+    [
+      224,
+      "Open",
+      "child: const Text('Open'),"
+    ]
+  ],
+  "lib/sniffer/sheets/favorites_sheet.dart": [
+    [
+      186,
+      "Create folder",
+      "title: const Text('Create folder'),"
+    ],
+    [
+      191,
+      "Folder name",
+      "hintText: 'Folder name',"
+    ],
+    [
+      198,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      203,
+      "Create",
+      "child: const Text('Create'),"
+    ],
+    [
+      269,
+      "New folder",
+      "label: const Text('New folder'),"
+    ],
+    [
+      482,
+      "Move to folder",
+      "title: const Text('Move to folder'),"
+    ],
+    [
+      489,
+      "Unsorted",
+      "title: const Text('Unsorted'),"
+    ],
+    [
+      530,
+      "Edit tags",
+      "PopupMenuItem(value: 'edit', child: Text('Edit tags')),"
+    ],
+    [
+      531,
+      "Move to folder…",
+      "PopupMenuItem(value: 'move', child: Text('Move to folder…')),"
+    ],
+    [
+      532,
+      "Remove bookmark",
+      "PopupMenuItem(value: 'delete', child: Text('Remove bookmark')),"
+    ],
+    [
+      558,
+      "Rename folder",
+      "const Text('Rename folder', style: TextStyle(fontSize: 12)),"
+    ],
+    [
+      565,
+      "Rename folder",
+      "title: const Text('Rename folder'),"
+    ],
+    [
+      570,
+      "Folder name",
+      "hintText: 'Folder name',"
+    ],
+    [
+      576,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      581,
+      "Save",
+      "child: const Text('Save'),"
+    ],
+    [
+      610,
+      "Delete folder",
+      "const Text('Delete folder', style: TextStyle(fontSize: 12)),"
+    ],
+    [
+      616,
+      "Delete folder?",
+      "title: const Text('Delete folder?'),"
+    ],
+    [
+      623,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      629,
+      "Delete",
+      "child: const Text('Delete'),"
+    ]
+  ],
+  "lib/sniffer/sheets/favorite_dialogs.dart": [
+    [
+      19,
+      "Add to favorites",
+      "title: const Text('Add to favorites'),"
+    ],
+    [
+      28,
+      "Folder",
+      "const Text('Folder', style: TextStyle(fontSize: 12)),"
+    ],
+    [
+      35,
+      "Unsorted",
+      "hintText: 'Unsorted',"
+    ],
+    [
+      40,
+      "Unsorted",
+      "child: Text('Unsorted'),"
+    ],
+    [
+      55,
+      "Create new folder",
+      "hintText: 'Create new folder',"
+    ],
+    [
+      75,
+      "Add folder",
+      "label: const Text('Add folder'),"
+    ],
+    [
+      82,
+      "Tags (comma separated)",
+      "hintText: 'Tags (comma separated)',"
+    ],
+    [
+      94,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      117,
+      "Save",
+      "child: const Text('Save'),"
+    ],
+    [
+      148,
+      "Edit favorite",
+      "title: const Text('Edit favorite'),"
+    ],
+    [
+      156,
+      "Folder",
+      "const Text('Folder', style: TextStyle(fontSize: 12)),"
+    ],
+    [
+      163,
+      "Unsorted",
+      "hintText: 'Unsorted',"
+    ],
+    [
+      168,
+      "Unsorted",
+      "child: Text('Unsorted'),"
+    ],
+    [
+      183,
+      "Tags (comma separated)",
+      "hintText: 'Tags (comma separated)',"
+    ],
+    [
+      194,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      198,
+      "Save",
+      "child: const Text('Save'),"
+    ]
+  ],
+  "lib/sniffer/sheets/group_actions_sheet.dart": [
+    [
+      138,
+      "Group color",
+      "_SectionHeader(label: 'Group color'),"
+    ],
+    [
+      313,
+      "Group name",
+      "hintText: 'Group name',"
+    ]
+  ],
+  "lib/sniffer/sheets/history_sheet.dart": [
+    [
+      344,
+      "Search history...",
+      "hintText: 'Search history...',"
+    ],
+    [
+      410,
+      "Select all",
+      "label: const Text('Select all'),"
+    ],
+    [
+      422,
+      "Open all (${_selectedUrls.length})",
+      "label: Text('Open all (${_selectedUrls.length})'),"
+    ],
+    [
+      429,
+      "Delete selected",
+      "tooltip: 'Delete selected',"
+    ],
+    [
+      435,
+      "Cancel selection",
+      "tooltip: 'Cancel selection',"
+    ],
+    [
+      560,
+      "Delete",
+      "tooltip: 'Delete',"
+    ]
+  ],
+  "lib/sniffer/sheets/library_sheet.dart": [
+    [
+      104,
+      "Search ${widget.title.toLowerCase()}...",
+      "hintText: 'Search ${widget.title.toLowerCase()}...',"
+    ],
+    [
+      185,
+      "Delete",
+      "tooltip: 'Delete',"
+    ]
+  ],
+  "lib/sniffer/sheets/library_transfer_sheets.dart": [
+    [
+      93,
+      "Favorites",
+      "title: 'Favorites',"
+    ],
+    [
+      110,
+      "Web History",
+      "title: 'Web History',"
+    ],
+    [
+      126,
+      "Saved Pages",
+      "title: 'Saved Pages',"
+    ],
+    [
+      142,
+      "Download History",
+      "title: 'Download History',"
+    ],
+    [
+      158,
+      "App Settings",
+      "title: 'App Settings',"
+    ],
+    [
+      175,
+      "Open Tabs",
+      "title: 'Open Tabs',"
+    ],
+    [
+      210,
+      "Export",
+      "child: const Text('Export'),"
+    ],
+    [
+      304,
+      "Favorites / Bookmarks",
+      "title: 'Favorites / Bookmarks',"
+    ],
+    [
+      320,
+      "Web History",
+      "title: 'Web History',"
+    ],
+    [
+      336,
+      "Saved Pages",
+      "title: 'Saved Pages',"
+    ],
+    [
+      352,
+      "Download History (Queue)",
+      "title: 'Download History (Queue)',"
+    ],
+    [
+      368,
+      "App Settings",
+      "title: 'App Settings',"
+    ],
+    [
+      402,
+      "Import",
+      "child: const Text('Import'),"
+    ]
+  ],
+  "lib/sniffer/sheets/media_info_sheet.dart": [
+    [
+      167,
+      "URL copied",
+      "AuroraSnackbar.show(ctx, 'URL copied');"
+    ],
+    [
+      169,
+      "Copy URL",
+      "tooltip: 'Copy URL',"
+    ]
+  ],
+  "lib/sniffer/sheets/phishing_warning_dialog.dart": [
+    [
+      19,
+      "Phishing suspected",
+      "Text('Phishing suspected'),"
+    ],
+    [
+      43,
+      "Stay safe",
+      "child: const Text('Stay safe'),"
+    ],
+    [
+      47,
+      "Continue anyway",
+      "child: const Text('Continue anyway'),"
+    ]
+  ],
+  "lib/sniffer/sheets/saved_pages_sheet.dart": [
+    [
+      29,
+      "Saved Pages",
+      "title: 'Saved Pages',"
+    ],
+    [
+      50,
+      "Save Page",
+      "label: const Text('Save Page'),"
+    ]
+  ],
+  "lib/sniffer/sheets/sniffed_media_sheet.dart": [
+    [
+      484,
+      "Retry",
+      "child: const Text('Retry'),"
+    ]
+  ],
+  "lib/sniffer/sheets/strict_redirect_prompt.dart": [
+    [
+      84,
+      "Ignore",
+      "child: const Text('Ignore'),"
+    ],
+    [
+      89,
+      "Background",
+      "child: const Text('Background'),"
+    ],
+    [
+      94,
+      "Here",
+      "child: const Text('Here'),"
+    ],
+    [
+      99,
+      "New tab",
+      "child: const Text('New tab'),"
+    ]
+  ],
+  "lib/sniffer/sheets/tabs_sheet.dart": [
+    [
+      107,
+      "Close all tabs",
+      "tooltip: 'Close all tabs',"
+    ],
+    [
+      686,
+      "Enter group name (e.g. Work, Shopping)",
+      "hintText: 'Enter group name (e.g. Work, Shopping)',"
+    ]
+  ],
+  "lib/sniffer/sheets/video_library_views.dart": [
+    [
+      36,
+      "Sites",
+      "label: Text('Sites'),"
+    ],
+    [
+      186,
+      "No saved videos yet",
+      "title: 'No saved videos yet',"
+    ],
+    [
+      213,
+      "Open page",
+      "const PopupMenuItem(value: 'page', child: Text('Open page')),"
+    ],
+    [
+      216,
+      "Remove",
+      "child: Text('Remove'),"
+    ],
+    [
+      244,
+      "No watch history yet",
+      "title: 'No watch history yet',"
+    ],
+    [
+      263,
+      "Open page",
+      "tooltip: 'Open page',"
+    ]
+  ],
+  "lib/sniffer/widgets/add_queue_dialog.dart": [
+    [
+      384,
+      "Added",
+      "AuroraSnackbar.show(context, 'Added \"$filename\" to queue.');"
+    ],
+    [
+      405,
+      "Add to Download Queue",
+      "title: const Text('Add to Download Queue'),"
+    ],
+    [
+      544,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      555,
+      "Download later",
+      "child: const Text('Download later'),"
+    ],
+    [
+      566,
+      "Download",
+      ": const Text('Download'),"
+    ]
+  ],
+  "lib/sniffer/widgets/find_in_page_bar.dart": [
+    [
+      48,
+      "Find in page",
+      "hintText: 'Find in page',"
+    ],
+    [
+      59,
+      "Previous",
+      "tooltip: 'Previous',"
+    ],
+    [
+      64,
+      "Next",
+      "tooltip: 'Next',"
+    ],
+    [
+      69,
+      "Close",
+      "tooltip: 'Close',"
+    ]
+  ],
+  "lib/sniffer/widgets/folder_selector.dart": [
+    [
+      117,
+      "e.g. Lecture Videos",
+      "hintText: 'e.g. Lecture Videos',"
+    ]
+  ],
+  "lib/sniffer/widgets/rename_file_dialog.dart": [
+    [
+      45,
+      "Rename File",
+      "title: const Text('Rename File'),"
+    ],
+    [
+      90,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      103,
+      "OK",
+      "child: const Text('OK'),"
+    ]
+  ],
+  "lib/sniffer/widgets/tab_strip.dart": [
+    [
+      116,
+      "New tab",
+      "tooltip: 'New tab',"
+    ]
+  ],
+  "lib/ui/pages/ffmpeg_studio_page.dart": [
+    [
+      153,
+      "Saved to $_ffmpegOutputLabel/$displayName",
+      "AuroraSnackbar.show(context, 'Saved to $_ffmpegOutputLabel/$displayName');"
+    ],
+    [
+      177,
+      "FFmpeg module is still downloading…",
+      "const SnackBar(content: Text('FFmpeg module is still downloading…')),"
+    ],
+    [
+      186,
+      "Download FFmpeg tools?",
+      "title: const Text('Download FFmpeg tools?'),"
+    ],
+    [
+      194,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      198,
+      "Download",
+      "child: const Text('Download'),"
+    ],
+    [
+      211,
+      "FFmpeg tools ready.",
+      "const SnackBar(content: Text('FFmpeg tools ready.')),"
+    ],
+    [
+      220,
+      "Download failed",
+      "title: const Text('Download failed'),"
+    ],
+    [
+      228,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      232,
+      "Retry",
+      "child: const Text('Retry'),"
+    ],
+    [
+      338,
+      "Cancel",
+      "label: const Text('Cancel'),"
+    ],
+    [
+      441,
+      "Compress Video",
+      "value: FfmpegOp.compress, child: Text('Compress Video')),"
+    ],
+    [
+      442,
+      "Trim Video",
+      "DropdownMenuItem(value: FfmpegOp.trim, child: Text('Trim Video')),"
+    ],
+    [
+      444,
+      "Extract Audio",
+      "value: FfmpegOp.audioExtract, child: Text('Extract Audio')),"
+    ],
+    [
+      445,
+      "Remux to MP4",
+      "DropdownMenuItem(value: FfmpegOp.remux, child: Text('Remux to MP4')),"
+    ],
+    [
+      447,
+      "Create GIF",
+      "value: FfmpegOp.gif, child: Text('Create GIF')),"
+    ],
+    [
+      490,
+      "Ultrafast",
+      "DropdownMenuItem(value: 'ultrafast', child: Text('Ultrafast')),"
+    ],
+    [
+      491,
+      "Superfast",
+      "DropdownMenuItem(value: 'superfast', child: Text('Superfast')),"
+    ],
+    [
+      492,
+      "Veryfast",
+      "DropdownMenuItem(value: 'veryfast', child: Text('Veryfast')),"
+    ],
+    [
+      493,
+      "Faster",
+      "DropdownMenuItem(value: 'faster', child: Text('Faster')),"
+    ],
+    [
+      494,
+      "Fast",
+      "DropdownMenuItem(value: 'fast', child: Text('Fast')),"
+    ],
+    [
+      495,
+      "Medium",
+      "DropdownMenuItem(value: 'medium', child: Text('Medium')),"
+    ],
+    [
+      496,
+      "Slow (better compression)",
+      "DropdownMenuItem(value: 'slow', child: Text('Slow (better compression)')),"
+    ],
+    [
+      530,
+      "e.g. 30",
+      "hintText: 'e.g. 30',"
+    ],
+    [
+      553,
+      "M4A (AAC)",
+      "DropdownMenuItem(value: 'm4a', child: Text('M4A (AAC)')),"
+    ],
+    [
+      554,
+      "MP3",
+      "DropdownMenuItem(value: 'mp3', child: Text('MP3')),"
+    ],
+    [
+      764,
+      "Cancel",
+      "label: const Text('Cancel'),"
+    ],
+    [
+      901,
+      "FFmpeg job queued — ${_operationLabel}",
+      "AuroraSnackbar.show(context, 'FFmpeg job queued — ${_operationLabel}');"
+    ]
+  ],
+  "lib/ui/pages/queue_page.dart": [
+    [
+      862,
+      "Paste a link to download…",
+      "hintText: 'Paste a link to download…',"
+    ],
+    [
+      917,
+      "Schedule download",
+      "tooltip: 'Schedule download',"
+    ],
+    [
+      926,
+      "Add download",
+      "tooltip: 'Add download',"
+    ],
+    [
+      1010,
+      "Search by URL or name…",
+      "hintText: 'Search by URL or name…',"
+    ],
+    [
+      1425,
+      "Keep",
+      "child: const Text('Keep')),"
+    ],
+    [
+      1428,
+      "Remove all",
+      "child: const Text('Remove all')),"
+    ],
+    [
+      1540,
+      "Pause selected",
+      "tooltip: 'Pause selected',"
+    ],
+    [
+      1547,
+      "Resume selected",
+      "tooltip: 'Resume selected',"
+    ],
+    [
+      1554,
+      "Retry selected",
+      "tooltip: 'Retry selected',"
+    ],
+    [
+      1561,
+      "Cancel scheduled",
+      "tooltip: 'Cancel scheduled',"
+    ],
+    [
+      1567,
+      "Remove selected",
+      "tooltip: 'Remove selected',"
+    ],
+    [
+      1610,
+      "Cancel scheduled downloads?",
+      "title: const Text('Cancel scheduled downloads?'),"
+    ],
+    [
+      1617,
+      "Keep",
+      "child: const Text('Keep')),"
+    ],
+    [
+      1620,
+      "Remove all",
+      "child: const Text('Remove all')),"
+    ],
+    [
+      1645,
+      "Keep",
+      "child: const Text('Keep')),"
+    ],
+    [
+      1648,
+      "Remove all",
+      "child: const Text('Remove all')),"
+    ],
+    [
+      2041,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      2201,
+      "Retry",
+      "child: const Text('Retry'),"
+    ],
+    [
+      2253,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      2298,
+      "Update existing",
+      "child: const Text('Update existing'),"
+    ]
+  ],
+  "lib/ui/pages/settings_page.dart": [
+    [
+      224,
+      "Aurora Watcher",
+      "appBar: AppBar(title: const Text('Aurora Watcher')),"
+    ],
+    [
+      225,
+      "Watcher service not available.",
+      "body: Center(child: Text('Watcher service not available.')),"
+    ],
+    [
+      625,
+      "Sources (${local.adblockFilterSources.length})",
+      "Text('Sources (${local.adblockFilterSources.length})',"
+    ],
+    [
+      833,
+      "Remove source",
+      "tooltip: 'Remove source',"
+    ],
+    [
+      1080,
+      "cdn.example.com\\nvideo.host.org",
+      "hintText: 'cdn.example.com\\nvideo.host.org',"
+    ],
+    [
+      1165,
+      "In-app snackbar alerts",
+      "title: const Text('In-app snackbar alerts'),"
+    ],
+    [
+      1182,
+      "Browser toolbar",
+      "title: 'Browser toolbar',"
+    ],
+    [
+      1379,
+      "HTTP / HTTPS",
+      "child: Text('HTTP / HTTPS'),"
+    ],
+    [
+      1383,
+      "SOCKS5",
+      "child: Text('SOCKS5'),"
+    ],
+    [
+      1404,
+      "192.168.1.1 or proxy.example.com",
+      "hintText: '192.168.1.1 or proxy.example.com',"
+    ],
+    [
+      1508,
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+      "hintText: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)...',"
+    ],
+    [
+      1536,
+      "Per-site browser identity overrides",
+      "Text('Per-site browser identity overrides',"
+    ],
+    [
+      1545,
+      "Per-site User-Agent (Pro)",
+      "title: Text('Per-site User-Agent (Pro)',"
+    ],
+    [
+      1562,
+      "Per-site browser identity overrides",
+      "Text('Per-site browser identity overrides',"
+    ],
+    [
+      1600,
+      ": ${entry.value}",
+      "child: Text(': ${entry.value}',"
+    ],
+    [
+      1628,
+      "Add override",
+      "label: const Text('Add override'),"
+    ],
+    [
+      1641,
+      "Add browser identity override",
+      "title: const Text('Add browser identity override'),"
+    ],
+    [
+      1657,
+      "Mobile",
+      "DropdownMenuItem(value: 'mobile', child: Text('Mobile')),"
+    ],
+    [
+      1658,
+      "Desktop Chrome",
+      "DropdownMenuItem(value: 'desktop_chrome', child: Text('Desktop Chrome')),"
+    ],
+    [
+      1659,
+      "Desktop Firefox",
+      "DropdownMenuItem(value: 'desktop_firefox', child: Text('Desktop Firefox')),"
+    ],
+    [
+      1660,
+      "Safari",
+      "DropdownMenuItem(value: 'safari', child: Text('Safari')),"
+    ],
+    [
+      1669,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      1680,
+      "Add",
+      "child: const Text('Add'),"
+    ],
+    [
+      1715,
+      "Per-site Profiles",
+      "Text('Per-site Profiles',"
+    ],
+    [
+      1731,
+      "Unlock with Pro",
+      "label: const Text('Unlock with Pro'),"
+    ],
+    [
+      1756,
+      "Schedule",
+      "appBar: AppBar(title: const Text('Schedule')),"
+    ],
+    [
+      1766,
+      "Scheduled Downloads",
+      "Text('Scheduled Downloads',"
+    ],
+    [
+      1782,
+      "Unlock with Pro",
+      "label: const Text('Unlock with Pro'),"
+    ],
+    [
+      1803,
+      "Automation API",
+      "title: 'Automation API',"
+    ],
+    [
+      1894,
+      "Regenerate Token",
+      "label: const Text('Regenerate Token'),"
+    ],
+    [
+      1908,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      1913,
+      "Regenerate",
+      "child: const Text('Regenerate'),"
+    ],
+    [
+      1955,
+      "Ultra feature",
+      "title: Text('Ultra feature',"
+    ],
+    [
+      1996,
+      "About",
+      "PanelHeader(icon: Icons.info_outline, title: 'About'),"
+    ],
+    [
+      2000,
+      "Aurora Downloader",
+      "Text('Aurora Downloader',"
+    ],
+    [
+      2005,
+      "Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.",
+      "Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',"
+    ],
+    [
+      2008,
+      "Built with Flutter and the Nord color palette.",
+      "Text('Built with Flutter and the Nord color palette.',"
+    ],
+    [
+      2042,
+      "Aurora Pro & Ultra",
+      "appBar: AppBar(title: const Text('Aurora Pro & Ultra')),"
+    ],
+    [
+      2115,
+      "Features",
+      "PanelHeader(icon: Icons.list_alt, title: 'Features'),"
+    ],
+    [
+      2127,
+      "Debug",
+      "icon: Icons.bug_report_outlined, title: 'Debug'),"
+    ],
+    [
+      2143,
+      "Free",
+      "child: Text('Free'),"
+    ],
+    [
+      2147,
+      "Pro",
+      "child: Text('Pro'),"
+    ],
+    [
+      2151,
+      "Ultra",
+      "child: Text('Ultra'),"
+    ],
+    [
+      2529,
+      "Save to tray. Aurora keeps a list so you can pick which to download later.",
+      "child: Text('Save to tray. Aurora keeps a list so you can pick which to download later.'),"
+    ],
+    [
+      2533,
+      "Download right away. Skip the tray and start fetching immediately.",
+      "child: Text('Download right away. Skip the tray and start fetching immediately.'),"
+    ],
+    [
+      2537,
+      "Ask each time Aurora spots media. Best when you download a mix of stuff.",
+      "child: Text('Ask each time Aurora spots media. Best when you download a mix of stuff.'),"
+    ],
+    [
+      2541,
+      "Block downloads from this site. Aurora will ignore every media URL.",
+      "child: Text('Block downloads from this site. Aurora will ignore every media URL.'),"
+    ],
+    [
+      2615,
+      "Google Drive Sync",
+      "appBar: AppBar(title: const Text('Google Drive Sync')),"
+    ],
+    [
+      2617,
+      "Drive sync unavailable",
+      "child: Text('Drive sync unavailable'),"
+    ],
+    [
+      2686,
+      "Drive Sync",
+      "appBar: AppBar(title: const Text('Drive Sync')),"
+    ],
+    [
+      2692,
+      "Drive Sync",
+      "title: 'Drive Sync',"
+    ],
+    [
+      2825,
+      "Sync now",
+      "label: const Text('Sync now'),"
+    ],
+    [
+      2943,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      2947,
+      "Reset all",
+      "child: const Text('Reset all'),"
+    ],
+    [
+      2982,
+      "External Apps",
+      "title: const Text('External Apps'),"
+    ],
+    [
+      2986,
+      "Reset all",
+      "tooltip: 'Reset all',"
+    ],
+    [
+      2997,
+      "External Apps",
+      "title: 'External Apps',"
+    ],
+    [
+      3124,
+      "Change",
+      "tooltip: 'Change',"
+    ],
+    [
+      3438,
+      "Favorites / Bookmarks",
+      "title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3446,
+      "Web History",
+      "title: Text('Web History', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3454,
+      "Saved Pages",
+      "title: Text('Saved Pages', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3462,
+      "Download History (Queue & Schedule)",
+      "title: Text('Download History (Queue & Schedule)', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3470,
+      "App Settings",
+      "title: Text('App Settings', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3478,
+      "Browser Sessions & Open Tabs",
+      "title: Text('Browser Sessions & Open Tabs', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3492,
+      "Download Rules & Organization",
+      "title: Text('Download Rules & Organization', style: TextStyle(color: context.ac.textPrimary)),"
+    ],
+    [
+      3504,
+      "Cancel",
+      "child: Text('Cancel', style: TextStyle(color: context.ac.textSecondary)),"
+    ],
+    [
+      3524,
+      "Import",
+      "child: const Text('Import'),"
+    ],
+    [
+      4000,
+      "Backup & Restore",
+      "PanelHeader(icon: Icons.backup_rounded, title: 'Backup & Restore'),"
+    ],
+    [
+      4018,
+      "Favorites / Bookmarks",
+      "title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4028,
+      "Web History",
+      "title: Text('Web History', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4038,
+      "Saved Pages",
+      "title: Text('Saved Pages', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4048,
+      "Download History (Queue)",
+      "title: Text('Download History (Queue)', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4058,
+      "App Settings",
+      "title: Text('App Settings', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4068,
+      "Browser Sessions & Open Tabs",
+      "title: Text('Browser Sessions & Open Tabs', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4078,
+      "Download Rules & Organization",
+      "title: Text('Download Rules & Organization', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4135,
+      "Choose backup file",
+      "label: const Text('Choose backup file'),"
+    ],
+    [
+      4142,
+      "Auto Backup",
+      "PanelHeader(icon: Icons.schedule_rounded, title: 'Auto Backup'),"
+    ],
+    [
+      4151,
+      "Enable auto backup",
+      "title: Text('Enable auto backup', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),"
+    ],
+    [
+      4205,
+      "Back up now",
+      "label: const Text('Back up now', style: TextStyle(fontSize: 12)),"
+    ],
+    [
+      4235,
+      "Scan",
+      "label: Text('Scan', style: TextStyle(color: context.ac.accentFrost, fontSize: 12)),"
+    ],
+    [
+      4316,
+      "Restore",
+      "tooltip: 'Restore',"
+    ],
+    [
+      4371,
+      "Background downloads on $name",
+      "title: Text('Background downloads on $name'),"
+    ],
+    [
+      4380,
+      "Later",
+      "child: const Text('Later'),"
+    ],
+    [
+      4387,
+      "Open settings",
+      "child: const Text('Open settings'),"
+    ],
+    [
+      4404,
+      "Battery Optimization",
+      "title: const Text('Battery Optimization'),"
+    ],
+    [
+      4405,
+      "Checking status\\u2026",
+      "subtitle: const Text('Checking status\\u2026'),"
+    ],
+    [
+      4412,
+      "Battery Optimization",
+      "title: const Text('Battery Optimization'),"
+    ],
+    [
+      4413,
+      "Aurora is optimized for background downloads",
+      "subtitle: const Text('Aurora is optimized for background downloads'),"
+    ],
+    [
+      4420,
+      "Allow background downloads",
+      "title: const Text('Allow background downloads'),"
+    ],
+    [
+      4421,
+      "Aurora may pause downloads in the background. Tap to request an exception.",
+      "subtitle: const Text('Aurora may pause downloads in the background. Tap to request an exception.'),"
+    ],
+    [
+      4519,
+      "Download Rules",
+      "title: const Text('Download Rules'),"
+    ],
+    [
+      4561,
+      "Create your first rule",
+      "label: const Text('Create your first rule'),"
+    ],
+    [
+      4612,
+      "Unlock with Pro",
+      "label: const Text('Unlock with Pro'),"
+    ],
+    [
+      4739,
+      "e.g. *.example.com",
+      "hintText: 'e.g. *.example.com',"
+    ],
+    [
+      4787,
+      "{host}_{quality}_{title}.{ext}",
+      "hintText: '{host}_{quality}_{title}.{ext}',"
+    ],
+    [
+      4804,
+      "e.g. Direct video site",
+      "hintText: 'e.g. Direct video site',"
+    ],
+    [
+      4950,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      5011,
+      "Delete",
+      "content: Text('Delete \"${rule.name}\"? This cannot be undone.'),"
+    ],
+    [
+      5015,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      5022,
+      "Delete",
+      "child: const Text('Delete'),"
+    ],
+    [
+      5085,
+      "Delete profile",
+      "title: const Text('Delete profile'),"
+    ],
+    [
+      5091,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      5095,
+      "Delete",
+      "child: Text('Delete',"
+    ],
+    [
+      5133,
+      "e.g. News site",
+      "labelText: 'Name', hintText: 'e.g. News site'),"
+    ],
+    [
+      5141,
+      "e.g. *.example.com",
+      "hintText: 'e.g. *.example.com'),"
+    ],
+    [
+      5147,
+      "Enabled",
+      "title: const Text('Enabled'),"
+    ],
+    [
+      5155,
+      "Browser overrides",
+      "Text('Browser overrides',"
+    ],
+    [
+      5163,
+      "Desktop mode",
+      "label: 'Desktop mode',"
+    ],
+    [
+      5168,
+      "Use global setting",
+      "child: Text('Use global setting')),"
+    ],
+    [
+      5171,
+      "Force desktop",
+      "child: Text('Force desktop')),"
+    ],
+    [
+      5174,
+      "Force mobile",
+      "child: Text('Force mobile')),"
+    ],
+    [
+      5187,
+      "User-Agent",
+      "label: 'User-Agent',"
+    ],
+    [
+      5191,
+      "Use global setting",
+      "value: '', child: Text('Use global setting')),"
+    ],
+    [
+      5193,
+      "Mobile",
+      "value: 'mobile', child: Text('Mobile')),"
+    ],
+    [
+      5196,
+      "Desktop Chrome",
+      "child: Text('Desktop Chrome')),"
+    ],
+    [
+      5199,
+      "Desktop Firefox",
+      "child: Text('Desktop Firefox')),"
+    ],
+    [
+      5201,
+      "Safari",
+      "value: 'safari', child: Text('Safari')),"
+    ],
+    [
+      5211,
+      "Adblock",
+      "label: 'Adblock',"
+    ],
+    [
+      5216,
+      "Use global setting",
+      "child: Text('Use global setting')),"
+    ],
+    [
+      5218,
+      "Enabled",
+      "value: 'true', child: Text('Enabled')),"
+    ],
+    [
+      5220,
+      "Disabled",
+      "value: 'false', child: Text('Disabled')),"
+    ],
+    [
+      5233,
+      "Replace site player",
+      "label: 'Replace site player',"
+    ],
+    [
+      5238,
+      "Use global setting",
+      "child: Text('Use global setting')),"
+    ],
+    [
+      5240,
+      "Enabled",
+      "value: 'true', child: Text('Enabled')),"
+    ],
+    [
+      5242,
+      "Disabled",
+      "value: 'false', child: Text('Disabled')),"
+    ],
+    [
+      5253,
+      "Download overrides",
+      "Text('Download overrides',"
+    ],
+    [
+      5262,
+      "Leave empty for global default",
+      "hintText: 'Leave empty for global default'),"
+    ],
+    [
+      5273,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      5352,
+      "Profiles",
+      "title: const Text('Profiles'),"
+    ],
+    [
+      5356,
+      "Add",
+      "label: const Text('Add'),"
+    ],
+    [
+      5373,
+      "No profiles yet",
+      "Text('No profiles yet',"
+    ],
+    [
+      5390,
+      "Add your first profile",
+      "label: const Text('Add your first profile'),"
+    ],
+    [
+      5470,
+      "Edit",
+      "tooltip: 'Edit',"
+    ],
+    [
+      5476,
+      "Delete",
+      "tooltip: 'Delete',"
+    ],
+    [
+      5534,
+      "Schedule",
+      "appBar: AppBar(title: const Text('Schedule')),"
+    ],
+    [
+      5538,
+      "Scheduled Downloads",
+      "PanelHeader(icon: Icons.schedule, title: 'Scheduled Downloads'),"
+    ],
+    [
+      5602,
+      "Cancel scheduled download",
+      "tooltip: 'Cancel scheduled download',"
+    ],
+    [
+      5699,
+      "Every dock action is already assigned.",
+      "AuroraSnackbar.show(context, 'Every dock action is already assigned.');"
+    ],
+    [
+      5761,
+      "Slide 1 (default)",
+      "title: 'Slide 1 (default)',"
+    ],
+    [
+      5779,
+      "Slide 2 (swipe left)",
+      "title: 'Slide 2 (swipe left)',"
+    ],
+    [
+      5801,
+      "Reset toolbar to default",
+      "label: const Text('Reset toolbar to default'),"
+    ],
+    [
+      5833,
+      "Add",
+      "label: const Text('Add'),"
+    ],
+    [
+      5874,
+      "Remove",
+      "tooltip: 'Remove',"
+    ],
+    [
+      5989,
+      "Aurora Downloader",
+      "hintText: 'Aurora Downloader',"
+    ],
+    [
+      6042,
+      "Reset to default",
+      "child: const Text('Reset to default'),"
+    ],
+    [
+      6088,
+      "Undo block",
+      "tooltip: 'Undo block',"
+    ]
+  ],
+  "lib/ui/pages/vault_page.dart": [
+    [
+      168,
+      "Could not open lock screen settings.",
+      "content: Text('Could not open lock screen settings. '"
+    ],
+    [
+      177,
+      "Could not open lock screen settings: $e",
+      "content: Text('Could not open lock screen settings: $e'),"
+    ],
+    [
+      202,
+      "Permanently delete ${entry.name}?\\n",
+      "content: Text('Permanently delete ${entry.name}?\\n'"
+    ],
+    [
+      207,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      211,
+      "Delete",
+      "child: const Text('Delete'),"
+    ],
+    [
+      240,
+      "OK",
+      "child: const Text('OK'),"
+    ],
+    [
+      305,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      332,
+      "Import",
+      "child: const Text('Import'),"
+    ],
+    [
+      381,
+      "Not imported: $fail",
+      "SnackBar(content: Text('Not imported: $fail')),"
+    ],
+    [
+      412,
+      "WebDAV Not Configured",
+      "title: const Text('WebDAV Not Configured'),"
+    ],
+    [
+      418,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      430,
+      "Open Settings",
+      "child: const Text('Open Settings'),"
+    ],
+    [
+      445,
+      "WebDAV Encrypted Vault Sync",
+      "title: const Text('WebDAV Encrypted Vault Sync'),"
+    ],
+    [
+      457,
+      "Upload Local Vault to WebDAV",
+      "title: const Text('Upload Local Vault to WebDAV'),"
+    ],
+    [
+      464,
+      "Restore Vault from WebDAV",
+      "title: const Text('Restore Vault from WebDAV'),"
+    ],
+    [
+      471,
+      "Delete Remote Vault Backup",
+      "title: const Text('Delete Remote Vault Backup'),"
+    ],
+    [
+      484,
+      "Enter passphrase for encryption key",
+      "hintText: 'Enter passphrase for encryption key',"
+    ],
+    [
+      495,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      499,
+      "Proceed",
+      "child: const Text('Proceed'),"
+    ],
+    [
+      511,
+      "Sync passphrase cannot be empty.",
+      "const SnackBar(content: Text('Sync passphrase cannot be empty.')),"
+    ],
+    [
+      584,
+      "Vault restored: $restoredCount files from WebDAV.",
+      "content: Text('Vault restored: $restoredCount files from WebDAV.'),"
+    ],
+    [
+      591,
+      "Failed to restore vault (incorrect passphrase or no remote backup).",
+      "content: Text('Failed to restore vault (incorrect passphrase or no remote backup).'),"
+    ],
+    [
+      624,
+      "Import downloads",
+      "tooltip: 'Import downloads',"
+    ],
+    [
+      629,
+      "WebDAV Vault Sync",
+      "tooltip: 'WebDAV Vault Sync',"
+    ],
+    [
+      634,
+      "Lock vault",
+      "tooltip: 'Lock vault',"
+    ],
+    [
+      640,
+      "Unlock vault",
+      "tooltip: 'Unlock vault',"
+    ],
+    [
+      666,
+      "Vault is locked",
+      "Text('Vault is locked',"
+    ],
+    [
+      682,
+      "Unlock",
+      "label: const Text('Unlock'),"
+    ],
+    [
+      689,
+      "Open lock screen settings",
+      "label: const Text('Open lock screen settings'),"
+    ],
+    [
+      707,
+      "Vault is empty",
+      "Text('Vault is empty',"
+    ],
+    [
+      713,
+      "Move downloaded files here to keep them private",
+      "Text('Move downloaded files here to keep them private',"
+    ],
+    [
+      744,
+      "Max ${Phase2Caps.maxFreeVaultItems} (free)",
+      "Text('Max ${Phase2Caps.maxFreeVaultItems} (free)',"
+    ],
+    [
+      776,
+      "Export / Decrypt",
+      "child: Text('Export / Decrypt')),"
+    ],
+    [
+      779,
+      "Delete",
+      "child: Text('Delete')),"
+    ],
+    [
+      829,
+      "I\\",
+      "child: const Text('I\\'ve saved my recovery key'),"
+    ]
+  ],
+  "lib/ui/pages/watcher_page.dart": [
+    [
+      70,
+      "Add Watch",
+      "label: const Text('Add Watch'),"
+    ],
+    [
+      130,
+      "Add your first watch",
+      "label: const Text('Add your first watch'),"
+    ],
+    [
+      217,
+      "Check now",
+      "tooltip: 'Check now',"
+    ],
+    [
+      236,
+      "Edit",
+      "tooltip: 'Edit',"
+    ],
+    [
+      242,
+      "Delete",
+      "tooltip: 'Delete',"
+    ],
+    [
+      292,
+      "e.g. My Podcast Feed",
+      "hintText: 'e.g. My Podcast Feed',"
+    ],
+    [
+      316,
+      "RSS Feed",
+      "value: WatchKind.rss, child: Text('RSS Feed')),"
+    ],
+    [
+      319,
+      "Web Page",
+      "child: Text('Web Page')),"
+    ],
+    [
+      330,
+      "e.g. 1080p|2160p",
+      "hintText: 'e.g. 1080p|2160p',"
+    ],
+    [
+      343,
+      "30 minutes",
+      "DropdownMenuItem(value: 30, child: Text('30 minutes')),"
+    ],
+    [
+      344,
+      "1 hour",
+      "DropdownMenuItem(value: 60, child: Text('1 hour')),"
+    ],
+    [
+      345,
+      "2 hours",
+      "DropdownMenuItem(value: 120, child: Text('2 hours')),"
+    ],
+    [
+      346,
+      "3 hours",
+      "DropdownMenuItem(value: 180, child: Text('3 hours')),"
+    ],
+    [
+      347,
+      "6 hours",
+      "DropdownMenuItem(value: 360, child: Text('6 hours')),"
+    ],
+    [
+      348,
+      "12 hours",
+      "DropdownMenuItem(value: 720, child: Text('12 hours')),"
+    ],
+    [
+      349,
+      "24 hours",
+      "DropdownMenuItem(value: 1440, child: Text('24 hours')),"
+    ],
+    [
+      357,
+      "Enabled",
+      "title: const Text('Enabled'),"
+    ],
+    [
+      370,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      416,
+      "Delete",
+      "content: Text('Delete \"${rule.label ?? rule.url}\"?'),"
+    ],
+    [
+      420,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      427,
+      "Delete",
+      "child: const Text('Delete'),"
+    ]
+  ],
+  "lib/ui/pages/webdav_settings_page.dart": [
+    [
+      121,
+      "Backup uploaded: $name",
+      "SnackBar(content: Text('Backup uploaded: $name')),"
+    ],
+    [
+      126,
+      "Upload failed. Check server connection.",
+      "const SnackBar(content: Text('Upload failed. Check server connection.')),"
+    ],
+    [
+      135,
+      "Restore backup?",
+      "title: const Text('Restore backup?'),"
+    ],
+    [
+      143,
+      "Cancel",
+      "child: const Text('Cancel'),"
+    ],
+    [
+      147,
+      "Restore",
+      "child: const Text('Restore'),"
+    ],
+    [
+      160,
+      "Download failed.",
+      "const SnackBar(content: Text('Download failed.')),"
+    ],
+    [
+      184,
+      "Upload backup now",
+      "tooltip: 'Upload backup now',"
+    ],
+    [
+      195,
+      "Server URL",
+      "Text('Server URL',"
+    ],
+    [
+      218,
+      "Username",
+      "Text('Username',"
+    ],
+    [
+      241,
+      "Password",
+      "Text('Password',"
+    ],
+    [
+      251,
+      "password or app token",
+      "hintText: 'password or app token',"
+    ],
+    [
+      311,
+      "Remote backups",
+      "Text('Remote backups',"
+    ],
+    [
+      320,
+      "No backups yet. Tap the upload button to create one.",
+      "Text('No backups yet. Tap the upload button to create one.',"
+    ],
+    [
+      334,
+      "Restore",
+      "tooltip: 'Restore',"
+    ]
+  ],
+  "lib/ui/widgets/dock_order_store.dart": [
+    [
+      26,
+      "Go back",
+      "DockItem(id: 'back', icon: Icons.arrow_back_ios_new, label: 'Go back'),"
+    ],
+    [
+      27,
+      "Go forward",
+      "DockItem(id: 'forward', icon: Icons.arrow_forward_ios, label: 'Go forward'),"
+    ],
+    [
+      28,
+      "Sniffed media",
+      "DockItem(id: 'sniffer', icon: Icons.radar, label: 'Sniffed media'),"
+    ],
+    [
+      29,
+      "Downloads",
+      "DockItem(id: 'downloads', icon: Icons.download_rounded, label: 'Downloads'),"
+    ],
+    [
+      30,
+      "Tabs",
+      "DockItem(id: 'tabs', icon: Icons.tab, label: 'Tabs'),"
+    ],
+    [
+      31,
+      "Home",
+      "DockItem(id: 'home', icon: Icons.home_rounded, label: 'Home'),"
+    ],
+    [
+      32,
+      "Browser tools",
+      "DockItem(id: 'menu', icon: Icons.menu_rounded, label: 'Browser tools'),"
+    ],
+    [
+      33,
+      "History",
+      "DockItem(id: 'history', icon: Icons.history_rounded, label: 'History'),"
+    ],
+    [
+      35,
+      "Bookmarks",
+      "DockItem(id: 'bookmarks', icon: Icons.bookmarks_rounded, label: 'Bookmarks'),"
+    ],
+    [
+      36,
+      "Settings",
+      "DockItem(id: 'settings', icon: Icons.settings_rounded, label: 'Settings'),"
+    ],
+    [
+      37,
+      "Adblock",
+      "DockItem(id: 'adblock', icon: Icons.shield, label: 'Adblock'),"
+    ],
+    [
+      38,
+      "Reader mode",
+      "DockItem(id: 'readerMode', icon: Icons.auto_stories, label: 'Reader mode'),"
+    ]
+  ]
+}

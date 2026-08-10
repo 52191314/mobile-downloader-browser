@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../downloader/models.dart';
 
@@ -11,7 +12,7 @@ Future<DuplicateChoice> showDuplicateDownloadDialog({
     context: context,
     builder: (BuildContext dialogContext) {
       return AlertDialog(
-        title: const Text('Already in Queue'),
+        title: Text(AppLocalizations.of(context)!.dlgAlreadyInQueue),
         content: Text(
           'This download link has already been added to your queue.\n\n'
           'The URL may have changed (token refresh). Update the existing '
@@ -27,13 +28,13 @@ Future<DuplicateChoice> showDuplicateDownloadDialog({
           TextButton(
             onPressed: () =>
                 Navigator.of(dialogContext).pop(DuplicateChoice.downloadAgain),
-            child: const Text('Create New'),
+            child: Text(AppLocalizations.of(context)!.dlgCreateNew),
           ),
           TextButton(
             onPressed: () => Navigator.of(
               dialogContext,
             ).pop(DuplicateChoice.updateExisting),
-            child: const Text('Update Existing'),
+            child: Text(AppLocalizations.of(context)!.dlgUpdateExisting),
           ),
         ],
       );

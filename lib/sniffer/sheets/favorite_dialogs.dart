@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../browser_library.dart';
 import '../models/favorite_selection.dart';
@@ -16,7 +17,7 @@ Future<FavoriteSelection?> showPromptFavoriteFolderDialog({
     context: context,
     builder: (ctx) {
       return AlertDialog(
-        title: const Text('Add to favorites'),
+        title: Text(AppLocalizations.of(context)!.favAddToFav),
         content: StatefulBuilder(
           builder: (ctx, setLocal) {
             return SizedBox(
@@ -145,7 +146,7 @@ Future<EditFavoriteResult?> showEditFavoriteDialog({
   final saved = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Edit favorite'),
+      title: Text(AppLocalizations.of(context)!.favEditFav),
       content: StatefulBuilder(
         builder: (ctx, setLocal) => SizedBox(
           width: 320,

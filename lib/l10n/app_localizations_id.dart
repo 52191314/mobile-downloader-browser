@@ -1470,4 +1470,164 @@ class AppLocalizationsId extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'Belum ada cadangan. Ketuk tombol unggah untuk membuatnya.';
+
+  @override
+  String get tourWelcomeTitle => 'Selamat datang di Aurora';
+
+  @override
+  String get tourSkip => 'Lewati tur';
+
+  @override
+  String get tourNext => 'Lanjut';
+
+  @override
+  String get tourDone => 'Mengerti';
+
+  @override
+  String get playerRetry => 'Coba lagi';
+
+  @override
+  String get playerPipNotAvailable =>
+      'Picture-in-Picture tidak tersedia di perangkat ini.';
+
+  @override
+  String get playerOpenInBrowser => 'Buka di browser';
+
+  @override
+  String get playerCopyLink => 'Salin tautan video';
+
+  @override
+  String get playerCopiedLink => 'Tautan video disalin ke papan klip';
+
+  @override
+  String get playerPip => 'Picture-in-picture';
+
+  @override
+  String get playerAddFav => 'Tambah ke favorit';
+
+  @override
+  String get playerMore => 'Lainnya';
+
+  @override
+  String get playerDownload => 'Download';
+
+  @override
+  String get playerSpeed => 'Kecepatan pemutaran';
+
+  @override
+  String get playerQuality => 'Kualitas';
+
+  @override
+  String get playerAspectRatio => 'Rasio aspek';
+
+  @override
+  String get dlgAlreadyInQueue => 'Sudah di Antrean';
+
+  @override
+  String get dlgCreateNew => 'Buat Baru';
+
+  @override
+  String get dlgUpdateExisting => 'Perbarui yang Ada';
+
+  @override
+  String get dlgPhishingWarning => 'Tersangka Phishing';
+
+  @override
+  String get dlgStaySafe => 'Tetap aman';
+
+  @override
+  String get dlgContinueAnyway => 'Lanjutkan saja';
+
+  @override
+  String get favCreateFolder => 'Buat folder';
+
+  @override
+  String get favFolderName => 'Nama folder';
+
+  @override
+  String get favUnsorted => 'Belum dikategorikan';
+
+  @override
+  String get favEditTags => 'Edit tag';
+
+  @override
+  String get favRemoveBookmark => 'Hapus bookmark';
+
+  @override
+  String get favAddToFav => 'Tambah ke favorit';
+
+  @override
+  String get favEditFav => 'Edit favorit';
+
+  @override
+  String get historySearch => 'Cari riwayat…';
+
+  @override
+  String get historySelectAll => 'Pilih semua';
+
+  @override
+  String get historyDeleteSelected => 'Hapus yang dipilih';
+
+  @override
+  String get historyCancelSelection => 'Batal pilih';
+
+  @override
+  String get captureRescan => 'Pindai ulang halaman';
+
+  @override
+  String get captureGrabSeries => 'Grab serial';
+
+  @override
+  String get captureSortDisplay => 'Opsi urutkan & tampilkan';
+
+  @override
+  String get captureDetails => 'Detail';
+
+  @override
+  String get dockGoBack => 'Kembali';
+
+  @override
+  String get dockGoForward => 'Maju';
+
+  @override
+  String get dockSniffedMedia => 'Media tersniff';
+
+  @override
+  String get dockDownloads => 'Unduhan';
+
+  @override
+  String get dockTabs => 'Tab';
+
+  @override
+  String get dockHome => 'Beranda';
+
+  @override
+  String get dockBrowserTools => 'Alat browser';
+
+  @override
+  String get dockHistory => 'Riwayat';
+
+  @override
+  String get dockBookmarks => 'Bookmark';
+
+  @override
+  String get dockSettings => 'Pengaturan';
+
+  @override
+  String get btnFindInPage => 'Cari di halaman';
+
+  @override
+  String get btnRenameFile => 'Ganti nama file';
+
+  @override
+  String get btnNewTab => 'Tab baru';
+
+  @override
+  String get btnCloseAllTabs => 'Tutup semua tab';
+
+  @override
+  String get btnNotNow => 'Nanti saja';
+
+  @override
+  String get btnStopSharing => 'Hentikan berbagi';
 }

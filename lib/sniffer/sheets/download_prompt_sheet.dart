@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 import '../sniffer_formatters.dart';
 
 enum DownloadPromptAction {
@@ -369,7 +370,7 @@ class __DownloadPromptSheetContentState
                       ),
                     );
                   },
-                  child: const Text('Not now'),
+                  child: Text(AppLocalizations.of(context)!.btnNotNow),
                 ),
               ),
               const SizedBox(width: 12),

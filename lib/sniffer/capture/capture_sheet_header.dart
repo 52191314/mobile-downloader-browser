@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
@@ -75,7 +76,7 @@ class CaptureSheetHeader extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Rescan page for new media',
+            tooltip: AppLocalizations.of(context)!.captureRescan,
             icon: Icon(Icons.refresh_rounded, color: ac.accentFrost),
             onPressed: onRescan,
           ),
@@ -95,7 +96,7 @@ class CaptureSheetHeader extends StatelessWidget {
           if (onSeriesGrab != null)
             IconButton(
               key: const Key('capture_series_grab_button'),
-              tooltip: 'Grab series (episode order)',
+              tooltip: AppLocalizations.of(context)!.captureGrabSeries,
               icon: Icon(
                 Icons.playlist_play_rounded,
                 color: totalShown == 0 ? ac.textDisabled : ac.accentFrost,

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -341,7 +342,7 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
                     controller: _searchController,
                     autofocus: true,
                     decoration: InputDecoration(
-                      hintText: 'Search history...',
+                      hintText: AppLocalizations.of(context)!.historySearch,
                       border: InputBorder.none,
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.clear),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../theme/aurora_palette.dart';
 
@@ -45,7 +46,7 @@ class FindInPageBar extends StatelessWidget {
                     autofocus: true,
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: 'Find in page',
+                      hintText: AppLocalizations.of(context)!.btnFindInPage,
                       prefixIcon: const Icon(Icons.search, size: 20),
                       suffixText: matchCount > 0
                           ? '${currentMatch + 1}/$matchCount'

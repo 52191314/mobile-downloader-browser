@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../theme/aurora_palette.dart';
 import '../safe_browsing_service.dart';
@@ -44,7 +45,7 @@ Future<bool?> showPhishingWarningDialog({
         ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(true),
-          child: const Text('Continue anyway'),
+          child: Text(AppLocalizations.of(context)!.dlgContinueAnyway),
         ),
       ],
     ),

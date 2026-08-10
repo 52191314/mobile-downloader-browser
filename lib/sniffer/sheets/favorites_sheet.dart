@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -183,7 +184,7 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
     final name = await showDialog<String>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Create folder'),
+        title: Text(AppLocalizations.of(context)!.favCreateFolder),
         content: TextField(
           controller: nameController,
           autofocus: true,

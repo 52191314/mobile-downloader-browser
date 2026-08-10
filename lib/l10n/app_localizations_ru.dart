@@ -1476,4 +1476,163 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'Poka net rezervnykh kopij. Nazhmite knopku zagruzki.';
+
+  @override
+  String get tourWelcomeTitle => 'Dobro pozhalovat\' v Aurora';
+
+  @override
+  String get tourSkip => 'Propushchit\'';
+
+  @override
+  String get tourNext => 'Daleen';
+
+  @override
+  String get tourDone => 'Ponyatno';
+
+  @override
+  String get playerRetry => 'Povtorit\'';
+
+  @override
+  String get playerPipNotAvailable => 'PiP nedostupen na etom ustrojstve.';
+
+  @override
+  String get playerOpenInBrowser => 'Otkryt\' v brauzere';
+
+  @override
+  String get playerCopyLink => 'Skopirovat\' ssylku na video';
+
+  @override
+  String get playerCopiedLink => 'Ssylka skopirovana';
+
+  @override
+  String get playerPip => 'Kartinka v kartinke';
+
+  @override
+  String get playerAddFav => 'Dobavit\' v izbrannoe';
+
+  @override
+  String get playerMore => 'Eshche';
+
+  @override
+  String get playerDownload => 'Skachat\'';
+
+  @override
+  String get playerSpeed => 'Skorost\' vosproizvedeniya';
+
+  @override
+  String get playerQuality => 'Kachestvo';
+
+  @override
+  String get playerAspectRatio => 'Sootnoshenie storon';
+
+  @override
+  String get dlgAlreadyInQueue => 'Uzhe v ocheredi';
+
+  @override
+  String get dlgCreateNew => 'Sozdat\' novyj';
+
+  @override
+  String get dlgUpdateExisting => 'Obnovit\' sushchestvuyushchij';
+
+  @override
+  String get dlgPhishingWarning => 'Podozrenie na fishing';
+
+  @override
+  String get dlgStaySafe => 'Ostaytes\' v bezopasnosti';
+
+  @override
+  String get dlgContinueAnyway => 'Vse ravno prodolzhit\'';
+
+  @override
+  String get favCreateFolder => 'Sozdat\' papku';
+
+  @override
+  String get favFolderName => 'Imya papki';
+
+  @override
+  String get favUnsorted => 'Bez kategorii';
+
+  @override
+  String get favEditTags => 'Redaktirovat\' tegi';
+
+  @override
+  String get favRemoveBookmark => 'Udalit\' zakladku';
+
+  @override
+  String get favAddToFav => 'Dobavit\' v izbrannoe';
+
+  @override
+  String get favEditFav => 'Redaktirovat\' izbrannoe';
+
+  @override
+  String get historySearch => 'Poisk v istorii…';
+
+  @override
+  String get historySelectAll => 'Vydelit\' vse';
+
+  @override
+  String get historyDeleteSelected => 'Udalit\' vybrannoe';
+
+  @override
+  String get historyCancelSelection => 'Otmena vybora';
+
+  @override
+  String get captureRescan => 'Skanirovat\' zanovo';
+
+  @override
+  String get captureGrabSeries => 'Zakhvat seriala';
+
+  @override
+  String get captureSortDisplay => 'Nastrojki sortirovki';
+
+  @override
+  String get captureDetails => 'Detali';
+
+  @override
+  String get dockGoBack => 'Nazad';
+
+  @override
+  String get dockGoForward => 'Vpered';
+
+  @override
+  String get dockSniffedMedia => 'Obnaruzhennye media';
+
+  @override
+  String get dockDownloads => 'Zagruzki';
+
+  @override
+  String get dockTabs => 'Vkladki';
+
+  @override
+  String get dockHome => 'Glavnaya';
+
+  @override
+  String get dockBrowserTools => 'Instrumenty brauzera';
+
+  @override
+  String get dockHistory => 'Istoriya';
+
+  @override
+  String get dockBookmarks => 'Zakladki';
+
+  @override
+  String get dockSettings => 'Nastrojki';
+
+  @override
+  String get btnFindInPage => 'Poisk na stranice';
+
+  @override
+  String get btnRenameFile => 'Pereimenovat\'';
+
+  @override
+  String get btnNewTab => 'Novaya vkladka';
+
+  @override
+  String get btnCloseAllTabs => 'Zakryt\' vse vkladki';
+
+  @override
+  String get btnNotNow => 'Ne sejchas';
+
+  @override
+  String get btnStopSharing => 'Ostanovit\' dostup';
 }

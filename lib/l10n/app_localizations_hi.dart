@@ -1475,4 +1475,164 @@ class AppLocalizationsHi extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'अभी तक कोई बैकअप नहीं है। एक बनाने के लिए अपलोड बटन दबाएं।';
+
+  @override
+  String get tourWelcomeTitle => 'Aurora में आपका स्वागत है';
+
+  @override
+  String get tourSkip => 'टूर छोड़ें';
+
+  @override
+  String get tourNext => 'आगे';
+
+  @override
+  String get tourDone => 'समझ गए';
+
+  @override
+  String get playerRetry => 'पुनः प्रयास करें';
+
+  @override
+  String get playerPipNotAvailable =>
+      'इस डिवाइस पर पिक्चर-इन-पिक्चर उपलब्ध नहीं है।';
+
+  @override
+  String get playerOpenInBrowser => 'ब्राउज़र में खोलें';
+
+  @override
+  String get playerCopyLink => 'वीडियो लिंक कॉपी करें';
+
+  @override
+  String get playerCopiedLink => 'वीडियो लिंक क्लिपबोर्ड पर कॉपी किया गया';
+
+  @override
+  String get playerPip => 'पिक्चर-इन-पिक्चर';
+
+  @override
+  String get playerAddFav => 'पसंदीदा में जोड़ें';
+
+  @override
+  String get playerMore => 'अधिक';
+
+  @override
+  String get playerDownload => 'डाउनलोड';
+
+  @override
+  String get playerSpeed => 'प्लेबैक गति';
+
+  @override
+  String get playerQuality => 'गुणवत्ता';
+
+  @override
+  String get playerAspectRatio => 'पहलू अनुपात';
+
+  @override
+  String get dlgAlreadyInQueue => 'पहले से ही कतार में';
+
+  @override
+  String get dlgCreateNew => 'नया बनाएं';
+
+  @override
+  String get dlgUpdateExisting => 'मौजूदा अपडेट करें';
+
+  @override
+  String get dlgPhishingWarning => 'फ़िशिंग का संदेह';
+
+  @override
+  String get dlgStaySafe => 'सुरक्षित रहें';
+
+  @override
+  String get dlgContinueAnyway => 'फिर भी जारी रखें';
+
+  @override
+  String get favCreateFolder => 'फ़ोल्डर बनाएं';
+
+  @override
+  String get favFolderName => 'फ़ोल्डर नाम';
+
+  @override
+  String get favUnsorted => 'अवर्गीकृत';
+
+  @override
+  String get favEditTags => 'टैग संपादित करें';
+
+  @override
+  String get favRemoveBookmark => 'बुकमार्क हटाएं';
+
+  @override
+  String get favAddToFav => 'पसंदीदा में जोड़ें';
+
+  @override
+  String get favEditFav => 'पसंदीदा संपादित करें';
+
+  @override
+  String get historySearch => 'इतिहास खोजें…';
+
+  @override
+  String get historySelectAll => 'सभी चुनें';
+
+  @override
+  String get historyDeleteSelected => 'चयनित हटाएं';
+
+  @override
+  String get historyCancelSelection => 'चयन रद्द करें';
+
+  @override
+  String get captureRescan => 'पेज रीस्कैन करें';
+
+  @override
+  String get captureGrabSeries => 'श्रृंखला पकड़ें';
+
+  @override
+  String get captureSortDisplay => 'क्रमबद्ध और प्रदर्शन विकल्प';
+
+  @override
+  String get captureDetails => 'विवरण';
+
+  @override
+  String get dockGoBack => 'वापस जाएं';
+
+  @override
+  String get dockGoForward => 'आगे जाएं';
+
+  @override
+  String get dockSniffedMedia => 'स्निफ़ किया गया मीडिया';
+
+  @override
+  String get dockDownloads => 'डाउनलोड';
+
+  @override
+  String get dockTabs => 'टैब';
+
+  @override
+  String get dockHome => 'होम';
+
+  @override
+  String get dockBrowserTools => 'ब्राउज़र टूल';
+
+  @override
+  String get dockHistory => 'इतिहास';
+
+  @override
+  String get dockBookmarks => 'बुकमार्क';
+
+  @override
+  String get dockSettings => 'सेटिंग्स';
+
+  @override
+  String get btnFindInPage => 'पेज में खोजें';
+
+  @override
+  String get btnRenameFile => 'फ़ाइल का नाम बदलें';
+
+  @override
+  String get btnNewTab => 'नया टैब';
+
+  @override
+  String get btnCloseAllTabs => 'सभी टैब बंद करें';
+
+  @override
+  String get btnNotNow => 'अभी नहीं';
+
+  @override
+  String get btnStopSharing => 'साझा करना रोकें';
 }

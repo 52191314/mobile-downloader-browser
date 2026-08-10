@@ -1423,4 +1423,163 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get webdavNoBackupsYet => '尚无备份。轻触上传按钮以创建一个。';
+
+  @override
+  String get tourWelcomeTitle => '欢迎使用 Aurora 下载器';
+
+  @override
+  String get tourSkip => '跳过导览';
+
+  @override
+  String get tourNext => '下一步';
+
+  @override
+  String get tourDone => '明白了';
+
+  @override
+  String get playerRetry => '重试';
+
+  @override
+  String get playerPipNotAvailable => '画中画功能在此设备上不可用。';
+
+  @override
+  String get playerOpenInBrowser => '在浏览器中打开';
+
+  @override
+  String get playerCopyLink => '复制视频链接';
+
+  @override
+  String get playerCopiedLink => '已将视频链接复制到剪贴板';
+
+  @override
+  String get playerPip => '画中画';
+
+  @override
+  String get playerAddFav => '添加到收藏';
+
+  @override
+  String get playerMore => '更多';
+
+  @override
+  String get playerDownload => '下载';
+
+  @override
+  String get playerSpeed => '播放速度';
+
+  @override
+  String get playerQuality => '清晰度';
+
+  @override
+  String get playerAspectRatio => '画面比例';
+
+  @override
+  String get dlgAlreadyInQueue => '已经在队列中';
+
+  @override
+  String get dlgCreateNew => '新建';
+
+  @override
+  String get dlgUpdateExisting => '更新现有';
+
+  @override
+  String get dlgPhishingWarning => '疑似钓鱼网站';
+
+  @override
+  String get dlgStaySafe => '保持安全';
+
+  @override
+  String get dlgContinueAnyway => '仍然继续';
+
+  @override
+  String get favCreateFolder => '创建文件夹';
+
+  @override
+  String get favFolderName => '文件夹名称';
+
+  @override
+  String get favUnsorted => '未分类';
+
+  @override
+  String get favEditTags => '编辑标签';
+
+  @override
+  String get favRemoveBookmark => '移除书签';
+
+  @override
+  String get favAddToFav => '添加到收藏';
+
+  @override
+  String get favEditFav => '编辑收藏';
+
+  @override
+  String get historySearch => '搜索历史…';
+
+  @override
+  String get historySelectAll => '全选';
+
+  @override
+  String get historyDeleteSelected => '删除所选';
+
+  @override
+  String get historyCancelSelection => '取消选择';
+
+  @override
+  String get captureRescan => '重新扫描页面中的新媒体';
+
+  @override
+  String get captureGrabSeries => '剧集抓取（剧集顺序）';
+
+  @override
+  String get captureSortDisplay => '排序与显示选项';
+
+  @override
+  String get captureDetails => '详情';
+
+  @override
+  String get dockGoBack => '返回';
+
+  @override
+  String get dockGoForward => '前进';
+
+  @override
+  String get dockSniffedMedia => '嗅探媒体';
+
+  @override
+  String get dockDownloads => '下载';
+
+  @override
+  String get dockTabs => '标签页';
+
+  @override
+  String get dockHome => '主页';
+
+  @override
+  String get dockBrowserTools => '浏览器工具';
+
+  @override
+  String get dockHistory => '历史记录';
+
+  @override
+  String get dockBookmarks => '书签';
+
+  @override
+  String get dockSettings => '设置';
+
+  @override
+  String get btnFindInPage => '页内查找';
+
+  @override
+  String get btnRenameFile => '重命名文件';
+
+  @override
+  String get btnNewTab => '新建标签页';
+
+  @override
+  String get btnCloseAllTabs => '关闭所有标签页';
+
+  @override
+  String get btnNotNow => '暂时不要';
+
+  @override
+  String get btnStopSharing => '停止共享';
 }

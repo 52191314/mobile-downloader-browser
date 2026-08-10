@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../theme/aurora_palette.dart';
 import '../controllers/tab_manager.dart';
@@ -113,7 +114,7 @@ class TabStrip extends StatelessWidget {
               color: ac.textSecondary,
             ),
             onPressed: onNewTab,
-            tooltip: 'New tab',
+            tooltip: AppLocalizations.of(context)!.btnNewTab,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
           ),

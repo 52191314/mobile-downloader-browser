@@ -1474,4 +1474,164 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'لا توجد نسخ احتياطية بعد. انقر على زر التحميل لإنشاء واحدة.';
+
+  @override
+  String get tourWelcomeTitle => 'مرحبًا بك في Aurora';
+
+  @override
+  String get tourSkip => 'تخطي الجولة';
+
+  @override
+  String get tourNext => 'التالي';
+
+  @override
+  String get tourDone => 'فهمت';
+
+  @override
+  String get playerRetry => 'إعادة المحاولة';
+
+  @override
+  String get playerPipNotAvailable =>
+      'صورة داخل صورة غير متوفرة على هذا الجهاز.';
+
+  @override
+  String get playerOpenInBrowser => 'الفتح في المتصفح';
+
+  @override
+  String get playerCopyLink => 'نسخ رابط الفيديو';
+
+  @override
+  String get playerCopiedLink => 'تم نسخ رابط الفيديو إلى الحافظة';
+
+  @override
+  String get playerPip => 'صورة داخل صورة';
+
+  @override
+  String get playerAddFav => 'إضافة إلى المفضلة';
+
+  @override
+  String get playerMore => 'المزيد';
+
+  @override
+  String get playerDownload => 'تنزيل';
+
+  @override
+  String get playerSpeed => 'سرعة التشغيل';
+
+  @override
+  String get playerQuality => 'الجودة';
+
+  @override
+  String get playerAspectRatio => 'نسبة الارتفاع إلى العرض';
+
+  @override
+  String get dlgAlreadyInQueue => 'موجود بالفعل في قائمة الانتظار';
+
+  @override
+  String get dlgCreateNew => 'إنشاء جديد';
+
+  @override
+  String get dlgUpdateExisting => 'تحديث الحالي';
+
+  @override
+  String get dlgPhishingWarning => 'اشتباه في التصيد الأحتيالي';
+
+  @override
+  String get dlgStaySafe => 'ابق آمنًا';
+
+  @override
+  String get dlgContinueAnyway => 'المتابعة على أي حال';
+
+  @override
+  String get favCreateFolder => 'إنشاء مجلد';
+
+  @override
+  String get favFolderName => 'اسم المجلد';
+
+  @override
+  String get favUnsorted => 'غير مصنف';
+
+  @override
+  String get favEditTags => 'تعديل العلامات';
+
+  @override
+  String get favRemoveBookmark => 'إزالة الإشارة المرجعية';
+
+  @override
+  String get favAddToFav => 'إضافة إلى المفضلة';
+
+  @override
+  String get favEditFav => 'تعديل المفضلة';
+
+  @override
+  String get historySearch => 'البحث في السجل…';
+
+  @override
+  String get historySelectAll => 'تحديد الكل';
+
+  @override
+  String get historyDeleteSelected => 'حذف المحدد';
+
+  @override
+  String get historyCancelSelection => 'إلغاء التحديد';
+
+  @override
+  String get captureRescan => 'إعادة فحص الصفحة';
+
+  @override
+  String get captureGrabSeries => 'التقاط السلسلة';
+
+  @override
+  String get captureSortDisplay => 'خيارات الترتيب والعرض';
+
+  @override
+  String get captureDetails => 'التفاصيل';
+
+  @override
+  String get dockGoBack => 'الرجوع';
+
+  @override
+  String get dockGoForward => 'التقدم';
+
+  @override
+  String get dockSniffedMedia => 'الوسائط المكتشفة';
+
+  @override
+  String get dockDownloads => 'التنزيلات';
+
+  @override
+  String get dockTabs => 'علامات التبويب';
+
+  @override
+  String get dockHome => 'الرئيسية';
+
+  @override
+  String get dockBrowserTools => 'أدوات المتصفح';
+
+  @override
+  String get dockHistory => 'السجل';
+
+  @override
+  String get dockBookmarks => 'الإشارات المرجعية';
+
+  @override
+  String get dockSettings => 'الإعدادات';
+
+  @override
+  String get btnFindInPage => 'البحث في الصفحة';
+
+  @override
+  String get btnRenameFile => 'إعادة تسمية الملف';
+
+  @override
+  String get btnNewTab => 'علامة تبويب جديدة';
+
+  @override
+  String get btnCloseAllTabs => 'إغلاق جميع علامات التبويب';
+
+  @override
+  String get btnNotNow => 'ليس الآن';
+
+  @override
+  String get btnStopSharing => 'إيقاف المشاركة';
 }

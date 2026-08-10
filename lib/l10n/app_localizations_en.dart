@@ -1471,4 +1471,164 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'No backups yet. Tap the upload button to create one.';
+
+  @override
+  String get tourWelcomeTitle => 'Welcome to Aurora Downloader';
+
+  @override
+  String get tourSkip => 'Skip tour';
+
+  @override
+  String get tourNext => 'Next';
+
+  @override
+  String get tourDone => 'Got it';
+
+  @override
+  String get playerRetry => 'Retry';
+
+  @override
+  String get playerPipNotAvailable =>
+      'Picture-in-Picture is not available on this device.';
+
+  @override
+  String get playerOpenInBrowser => 'Open in browser';
+
+  @override
+  String get playerCopyLink => 'Copy video link';
+
+  @override
+  String get playerCopiedLink => 'Copied video link to clipboard';
+
+  @override
+  String get playerPip => 'Picture-in-picture';
+
+  @override
+  String get playerAddFav => 'Add to favorites';
+
+  @override
+  String get playerMore => 'More';
+
+  @override
+  String get playerDownload => 'Download';
+
+  @override
+  String get playerSpeed => 'Playback speed';
+
+  @override
+  String get playerQuality => 'Quality';
+
+  @override
+  String get playerAspectRatio => 'Aspect ratio';
+
+  @override
+  String get dlgAlreadyInQueue => 'Already in Queue';
+
+  @override
+  String get dlgCreateNew => 'Create New';
+
+  @override
+  String get dlgUpdateExisting => 'Update Existing';
+
+  @override
+  String get dlgPhishingWarning => 'Phishing suspected';
+
+  @override
+  String get dlgStaySafe => 'Stay safe';
+
+  @override
+  String get dlgContinueAnyway => 'Continue anyway';
+
+  @override
+  String get favCreateFolder => 'Create folder';
+
+  @override
+  String get favFolderName => 'Folder name';
+
+  @override
+  String get favUnsorted => 'Unsorted';
+
+  @override
+  String get favEditTags => 'Edit tags';
+
+  @override
+  String get favRemoveBookmark => 'Remove bookmark';
+
+  @override
+  String get favAddToFav => 'Add to favorites';
+
+  @override
+  String get favEditFav => 'Edit favorite';
+
+  @override
+  String get historySearch => 'Search history…';
+
+  @override
+  String get historySelectAll => 'Select all';
+
+  @override
+  String get historyDeleteSelected => 'Delete selected';
+
+  @override
+  String get historyCancelSelection => 'Cancel selection';
+
+  @override
+  String get captureRescan => 'Rescan page for new media';
+
+  @override
+  String get captureGrabSeries => 'Grab series (episode order)';
+
+  @override
+  String get captureSortDisplay => 'Sort and display options';
+
+  @override
+  String get captureDetails => 'Details';
+
+  @override
+  String get dockGoBack => 'Go back';
+
+  @override
+  String get dockGoForward => 'Go forward';
+
+  @override
+  String get dockSniffedMedia => 'Sniffed media';
+
+  @override
+  String get dockDownloads => 'Downloads';
+
+  @override
+  String get dockTabs => 'Tabs';
+
+  @override
+  String get dockHome => 'Home';
+
+  @override
+  String get dockBrowserTools => 'Browser tools';
+
+  @override
+  String get dockHistory => 'History';
+
+  @override
+  String get dockBookmarks => 'Bookmarks';
+
+  @override
+  String get dockSettings => 'Settings';
+
+  @override
+  String get btnFindInPage => 'Find in page';
+
+  @override
+  String get btnRenameFile => 'Rename File';
+
+  @override
+  String get btnNewTab => 'New tab';
+
+  @override
+  String get btnCloseAllTabs => 'Close all tabs';
+
+  @override
+  String get btnNotNow => 'Not now';
+
+  @override
+  String get btnStopSharing => 'Stop sharing';
 }

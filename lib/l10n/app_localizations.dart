@@ -2921,6 +2921,324 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No backups yet. Tap the upload button to create one.'**
   String get webdavNoBackupsYet;
+
+  /// No description provided for @tourWelcomeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Welcome to Aurora Downloader'**
+  String get tourWelcomeTitle;
+
+  /// No description provided for @tourSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip tour'**
+  String get tourSkip;
+
+  /// No description provided for @tourNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get tourNext;
+
+  /// No description provided for @tourDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it'**
+  String get tourDone;
+
+  /// No description provided for @playerRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get playerRetry;
+
+  /// No description provided for @playerPipNotAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Picture-in-Picture is not available on this device.'**
+  String get playerPipNotAvailable;
+
+  /// No description provided for @playerOpenInBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in browser'**
+  String get playerOpenInBrowser;
+
+  /// No description provided for @playerCopyLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy video link'**
+  String get playerCopyLink;
+
+  /// No description provided for @playerCopiedLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied video link to clipboard'**
+  String get playerCopiedLink;
+
+  /// No description provided for @playerPip.
+  ///
+  /// In en, this message translates to:
+  /// **'Picture-in-picture'**
+  String get playerPip;
+
+  /// No description provided for @playerAddFav.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to favorites'**
+  String get playerAddFav;
+
+  /// No description provided for @playerMore.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get playerMore;
+
+  /// No description provided for @playerDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get playerDownload;
+
+  /// No description provided for @playerSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Playback speed'**
+  String get playerSpeed;
+
+  /// No description provided for @playerQuality.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality'**
+  String get playerQuality;
+
+  /// No description provided for @playerAspectRatio.
+  ///
+  /// In en, this message translates to:
+  /// **'Aspect ratio'**
+  String get playerAspectRatio;
+
+  /// No description provided for @dlgAlreadyInQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Already in Queue'**
+  String get dlgAlreadyInQueue;
+
+  /// No description provided for @dlgCreateNew.
+  ///
+  /// In en, this message translates to:
+  /// **'Create New'**
+  String get dlgCreateNew;
+
+  /// No description provided for @dlgUpdateExisting.
+  ///
+  /// In en, this message translates to:
+  /// **'Update Existing'**
+  String get dlgUpdateExisting;
+
+  /// No description provided for @dlgPhishingWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Phishing suspected'**
+  String get dlgPhishingWarning;
+
+  /// No description provided for @dlgStaySafe.
+  ///
+  /// In en, this message translates to:
+  /// **'Stay safe'**
+  String get dlgStaySafe;
+
+  /// No description provided for @dlgContinueAnyway.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue anyway'**
+  String get dlgContinueAnyway;
+
+  /// No description provided for @favCreateFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Create folder'**
+  String get favCreateFolder;
+
+  /// No description provided for @favFolderName.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder name'**
+  String get favFolderName;
+
+  /// No description provided for @favUnsorted.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsorted'**
+  String get favUnsorted;
+
+  /// No description provided for @favEditTags.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit tags'**
+  String get favEditTags;
+
+  /// No description provided for @favRemoveBookmark.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove bookmark'**
+  String get favRemoveBookmark;
+
+  /// No description provided for @favAddToFav.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to favorites'**
+  String get favAddToFav;
+
+  /// No description provided for @favEditFav.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit favorite'**
+  String get favEditFav;
+
+  /// No description provided for @historySearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search history…'**
+  String get historySearch;
+
+  /// No description provided for @historySelectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get historySelectAll;
+
+  /// No description provided for @historyDeleteSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete selected'**
+  String get historyDeleteSelected;
+
+  /// No description provided for @historyCancelSelection.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel selection'**
+  String get historyCancelSelection;
+
+  /// No description provided for @captureRescan.
+  ///
+  /// In en, this message translates to:
+  /// **'Rescan page for new media'**
+  String get captureRescan;
+
+  /// No description provided for @captureGrabSeries.
+  ///
+  /// In en, this message translates to:
+  /// **'Grab series (episode order)'**
+  String get captureGrabSeries;
+
+  /// No description provided for @captureSortDisplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort and display options'**
+  String get captureSortDisplay;
+
+  /// No description provided for @captureDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get captureDetails;
+
+  /// No description provided for @dockGoBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Go back'**
+  String get dockGoBack;
+
+  /// No description provided for @dockGoForward.
+  ///
+  /// In en, this message translates to:
+  /// **'Go forward'**
+  String get dockGoForward;
+
+  /// No description provided for @dockSniffedMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Sniffed media'**
+  String get dockSniffedMedia;
+
+  /// No description provided for @dockDownloads.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloads'**
+  String get dockDownloads;
+
+  /// No description provided for @dockTabs.
+  ///
+  /// In en, this message translates to:
+  /// **'Tabs'**
+  String get dockTabs;
+
+  /// No description provided for @dockHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get dockHome;
+
+  /// No description provided for @dockBrowserTools.
+  ///
+  /// In en, this message translates to:
+  /// **'Browser tools'**
+  String get dockBrowserTools;
+
+  /// No description provided for @dockHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get dockHistory;
+
+  /// No description provided for @dockBookmarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks'**
+  String get dockBookmarks;
+
+  /// No description provided for @dockSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get dockSettings;
+
+  /// No description provided for @btnFindInPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Find in page'**
+  String get btnFindInPage;
+
+  /// No description provided for @btnRenameFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename File'**
+  String get btnRenameFile;
+
+  /// No description provided for @btnNewTab.
+  ///
+  /// In en, this message translates to:
+  /// **'New tab'**
+  String get btnNewTab;
+
+  /// No description provided for @btnCloseAllTabs.
+  ///
+  /// In en, this message translates to:
+  /// **'Close all tabs'**
+  String get btnCloseAllTabs;
+
+  /// No description provided for @btnNotNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get btnNotNow;
+
+  /// No description provided for @btnStopSharing.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop sharing'**
+  String get btnStopSharing;
 }
 
 class _AppLocalizationsDelegate

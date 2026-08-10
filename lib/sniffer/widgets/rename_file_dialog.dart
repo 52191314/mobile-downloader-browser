@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../downloader/filename_service.dart';
 import '../filename_utils.dart';
@@ -42,7 +43,7 @@ class _RenameFileDialogState extends State<RenameFileDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Rename File'),
+      title: Text(AppLocalizations.of(context)!.btnRenameFile),
       content: Form(
         key: _formKey,
         child: Column(

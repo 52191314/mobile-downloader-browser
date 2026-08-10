@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
@@ -1013,8 +1014,8 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
 
       if (!success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Picture-in-Picture is not available on this device.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.playerPipNotAvailable),
             duration: Duration(seconds: 2),
           ),
         );
@@ -1026,7 +1027,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
       // transient platform error.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Picture-in-Picture is not available on this device.'),
             duration: Duration(seconds: 2),
           ),
@@ -1100,8 +1101,8 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         unawaited(Clipboard.setData(ClipboardData(text: _activeUrl)));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Copied video link to clipboard'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.playerCopiedLink),
               duration: Duration(seconds: 1),
             ),
           );

@@ -1437,4 +1437,163 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get webdavNoBackupsYet => 'バックアップはまだありません。アップロードボタンをタップして作成してください。';
+
+  @override
+  String get tourWelcomeTitle => 'Aurora Downloaderへようこそ';
+
+  @override
+  String get tourSkip => 'ツアーをスキップ';
+
+  @override
+  String get tourNext => '次へ';
+
+  @override
+  String get tourDone => '了解';
+
+  @override
+  String get playerRetry => '再試行';
+
+  @override
+  String get playerPipNotAvailable => 'このデバイスではピクチャーインピクチャーは利用できません。';
+
+  @override
+  String get playerOpenInBrowser => 'ブラウザで開く';
+
+  @override
+  String get playerCopyLink => '動画リンクをコピー';
+
+  @override
+  String get playerCopiedLink => '動画リンクをクリップボードにコピーしました';
+
+  @override
+  String get playerPip => 'ピクチャーインピクチャー';
+
+  @override
+  String get playerAddFav => 'お気に入りに追加';
+
+  @override
+  String get playerMore => 'その他';
+
+  @override
+  String get playerDownload => 'ダウンロード';
+
+  @override
+  String get playerSpeed => '再生速度';
+
+  @override
+  String get playerQuality => '画質';
+
+  @override
+  String get playerAspectRatio => 'アスペクト比';
+
+  @override
+  String get dlgAlreadyInQueue => 'すでにキューにあります';
+
+  @override
+  String get dlgCreateNew => '新規作成';
+
+  @override
+  String get dlgUpdateExisting => '既存を更新';
+
+  @override
+  String get dlgPhishingWarning => 'フィッシングの疑い';
+
+  @override
+  String get dlgStaySafe => '安全を確保';
+
+  @override
+  String get dlgContinueAnyway => '続行する';
+
+  @override
+  String get favCreateFolder => 'フォルダを作成';
+
+  @override
+  String get favFolderName => 'フォルダ名';
+
+  @override
+  String get favUnsorted => '未分類';
+
+  @override
+  String get favEditTags => 'タグを編集';
+
+  @override
+  String get favRemoveBookmark => 'ブックマークを削除';
+
+  @override
+  String get favAddToFav => 'お気に入りに追加';
+
+  @override
+  String get favEditFav => 'お気に入りを編集';
+
+  @override
+  String get historySearch => '履歴を検索…';
+
+  @override
+  String get historySelectAll => 'すべて選択';
+
+  @override
+  String get historyDeleteSelected => '選択項目を削除';
+
+  @override
+  String get historyCancelSelection => '選択を解除';
+
+  @override
+  String get captureRescan => '新しいメディアを再スキャン';
+
+  @override
+  String get captureGrabSeries => 'シリーズを取得（エピソード順）';
+
+  @override
+  String get captureSortDisplay => '並べ替えと表示オプション';
+
+  @override
+  String get captureDetails => '詳細';
+
+  @override
+  String get dockGoBack => '戻る';
+
+  @override
+  String get dockGoForward => '進む';
+
+  @override
+  String get dockSniffedMedia => '検出されたメディア';
+
+  @override
+  String get dockDownloads => 'ダウンロード';
+
+  @override
+  String get dockTabs => 'タブ';
+
+  @override
+  String get dockHome => 'ホーム';
+
+  @override
+  String get dockBrowserTools => 'ブラウザツール';
+
+  @override
+  String get dockHistory => '履歴';
+
+  @override
+  String get dockBookmarks => 'ブックマーク';
+
+  @override
+  String get dockSettings => '設定';
+
+  @override
+  String get btnFindInPage => 'ページ内検索';
+
+  @override
+  String get btnRenameFile => '名前を変更';
+
+  @override
+  String get btnNewTab => '新しいタブ';
+
+  @override
+  String get btnCloseAllTabs => 'すべてのタブを閉じる';
+
+  @override
+  String get btnNotNow => '後で';
+
+  @override
+  String get btnStopSharing => '共有を停止';
 }

@@ -1477,4 +1477,164 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get webdavNoBackupsYet =>
       'Nenhum backup ainda. Toque no botão de upload para criar um.';
+
+  @override
+  String get tourWelcomeTitle => 'Bem-vindo ao Aurora';
+
+  @override
+  String get tourSkip => 'Pular tour';
+
+  @override
+  String get tourNext => 'Próximo';
+
+  @override
+  String get tourDone => 'Entendido';
+
+  @override
+  String get playerRetry => 'Tentar novamente';
+
+  @override
+  String get playerPipNotAvailable =>
+      'Picture-in-Picture não está disponível neste dispositivo.';
+
+  @override
+  String get playerOpenInBrowser => 'Abrir no navegador';
+
+  @override
+  String get playerCopyLink => 'Copiar link do vídeo';
+
+  @override
+  String get playerCopiedLink => 'Link do vídeo copiado';
+
+  @override
+  String get playerPip => 'Picture-in-picture';
+
+  @override
+  String get playerAddFav => 'Adicionar aos favoritos';
+
+  @override
+  String get playerMore => 'Mais';
+
+  @override
+  String get playerDownload => 'Baixar';
+
+  @override
+  String get playerSpeed => 'Velocidade de reprodução';
+
+  @override
+  String get playerQuality => 'Qualidade';
+
+  @override
+  String get playerAspectRatio => 'Proporção de tela';
+
+  @override
+  String get dlgAlreadyInQueue => 'Já na fila';
+
+  @override
+  String get dlgCreateNew => 'Criar novo';
+
+  @override
+  String get dlgUpdateExisting => 'Atualizar existente';
+
+  @override
+  String get dlgPhishingWarning => 'Suspeita de phishing';
+
+  @override
+  String get dlgStaySafe => 'Fique seguro';
+
+  @override
+  String get dlgContinueAnyway => 'Continuar mesmo assim';
+
+  @override
+  String get favCreateFolder => 'Criar pasta';
+
+  @override
+  String get favFolderName => 'Nome da pasta';
+
+  @override
+  String get favUnsorted => 'Não classificado';
+
+  @override
+  String get favEditTags => 'Editar tags';
+
+  @override
+  String get favRemoveBookmark => 'Remover marcador';
+
+  @override
+  String get favAddToFav => 'Adicionar aos favoritos';
+
+  @override
+  String get favEditFav => 'Editar favorito';
+
+  @override
+  String get historySearch => 'Buscar no histórico…';
+
+  @override
+  String get historySelectAll => 'Selecionar tudo';
+
+  @override
+  String get historyDeleteSelected => 'Excluir selecionados';
+
+  @override
+  String get historyCancelSelection => 'Cancelar seleção';
+
+  @override
+  String get captureRescan => 'Reescanear página';
+
+  @override
+  String get captureGrabSeries => 'Capturar série (ordem de episódios)';
+
+  @override
+  String get captureSortDisplay => 'Opções de ordenação e exibição';
+
+  @override
+  String get captureDetails => 'Detalhes';
+
+  @override
+  String get dockGoBack => 'Voltar';
+
+  @override
+  String get dockGoForward => 'Avançar';
+
+  @override
+  String get dockSniffedMedia => 'Mídia detectada';
+
+  @override
+  String get dockDownloads => 'Downloads';
+
+  @override
+  String get dockTabs => 'Abas';
+
+  @override
+  String get dockHome => 'Início';
+
+  @override
+  String get dockBrowserTools => 'Ferramentas do navegador';
+
+  @override
+  String get dockHistory => 'Histórico';
+
+  @override
+  String get dockBookmarks => 'Marcadores';
+
+  @override
+  String get dockSettings => 'Configurações';
+
+  @override
+  String get btnFindInPage => 'Buscar na página';
+
+  @override
+  String get btnRenameFile => 'Renomear arquivo';
+
+  @override
+  String get btnNewTab => 'Nova aba';
+
+  @override
+  String get btnCloseAllTabs => 'Fechar todas as abas';
+
+  @override
+  String get btnNotNow => 'Agora não';
+
+  @override
+  String get btnStopSharing => 'Parar de compartilhar';
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 import 'package:aurora_downloader/sniffer/capture/media_filter.dart';
 import 'package:aurora_downloader/theme/aurora_palette.dart';
@@ -72,7 +73,7 @@ class CaptureFilterBar extends StatelessWidget {
           if (onOpenOptions != null)
             IconButton(
               key: const Key('capture_options_button'),
-              tooltip: 'Sort and display options',
+              tooltip: AppLocalizations.of(context)!.captureSortDisplay,
               visualDensity: VisualDensity.compact,
               icon: Icon(
                 Icons.tune,
