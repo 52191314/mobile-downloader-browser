@@ -1534,6 +1534,20 @@ class AppLocalizationsAr extends AppLocalizations {
   String get dlgUpdateExisting => 'تحديث الحالي';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'يوجد تنزيل بهذا الاسم بالفعل في قائمة الانتظار.\n\nالملف: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'تخطي';
+
+  @override
+  String get dlgReplace => 'استبدال';
+
+  @override
+  String get dlgApplyToAll => 'تطبيق على جميع التكرارات';
+
+  @override
   String get dlgPhishingWarning => 'اشتباه في التصيد الأحتيالي';
 
   @override

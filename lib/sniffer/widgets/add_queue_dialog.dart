@@ -335,29 +335,20 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
           );
       if (hasDuplicate) {
         if (!mounted) return;
-        // Shared duplicate prompt (same widget as enqueue_download's) so the
-        // copy and the DuplicateChoice mapping stay consistent.
-        final choice =
+        final result =
             await showDuplicateDownloadDialog(context: context, filename: filename);
-        if (choice == DuplicateChoice.skip) {
+        if (result.choice == DuplicateChoice.skip) {
           if (mounted) {
             setState(() => isSubmitting = false);
           }
           return;
         }
-        if (choice == DuplicateChoice.updateExisting) {
+        if (result.choice == DuplicateChoice.replace) {
           final existingId = widget.downloadQueue.resniffPendingTaskId ??
               widget.downloadQueue.getTaskByUrl(mediaUrl)?.id ??
               widget.downloadQueue.getTaskByUrl(selectedMedia.url)?.id;
           if (existingId != null) {
-            await widget.downloadQueue.updateTaskFromDonor(existingId, task);
-            if (!mounted) return;
-            navigator.pop(true);
-            AuroraSnackbar.show(
-              context,
-              'Done — Link updated. Download will retry.',
-            );
-            return;
+            await widget.downloadQueue.cancelTaskAsync(existingId);
           }
         }
         force = true;

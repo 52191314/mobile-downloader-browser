@@ -1540,6 +1540,20 @@ class AppLocalizationsEs extends AppLocalizations {
   String get dlgUpdateExisting => 'Actualizar existente';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Ya existe una descarga con este nombre en la cola.\n\nArchivo: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Omitir';
+
+  @override
+  String get dlgReplace => 'Reemplazar';
+
+  @override
+  String get dlgApplyToAll => 'Aplicar a todos los duplicados';
+
+  @override
   String get dlgPhishingWarning => 'Sospecha de phishing';
 
   @override

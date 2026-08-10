@@ -520,5 +520,16 @@
   "btnNewTab": "新しいタブ",
   "btnCloseAllTabs": "すべてのタブを閉じる",
   "btnNotNow": "後で",
-  "btnStopSharing": "共有を停止"
+  "btnStopSharing": "共有を停止",
+  "dlgDuplicateContent": "同じ名前のダウンロードがキューに存在します。\n\nファイル: {filename}",
+  "dlgSkip": "スキップ",
+  "dlgReplace": "置換",
+  "dlgApplyToAll": "すべての重複に適用",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

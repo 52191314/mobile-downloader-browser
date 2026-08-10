@@ -520,5 +520,16 @@
   "btnNewTab": "Neuer Tab",
   "btnCloseAllTabs": "Alle Tabs schließen",
   "btnNotNow": "Später",
-  "btnStopSharing": "Freigabe beenden"
+  "btnStopSharing": "Freigabe beenden",
+  "dlgDuplicateContent": "Ein Download mit diesem Namen existiert bereits in der Warteschlange.\n\nDatei: {filename}",
+  "dlgSkip": "Überspringen",
+  "dlgReplace": "Ersetzen",
+  "dlgApplyToAll": "Für alle Duplikate anwenden",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

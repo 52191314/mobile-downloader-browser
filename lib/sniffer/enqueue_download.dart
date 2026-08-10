@@ -111,6 +111,7 @@ Future<void> enqueueDirectDownload({
   String? pageHost,
   String? mediaTypeForRule,
   bool silent = false,
+  DuplicatePolicy? batchDuplicatePolicy,
 }) async {
   final media = tab.snifferEngine.detectedMedia
       .where((m) => m.url == url)
@@ -248,24 +249,36 @@ Future<void> enqueueDirectDownload({
         suggestedName,
         media?.sourcePageUrl ?? currentUrl,
       )) {
-    if (silent) return; // batch: skip already-queued quietly
+    if (silent && batchDuplicatePolicy == null) return; // batch: skip already-queued quietly
     if (!context.mounted) return;
-    final choice = await showDuplicateDownloadDialog(
-      context: context,
-      filename: suggestedName,
-    );
-    if (choice == DuplicateChoice.skip) return;
-    if (choice == DuplicateChoice.updateExisting) {
-      final existing = downloadQueue.getTaskByUrl(url);
-      if (existing != null) {
-        await downloadQueue.updateTaskFromDonor(existing.id, task);
-        if (isMounted()) {
-          showSnack('Done — Link updated. Download will retry.');
-        }
-        return;
+
+    late final DuplicateChoice choice;
+    if (batchDuplicatePolicy != null && batchDuplicatePolicy.applyToAll) {
+      choice = batchDuplicatePolicy.choice;
+    } else {
+      final result = await showDuplicateDownloadDialog(
+        context: context,
+        filename: suggestedName,
+        showApplyToAll: batchDuplicatePolicy != null,
+      );
+      choice = result.choice;
+      if (batchDuplicatePolicy != null && result.applyToAll) {
+        batchDuplicatePolicy.choice = choice;
+        batchDuplicatePolicy.applyToAll = true;
       }
     }
-    force = true;
+
+    if (choice == DuplicateChoice.skip) return;
+    if (choice == DuplicateChoice.replace) {
+      final existing = downloadQueue.getTaskByUrl(url);
+      if (existing != null) {
+        await downloadQueue.cancelTaskAsync(existing.id);
+      }
+      force = true;
+    } else {
+      // createNew
+      force = true;
+    }
   }
   downloadQueue.addTask(task, force: force);
 

@@ -1496,6 +1496,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dlgUpdateExisting => '既存を更新';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return '同じ名前のダウンロードがキューに存在します。\n\nファイル: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'スキップ';
+
+  @override
+  String get dlgReplace => '置換';
+
+  @override
+  String get dlgApplyToAll => 'すべての重複に適用';
+
+  @override
   String get dlgPhishingWarning => 'フィッシングの疑い';
 
   @override

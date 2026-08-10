@@ -520,5 +520,16 @@
   "btnNewTab": "नया टैब",
   "btnCloseAllTabs": "सभी टैब बंद करें",
   "btnNotNow": "अभी नहीं",
-  "btnStopSharing": "साझा करना रोकें"
+  "btnStopSharing": "साझा करना रोकें",
+  "dlgDuplicateContent": "इस नाम का डाउनलोड पहले से कतार में मौजूद है।\n\nफ़ाइल: {filename}",
+  "dlgSkip": "छोड़ें",
+  "dlgReplace": "बदलें",
+  "dlgApplyToAll": "सभी डुप्लीकेट पर लागू करें",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

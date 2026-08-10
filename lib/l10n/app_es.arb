@@ -520,5 +520,16 @@
   "btnNewTab": "Nueva pestaña",
   "btnCloseAllTabs": "Cerrar todas las pestañas",
   "btnNotNow": "Ahora no",
-  "btnStopSharing": "Detener uso compartido"
+  "btnStopSharing": "Detener uso compartido",
+  "dlgDuplicateContent": "Ya existe una descarga con este nombre en la cola.\n\nArchivo: {filename}",
+  "dlgSkip": "Omitir",
+  "dlgReplace": "Reemplazar",
+  "dlgApplyToAll": "Aplicar a todos los duplicados",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

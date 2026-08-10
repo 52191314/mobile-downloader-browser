@@ -548,5 +548,16 @@
   "btnNewTab": "Nouvel onglet",
   "btnCloseAllTabs": "Fermer tous les onglets",
   "btnNotNow": "Pas maintenant",
-  "btnStopSharing": "Arrêter le partage"
+  "btnStopSharing": "Arrêter le partage",
+  "dlgDuplicateContent": "Un téléchargement avec ce nom existe déjà dans la file d'attente.\n\nFichier : {filename}",
+  "dlgSkip": "Ignorer",
+  "dlgReplace": "Remplacer",
+  "dlgApplyToAll": "Appliquer à tous les doublons",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

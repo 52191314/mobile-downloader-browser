@@ -1,9 +1,20 @@
 enum DownloadState { scheduled, idle, downloading, paused, completed, failed, merging }
 
+/// How to handle a download whose URL or filename already exists in the queue.
 enum DuplicateChoice {
-  downloadAgain,
-  updateExisting,
+  /// Skip this item (do nothing).
   skip,
+  /// Replace the existing task — delete it from queue, add the new one.
+  replace,
+  /// Create a new separate task alongside the existing one.
+  createNew,
+}
+
+/// Batch duplicate policy: remembers a user's choice to apply to all remaining items.
+class DuplicatePolicy {
+  DuplicateChoice choice;
+  bool applyToAll;
+  DuplicatePolicy({required this.choice, this.applyToAll = false});
 }
 
 /// Classifies the reason a download failed.

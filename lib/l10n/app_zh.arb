@@ -520,5 +520,16 @@
   "btnNewTab": "新建标签页",
   "btnCloseAllTabs": "关闭所有标签页",
   "btnNotNow": "暂时不要",
-  "btnStopSharing": "停止共享"
+  "btnStopSharing": "停止共享",
+  "dlgDuplicateContent": "下载队列中已存在同名下载。\n\n文件：{filename}",
+  "dlgSkip": "跳过",
+  "dlgReplace": "替换",
+  "dlgApplyToAll": "对所有重复项执行相同操作",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

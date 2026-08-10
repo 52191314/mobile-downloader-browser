@@ -2840,19 +2840,16 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     }
 
-    // --- Enqueue all, skipping anything already queued ---
+    // --- Enqueue all, with WinRAR-style duplicate handling ---
     var added = 0;
     var skipped = 0;
+    final duplicatePolicy = DuplicatePolicy(choice: DuplicateChoice.skip);
     for (final media in toEnqueue) {
       if (!mounted) break;
       if (RestrictedMediaPolicy.isBlocked(
         mediaUrl: media.url,
         sourcePageUrl: media.sourcePageUrl,
       )) {
-        skipped++;
-        continue;
-      }
-      if (_downloadQueue.urlExists(media.url)) {
         skipped++;
         continue;
       }
@@ -2872,6 +2869,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         ruleEngine: widget.ruleEngine,
         pageHost: pageUri?.host,
         silent: true,
+        batchDuplicatePolicy: duplicatePolicy,
       );
       if (_downloadQueue.urlExists(media.url)) {
         added++;
@@ -5204,7 +5202,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
-  Future<DuplicateChoice> _showDuplicatePrompt(
+  Future<DuplicateDialogResult> _showDuplicatePrompt(
     BuildContext context,
     String filename,
   ) {

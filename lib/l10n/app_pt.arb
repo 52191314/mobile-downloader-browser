@@ -520,5 +520,16 @@
   "btnNewTab": "Nova aba",
   "btnCloseAllTabs": "Fechar todas as abas",
   "btnNotNow": "Agora não",
-  "btnStopSharing": "Parar de compartilhar"
+  "btnStopSharing": "Parar de compartilhar",
+  "dlgDuplicateContent": "Já existe um download com este nome na fila.\n\nArquivo: {filename}",
+  "dlgSkip": "Pular",
+  "dlgReplace": "Substituir",
+  "dlgApplyToAll": "Aplicar a todos os duplicados",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

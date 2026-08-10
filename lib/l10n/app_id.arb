@@ -520,5 +520,16 @@
   "btnNewTab": "Tab baru",
   "btnCloseAllTabs": "Tutup semua tab",
   "btnNotNow": "Nanti saja",
-  "btnStopSharing": "Hentikan berbagi"
+  "btnStopSharing": "Hentikan berbagi",
+  "dlgDuplicateContent": "Unduhan dengan nama ini sudah ada dalam antrean.\n\nFile: {filename}",
+  "dlgSkip": "Lewati",
+  "dlgReplace": "Ganti",
+  "dlgApplyToAll": "Terapkan untuk semua duplikat",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

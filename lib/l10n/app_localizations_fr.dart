@@ -1541,6 +1541,20 @@ class AppLocalizationsFr extends AppLocalizations {
   String get dlgUpdateExisting => 'Mettre à jour l\'existant';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Un téléchargement avec ce nom existe déjà dans la file d\'attente.\n\nFichier : $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Ignorer';
+
+  @override
+  String get dlgReplace => 'Remplacer';
+
+  @override
+  String get dlgApplyToAll => 'Appliquer à tous les doublons';
+
+  @override
   String get dlgPhishingWarning => 'Hameçonnage suspecté';
 
   @override

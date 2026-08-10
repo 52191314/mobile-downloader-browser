@@ -3038,6 +3038,30 @@ abstract class AppLocalizations {
   /// **'Update Existing'**
   String get dlgUpdateExisting;
 
+  /// No description provided for @dlgDuplicateContent.
+  ///
+  /// In en, this message translates to:
+  /// **'A download with this name already exists in the queue.\n\nFile: {filename}'**
+  String dlgDuplicateContent(String filename);
+
+  /// No description provided for @dlgSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get dlgSkip;
+
+  /// No description provided for @dlgReplace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get dlgReplace;
+
+  /// No description provided for @dlgApplyToAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to all duplicates'**
+  String get dlgApplyToAll;
+
   /// No description provided for @dlgPhishingWarning.
   ///
   /// In en, this message translates to:

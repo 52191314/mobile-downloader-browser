@@ -1535,6 +1535,20 @@ class AppLocalizationsHi extends AppLocalizations {
   String get dlgUpdateExisting => 'मौजूदा अपडेट करें';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'इस नाम का डाउनलोड पहले से कतार में मौजूद है।\n\nफ़ाइल: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'छोड़ें';
+
+  @override
+  String get dlgReplace => 'बदलें';
+
+  @override
+  String get dlgApplyToAll => 'सभी डुप्लीकेट पर लागू करें';
+
+  @override
   String get dlgPhishingWarning => 'फ़िशिंग का संदेह';
 
   @override

@@ -1531,6 +1531,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dlgUpdateExisting => 'Update Existing';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'A download with this name already exists in the queue.\n\nFile: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Skip';
+
+  @override
+  String get dlgReplace => 'Replace';
+
+  @override
+  String get dlgApplyToAll => 'Apply to all duplicates';
+
+  @override
   String get dlgPhishingWarning => 'Phishing suspected';
 
   @override

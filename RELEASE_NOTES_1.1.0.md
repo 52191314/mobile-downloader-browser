@@ -1,8 +1,17 @@
 # Aurora Downloader 1.1.0 Release Notes
 
-**Build Version**: 1.1.0+64  
+**Build Version**: 1.1.0+65  
 **Release Date**: August 10, 2026  
 **Build Channel**: Google Play Store (`AURORA_BUILD_CHANNEL=play`)
+
+## Build 65 - WinRAR-style Duplicate Download Handling
+
+### Duplicate Download Dialog Redesign
+- **Skip / Replace / Create New**: Replaced the old Cancel / Create New / Update Existing options with a clearer WinRAR-inspired set: Skip (do nothing), Replace (delete existing task and re-add fresh), Create New (add alongside).
+- **"Apply to all duplicates" toggle**: Batch downloads (listing page crawl, capture sheet multi-select, series grab) now show a checkbox to apply the chosen action to all remaining duplicates in the batch, eliminating repeated prompts.
+- **Batch duplicate policy**: The listing batch download (`_runListingBatchDownload`) and capture batch flows pass a `DuplicatePolicy` through the enqueue pipeline, so duplicates encountered mid-batch are handled according to the user's remembered preference.
+- **Replace action**: Uses `cancelTaskAsync` to fully clean up the existing task (temp files, partial downloads) before adding the replacement, instead of the old URL-patch approach.
+- **Localized in all 11 languages**: New dialog strings (dlgSkip, dlgReplace, dlgDuplicateContent, dlgApplyToAll) translated across en, zh, ja, de, es, pt, ru, hi, ar, id, fr.
 
 ## Major Enhancements
 

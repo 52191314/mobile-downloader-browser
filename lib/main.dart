@@ -45,6 +45,7 @@ import 'premium/phase2_caps.dart';
 import 'premium/accent_pack.dart';
 import 'premium/vault_service.dart';
 import 'sniffer/token_refresh_service.dart';
+import 'sniffer/sheets/duplicate_download_dialog.dart';
 
 import 'compliance/restricted_media_policy.dart';
 import 'sniffer/worker_isolate_pool.dart';
@@ -1291,33 +1292,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       );
       if (_downloadQueue.urlExists(rawUrl)) {
         if (!mounted) return;
-        final choice = await _showDuplicatePrompt(context, 'Torrent');
-        if (choice == DuplicateChoice.skip) {
+        final result = await _showDuplicatePrompt(context, 'Torrent');
+        if (result.choice == DuplicateChoice.skip) {
           _urlController.clear();
           return;
         }
-        if (choice == DuplicateChoice.updateExisting) {
+        if (result.choice == DuplicateChoice.replace) {
           final existing = _downloadQueue.getTaskByUrl(rawUrl);
           if (existing != null) {
-            final urlChanged = existing.url != rawUrl;
-            existing.url = rawUrl;
-            existing.headers = task.headers;
-            if (urlChanged) {
-              existing.downloadedBytes = 0;
-              existing.totalBytes = 0;
-            }
-            if (existing.state == DownloadState.failed ||
-                existing.state == DownloadState.paused ||
-                existing.state == DownloadState.completed) {
-              existing.state = DownloadState.idle;
-            }
-            existing.failureReason = null;
-            existing.errorMessage = null;
-            await _downloadQueue.resumeTaskAsync(existing.id);
-            _urlController.clear();
-            _showSnack('Done — Link updated. Torrent will retry.');
-            if (mounted) setState(() {});
-            return;
+            await _downloadQueue.cancelTaskAsync(existing.id);
           }
         }
       }
@@ -1367,19 +1350,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     bool force = false;
     if (_downloadQueue.urlExists(rawUrl)) {
       if (!mounted) return;
-      final choice = await _showDuplicatePrompt(context, fileName);
-      if (choice == DuplicateChoice.skip) {
+      final result = await _showDuplicatePrompt(context, fileName);
+      if (result.choice == DuplicateChoice.skip) {
         _urlController.clear();
         return;
       }
-      if (choice == DuplicateChoice.updateExisting) {
+      if (result.choice == DuplicateChoice.replace) {
         final existing = _downloadQueue.getTaskByUrl(rawUrl);
         if (existing != null) {
-          await _downloadQueue.updateTaskFromDonor(existing.id, task);
-          _urlController.clear();
-          _showSnack('Done — Link updated. Download will retry.');
-          if (mounted) setState(() {});
-          return;
+          await _downloadQueue.cancelTaskAsync(existing.id);
         }
       }
       force = true;
@@ -2076,36 +2055,13 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     };
   }
 
-  Future<DuplicateChoice> _showDuplicatePrompt(
+  Future<DuplicateDialogResult> _showDuplicatePrompt(
     BuildContext context,
     String filename,
-  ) async {
-    final result = await showDialog<DuplicateChoice>(
+  ) {
+    return showDuplicateDownloadDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Already in Queue'),
-          content: const Text(
-            'This download link has already been added to your queue.\n\n'
-            'The URL may have changed (token refresh). Update the existing download with the new link, or create a separate one.',
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.skip),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.downloadAgain),
-              child: const Text('Create New'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(DuplicateChoice.updateExisting),
-              child: const Text('Update Existing'),
-            ),
-          ],
-        );
-      },
+      filename: filename,
     );
-    return result ?? DuplicateChoice.skip;
   }
 }

@@ -1530,6 +1530,20 @@ class AppLocalizationsId extends AppLocalizations {
   String get dlgUpdateExisting => 'Perbarui yang Ada';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Unduhan dengan nama ini sudah ada dalam antrean.\n\nFile: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Lewati';
+
+  @override
+  String get dlgReplace => 'Ganti';
+
+  @override
+  String get dlgApplyToAll => 'Terapkan untuk semua duplikat';
+
+  @override
   String get dlgPhishingWarning => 'Tersangka Phishing';
 
   @override

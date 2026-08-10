@@ -520,5 +520,16 @@
   "btnNewTab": "علامة تبويب جديدة",
   "btnCloseAllTabs": "إغلاق جميع علامات التبويب",
   "btnNotNow": "ليس الآن",
-  "btnStopSharing": "إيقاف المشاركة"
+  "btnStopSharing": "إيقاف المشاركة",
+  "dlgDuplicateContent": "يوجد تنزيل بهذا الاسم بالفعل في قائمة الانتظار.\n\nالملف: {filename}",
+  "dlgSkip": "تخطي",
+  "dlgReplace": "استبدال",
+  "dlgApplyToAll": "تطبيق على جميع التكرارات",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

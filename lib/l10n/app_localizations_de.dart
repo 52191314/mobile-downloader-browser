@@ -1538,6 +1538,20 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dlgUpdateExisting => 'Bestehenden aktualisieren';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Ein Download mit diesem Namen existiert bereits in der Warteschlange.\n\nDatei: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Überspringen';
+
+  @override
+  String get dlgReplace => 'Ersetzen';
+
+  @override
+  String get dlgApplyToAll => 'Für alle Duplikate anwenden';
+
+  @override
   String get dlgPhishingWarning => 'Phishing-Verdacht';
 
   @override

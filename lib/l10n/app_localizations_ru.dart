@@ -1535,6 +1535,20 @@ class AppLocalizationsRu extends AppLocalizations {
   String get dlgUpdateExisting => 'Obnovit\' sushchestvuyushchij';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Загрузка с таким именем уже существует в очереди.\n\nФайл: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Пропустить';
+
+  @override
+  String get dlgReplace => 'Заменить';
+
+  @override
+  String get dlgApplyToAll => 'Применить ко всем дубликатам';
+
+  @override
   String get dlgPhishingWarning => 'Podozrenie na fishing';
 
   @override

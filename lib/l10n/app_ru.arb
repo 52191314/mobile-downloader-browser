@@ -520,5 +520,16 @@
   "btnNewTab": "Novaya vkladka",
   "btnCloseAllTabs": "Zakryt' vse vkladki",
   "btnNotNow": "Ne sejchas",
-  "btnStopSharing": "Ostanovit' dostup"
+  "btnStopSharing": "Ostanovit' dostup",
+  "dlgDuplicateContent": "Загрузка с таким именем уже существует в очереди.\n\nФайл: {filename}",
+  "dlgSkip": "Пропустить",
+  "dlgReplace": "Заменить",
+  "dlgApplyToAll": "Применить ко всем дубликатам",
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  }
 }

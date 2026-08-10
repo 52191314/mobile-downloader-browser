@@ -1537,6 +1537,20 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dlgUpdateExisting => 'Atualizar existente';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return 'Já existe um download com este nome na fila.\n\nArquivo: $filename';
+  }
+
+  @override
+  String get dlgSkip => 'Pular';
+
+  @override
+  String get dlgReplace => 'Substituir';
+
+  @override
+  String get dlgApplyToAll => 'Aplicar a todos os duplicados';
+
+  @override
   String get dlgPhishingWarning => 'Suspeita de phishing';
 
   @override

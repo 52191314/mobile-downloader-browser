@@ -1482,6 +1482,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get dlgUpdateExisting => '更新现有';
 
   @override
+  String dlgDuplicateContent(String filename) {
+    return '下载队列中已存在同名下载。\n\n文件：$filename';
+  }
+
+  @override
+  String get dlgSkip => '跳过';
+
+  @override
+  String get dlgReplace => '替换';
+
+  @override
+  String get dlgApplyToAll => '对所有重复项执行相同操作';
+
+  @override
   String get dlgPhishingWarning => '疑似钓鱼网站';
 
   @override
