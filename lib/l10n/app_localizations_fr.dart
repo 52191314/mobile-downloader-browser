@@ -12,13 +12,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get appTitle => 'Aurora Downloader';
 
   @override
-  String get tabQueue => 'Downloads';
+  String get tabQueue => 'Téléchargements';
 
   @override
   String get tabBrowser => 'Browser';
 
   @override
-  String get tabSettings => 'Settings';
+  String get tabSettings => 'Paramètres';
 
   @override
   String get tabStudio => 'FFmpeg Studio';
@@ -34,31 +34,31 @@ class AppLocalizationsFr extends AppLocalizations {
       'Choose the display language for Aurora Downloader interface';
 
   @override
-  String get systemDefault => 'System Default';
+  String get systemDefault => 'System Par défaut';
 
   @override
   String get darkMode => 'Dark Mode';
 
   @override
-  String get searchOrTypeUrl => 'Search or type URL...';
+  String get searchOrTypeUrl => 'Rechercher or type URL...';
 
   @override
-  String get download => 'Download';
+  String get download => 'Télécharger';
 
   @override
-  String get cancel => 'Cancel';
+  String get cancel => 'Annuler';
 
   @override
-  String get delete => 'Delete';
+  String get delete => 'Supprimer';
 
   @override
-  String get pause => 'Pause';
+  String get pause => 'Mettre en pause';
 
   @override
-  String get resume => 'Resume';
+  String get resume => 'Reprendre';
 
   @override
-  String get retry => 'Retry';
+  String get retry => 'Réessayer';
 
   @override
   String get completed => 'Completed';
@@ -73,13 +73,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get failed => 'Failed';
 
   @override
-  String get clearAll => 'Clear All';
+  String get clearAll => 'Effacer Tous';
 
   @override
   String get confirm => 'Confirm';
 
   @override
-  String get save => 'Save';
+  String get save => 'Enregistrer';
 
   @override
   String get about => 'About';
@@ -130,7 +130,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get onboardingStep5Desc =>
-      'Opens Settings and Tools: User Guide, Adblock, Download Rules, Private Vault, and WebDAV Backup.';
+      'Opens Paramètres and Tools: Guide de l\'utilisateur, Adblock, Télécharger Règles, Private Coffre-fort, and WebDAV Sauvegarde.';
 
   @override
   String get skipTutorial => 'Skip tutorial';
@@ -142,7 +142,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get next => 'Next';
 
   @override
-  String get menuSegmentSettings => 'Settings';
+  String get menuSegmentSettings => 'Paramètres';
 
   @override
   String get menuSegmentTools => 'Tools';
@@ -154,7 +154,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get menuNetwork => 'Network';
 
   @override
-  String get menuRules => 'Rules';
+  String get menuRules => 'Règles';
 
   @override
   String get menuSchedule => 'Schedule';
@@ -163,7 +163,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get menuAdblock => 'Adblock';
 
   @override
-  String get menuSearchPrivacy => 'Search & Privacy';
+  String get menuSearchPrivacy => 'Rechercher & Privacy';
 
   @override
   String get menuSniffer => 'Sniffer';
@@ -172,22 +172,22 @@ class AppLocalizationsFr extends AppLocalizations {
   String get menuTheme => 'Theme';
 
   @override
-  String get menuProfiles => 'Profiles';
+  String get menuProfiles => 'Profils';
 
   @override
   String get menuExternalApps => 'External apps';
 
   @override
-  String get menuBackup => 'Backup';
+  String get menuBackup => 'Sauvegarde';
 
   @override
   String get menuGoogleDrive => 'Google Drive';
 
   @override
-  String get menuWebdavBackup => 'WebDAV Backup';
+  String get menuWebdavBackup => 'WebDAV Sauvegarde';
 
   @override
-  String get menuPrivateVault => 'Private Vault';
+  String get menuPrivateVault => 'Private Coffre-fort';
 
   @override
   String get menuProUltra => 'Aurora Pro & Ultra';
@@ -199,7 +199,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get menuAutomationApi => 'Automation API';
 
   @override
-  String get menuUserGuide => 'User Guide';
+  String get menuUserGuide => 'Guide de l\'utilisateur';
 
   @override
   String get menuAbout => 'About';
@@ -217,19 +217,19 @@ class AppLocalizationsFr extends AppLocalizations {
   String get toolIncognitoOff => 'Incognito: Off';
 
   @override
-  String get toolCustomTab => 'Open in Custom Tab';
+  String get toolCustomTab => 'Open in Personnalisé Tab';
 
   @override
-  String get toolHistory => 'History';
+  String get toolHistory => 'Historique';
 
   @override
-  String get toolFavorites => 'Favorites';
+  String get toolFavorites => 'Favoris';
 
   @override
   String get toolSavedPages => 'Saved pages';
 
   @override
-  String get toolSavePage => 'Save page';
+  String get toolSavePage => 'Enregistrer page';
 
   @override
   String get toolFindOnPage => 'Find on page';
@@ -259,10 +259,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get toolRescanMedia => 'Re-scan media';
 
   @override
-  String get toolBatchDownload => 'Download all on this page';
+  String get toolBatchDownload => 'Télécharger all on this page';
 
   @override
-  String get toolClearCookies => 'Clear cookies';
+  String get toolClearCookies => 'Effacer cookies';
 
   @override
   String get emptyQueueTitle => 'No downloads yet';
@@ -272,7 +272,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Paste a media URL above or use the Browser to find videos and files';
 
   @override
-  String get catCoreSettings => 'Core Settings';
+  String get catCoreSettings => 'Core Paramètres';
 
   @override
   String get catPrivacySecurity => 'Privacy & Security';
@@ -281,28 +281,28 @@ class AppLocalizationsFr extends AppLocalizations {
   String get catCustomization => 'Customization';
 
   @override
-  String get catBackupSync => 'Backup & Sync';
+  String get catBackupSync => 'Sauvegarde & Sync';
 
   @override
   String get catAdvanced => 'Advanced';
 
   @override
-  String get pageTitleDefaults => 'Download Defaults';
+  String get pageTitleDefaults => 'Télécharger Defaults';
 
   @override
   String get pageTitleNetwork => 'Network & Proxy';
 
   @override
-  String get pageTitleRules => 'Download Rules';
+  String get pageTitleRules => 'Télécharger Règles';
 
   @override
-  String get pageTitleSchedule => 'Schedule Settings';
+  String get pageTitleSchedule => 'Schedule Paramètres';
 
   @override
   String get pageTitleAdblock => 'Adblock & Filters';
 
   @override
-  String get pageTitleSearch => 'Search & Privacy';
+  String get pageTitleSearch => 'Rechercher & Privacy';
 
   @override
   String get pageTitleSniffer => 'Media Sniffer';
@@ -311,19 +311,19 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pageTitleTheme => 'Appearance & Theme';
 
   @override
-  String get pageTitleProfiles => 'User Profiles';
+  String get pageTitleProfiles => 'User Profils';
 
   @override
   String get pageTitleExternalApps => 'External Applications';
 
   @override
-  String get pageTitleBackup => 'Backup & Restore';
+  String get pageTitleBackup => 'Sauvegarde & Restaurer';
 
   @override
-  String get pageTitleWebdav => 'WebDAV Backup';
+  String get pageTitleWebdav => 'WebDAV Sauvegarde';
 
   @override
-  String get pageTitleVault => 'Private Vault';
+  String get pageTitleVault => 'Private Coffre-fort';
 
   @override
   String get pageTitleWatcher => 'Aurora Watcher';
@@ -332,16 +332,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pageTitleAutomation => 'Automation API';
 
   @override
-  String get pageTitleUserGuide => 'User Guide';
+  String get pageTitleUserGuide => 'Guide de l\'utilisateur';
 
   @override
   String get pageTitleAbout => 'About Aurora';
 
   @override
-  String get sheetHistory => 'Browsing History';
+  String get sheetHistory => 'Browsing Historique';
 
   @override
-  String get sheetFavorites => 'Bookmarks & Favorites';
+  String get sheetFavorites => 'Signets & Favoris';
 
   @override
   String get sheetSavedPages => 'Saved Offline Pages';
@@ -353,79 +353,79 @@ class AppLocalizationsFr extends AppLocalizations {
   String get sheetSniffedMedia => 'Detected Media';
 
   @override
-  String get sheetDownloadPrompt => 'Download Options';
+  String get sheetDownloadPrompt => 'Télécharger Options';
 
   @override
-  String get actionCancel => 'Cancel';
+  String get actionCancel => 'Annuler';
 
   @override
-  String get actionConfirm => 'Confirm';
+  String get actionConfirm => 'Confirmer';
 
   @override
-  String get actionSave => 'Save';
+  String get actionSave => 'Enregistrer';
 
   @override
-  String get actionDelete => 'Delete';
+  String get actionDelete => 'Supprimer';
 
   @override
-  String get actionDownload => 'Download';
+  String get actionDownload => 'Télécharger';
 
   @override
   String get actionShare => 'Share';
 
   @override
-  String get actionOpen => 'Open';
+  String get actionOpen => 'Ouvrir';
 
   @override
-  String get actionPause => 'Pause';
+  String get actionPause => 'Mettre en pause';
 
   @override
-  String get actionResume => 'Resume';
+  String get actionResume => 'Reprendre';
 
   @override
-  String get actionRetry => 'Retry';
+  String get actionRetry => 'Réessayer';
 
   @override
-  String get actionClear => 'Clear';
+  String get actionClear => 'Effacer';
 
   @override
-  String get actionSelectAll => 'Select All';
+  String get actionSelectAll => 'Tout sélectionner';
 
   @override
-  String get actionDeselectAll => 'Deselect All';
+  String get actionDeselectAll => 'Tout désélectionner';
 
   @override
-  String get actionPauseAll => 'Pause All';
+  String get actionPauseAll => 'Mettre en pause Tous';
 
   @override
-  String get actionResumeAll => 'Resume All';
+  String get actionResumeAll => 'Reprendre Tous';
 
   @override
-  String get actionClearCompleted => 'Clear Completed';
+  String get actionClearCompleted => 'Effacer Completed';
 
   @override
   String get toastLinkCopied => 'Link copied to clipboard';
 
   @override
-  String get toastDownloadEnqueued => 'Download added to queue';
+  String get toastDownloadEnqueued => 'Télécharger added to queue';
 
   @override
-  String get toastDownloadStarted => 'Download started';
+  String get toastDownloadStarted => 'Télécharger started';
 
   @override
-  String get toastDownloadPaused => 'Download paused';
+  String get toastDownloadPaused => 'Télécharger paused';
 
   @override
-  String get toastDownloadCompleted => 'Download finished';
+  String get toastDownloadCompleted => 'Télécharger finished';
 
   @override
-  String get toastDownloadFailed => 'Download failed';
+  String get toastDownloadFailed => 'Télécharger failed';
 
   @override
   String get notifDownloadingTitle => 'Downloading Media';
 
   @override
-  String get notifCompleteTitle => 'Download Complete';
+  String get notifCompleteTitle => 'Télécharger Complete';
 
   @override
   String get lblMaxConcurrentDownloads => 'Max concurrent downloads';
@@ -434,20 +434,20 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblChunksPerDownload => 'Chunks per download';
 
   @override
-  String get lblDownloadDestination => 'Destination (under Downloads)';
+  String get lblDownloadDestination => 'Destination (under Téléchargements)';
 
   @override
   String get lblAutoRetryFailed => 'Auto-retry failed downloads';
 
   @override
-  String get lblRetryLimit => 'Retry limit';
+  String get lblRetryLimit => 'Réessayer limit';
 
   @override
   String get lblAutoClassify => 'Auto-classify downloads';
 
   @override
   String get lblAutoClassifyDesc =>
-      'Sort finished files into Videos, Audio, Images, Documents when they land in Downloads.';
+      'Sort finished files into Videos, Audio, Images, Documents when they land in Téléchargements.';
 
   @override
   String get lblConvertTsToMp4 => 'Convert .ts to .mp4';
@@ -467,14 +467,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblMaxDetectedMedia => 'Max detected media';
 
   @override
-  String get lblDownloadLinkBehavior => 'Download link behavior';
+  String get lblDownloadLinkBehavior => 'Télécharger link behavior';
 
   @override
   String get lblWifiOnly => 'Wi-Fi only downloads';
 
   @override
   String get lblWifiOnlyDescOn =>
-      'Downloads only proceed on Wi-Fi. Turn off to use mobile data.';
+      'Téléchargements only proceed on Wi-Fi. Turn off to use mobile data.';
 
   @override
   String get lblWifiOnlyDescOff =>
@@ -565,7 +565,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblAddCustomFilterUrl => 'Add custom filter URL';
 
   @override
-  String get lblCustomFilterUrlsPro => 'Custom filter URLs (Pro only)';
+  String get lblCustomFilterUrlsPro => 'Personnalisé filter URLs (Pro only)';
 
   @override
   String get lblBlockedElementsSite => 'Blocked elements by site';
@@ -581,20 +581,21 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get lblIncognitoModeDescOn =>
-      'Private mode is ON. History and cookies are suppressed. Active tabs show a purple shield.';
+      'Private mode is ON. Historique and cookies are suppressed. Active tabs show a purple shield.';
 
   @override
   String get lblIncognitoModeDescOff =>
       'Browse without saving history or cookies. Active tabs show a purple shield icon when private mode is ON.';
 
   @override
-  String get lblSearchEngineHeader => 'Search Engine';
+  String get lblSearchEngineHeader => 'Rechercher Engine';
 
   @override
-  String get lblSearchEngine => 'Search engine';
+  String get lblSearchEngine => 'Rechercher engine';
 
   @override
-  String get lblCustomUrlTemplate => 'Custom URL template (use %s for query)';
+  String get lblCustomUrlTemplate =>
+      'Personnalisé URL template (use %s for query)';
 
   @override
   String get lblInAppPlayerHeader => 'In-app player';
@@ -632,7 +633,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Bundled decoders. Handles streams ExoPlayer refuses.';
 
   @override
-  String get lblDisabledMediaTypes => 'Disabled Media Types';
+  String get lblDisabledMediaTypes => 'Désactivé Media Types';
 
   @override
   String get lblExtraVideoHosts => 'Extra Video Hosts';
@@ -679,7 +680,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblProxyType => 'Proxy Type';
 
   @override
-  String get lblUserAgentProfile => 'User-Agent Profile';
+  String get lblUserAgentProfile => 'User-Agent Profil';
 
   @override
   String get lblPerSiteUserAgents => 'Per-site User-Agents';
@@ -692,21 +693,21 @@ class AppLocalizationsFr extends AppLocalizations {
       'Allows connecting to sites with invalid or self-signed HTTPS certificates.';
 
   @override
-  String get lblExportBackup => 'Export Backup File';
+  String get lblExportBackup => 'Exporter Sauvegarde File';
 
   @override
-  String get lblImportBackup => 'Import Backup File';
+  String get lblImportBackup => 'Importer Sauvegarde File';
 
   @override
   String get lblBackupDatabaseDesc =>
-      'Backup downloads, history, bookmarks, adblock filters, and app settings into a single file.';
+      'Sauvegarde downloads, history, bookmarks, adblock filters, and app settings into a single file.';
 
   @override
   String get lblRestoreDatabaseDesc =>
-      'Restore app data from a previously created backup file.';
+      'Restaurer app data from a previously created backup file.';
 
   @override
-  String get lblVaultTitle => 'Private Vault';
+  String get lblVaultTitle => 'Private Coffre-fort';
 
   @override
   String get lblVaultDesc =>
@@ -719,7 +720,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblChangePin => 'Change PIN';
 
   @override
-  String get lblUnlockVault => 'Unlock Private Vault';
+  String get lblUnlockVault => 'Unlock Private Coffre-fort';
 
   @override
   String get lblEnterPin => 'Enter 4-digit PIN';
@@ -756,7 +757,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Automatically detect media links copied to your system clipboard and prompt to download.';
 
   @override
-  String get lblWebdavTitle => 'WebDAV Backup';
+  String get lblWebdavTitle => 'WebDAV Sauvegarde';
 
   @override
   String get lblServerUrl => 'Server URL';
@@ -781,7 +782,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Learn how to capture streams, use private vault, configure adblock rules, and optimize download speed.';
 
   @override
-  String get lblFilterAll => 'All';
+  String get lblFilterAll => 'Tous';
 
   @override
   String get lblFilterDownloading => 'Downloading';
@@ -796,103 +797,103 @@ class AppLocalizationsFr extends AppLocalizations {
   String get lblFilterFailed => 'Failed';
 
   @override
-  String get lblPauseAll => 'Pause All';
+  String get lblPauseAll => 'Mettre en pause Tous';
 
   @override
-  String get lblResumeAll => 'Resume All';
+  String get lblResumeAll => 'Reprendre Tous';
 
   @override
-  String get lblClearCompleted => 'Clear Completed';
+  String get lblClearCompleted => 'Effacer Completed';
 
   @override
-  String get lblSearchQueue => 'Search downloads...';
+  String get lblSearchQueue => 'Rechercher downloads...';
 
   @override
-  String get cardPriorityHigh => 'High';
+  String get cardPriorityHigh => 'Haute';
 
   @override
-  String get cardPriorityLow => 'Low';
+  String get cardPriorityLow => 'Basse';
 
   @override
-  String get cardTooltipCancelScheduled => 'Cancel scheduled';
+  String get cardTooltipCancelScheduled => 'Annuler scheduled';
 
   @override
-  String get cardTooltipPause => 'Pause';
+  String get cardTooltipPause => 'Mettre en pause';
 
   @override
-  String get cardTooltipResume => 'Resume';
+  String get cardTooltipResume => 'Reprendre';
 
   @override
   String get cardTooltipRefreshLink => 'Refresh link';
 
   @override
-  String get cardTooltipRetry => 'Retry';
+  String get cardTooltipRetry => 'Réessayer';
 
   @override
   String get cardTooltipOpen => 'Open';
 
   @override
-  String get cardMenuOpen => 'Open';
+  String get cardMenuOpen => 'Ouvrir';
 
   @override
-  String get cardMenuShare => 'Share…';
+  String get cardMenuShare => 'Partager';
 
   @override
-  String get cardMenuSendToPc => 'Send to PC…';
+  String get cardMenuSendToPc => 'Envoyer sur PC';
 
   @override
-  String get cardMenuMoveToVault => 'Move to Vault…';
+  String get cardMenuMoveToVault => 'Déplacer dans le coffre-fort';
 
   @override
-  String get cardMenuFfmpegStudio => 'Edit in FFmpeg Studio';
+  String get cardMenuFfmpegStudio => 'Modifier in FFmpeg Studio';
 
   @override
-  String get cardMenuRedownload => 'Redownload';
+  String get cardMenuRedownload => 'Rétélécharger';
 
   @override
-  String get cardMenuForceMerge => 'Force merge';
+  String get cardMenuForceMerge => 'Forcer la fusion';
 
   @override
-  String get cardMenuRefreshLink => 'Refresh link';
+  String get cardMenuRefreshLink => 'Rafraîchir le lien';
 
   @override
   String get cardMenuResniffOnPage => 'Re-sniff on page';
 
   @override
-  String get cardMenuOpenSourcePage => 'Open source page';
+  String get cardMenuOpenSourcePage => 'Ouvrir la page source';
 
   @override
   String get cardMenuScheduleDownload => 'Schedule download';
 
   @override
-  String get cardMenuRemove => 'Remove';
+  String get cardMenuRemove => 'Supprimer';
 
   @override
-  String get cardMenuCancel => 'Cancel';
+  String get cardMenuCancel => 'Annuler';
 
   @override
-  String get cardMenuProperties => 'Properties';
+  String get cardMenuProperties => 'Propriétés du fichier';
 
   @override
-  String get cardStatusStarting => 'Starting…';
+  String get cardStatusStarting => 'Démarrage…';
 
   @override
-  String get cardStatusScheduled => 'Scheduled';
+  String get cardStatusScheduled => 'Programmé';
 
   @override
-  String get cardStatusPaused => 'Paused';
+  String get cardStatusPaused => 'En pause';
 
   @override
-  String get cardStatusFailed => 'Failed';
+  String get cardStatusFailed => 'Échec';
 
   @override
-  String get cardStatusMerging => 'Merging…';
+  String get cardStatusMerging => 'Fusion en cours…';
 
   @override
-  String get cardStatusDownloaded => 'downloaded';
+  String get cardStatusDownloaded => 'Téléchargé';
 
   @override
-  String get cardStatusSaved => 'saved';
+  String get cardStatusSaved => 'Enregistré';
 
   @override
   String get cardSegmentsLabel => 'segs';
@@ -907,13 +908,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get propDialogLocation => 'Location';
 
   @override
-  String get propDialogDownloadLink => 'Download link';
+  String get propDialogDownloadLink => 'Télécharger link';
 
   @override
   String get propDialogSourcePage => 'Source page';
 
   @override
-  String get propDialogClose => 'Close';
+  String get propDialogClose => 'Fermer';
 
   @override
   String get queueTitle => 'Queue';
@@ -924,10 +925,10 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get queueTooltipSearch => 'Search';
+  String get queueTooltipSearch => 'Rechercher';
 
   @override
-  String get queueTooltipCloseSearch => 'Close search';
+  String get queueTooltipCloseSearch => 'Fermer search';
 
   @override
   String get queueTooltipSelect => 'Select';
@@ -942,7 +943,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get queueTooltipShowGrid => 'Completed history grid';
 
   @override
-  String get queueSortBy => 'Sort by';
+  String get queueSortBy => 'Trier par';
 
   @override
   String get queueResetFilters => 'Reset filters';
@@ -951,78 +952,80 @@ class AppLocalizationsFr extends AppLocalizations {
   String get queueOpenBrowser => 'Open Browser';
 
   @override
-  String get queueBulkPauseAll => 'Pause all active';
+  String get queueBulkPauseAll => 'Tout mettre en pause';
 
   @override
-  String get queueBulkResumeAll => 'Resume all paused';
+  String get queueBulkResumeAll => 'Tout reprendre';
 
   @override
-  String get queueBulkRetryFailed => 'Retry all failed';
+  String get queueBulkRetryFailed => 'Réessayer all failed';
 
   @override
-  String get queueBulkCancelScheduled => 'Cancel scheduled';
+  String get queueBulkCancelScheduled =>
+      'Annuler les téléchargements programmés';
 
   @override
-  String get queueBulkCancelActive => 'Cancel active';
+  String get queueBulkCancelActive => 'Annuler les téléchargements actifs';
 
   @override
-  String get queueBulkFindDuplicates => 'Find duplicates';
+  String get queueBulkFindDuplicates => 'Rechercher les doublons';
 
   @override
-  String get queueDlgCancelScheduledTitle => 'Cancel scheduled downloads?';
+  String get queueDlgCancelScheduledTitle =>
+      'Annuler les téléchargements programmés ?';
 
   @override
-  String get queueDlgCancelActiveTitle => 'Cancel active downloads?';
+  String get queueDlgCancelActiveTitle =>
+      'Annuler les téléchargements actifs ?';
 
   @override
-  String get queueDlgKeep => 'Keep';
+  String get queueDlgKeep => 'Conserver';
 
   @override
-  String get queueDlgRemoveAll => 'Remove all';
+  String get queueDlgRemoveAll => 'Tout supprimer';
 
   @override
-  String get queueDlgRemoveSelected => 'Remove selected downloads?';
+  String get queueDlgRemoveSelected => 'Retirer selected downloads?';
 
   @override
-  String get queueDlgDuplicatesTitle => 'Duplicate URLs';
+  String get queueDlgDuplicatesTitle => 'Doublons trouvés';
 
   @override
-  String get queueDlgNoDuplicates => 'All tasks in the queue have unique URLs.';
+  String get queueDlgNoDuplicates => 'Aucun doublon trouvé.';
 
   @override
-  String get queueDlgClose => 'Close';
+  String get queueDlgClose => 'Fermer';
 
   @override
-  String get queueSnackEnterUrl => 'Enter a URL to schedule.';
+  String get queueSnackEnterUrl => 'Veuillez entrer une URL valide.';
 
   @override
-  String get queueSnackDownloadScheduled => 'Download scheduled.';
+  String get queueSnackDownloadScheduled => 'Télécharger scheduled.';
 
   @override
-  String get queueSnackFileMissing =>
-      'File path is missing or file does not exist.';
+  String get queueSnackFileMissing => 'Le fichier téléchargé n\'existe plus.';
 
   @override
   String get queueSnackFfmpegDownloading =>
-      'FFmpeg module is already downloading.';
+      'Le module FFmpeg est en cours de téléchargement…';
 
   @override
-  String get queueSnackFfmpegReady => 'FFmpeg tools ready.';
+  String get queueSnackFfmpegReady => 'Les outils FFmpeg sont prêts.';
 
   @override
-  String get queueDlgFfmpegTitle => 'Download FFmpeg tools?';
+  String get queueDlgFfmpegTitle => 'Télécharger FFmpeg tools?';
 
   @override
-  String get queueDlgFfmpegFailedTitle => 'Download failed';
+  String get queueDlgFfmpegFailedTitle => 'Télécharger failed';
 
   @override
-  String get queueDlgDownload => 'Download';
+  String get queueDlgDownload => 'Télécharger';
 
   @override
-  String get queueDlgRetry => 'Retry';
+  String get queueDlgRetry => 'Réessayer';
 
   @override
-  String get queueDlgSavePartialTitle => 'Save partial file?';
+  String get queueDlgSavePartialTitle => 'Enregistrer partial file?';
 
   @override
   String get queueDlgDismiss => 'Dismiss';
@@ -1042,7 +1045,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get snifferSnackCloudflareRetrying =>
-      'Cloudflare block detected — re-applying stealth & retrying…';
+      'Contournement Cloudflare en cours…';
 
   @override
   String snifferCfTitle(String host) {
@@ -1055,43 +1058,43 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get snifferCfAlreadyExternal =>
-      'This site is set to always open in Chrome Custom Tab.';
+      'This site is set to always open in Chrome Personnalisé Tab.';
 
   @override
-  String get snifferCfClose => 'Close';
+  String get snifferCfClose => 'Fermer';
 
   @override
-  String get snifferCfOpenCct => 'Open in Chrome Custom Tab';
+  String get snifferCfOpenCct => 'Open in Chrome Personnalisé Tab';
 
   @override
   String get snifferCfOpenSystem => 'Open in System Browser';
 
   @override
   String snifferCfAlwaysCct(String host) {
-    return 'Always open $host in Custom Tab';
+    return 'Always open $host in Personnalisé Tab';
   }
 
   @override
   String get snifferSnackElementBlocked => 'Element blocked. Undo?';
 
   @override
-  String get snifferDlgDownloadAllTitle => 'Download all on this page';
+  String get snifferDlgDownloadAllTitle => 'Télécharger all on this page';
 
   @override
-  String get snifferDlgCancel => 'Cancel';
+  String get snifferDlgCancel => 'Annuler';
 
   @override
-  String get snifferDlgSiteDataTitle => 'Site Data';
+  String get snifferDlgSiteDataTitle => 'Données du site & Confidentialité';
 
   @override
-  String get snifferDlgClearSiteData => 'Clear';
+  String get snifferDlgClearSiteData => 'Effacer';
 
   @override
   String get snifferSnackOpenPageFirst =>
-      'Open a page first to adjust adblock settings.';
+      'Veuillez d\'abord ouvrir une page web.';
 
   @override
-  String get snifferAdblockTitle => 'Adblock on this site';
+  String get snifferAdblockTitle => 'Bloqueur de publicités';
 
   @override
   String snifferAdblockBlockedCount(int count) {
@@ -1099,25 +1102,25 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get snifferAdblockDone => 'Done';
+  String get snifferAdblockDone => 'Terminé';
 
   @override
   String get snifferUndoLabel => 'Undo';
 
   @override
-  String get snifferCancelLabel => 'Cancel';
+  String get snifferCancelLabel => 'Annuler';
 
   @override
-  String get snifferPopupBlockedTitle => 'Popup blocked by Aurora';
+  String get snifferPopupBlockedTitle => 'Pop-up bloqué';
 
   @override
-  String get snifferRedirectBlockedTitle => 'Redirect blocked by Aurora';
+  String get snifferRedirectBlockedTitle => 'Redirection bloquée par Aurora';
 
   @override
-  String get snifferProfilesTitle => 'No profiles yet';
+  String get snifferProfilesTitle => 'Profils de sites';
 
   @override
-  String get snifferNewProfileTitle => 'New profile';
+  String get snifferNewProfileTitle => 'Nouveau profil de site';
 
   @override
   String get queueFlatList => 'Liste plate (sans sections)';
@@ -1251,11 +1254,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsSnackTray =>
-      'Save to tray. Aurora keeps a list so you can pick which to download later.';
+      'Enregistrer to tray. Aurora keeps a list so you can pick which to download later.';
 
   @override
   String get settingsSnackImmediate =>
-      'Download right away. Skip the tray and start fetching immediately.';
+      'Télécharger right away. Skip the tray and start fetching immediately.';
 
   @override
   String get settingsSnackAsk =>
