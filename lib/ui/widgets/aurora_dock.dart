@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 
 /// Slim shell bar on Queue only: Queue | Browser (Settings are full-screen routes).
@@ -23,6 +24,7 @@ class AuroraDock extends StatelessWidget {
   Widget build(BuildContext context) {
     final ac = context.ac;
     final isLight = context.isLight;
+    final l = AppLocalizations.of(context);
 
     return Material(
       color: ac.dockSurface,
@@ -47,7 +49,7 @@ class AuroraDock extends StatelessWidget {
                       key: queueKey ?? const Key('dock_tab_queue'),
                       icon: Icons.download_outlined,
                       selectedIcon: Icons.download_rounded,
-                      label: 'Queue',
+                      label: l?.tabQueue ?? 'Queue',
                       selected: currentIndex == 0,
                       onTap: () => onTabSelected(0),
                     ),
@@ -55,7 +57,7 @@ class AuroraDock extends StatelessWidget {
                       key: browserKey ?? const Key('dock_tab_browser'),
                       icon: Icons.language_outlined,
                       selectedIcon: Icons.language_rounded,
-                      label: 'Browser',
+                      label: l?.tabBrowser ?? 'Browser',
                       selected: currentIndex == 1,
                       badgeCount: badgeCount,
                       onTap: () => onTabSelected(1),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 
 /// One row in the Samsung-style overflow popup (Settings or Tools).
@@ -239,7 +240,7 @@ class _OverflowCardState extends State<_OverflowCard> {
                   child: Row(
                     children: [
                       _SegChip(
-                        label: 'Settings',
+                        label: AppLocalizations.of(context)?.menuSegmentSettings ?? 'Settings',
                         selected: _segment == OverflowMenuSegment.settings,
                         onTap: () => setState(() {
                           _segment = OverflowMenuSegment.settings;
@@ -247,7 +248,7 @@ class _OverflowCardState extends State<_OverflowCard> {
                         }),
                       ),
                       _SegChip(
-                        label: 'Tools',
+                        label: AppLocalizations.of(context)?.menuSegmentTools ?? 'Tools',
                         selected: _segment == OverflowMenuSegment.tools,
                         onTap: () => setState(() {
                           _segment = OverflowMenuSegment.tools;

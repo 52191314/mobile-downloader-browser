@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../settings/onboarding_experiment.dart';
 
@@ -295,7 +296,10 @@ class _OnboardingSpotlightOverlayState
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 8),
                           ),
-                          child: const Text('Skip tutorial'),
+                          child: Text(
+                            AppLocalizations.of(context)?.skipTutorial ??
+                                'Skip tutorial',
+                          ),
                         ),
 
                         // Indicators & Next Button
@@ -336,8 +340,10 @@ class _OnboardingSpotlightOverlayState
                               ),
                               child: Text(
                                 _currentStepIndex == widget.steps.length - 1
-                                    ? 'Got it!'
-                                    : 'Next',
+                                    ? (AppLocalizations.of(context)?.gotIt ??
+                                        'Got it!')
+                                    : (AppLocalizations.of(context)?.next ??
+                                        'Next'),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                 ),

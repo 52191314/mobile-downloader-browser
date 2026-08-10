@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../../l10n/app_localizations.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -257,7 +258,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildDefaultsPage() {
     var local = _settings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Download Defaults')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleDefaults ?? 'Download Defaults')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -535,7 +536,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildAdblockPage() {
     var local = _settings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Adblock')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleAdblock ?? 'Adblock & Filters')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -848,7 +849,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildSearchPage() {
     var local = _settings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Search & Privacy')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleSearch ?? 'Search & Privacy')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -939,7 +940,7 @@ class _SettingsPageState extends State<SettingsPage> {
     var localReplacePlayer = _settings.replaceSitePlayer;
     var localEngine = _settings.playbackEngine;
     return Scaffold(
-      appBar: AppBar(title: const Text('Media Sniffer')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleSniffer ?? 'Media Sniffer')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -1096,7 +1097,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildAppearancePage() {
     var localPref = _settings.darkModePreference;
     return Scaffold(
-      appBar: AppBar(title: const Text('Appearance')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleTheme ?? 'Appearance & Theme')),
       body: StatefulBuilder(
         builder: (context, setLocal) => ListView(
           padding: const EdgeInsets.all(16),
@@ -1107,8 +1108,9 @@ class _SettingsPageState extends State<SettingsPage> {
               DropdownButtonFormField<String>(
                 value: _settings.appLanguageCode,
                 decoration: InputDecoration(
-                  labelText: 'App language',
-                  helperText: 'Choose display language for Aurora Downloader interface',
+                  labelText: AppLocalizations.of(context)?.settingsLanguage ?? 'App language',
+                  helperText: AppLocalizations.of(context)?.settingsLanguageDesc ??
+                      'Choose display language for Aurora Downloader interface',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -1342,7 +1344,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final localSiteUas = Map<String, String>.from(_settings.siteUserAgents);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Network')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleNetwork ?? 'Network & Proxy')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1692,7 +1694,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildProfilesLockedPage() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Profiles')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleProfiles ?? 'User Profiles')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -1979,7 +1981,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildAboutPage() {
     return Scaffold(
-      appBar: AppBar(title: const Text('About')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleAbout ?? 'About Aurora')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -3982,7 +3984,7 @@ class _BackupPageState extends State<BackupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Backup & Restore')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleBackup ?? 'Backup & Restore')),
       body: SafeArea(
               child: ListView(
                 padding: const EdgeInsets.all(16),
@@ -4568,7 +4570,7 @@ class _RulesPageState extends State<_RulesPage> {
 
   Widget _buildLockedPage() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Download Rules')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context)?.pageTitleRules ?? 'Download Rules')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),

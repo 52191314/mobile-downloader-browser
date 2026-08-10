@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../l10n/app_localizations.dart';
 import 'models/site_profile.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -1000,7 +1001,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   @override
   Set<String> get builtWebViewTabIds => _builtWebViewTabIds;
 
-  @override
   List<String> get tabActivationOrder => _tabActivationOrder;
 
   @override
@@ -3860,110 +3860,112 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     }
 
+    final l = AppLocalizations.of(context);
+
     // NOTE: When adding or updating a Settings entry, update both settings_page.dart (_buildSettingsHub) and sniffer_screen.dart (rawSettingsEntries).
     final rawSettingsEntries = [
       // 1. Downloads & Core Behavior
       OverflowMenuEntry(
         icon: Icons.download_rounded,
-        label: 'Defaults',
+        label: l?.menuDefaults ?? 'Defaults',
         onTap: () => unawaited(openSection(SettingsSection.defaults)),
       ),
       OverflowMenuEntry(
         icon: Icons.wifi_rounded,
-        label: 'Network',
+        label: l?.menuNetwork ?? 'Network',
         onTap: () => unawaited(openSection(SettingsSection.network)),
       ),
       OverflowMenuEntry(
         icon: Icons.rule_rounded,
-        label: 'Rules',
+        label: l?.menuRules ?? 'Rules',
         onTap: () => unawaited(openSection(SettingsSection.rules)),
       ),
       OverflowMenuEntry(
         icon: Icons.schedule_rounded,
-        label: 'Schedule',
+        label: l?.menuSchedule ?? 'Schedule',
         onTap: () => unawaited(openSection(SettingsSection.schedule)),
       ),
       // 2. Security, Privacy & Sniffing
       OverflowMenuEntry(
         icon: Icons.shield_rounded,
-        label: 'Adblock',
+        label: l?.menuAdblock ?? 'Adblock',
         onTap: () => unawaited(openSection(SettingsSection.adblock)),
       ),
       OverflowMenuEntry(
         icon: Icons.search_rounded,
-        label: 'Search & Privacy',
+        label: l?.menuSearchPrivacy ?? 'Search & Privacy',
         onTap: () => unawaited(openSection(SettingsSection.search)),
       ),
       OverflowMenuEntry(
         icon: Icons.tune_rounded,
-        label: 'Sniffer',
+        label: l?.menuSniffer ?? 'Sniffer',
         onTap: () => unawaited(openSection(SettingsSection.sniffer)),
       ),
       // 3. Customization & Profiles
       OverflowMenuEntry(
         icon: Icons.palette_outlined,
-        label: 'Theme',
+        label: l?.menuTheme ?? 'Theme',
         onTap: () => unawaited(openSection(SettingsSection.appearance)),
       ),
       OverflowMenuEntry(
         icon: Icons.people_outline_rounded,
-        label: 'Profiles',
+        label: l?.menuProfiles ?? 'Profiles',
         onTap: () => unawaited(openSection(SettingsSection.profiles)),
       ),
       OverflowMenuEntry(
         icon: Icons.open_in_new_rounded,
-        label: 'External apps',
+        label: l?.menuExternalApps ?? 'External apps',
         onTap: () => unawaited(openSection(SettingsSection.externalApps)),
       ),
       // 4. Sync & Backup
       OverflowMenuEntry(
         icon: Icons.backup_rounded,
-        label: 'Backup',
+        label: l?.menuBackup ?? 'Backup',
         onTap: () => unawaited(openSection(SettingsSection.backup)),
       ),
       if (kDriveSyncEnabled)
         OverflowMenuEntry(
           icon: Icons.cloud_outlined,
-          label: 'Google Drive',
+          label: l?.menuGoogleDrive ?? 'Google Drive',
           onTap: () => unawaited(openSection(SettingsSection.drive)),
         ),
       OverflowMenuEntry(
         icon: Icons.cloud_outlined,
-        label: 'WebDAV Backup',
+        label: l?.menuWebdavBackup ?? 'WebDAV Backup',
         onTap: () => unawaited(openSection(SettingsSection.webdav)),
       ),
       OverflowMenuEntry(
         icon: Icons.shield_outlined,
-        label: 'Private Vault',
+        label: l?.menuPrivateVault ?? 'Private Vault',
         onTap: () => unawaited(openSection(SettingsSection.vault)),
       ),
       // 5. Advanced & Automation
       OverflowMenuEntry(
         icon: Icons.auto_awesome,
-        label: 'Aurora Pro & Ultra',
+        label: l?.menuProUltra ?? 'Aurora Pro & Ultra',
         color: ac.accentAmber,
         onTap: () => unawaited(openSection(SettingsSection.pro)),
       ),
       OverflowMenuEntry(
         icon: Icons.rss_feed,
-        label: 'Aurora Watcher',
+        label: l?.menuWatcher ?? 'Aurora Watcher',
         onTap: () => unawaited(openSection(SettingsSection.watcher)),
       ),
       OverflowMenuEntry(
         icon: Icons.api,
-        label: 'Automation API',
+        label: l?.menuAutomationApi ?? 'Automation API',
         onTap: () => unawaited(openSection(SettingsSection.automation)),
       ),
       // 6. Help & Info
       OverflowMenuEntry(
         icon: Icons.menu_book_rounded,
-        label: 'User Guide',
+        label: l?.menuUserGuide ?? 'User Guide',
         color: ac.accentFrost,
         onTap: () => unawaited(openSection(SettingsSection.userGuide)),
       ),
       OverflowMenuEntry(
         icon: Icons.info_outline_rounded,
-        label: 'About',
+        label: l?.menuAbout ?? 'About',
         onTap: () => unawaited(openSection(SettingsSection.about)),
       ),
     ];
@@ -3974,23 +3976,24 @@ class _SnifferScreenState extends State<SnifferScreen>
             ? Icons.security_rounded
             : Icons.security_outlined,
         label: settings.cloudflareStealthEnabled
-            ? 'Stealth Mode: On'
-            : 'Stealth Mode: Off',
+            ? (l?.toolStealthOn ?? 'Stealth Mode: On')
+            : (l?.toolStealthOff ?? 'Stealth Mode: Off'),
         color: settings.cloudflareStealthEnabled
             ? ac.accentFrost
             : ac.textPrimary,
-
         onTap: _toggleStealthMode,
       ),
       OverflowMenuEntry(
         icon: _privateMode ? Icons.security_rounded : Icons.shield_outlined,
-        label: _privateMode ? 'Incognito: On' : 'Incognito: Off',
+        label: _privateMode
+            ? (l?.toolIncognitoOn ?? 'Incognito: On')
+            : (l?.toolIncognitoOff ?? 'Incognito: Off'),
         color: _privateMode ? Colors.purpleAccent : ac.textPrimary,
         onTap: _toggleIncognitoMode,
       ),
       OverflowMenuEntry(
         icon: Icons.tab_rounded,
-        label: 'Open in Custom Tab',
+        label: l?.toolCustomTab ?? 'Open in Custom Tab',
         color: ac.accentFrost,
         onTap: () {
           final url = _activeTab.currentUrl;
@@ -4001,38 +4004,38 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
       OverflowMenuEntry(
         icon: Icons.history_rounded,
-        label: 'History',
+        label: l?.toolHistory ?? 'History',
         onTap: _showHistorySheet,
       ),
       OverflowMenuEntry(
         icon: Icons.star_rounded,
-        label: 'Favorites',
+        label: l?.toolFavorites ?? 'Favorites',
         color: ac.accentAmber,
         onTap: _showFavoritesSheet,
       ),
       OverflowMenuEntry(
         icon: Icons.offline_pin_rounded,
-        label: 'Saved pages',
+        label: l?.toolSavedPages ?? 'Saved pages',
         onTap: _showSavedPagesSheet,
       ),
       OverflowMenuEntry(
         icon: Icons.save_alt_rounded,
-        label: 'Save page',
+        label: l?.toolSavePage ?? 'Save page',
         onTap: () => unawaited(_saveCurrentPage()),
       ),
       OverflowMenuEntry(
         icon: Icons.find_in_page_rounded,
-        label: 'Find on page',
+        label: l?.toolFindOnPage ?? 'Find on page',
         onTap: () => setState(() => _findVisible = true),
       ),
       OverflowMenuEntry(
         icon: Icons.assignment_ind_rounded,
-        label: 'Autofill',
+        label: l?.toolAutofill ?? 'Autofill',
         onTap: () => unawaited(_showAutofillMenu()),
       ),
       OverflowMenuEntry(
         icon: Icons.chrome_reader_mode_rounded,
-        label: 'Reader mode',
+        label: l?.toolReaderMode ?? 'Reader mode',
         onTap: () => unawaited(_showReaderMode()),
       ),
       OverflowMenuEntry(
@@ -4040,8 +4043,10 @@ class _SnifferScreenState extends State<SnifferScreen>
             ? Icons.shield
             : (isAllowlisted ? Icons.shield_outlined : Icons.shield),
         label: !settings.adblockEnabled
-            ? 'Adblock: Off'
-            : (isAllowlisted ? 'Ads allowed' : 'Adblock: On'),
+            ? (l?.toolAdblockOff ?? 'Adblock: Off')
+            : (isAllowlisted
+                ? (l?.toolAdsAllowed ?? 'Ads allowed')
+                : (l?.toolAdblockOn ?? 'Adblock: On')),
         color: !settings.adblockEnabled
             ? Colors.redAccent
             : (isAllowlisted ? ac.textSecondary : Colors.green),
@@ -4049,28 +4054,28 @@ class _SnifferScreenState extends State<SnifferScreen>
       ),
       OverflowMenuEntry(
         icon: Icons.ads_click,
-        label: 'Block element',
+        label: l?.toolBlockElement ?? 'Block element',
         onTap: () => unawaited(_startElementPicker()),
       ),
       OverflowMenuEntry(
         icon: Icons.undo,
-        label: 'Reset blocks',
+        label: l?.toolResetBlocks ?? 'Reset blocks',
         onTap: _resetPageElementBlocks,
       ),
       OverflowMenuEntry(
         icon: Icons.refresh_rounded,
-        label: 'Re-scan media',
+        label: l?.toolRescanMedia ?? 'Re-scan media',
         onTap: () => unawaited(_rescanPageMedia()),
       ),
       OverflowMenuEntry(
         icon: Icons.playlist_add_rounded,
-        label: 'Download all on this page',
+        label: l?.toolBatchDownload ?? 'Download all on this page',
         color: ac.accentFrost,
         onTap: () => unawaited(_runListingBatchDownload()),
       ),
       OverflowMenuEntry(
         icon: Icons.cookie_rounded,
-        label: 'Clear cookies',
+        label: l?.toolClearCookies ?? 'Clear cookies',
         color: Colors.redAccent,
         onTap: () {
           unawaited(

@@ -294,49 +294,47 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     // Steps 1–2 stay on Queue so shell dock keys stay mounted.
     // Steps 3–5 switch to Browser so primary-bar keys (sniffer / tabs / ⋯) exist.
     // No Queue-tab spotlight: that icon only exists on the Queue shell bar.
+    final l = AppLocalizations.of(context);
     OnboardingSpotlightOverlay.show(
       context,
       steps: [
         SpotlightStep(
           targetKey: _urlInputKey,
-          title: 'Link & URL Input',
-          description:
+          title: l?.onboardingStep1Title ?? 'Link & URL Input',
+          description: l?.onboardingStep1Desc ??
               'Paste media URLs or stream links here to start a download without opening the browser.',
           icon: Icons.link_rounded,
           onStepEntered: () => _selectTab(0),
         ),
         SpotlightStep(
           targetKey: _browserTabKey,
-          title: 'Media Sniffer Browser',
-          description:
+          title: l?.onboardingStep2Title ?? 'Media Sniffer Browser',
+          description: l?.onboardingStep2Desc ??
               'Open the built-in browser to browse sites and auto-detect streams, HLS playlists, and audio.',
           icon: Icons.language_rounded,
           onStepEntered: () => _selectTab(0),
         ),
         SpotlightStep(
           targetKey: _browserSnifferKey,
-          title: 'Sniffed Media (Radar)',
-          description:
-              'When the radar lights up, tap it to review detected media and add items to the queue. '
-              'Queue is left of Radar; bookmarks list is on the right. '
-              'Use the star in the address bar to save the current page.',
+          title: l?.onboardingStep3Title ?? 'Sniffed Media (Radar)',
+          description: l?.onboardingStep3Desc ??
+              'When the radar lights up, tap it to review detected media and add items to the queue.',
           icon: Icons.radar,
           onStepEntered: () => _selectTab(1),
         ),
         SpotlightStep(
           targetKey: _browserTabsKey,
-          title: 'Browser Tabs',
-          description:
+          title: l?.onboardingStep4Title ?? 'Browser Tabs',
+          description: l?.onboardingStep4Desc ??
               'Manage multiple pages at once — open, switch, or close tabs from this control.',
           icon: Icons.tab_rounded,
           onStepEntered: () => _selectTab(1),
         ),
         SpotlightStep(
           targetKey: _browserMenuKey,
-          title: 'Menu Popup (⋯)',
-          description:
-              'Opens Settings and Tools. Important destinations: User Guide, Adblock, Download Rules, '
-              'Private Vault, Profiles, WebDAV Backup, Aurora Watcher, History, and Favorites.',
+          title: l?.onboardingStep5Title ?? 'Menu Popup (⋯)',
+          description: l?.onboardingStep5Desc ??
+              'Opens Settings and Tools. Important destinations: User Guide, Adblock, Download Rules, Private Vault, and WebDAV Backup.',
           icon: Icons.more_vert_rounded,
           onStepEntered: () => _selectTab(1),
         ),
@@ -362,6 +360,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         final ac = context.ac;
         return StatefulBuilder(
           builder: (dialogCtx, setDialogState) {
+            final l = AppLocalizations.of(dialogCtx);
             return AlertDialog(
               backgroundColor: const Color(0xFF0F172A),
               shape: RoundedRectangleBorder(
@@ -372,10 +371,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                 children: [
                   Icon(Icons.language_rounded, color: ac.accentFrost, size: 24),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'App Language',
-                      style: TextStyle(
+                      l?.onboardingWelcomeTitle ?? 'App Language',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -391,9 +390,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Select your display language for Aurora Downloader interface:',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                      Text(
+                        l?.onboardingWelcomeDesc ??
+                            'Select your display language for Aurora Downloader interface:',
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                       ),
                       const SizedBox(height: 16),
                       ...kAppSupportedLanguages.map((lang) {
@@ -461,11 +461,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                     ),
                   ),
                   onPressed: () => Navigator.of(dialogCtx).pop(),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Text(
-                      'Continue',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      l?.onboardingContinue ?? 'Continue',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),

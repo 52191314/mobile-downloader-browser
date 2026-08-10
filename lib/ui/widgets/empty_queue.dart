@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import 'panel.dart';
 
 class EmptyQueue extends StatefulWidget {
-  final String message;
+  final String? message;
   final IconData icon;
 
   const EmptyQueue({
     super.key,
-    this.message = 'No downloads yet. Paste a link above to add one.',
+    this.message,
     this.icon = Icons.inbox_outlined,
   });
 
@@ -73,7 +74,9 @@ class _EmptyQueueState extends State<EmptyQueue>
               ),
               const SizedBox(height: 16),
               Text(
-                widget.message,
+                widget.message ??
+                    (AppLocalizations.of(context)?.emptyQueueDesc ??
+                        'No downloads yet. Paste a link above to add one.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: 'Inter',
