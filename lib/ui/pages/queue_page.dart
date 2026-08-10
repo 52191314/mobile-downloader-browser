@@ -274,16 +274,16 @@ class _QueuePageState extends State<QueuePage> {
                 icon: const Icon(Icons.close),
                 onPressed: _exitSelectionMode,
               ),
-              title: Text('${_selectedIds.length} selected'),
+              title: Text(AppLocalizations.of(context)!.queueSelected(_selectedIds.length)),
               actions: _buildSelectionActions(_selectedTasks),
             )
           : AppBar(
-              title: const Text('Queue'),
+              title: Text(AppLocalizations.of(context)!.queueTitle),
               actions: [
                 IconButton(
                   icon: Icon(
                       _searchExpanded ? Icons.search_off : Icons.search),
-                  tooltip: _searchExpanded ? 'Close search' : 'Search',
+                  tooltip: _searchExpanded ? AppLocalizations.of(context)!.queueTooltipCloseSearch : AppLocalizations.of(context)!.queueTooltipSearch,
                   onPressed: () => setState(() {
                     _searchExpanded = !_searchExpanded;
                     if (!_searchExpanded) {
@@ -295,12 +295,12 @@ class _QueuePageState extends State<QueuePage> {
                 if (filteredTasks.isNotEmpty) ...[
                   IconButton(
                     icon: const Icon(Icons.checklist),
-                    tooltip: 'Select',
+                    tooltip: AppLocalizations.of(context)!.queueTooltipSelect,
                     onPressed: _enterSelectionMode,
                   ),
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert),
-                    tooltip: 'Bulk actions',
+                    tooltip: AppLocalizations.of(context)!.queueTooltipBulkActions,
                     itemBuilder: (ctx) =>
                         _buildBulkOverflowMenu(filteredTasks),
                     onSelected: (value) =>
@@ -310,7 +310,7 @@ class _QueuePageState extends State<QueuePage> {
                     icon: Icon(_viewMode
                         ? Icons.list_rounded
                         : Icons.grid_view_rounded),
-                    tooltip: _viewMode ? 'Show as list' : 'Completed history grid',
+                    tooltip: _viewMode ? AppLocalizations.of(context)!.queueTooltipShowList : AppLocalizations.of(context)!.queueTooltipShowGrid,
                     onPressed: () =>
                         setState(() => _viewMode = !_viewMode),
                   ),
@@ -792,7 +792,7 @@ class _QueuePageState extends State<QueuePage> {
                 const SizedBox(height: 8),
                 TextButton.icon(
                   icon: const Icon(Icons.clear_all, size: 16),
-                  label: const Text('Reset filters'),
+                  label: Text(AppLocalizations.of(context)!.queueResetFilters),
                   onPressed: () {
                     setState(() {
                       _searchQuery = '';
@@ -822,7 +822,7 @@ class _QueuePageState extends State<QueuePage> {
                 const SizedBox(height: 16),
                 TextButton.icon(
                   icon: const Icon(Icons.travel_explore, size: 18),
-                  label: const Text('Open Browser'),
+                  label: Text(AppLocalizations.of(context)!.queueOpenBrowser),
                   onPressed: widget.onOpenBrowser,
                 ),
               ],
@@ -948,7 +948,7 @@ class _QueuePageState extends State<QueuePage> {
     final rawUrl = widget.urlController.text.trim();
     if (rawUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a URL to schedule.')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackEnterUrl)),
       );
       return;
     }
@@ -984,7 +984,7 @@ class _QueuePageState extends State<QueuePage> {
     widget.urlController.clear();
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Download scheduled.')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackDownloadScheduled)),
       );
     }
   }
@@ -1164,7 +1164,7 @@ class _QueuePageState extends State<QueuePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Sort by',
+                  Text(AppLocalizations.of(context)!.queueSortBy,
                       style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 14,
@@ -1228,7 +1228,7 @@ class _QueuePageState extends State<QueuePage> {
                       children: [
                         Expanded(
                           child: Text(
-                            'Flat list (no sections)',
+                            AppLocalizations.of(context)!.queueFlatList,
                             style: TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 13,
@@ -1287,67 +1287,67 @@ class _QueuePageState extends State<QueuePage> {
 
     final items = <PopupMenuEntry<String>>[];
     if (hasActive) {
-      items.add(const PopupMenuItem(
+      items.add(PopupMenuItem(
         value: 'pause_all',
-        child: ListTile(
-          leading: Icon(Icons.pause_rounded, size: 20),
-          title: Text('Pause all active'),
+        child: Builder(builder: (ctx) => ListTile(
+          leading: const Icon(Icons.pause_rounded, size: 20),
+          title: Text(AppLocalizations.of(ctx)!.queueBulkPauseAll),
           dense: true,
           contentPadding: EdgeInsets.zero,
-        ),
+        )),
       ));
     }
     if (hasPaused) {
-      items.add(const PopupMenuItem(
+      items.add(PopupMenuItem(
         value: 'resume_all',
-        child: ListTile(
-          leading: Icon(Icons.play_arrow_rounded, size: 20),
-          title: Text('Resume all paused'),
+        child: Builder(builder: (ctx) => ListTile(
+          leading: const Icon(Icons.play_arrow_rounded, size: 20),
+          title: Text(AppLocalizations.of(ctx)!.queueBulkResumeAll),
           dense: true,
           contentPadding: EdgeInsets.zero,
-        ),
+        )),
       ));
     }
     if (hasFailed) {
-      items.add(const PopupMenuItem(
+      items.add(PopupMenuItem(
         value: 'retry_all',
-        child: ListTile(
-          leading: Icon(Icons.refresh_rounded, size: 20),
-          title: Text('Retry all failed'),
+        child: Builder(builder: (ctx) => ListTile(
+          leading: const Icon(Icons.refresh_rounded, size: 20),
+          title: Text(AppLocalizations.of(ctx)!.queueBulkRetryFailed),
           dense: true,
           contentPadding: EdgeInsets.zero,
-        ),
+        )),
       ));
     }
     if (hasScheduled) {
-      items.add(const PopupMenuItem(
+      items.add(PopupMenuItem(
         value: 'cancel_scheduled',
-        child: ListTile(
-          leading: Icon(Icons.event_busy_rounded, size: 20),
-          title: Text('Cancel scheduled'),
+        child: Builder(builder: (ctx) => ListTile(
+          leading: const Icon(Icons.event_busy_rounded, size: 20),
+          title: Text(AppLocalizations.of(ctx)!.queueBulkCancelScheduled),
           dense: true,
           contentPadding: EdgeInsets.zero,
-        ),
+        )),
       ));
     }
-    items.add(const PopupMenuItem(
+    items.add(PopupMenuItem(
       value: 'cancel_active',
-      child: ListTile(
-        leading: Icon(Icons.cancel_outlined, size: 20),
-        title: Text('Cancel active'),
+      child: Builder(builder: (ctx) => ListTile(
+        leading: const Icon(Icons.cancel_outlined, size: 20),
+        title: Text(AppLocalizations.of(ctx)!.queueBulkCancelActive),
         dense: true,
         contentPadding: EdgeInsets.zero,
-      ),
+      )),
     ));
     // P12 duplicateFinder: Pro+ can scan the queue for duplicate URLs/names.
-    items.add(const PopupMenuItem(
+    items.add(PopupMenuItem(
       value: 'find_duplicates',
-      child: ListTile(
-        leading: Icon(Icons.content_copy_rounded, size: 20),
-        title: Text('Find duplicates'),
+      child: Builder(builder: (ctx) => ListTile(
+        leading: const Icon(Icons.content_copy_rounded, size: 20),
+        title: Text(AppLocalizations.of(ctx)!.queueBulkFindDuplicates),
         dense: true,
         contentPadding: EdgeInsets.zero,
-      ),
+      )),
     ));
     return items;
   }
@@ -1386,17 +1386,17 @@ class _QueuePageState extends State<QueuePage> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            title: const Text('Cancel scheduled downloads?'),
+            title: Text(AppLocalizations.of(context)!.queueDlgCancelScheduledTitle),
             content: const Text(
               'All scheduled downloads will be removed.',
             ),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Keep')),
+                  child: Text(AppLocalizations.of(context)!.queueDlgKeep)),
               TextButton(
                   onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Remove all')),
+                  child: Text(AppLocalizations.of(context)!.queueDlgRemoveAll)),
             ],
           ),
         );
@@ -1414,7 +1414,7 @@ class _QueuePageState extends State<QueuePage> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            title: const Text('Cancel active downloads?'),
+            title: Text(AppLocalizations.of(context)!.queueDlgCancelActiveTitle),
             content: const Text(
               'This removes all active and queued downloads.\n'
               'Temporary files will be deleted.',
@@ -1501,12 +1501,12 @@ class _QueuePageState extends State<QueuePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          duplicates.isEmpty ? 'No duplicates found' : 'Duplicates found',
+          duplicates.isEmpty ? AppLocalizations.of(context)!.queueDlgNoDuplicates : AppLocalizations.of(context)!.queueDlgDuplicatesTitle,
         ),
         content: SizedBox(
           width: double.maxFinite,
           child: duplicates.isEmpty
-              ? const Text('All tasks in the queue have unique URLs.')
+              ? Text(AppLocalizations.of(context)!.queueDlgNoDuplicates)
               : ListView.builder(
                   shrinkWrap: true,
                   itemCount: duplicates.length,
@@ -1519,7 +1519,7 @@ class _QueuePageState extends State<QueuePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+            child: Text(AppLocalizations.of(ctx)!.queueDlgClose),
           ),
         ],
       ),
@@ -1634,7 +1634,7 @@ class _QueuePageState extends State<QueuePage> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            title: const Text('Remove selected downloads?'),
+            title: Text(AppLocalizations.of(context)!.queueDlgRemoveSelected),
             content: const Text(
               'Selected downloads will be removed.\n'
               'Temporary files will be deleted.',
@@ -1872,7 +1872,7 @@ class _QueuePageState extends State<QueuePage> {
         widget.queue.scheduleTask(t, startAt);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Scheduled ${t.savePath.split('/').last} for start.')),
+            SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackDownloadScheduled)),
           );
         }
       },
@@ -1904,7 +1904,7 @@ class _QueuePageState extends State<QueuePage> {
     if (path == null || path.isEmpty || !File(path).existsSync()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('File path is missing or file does not exist.')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackFileMissing)),
       );
       return;
     }
@@ -1983,7 +1983,7 @@ class _QueuePageState extends State<QueuePage> {
 
     if (status == FeatureModuleStatus.downloading) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('FFmpeg module is already downloading…')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackFfmpegDownloading)),
       );
       return false;
     }
@@ -1993,7 +1993,7 @@ class _QueuePageState extends State<QueuePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Download FFmpeg tools?'),
+        title: Text(AppLocalizations.of(context)!.queueDlgFfmpegTitle),
         content: Text(
           'FFmpeg media tools are not included in the base app on this '
           'distribution channel.\n\n'
@@ -2003,11 +2003,11 @@ class _QueuePageState extends State<QueuePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context)!.actionCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Download'),
+            child: Text(AppLocalizations.of(context)!.queueDlgDownload),
           ),
         ],
       ),
@@ -2021,7 +2021,7 @@ class _QueuePageState extends State<QueuePage> {
 
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('FFmpeg tools ready.')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.queueSnackFfmpegReady)),
       );
       return true;
     }
@@ -2030,7 +2030,7 @@ class _QueuePageState extends State<QueuePage> {
     final retry = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Download failed'),
+        title: Text(AppLocalizations.of(context)!.queueDlgFfmpegFailedTitle),
         content: const Text(
           'Could not download the FFmpeg module. '
           'Check your network connection and try again.',
@@ -2042,7 +2042,7 @@ class _QueuePageState extends State<QueuePage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Retry'),
+            child: Text(AppLocalizations.of(context)!.queueDlgRetry),
           ),
         ],
       ),
@@ -2182,7 +2182,7 @@ class _QueuePageState extends State<QueuePage> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Save partial file?'),
+        title: Text(AppLocalizations.of(context)!.queueDlgSavePartialTitle),
         content: Text(
           'The server closed the connection at $pct% completion.\n\n'
           'Merge the partial file to keep what finished, '
@@ -2191,7 +2191,7 @@ class _QueuePageState extends State<QueuePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Dismiss'),
+            child: Text(AppLocalizations.of(context)!.queueDlgDismiss),
           ),
           TextButton(
             onPressed: () {
@@ -2215,7 +2215,7 @@ class _QueuePageState extends State<QueuePage> {
                 }
               }
             },
-            child: const Text('Merge and save'),
+            child: Text(AppLocalizations.of(context)!.queueDlgMergeAndSave),
           ),
         ],
       ),
@@ -2241,7 +2241,7 @@ class _QueuePageState extends State<QueuePage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Link already queued'),
+        title: Text(AppLocalizations.of(context)!.queueDlgLinkAlreadyQueuedTitle),
         content: const Text(
           'This link is already in your download queue.\n\n'
           'The URL may have changed (token refresh). Update the existing '
@@ -2274,11 +2274,11 @@ class _QueuePageState extends State<QueuePage> {
                 created.copyBrowserBridgesFrom(newTask);
                 widget.queue.addTask(created, force: true);
                 if (mounted) {
-                  AuroraSnackbar.show(context, 'Done — New download created with refreshed link.');
+                  AuroraSnackbar.show(context, AppLocalizations.of(context)!.queueSnackNewDownloadCreated);
                 }
               }
             },
-            child: const Text('Create new'),
+            child: Text(AppLocalizations.of(context)!.queueDlgCreateNew),
           ),
           ElevatedButton(
             onPressed: () async {

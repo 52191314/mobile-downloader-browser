@@ -773,4 +773,312 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get lblSearchQueue => '搜索下载任务...';
+
+  @override
+  String get cardPriorityHigh => '高';
+
+  @override
+  String get cardPriorityLow => '低';
+
+  @override
+  String get cardTooltipCancelScheduled => '取消计划';
+
+  @override
+  String get cardTooltipPause => '暂停';
+
+  @override
+  String get cardTooltipResume => '继续';
+
+  @override
+  String get cardTooltipRefreshLink => '刷新链接';
+
+  @override
+  String get cardTooltipRetry => '重试';
+
+  @override
+  String get cardTooltipOpen => '打开';
+
+  @override
+  String get cardMenuOpen => '打开';
+
+  @override
+  String get cardMenuShare => '分享…';
+
+  @override
+  String get cardMenuSendToPc => '发送到PC…';
+
+  @override
+  String get cardMenuMoveToVault => '移至保险库…';
+
+  @override
+  String get cardMenuFfmpegStudio => '在FFmpeg工作室编辑';
+
+  @override
+  String get cardMenuRedownload => '重新下载';
+
+  @override
+  String get cardMenuForceMerge => '强制合并';
+
+  @override
+  String get cardMenuRefreshLink => '刷新链接';
+
+  @override
+  String get cardMenuResniffOnPage => '在页面上重新嗅探';
+
+  @override
+  String get cardMenuOpenSourcePage => '打开来源页面';
+
+  @override
+  String get cardMenuScheduleDownload => '计划下载';
+
+  @override
+  String get cardMenuRemove => '移除';
+
+  @override
+  String get cardMenuCancel => '取消';
+
+  @override
+  String get cardMenuProperties => '属性';
+
+  @override
+  String get cardStatusStarting => '正在启动…';
+
+  @override
+  String get cardStatusScheduled => '已计划';
+
+  @override
+  String get cardStatusPaused => '已暂停';
+
+  @override
+  String get cardStatusFailed => '失败';
+
+  @override
+  String get cardStatusMerging => '合并中…';
+
+  @override
+  String get cardStatusDownloaded => '已下载';
+
+  @override
+  String get cardStatusSaved => '已保存';
+
+  @override
+  String get cardSegmentsLabel => '段';
+
+  @override
+  String get propDialogTitle => '文件详情';
+
+  @override
+  String get propDialogFileName => '文件名';
+
+  @override
+  String get propDialogLocation => '位置';
+
+  @override
+  String get propDialogDownloadLink => '下载链接';
+
+  @override
+  String get propDialogSourcePage => '来源页面';
+
+  @override
+  String get propDialogClose => '关闭';
+
+  @override
+  String get queueTitle => '队列';
+
+  @override
+  String queueSelected(int count) {
+    return '已选择 $count 个';
+  }
+
+  @override
+  String get queueTooltipSearch => '搜索';
+
+  @override
+  String get queueTooltipCloseSearch => '关闭搜索';
+
+  @override
+  String get queueTooltipSelect => '选择';
+
+  @override
+  String get queueTooltipBulkActions => '批量操作';
+
+  @override
+  String get queueTooltipShowList => '以列表显示';
+
+  @override
+  String get queueTooltipShowGrid => '已完成历史网格';
+
+  @override
+  String get queueSortBy => '排序方式';
+
+  @override
+  String get queueResetFilters => '重置过滤器';
+
+  @override
+  String get queueOpenBrowser => '打开浏览器';
+
+  @override
+  String get queueBulkPauseAll => '暂停所有活动';
+
+  @override
+  String get queueBulkResumeAll => '继续所有暂停';
+
+  @override
+  String get queueBulkRetryFailed => '重试所有失败';
+
+  @override
+  String get queueBulkCancelScheduled => '取消计划';
+
+  @override
+  String get queueBulkCancelActive => '取消活动';
+
+  @override
+  String get queueBulkFindDuplicates => '查找重复项';
+
+  @override
+  String get queueDlgCancelScheduledTitle => '取消计划下载？';
+
+  @override
+  String get queueDlgCancelActiveTitle => '取消活动下载？';
+
+  @override
+  String get queueDlgKeep => '保留';
+
+  @override
+  String get queueDlgRemoveAll => '全部删除';
+
+  @override
+  String get queueDlgRemoveSelected => '删除所选下载？';
+
+  @override
+  String get queueDlgDuplicatesTitle => '重复的URL';
+
+  @override
+  String get queueDlgNoDuplicates => '队列中的所有任务都有唯一的URL。';
+
+  @override
+  String get queueDlgClose => '关闭';
+
+  @override
+  String get queueSnackEnterUrl => '请输入要计划的URL。';
+
+  @override
+  String get queueSnackDownloadScheduled => '下载已计划。';
+
+  @override
+  String get queueSnackFileMissing => '文件路径丢失或文件不存在。';
+
+  @override
+  String get queueSnackFfmpegDownloading => 'FFmpeg模块已经在下载中。';
+
+  @override
+  String get queueSnackFfmpegReady => 'FFmpeg工具已就绪。';
+
+  @override
+  String get queueDlgFfmpegTitle => '下载FFmpeg工具？';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => '下载失败';
+
+  @override
+  String get queueDlgDownload => '下载';
+
+  @override
+  String get queueDlgRetry => '重试';
+
+  @override
+  String get queueDlgSavePartialTitle => '保存部分文件？';
+
+  @override
+  String get queueDlgDismiss => '关闭';
+
+  @override
+  String get queueDlgMergeAndSave => '合并并保存';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => '链接已在队列中';
+
+  @override
+  String get queueDlgCreateNew => '创建新';
+
+  @override
+  String get queueSnackNewDownloadCreated => '完成 - 已使用刷新的链接创建新下载。';
+
+  @override
+  String get snifferSnackCloudflareRetrying => '检测到Cloudflare封锁 — 重新应用隐身模式并重试…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare封锁了$host';
+  }
+
+  @override
+  String get snifferCfDesc => '此网站封锁应用内Android WebView。完整浏览器（如Chrome）可绕过此封锁。';
+
+  @override
+  String get snifferCfAlreadyExternal => '此网站已设置为始终在Chrome自定义标签中打开。';
+
+  @override
+  String get snifferCfClose => '关闭';
+
+  @override
+  String get snifferCfOpenCct => '在Chrome自定义标签中打开';
+
+  @override
+  String get snifferCfOpenSystem => '在系统浏览器中打开';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return '始终在自定义标签中打开$host';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => '元素已被屏蔽。撤销？';
+
+  @override
+  String get snifferDlgDownloadAllTitle => '下载此页面上的所有内容';
+
+  @override
+  String get snifferDlgCancel => '取消';
+
+  @override
+  String get snifferDlgSiteDataTitle => '网站数据';
+
+  @override
+  String get snifferDlgClearSiteData => '清除';
+
+  @override
+  String get snifferSnackOpenPageFirst => '请先打开页面以调整广告拦截设置。';
+
+  @override
+  String get snifferAdblockTitle => '此网站上的广告拦截';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return '在此页面上拦截了$count个请求';
+  }
+
+  @override
+  String get snifferAdblockDone => '完成';
+
+  @override
+  String get snifferUndoLabel => '撤销';
+
+  @override
+  String get snifferCancelLabel => '取消';
+
+  @override
+  String get snifferPopupBlockedTitle => '弹出窗口被Aurora拦截';
+
+  @override
+  String get snifferRedirectBlockedTitle => '重定向被Aurora拦截';
+
+  @override
+  String get snifferProfilesTitle => '尚无配置文件';
+
+  @override
+  String get snifferNewProfileTitle => '新配置文件';
+
+  @override
+  String get queueFlatList => '平面列表（无分节）';
 }

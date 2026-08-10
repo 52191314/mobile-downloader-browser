@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -210,5 +211,170 @@ class HeadlessPageResniffer {
       await _headless?.dispose();
     } catch (_) {}
     _headless = null;
+  }
+
+  /// Loads [sourcePageUrl] headlessly and returns **all** media URLs the
+  /// rendered DOM exposes — `<source src>`, `<video>/<audio> src`,
+  /// `og:video`/`twitter:player` meta, inline script strings, and
+  /// `performance.getEntriesByType('resource')` — for `.m3u8`, `.mpd` and
+  /// `.mp4`. Used by the listing crawler as the JS-rendered fallback when a
+  /// detail page's static HTML contains no direct media URL.
+  ///
+  /// Returns an empty list when nothing is found or the page cannot load.
+  /// The instance is disposed automatically.
+  Future<List<String>> resniffAll(String sourcePageUrl) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return const [];
+    if (_isDisposed) return const [];
+    if (!sourcePageUrl.startsWith('http')) return const [];
+
+    final loadCompleter = Completer<bool>();
+
+    try {
+      _headless = HeadlessInAppWebView(
+        initialUrlRequest: URLRequest(url: WebUri(sourcePageUrl)),
+        initialSettings: InAppWebViewSettings(
+          incognito: true,
+          javaScriptEnabled: true,
+          domStorageEnabled: true,
+          databaseEnabled: true,
+          mediaPlaybackRequiresUserGesture: false,
+          useShouldOverrideUrlLoading: true,
+          useOnLoadResource: false,
+          useShouldInterceptRequest: true,
+        ),
+        onLoadStop: (controller, url) {
+          if (!loadCompleter.isCompleted) {
+            loadCompleter.complete(true);
+          }
+        },
+        onReceivedError: (controller, request, error) {
+          if (request.isForMainFrame == true && !loadCompleter.isCompleted) {
+            loadCompleter.complete(false);
+          }
+        },
+      );
+      await _headless!.run();
+      _controller = _headless!.webViewController;
+      if (_controller == null) return const [];
+
+      final ok = await loadCompleter.future.timeout(_pageLoadTimeout);
+      if (_isDisposed || !ok) return const [];
+
+      // Give JS time to execute and the player to initialise.
+      await Future<void>.delayed(_jsGracePeriod);
+      if (_isDisposed) return const [];
+
+      final results = <String>{};
+
+      // DOM + script-string media URLs.
+      final fromDom = await _queryAllMediaUrls();
+      if (fromDom != null) results.addAll(fromDom);
+
+      // fetch/XHR-loaded playlists.
+      await Future<void>.delayed(_resourcePollDelay);
+      if (_isDisposed) return const [];
+      final fromPerf = await _queryAllPerformanceEntries();
+      if (fromPerf != null) results.addAll(fromPerf);
+
+      return results.toList();
+    } catch (_) {
+      return const [];
+    } finally {
+      await dispose();
+    }
+  }
+
+  /// Returns every `.m3u8` / `.mpd` / `.mp4` URL visible in the rendered
+  /// DOM: `<source src>`, `<video>/<audio>` src/currentSrc, meta
+  /// og:video/twitter:player, and inline `<script>` text. Null on failure.
+  Future<List<String>?> _queryAllMediaUrls() async {
+    final ctrl = _controller;
+    if (ctrl == null) return null;
+    try {
+      final result = await ctrl.evaluateJavascript(source: '''
+(() => {
+  const out = new Set();
+  function scan(root) {
+    if (!root || !root.querySelectorAll) return;
+    const sources = root.querySelectorAll('source[src]');
+    for (const s of sources) {
+      const src = s.src || s.getAttribute('src') || '';
+      if (src && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(src)) out.add(src);
+    }
+    const medias = root.querySelectorAll('video, audio');
+    for (const m of medias) {
+      const src = m.currentSrc || m.src || '';
+      if (src && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(src)) out.add(src);
+    }
+    const metas = root.querySelectorAll('meta[property="og:video"], meta[property="twitter:player:stream"], meta[itemprop="contentURL"]');
+    for (const mt of metas) {
+      const c = mt.content || '';
+      if (c && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(c)) out.add(c);
+    }
+    const scripts = root.querySelectorAll('script');
+    for (const sc of scripts) {
+      const text = sc.textContent || '';
+      const re = /https?:\\\\/\\\\/[^"'\\\\s]+?\\.(m3u8|mpd|mp4)(\\\\?[^"'\\\\s]*)?/gi;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const u = m[0].replace(/\\\\\\//g, '/');
+        if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) out.add(u);
+      }
+    }
+  }
+  scan(document);
+  const iframes = document.querySelectorAll('iframe');
+  for (const f of iframes) {
+    try { const fr = f.contentDocument; if (fr) scan(fr); } catch (_) {}
+  }
+  return JSON.stringify(Array.from(out));
+})();
+''');
+      if (result is String && result.isNotEmpty && result != '[]') {
+        try {
+          final decoded = jsonDecode(result);
+          if (decoded is List) {
+            return decoded.whereType<String>().toList();
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Polls `performance.getEntriesByType('resource')` for all `.m3u8` /
+  /// `.mpd` / `.mp4` URLs — catches players that fetch playlists via
+  /// XHR/fetch rather than setting them as DOM element src.
+  Future<List<String>?> _queryAllPerformanceEntries() async {
+    final ctrl = _controller;
+    if (ctrl == null) return null;
+    try {
+      final result = await ctrl.evaluateJavascript(source: '''
+        (() => {
+          try {
+            const out = new Set();
+            const entries = performance.getEntriesByType('resource');
+            for (const e of entries) {
+              const u = e.name;
+              if (/\\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(u) &&
+                  u.indexOf('ping.m3u8') === -1 &&
+                  u.indexOf('/ping') === -1) {
+                out.add(u);
+              }
+            }
+            return JSON.stringify(Array.from(out));
+          } catch(e) { return '[]'; }
+        })()
+      ''');
+      if (result is String && result.isNotEmpty && result != '[]') {
+        try {
+          final decoded = jsonDecode(result);
+          if (decoded is List) {
+            return decoded.whereType<String>().toList();
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
   }
 }

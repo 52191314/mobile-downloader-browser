@@ -805,4 +805,322 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'عالي';
+
+  @override
+  String get cardPriorityLow => 'منخفض';
+
+  @override
+  String get cardTooltipCancelScheduled => 'إلغاء المجدول';
+
+  @override
+  String get cardTooltipPause => 'إيقاف مؤقت';
+
+  @override
+  String get cardTooltipResume => 'استئناف';
+
+  @override
+  String get cardTooltipRefreshLink => 'تحديث الرابط';
+
+  @override
+  String get cardTooltipRetry => 'إعادة المحاولة';
+
+  @override
+  String get cardTooltipOpen => 'فتح';
+
+  @override
+  String get cardMenuOpen => 'فتح';
+
+  @override
+  String get cardMenuShare => 'مشاركة…';
+
+  @override
+  String get cardMenuSendToPc => 'إرسال إلى الكمبيوتر…';
+
+  @override
+  String get cardMenuMoveToVault => 'نقل إلى الخزينة…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'تحرير في FFmpeg Studio';
+
+  @override
+  String get cardMenuRedownload => 'إعادة التنزيل';
+
+  @override
+  String get cardMenuForceMerge => 'دمج قسري';
+
+  @override
+  String get cardMenuRefreshLink => 'تحديث الرابط';
+
+  @override
+  String get cardMenuResniffOnPage => 'إعادة الفحص في الصفحة';
+
+  @override
+  String get cardMenuOpenSourcePage => 'فتح صفحة المصدر';
+
+  @override
+  String get cardMenuScheduleDownload => 'جدولة التنزيل';
+
+  @override
+  String get cardMenuRemove => 'إزالة';
+
+  @override
+  String get cardMenuCancel => 'إلغاء';
+
+  @override
+  String get cardMenuProperties => 'الخصائص';
+
+  @override
+  String get cardStatusStarting => 'جارٍ البدء…';
+
+  @override
+  String get cardStatusScheduled => 'مجدول';
+
+  @override
+  String get cardStatusPaused => 'متوقف مؤقتاً';
+
+  @override
+  String get cardStatusFailed => 'فشل';
+
+  @override
+  String get cardStatusMerging => 'جارٍ الدمج…';
+
+  @override
+  String get cardStatusDownloaded => 'تم التنزيل';
+
+  @override
+  String get cardStatusSaved => 'محفوظ';
+
+  @override
+  String get cardSegmentsLabel => 'مقاطع';
+
+  @override
+  String get propDialogTitle => 'تفاصيل الملف';
+
+  @override
+  String get propDialogFileName => 'اسم الملف';
+
+  @override
+  String get propDialogLocation => 'الموقع';
+
+  @override
+  String get propDialogDownloadLink => 'رابط التنزيل';
+
+  @override
+  String get propDialogSourcePage => 'صفحة المصدر';
+
+  @override
+  String get propDialogClose => 'إغلاق';
+
+  @override
+  String get queueTitle => 'قائمة الانتظار';
+
+  @override
+  String queueSelected(int count) {
+    return 'تم تحديد $count';
+  }
+
+  @override
+  String get queueTooltipSearch => 'بحث';
+
+  @override
+  String get queueTooltipCloseSearch => 'إغلاق البحث';
+
+  @override
+  String get queueTooltipSelect => 'اختر';
+
+  @override
+  String get queueTooltipBulkActions => 'إجراءات جماعية';
+
+  @override
+  String get queueTooltipShowList => 'عرض كقائمة';
+
+  @override
+  String get queueTooltipShowGrid => 'شبكة سجل المكتمل';
+
+  @override
+  String get queueSortBy => 'فرز حسب';
+
+  @override
+  String get queueResetFilters => 'إعادة تعيين الفلاتر';
+
+  @override
+  String get queueOpenBrowser => 'فتح المتصفح';
+
+  @override
+  String get queueBulkPauseAll => 'إيقاف مؤقت لجميع النشطة';
+
+  @override
+  String get queueBulkResumeAll => 'استئناف جميع المتوقفة';
+
+  @override
+  String get queueBulkRetryFailed => 'إعادة محاولة جميع الفاشلة';
+
+  @override
+  String get queueBulkCancelScheduled => 'إلغاء المجدولة';
+
+  @override
+  String get queueBulkCancelActive => 'إلغاء النشطة';
+
+  @override
+  String get queueBulkFindDuplicates => 'البحث عن التكرارات';
+
+  @override
+  String get queueDlgCancelScheduledTitle =>
+      'هل تريد إلغاء التنزيلات المجدولة؟';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'هل تريد إلغاء التنزيلات النشطة؟';
+
+  @override
+  String get queueDlgKeep => 'احتفظ';
+
+  @override
+  String get queueDlgRemoveAll => 'حذف الكل';
+
+  @override
+  String get queueDlgRemoveSelected => 'هل تريد حذف التنزيلات المحددة؟';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'عناوين URL المكررة';
+
+  @override
+  String get queueDlgNoDuplicates =>
+      'جميع المهام في قائمة الانتظار لها عناوين URL فريدة.';
+
+  @override
+  String get queueDlgClose => 'إغلاق';
+
+  @override
+  String get queueSnackEnterUrl => 'أدخل عنوان URL للجدولة.';
+
+  @override
+  String get queueSnackDownloadScheduled => 'تمت جدولة التنزيل.';
+
+  @override
+  String get queueSnackFileMissing => 'مسار الملف مفقود أو الملف غير موجود.';
+
+  @override
+  String get queueSnackFfmpegDownloading => 'وحدة FFmpeg يتم تنزيلها بالفعل.';
+
+  @override
+  String get queueSnackFfmpegReady => 'أدوات FFmpeg جاهزة.';
+
+  @override
+  String get queueDlgFfmpegTitle => 'هل تريد تنزيل أدوات FFmpeg؟';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'فشل التنزيل';
+
+  @override
+  String get queueDlgDownload => 'تنزيل';
+
+  @override
+  String get queueDlgRetry => 'إعادة المحاولة';
+
+  @override
+  String get queueDlgSavePartialTitle => 'هل تريد حفظ الملف الجزئي؟';
+
+  @override
+  String get queueDlgDismiss => 'رفض';
+
+  @override
+  String get queueDlgMergeAndSave => 'دمج وحفظ';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle =>
+      'الرابط في قائمة الانتظار بالفعل';
+
+  @override
+  String get queueDlgCreateNew => 'إنشاء جديد';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'تم - تم إنشاء تنزيل جديد برابط محدث.';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'تم اكتشاف حظر Cloudflare — إعادة تطبيق التخفي وإعادة المحاولة…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare حجب $host';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'هذا الموقع يحجب WebViews داخل التطبيق. المتصفحات الكاملة مثل Chrome تتجاوز هذا الحجب.';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'هذا الموقع مُعيَّن ليُفتح دائمًا في تبويب Chrome المخصص.';
+
+  @override
+  String get snifferCfClose => 'إغلاق';
+
+  @override
+  String get snifferCfOpenCct => 'فتح في تبويب Chrome المخصص';
+
+  @override
+  String get snifferCfOpenSystem => 'فتح في متصفح النظام';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'فتح $host دائمًا في تبويب مخصص';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => 'تم حجب العنصر. تراجع؟';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'تنزيل الكل في هذه الصفحة';
+
+  @override
+  String get snifferDlgCancel => 'إلغاء';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'بيانات الموقع';
+
+  @override
+  String get snifferDlgClearSiteData => 'مسح';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'افتح صفحة أولاً لضبط إعدادات حاجب الإعلانات.';
+
+  @override
+  String get snifferAdblockTitle => 'حاجب الإعلانات في هذا الموقع';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'تم حجب $count طلبات في هذه الصفحة';
+  }
+
+  @override
+  String get snifferAdblockDone => 'تم';
+
+  @override
+  String get snifferUndoLabel => 'تراجع';
+
+  @override
+  String get snifferCancelLabel => 'إلغاء';
+
+  @override
+  String get snifferPopupBlockedTitle =>
+      'تم حجب النافذة المنبثقة بواسطة Aurora';
+
+  @override
+  String get snifferRedirectBlockedTitle =>
+      'تم حجب إعادة التوجيه بواسطة Aurora';
+
+  @override
+  String get snifferProfilesTitle => 'لا توجد ملفات شخصية بعد';
+
+  @override
+  String get snifferNewProfileTitle => 'ملف شخصي جديد';
+
+  @override
+  String get queueFlatList => 'قائمة مسطحة (بدون أقسام)';
 }

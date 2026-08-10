@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../downloader/downloader.dart';
 
@@ -26,29 +27,30 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
+    final l10n = AppLocalizations.of(context)!;
 
     return AlertDialog(
-      title: const Text('File details'),
+      title: Text(l10n.propDialogTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('File name', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
+            Text(l10n.propDialogFileName, style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
             const SizedBox(height: 4),
             SelectableText(
               _currentName,
               style: TextStyle(fontSize: 12, color: ac.textSecondary),
             ),
             const SizedBox(height: 16),
-            Text('Location', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
+            Text(l10n.propDialogLocation, style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
             const SizedBox(height: 4),
             SelectableText(
               widget.task.publicPathLabel ?? widget.task.savePath,
               style: TextStyle(fontSize: 12, color: ac.textSecondary),
             ),
             const SizedBox(height: 16),
-            Text('Download link', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
+            Text(l10n.propDialogDownloadLink, style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
             const SizedBox(height: 4),
             SelectableText(
               widget.task.url,
@@ -56,7 +58,7 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
             ),
             const SizedBox(height: 16),
             if (widget.task.sourcePageUrl != null) ...[
-              Text('Source page', style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
+              Text(l10n.propDialogSourcePage, style: TextStyle(fontWeight: FontWeight.bold, color: ac.accentFrost, fontSize: 12)),
               const SizedBox(height: 4),
               SelectableText(
                 widget.task.sourcePageUrl!,
@@ -70,7 +72,7 @@ class DownloadPropertiesDialogState extends State<DownloadPropertiesDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
+          child: Text(l10n.propDialogClose),
         ),
       ],
     );

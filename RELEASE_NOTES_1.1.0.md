@@ -1,8 +1,8 @@
 # Aurora Downloader 1.1.0 Release Notes
 
-**Build Version**: 1.1.0+58  
+**Build Version**: 1.1.0+59  
 **Release Date**: August 10, 2026  
-**Build Channel**: Google Play (Play Store release bundle)
+**Build Channel**: GitHub / OSS (github channel)
 
 ## Major Enhancements
 

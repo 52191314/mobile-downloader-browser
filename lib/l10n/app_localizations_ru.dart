@@ -806,4 +806,322 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'Высокий';
+
+  @override
+  String get cardPriorityLow => 'Низкий';
+
+  @override
+  String get cardTooltipCancelScheduled => 'Отменить запланированное';
+
+  @override
+  String get cardTooltipPause => 'Пауза';
+
+  @override
+  String get cardTooltipResume => 'Возобновить';
+
+  @override
+  String get cardTooltipRefreshLink => 'Обновить ссылку';
+
+  @override
+  String get cardTooltipRetry => 'Повторить';
+
+  @override
+  String get cardTooltipOpen => 'Открыть';
+
+  @override
+  String get cardMenuOpen => 'Открыть';
+
+  @override
+  String get cardMenuShare => 'Поделиться…';
+
+  @override
+  String get cardMenuSendToPc => 'Отправить на ПК…';
+
+  @override
+  String get cardMenuMoveToVault => 'Переместить в хранилище…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'Редактировать в FFmpeg Studio';
+
+  @override
+  String get cardMenuRedownload => 'Загрузить повторно';
+
+  @override
+  String get cardMenuForceMerge => 'Принудительное слияние';
+
+  @override
+  String get cardMenuRefreshLink => 'Обновить ссылку';
+
+  @override
+  String get cardMenuResniffOnPage => 'Повторный сканирование на странице';
+
+  @override
+  String get cardMenuOpenSourcePage => 'Открыть исходную страницу';
+
+  @override
+  String get cardMenuScheduleDownload => 'Запланировать загрузку';
+
+  @override
+  String get cardMenuRemove => 'Удалить';
+
+  @override
+  String get cardMenuCancel => 'Отмена';
+
+  @override
+  String get cardMenuProperties => 'Свойства';
+
+  @override
+  String get cardStatusStarting => 'Запуск…';
+
+  @override
+  String get cardStatusScheduled => 'Запланировано';
+
+  @override
+  String get cardStatusPaused => 'На паузе';
+
+  @override
+  String get cardStatusFailed => 'Ошибка';
+
+  @override
+  String get cardStatusMerging => 'Слияние…';
+
+  @override
+  String get cardStatusDownloaded => 'загружено';
+
+  @override
+  String get cardStatusSaved => 'сохранено';
+
+  @override
+  String get cardSegmentsLabel => 'сег';
+
+  @override
+  String get propDialogTitle => 'Сведения о файле';
+
+  @override
+  String get propDialogFileName => 'Имя файла';
+
+  @override
+  String get propDialogLocation => 'Расположение';
+
+  @override
+  String get propDialogDownloadLink => 'Ссылка для скачивания';
+
+  @override
+  String get propDialogSourcePage => 'Исходная страница';
+
+  @override
+  String get propDialogClose => 'Закрыть';
+
+  @override
+  String get queueTitle => 'Очередь';
+
+  @override
+  String queueSelected(int count) {
+    return '$count выбрано';
+  }
+
+  @override
+  String get queueTooltipSearch => 'Поиск';
+
+  @override
+  String get queueTooltipCloseSearch => 'Закрыть поиск';
+
+  @override
+  String get queueTooltipSelect => 'Выбрать';
+
+  @override
+  String get queueTooltipBulkActions => 'Массовые действия';
+
+  @override
+  String get queueTooltipShowList => 'Показать как список';
+
+  @override
+  String get queueTooltipShowGrid => 'Сетка истории завершённых';
+
+  @override
+  String get queueSortBy => 'Сортировать по';
+
+  @override
+  String get queueResetFilters => 'Сбросить фильтры';
+
+  @override
+  String get queueOpenBrowser => 'Открыть браузер';
+
+  @override
+  String get queueBulkPauseAll => 'Приостановить все активные';
+
+  @override
+  String get queueBulkResumeAll => 'Возобновить все приостановленные';
+
+  @override
+  String get queueBulkRetryFailed => 'Повторить все ошибки';
+
+  @override
+  String get queueBulkCancelScheduled => 'Отменить запланированные';
+
+  @override
+  String get queueBulkCancelActive => 'Отменить активные';
+
+  @override
+  String get queueBulkFindDuplicates => 'Найти дубликаты';
+
+  @override
+  String get queueDlgCancelScheduledTitle =>
+      'Отменить запланированные загрузки?';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'Отменить активные загрузки?';
+
+  @override
+  String get queueDlgKeep => 'Оставить';
+
+  @override
+  String get queueDlgRemoveAll => 'Удалить все';
+
+  @override
+  String get queueDlgRemoveSelected => 'Удалить выбранные загрузки?';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'Дублирующиеся URL';
+
+  @override
+  String get queueDlgNoDuplicates =>
+      'Все задачи в очереди имеют уникальные URL.';
+
+  @override
+  String get queueDlgClose => 'Закрыть';
+
+  @override
+  String get queueSnackEnterUrl => 'Введите URL для планирования.';
+
+  @override
+  String get queueSnackDownloadScheduled => 'Загрузка запланирована.';
+
+  @override
+  String get queueSnackFileMissing =>
+      'Путь к файлу отсутствует или файл не существует.';
+
+  @override
+  String get queueSnackFfmpegDownloading => 'Модуль FFmpeg уже загружается.';
+
+  @override
+  String get queueSnackFfmpegReady => 'Инструменты FFmpeg готовы.';
+
+  @override
+  String get queueDlgFfmpegTitle => 'Загрузить инструменты FFmpeg?';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'Загрузка не удалась';
+
+  @override
+  String get queueDlgDownload => 'Скачать';
+
+  @override
+  String get queueDlgRetry => 'Повторить';
+
+  @override
+  String get queueDlgSavePartialTitle => 'Сохранить частичный файл?';
+
+  @override
+  String get queueDlgDismiss => 'Закрыть';
+
+  @override
+  String get queueDlgMergeAndSave => 'Объединить и сохранить';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => 'Ссылка уже в очереди';
+
+  @override
+  String get queueDlgCreateNew => 'Создать новое';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'Готово — создана новая загрузка с обновлённой ссылкой.';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Обнаружена блокировка Cloudflare — повторное применение стелса и повтор…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare заблокировал $host';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'Этот сайт блокирует встроенные WebView Android. Полноценные браузеры, такие как Chrome, обходят эту блокировку.';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'Этот сайт всегда открывается в специальной вкладке Chrome.';
+
+  @override
+  String get snifferCfClose => 'Закрыть';
+
+  @override
+  String get snifferCfOpenCct => 'Открыть в Chrome Custom Tab';
+
+  @override
+  String get snifferCfOpenSystem => 'Открыть в системном браузере';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'Всегда открывать $host в Custom Tab';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => 'Элемент заблокирован. Отменить?';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'Загрузить всё на этой странице';
+
+  @override
+  String get snifferDlgCancel => 'Отмена';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'Данные сайта';
+
+  @override
+  String get snifferDlgClearSiteData => 'Очистить';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'Сначала откройте страницу для настройки параметров блокировки рекламы.';
+
+  @override
+  String get snifferAdblockTitle => 'Блокировка рекламы на этом сайте';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'Заблокировано $count запросов на этой странице';
+  }
+
+  @override
+  String get snifferAdblockDone => 'Готово';
+
+  @override
+  String get snifferUndoLabel => 'Отменить';
+
+  @override
+  String get snifferCancelLabel => 'Отмена';
+
+  @override
+  String get snifferPopupBlockedTitle =>
+      'Всплывающее окно заблокировано Aurora';
+
+  @override
+  String get snifferRedirectBlockedTitle =>
+      'Перенаправление заблокировано Aurora';
+
+  @override
+  String get snifferProfilesTitle => 'Профилей пока нет';
+
+  @override
+  String get snifferNewProfileTitle => 'Новый профиль';
+
+  @override
+  String get queueFlatList => 'Плоский список (без разделов)';
 }

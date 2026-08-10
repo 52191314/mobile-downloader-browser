@@ -784,4 +784,314 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'ダウンロードを検索...';
+
+  @override
+  String get cardPriorityHigh => '高';
+
+  @override
+  String get cardPriorityLow => '低';
+
+  @override
+  String get cardTooltipCancelScheduled => 'スケジュールをキャンセル';
+
+  @override
+  String get cardTooltipPause => '一時停止';
+
+  @override
+  String get cardTooltipResume => '再開';
+
+  @override
+  String get cardTooltipRefreshLink => 'リンクを更新';
+
+  @override
+  String get cardTooltipRetry => '再試行';
+
+  @override
+  String get cardTooltipOpen => '開く';
+
+  @override
+  String get cardMenuOpen => '開く';
+
+  @override
+  String get cardMenuShare => '共有…';
+
+  @override
+  String get cardMenuSendToPc => 'PCに送信…';
+
+  @override
+  String get cardMenuMoveToVault => 'ボルトに移動…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'FFmpegスタジオで編集';
+
+  @override
+  String get cardMenuRedownload => '再ダウンロード';
+
+  @override
+  String get cardMenuForceMerge => '強制マージ';
+
+  @override
+  String get cardMenuRefreshLink => 'リンクを更新';
+
+  @override
+  String get cardMenuResniffOnPage => 'ページで再スニッフ';
+
+  @override
+  String get cardMenuOpenSourcePage => 'ソースページを開く';
+
+  @override
+  String get cardMenuScheduleDownload => 'ダウンロードをスケジュール';
+
+  @override
+  String get cardMenuRemove => '削除';
+
+  @override
+  String get cardMenuCancel => 'キャンセル';
+
+  @override
+  String get cardMenuProperties => 'プロパティ';
+
+  @override
+  String get cardStatusStarting => '開始中…';
+
+  @override
+  String get cardStatusScheduled => 'スケジュール済み';
+
+  @override
+  String get cardStatusPaused => '一時停止中';
+
+  @override
+  String get cardStatusFailed => '失敗';
+
+  @override
+  String get cardStatusMerging => 'マージ中…';
+
+  @override
+  String get cardStatusDownloaded => 'ダウンロード済み';
+
+  @override
+  String get cardStatusSaved => '保存済み';
+
+  @override
+  String get cardSegmentsLabel => 'セグ';
+
+  @override
+  String get propDialogTitle => 'ファイルの詳細';
+
+  @override
+  String get propDialogFileName => 'ファイル名';
+
+  @override
+  String get propDialogLocation => '場所';
+
+  @override
+  String get propDialogDownloadLink => 'ダウンロードリンク';
+
+  @override
+  String get propDialogSourcePage => 'ソースページ';
+
+  @override
+  String get propDialogClose => '閉じる';
+
+  @override
+  String get queueTitle => 'キュー';
+
+  @override
+  String queueSelected(int count) {
+    return '$count 件選択中';
+  }
+
+  @override
+  String get queueTooltipSearch => '検索';
+
+  @override
+  String get queueTooltipCloseSearch => '検索を閉じる';
+
+  @override
+  String get queueTooltipSelect => '選択';
+
+  @override
+  String get queueTooltipBulkActions => '一括操作';
+
+  @override
+  String get queueTooltipShowList => 'リストとして表示';
+
+  @override
+  String get queueTooltipShowGrid => '完了履歴グリッド';
+
+  @override
+  String get queueSortBy => '並べ替え';
+
+  @override
+  String get queueResetFilters => 'フィルターをリセット';
+
+  @override
+  String get queueOpenBrowser => 'ブラウザを開く';
+
+  @override
+  String get queueBulkPauseAll => 'アクティブをすべて一時停止';
+
+  @override
+  String get queueBulkResumeAll => 'すべての一時停止を再開';
+
+  @override
+  String get queueBulkRetryFailed => 'すべての失敗を再試行';
+
+  @override
+  String get queueBulkCancelScheduled => 'スケジュール済みをキャンセル';
+
+  @override
+  String get queueBulkCancelActive => 'アクティブをキャンセル';
+
+  @override
+  String get queueBulkFindDuplicates => '重複を検索';
+
+  @override
+  String get queueDlgCancelScheduledTitle => 'スケジュールされたダウンロードをキャンセルしますか？';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'アクティブなダウンロードをキャンセルしますか？';
+
+  @override
+  String get queueDlgKeep => '保持';
+
+  @override
+  String get queueDlgRemoveAll => 'すべて削除';
+
+  @override
+  String get queueDlgRemoveSelected => '選択したダウンロードを削除しますか？';
+
+  @override
+  String get queueDlgDuplicatesTitle => '重複URL';
+
+  @override
+  String get queueDlgNoDuplicates => 'キュー内のすべてのタスクには一意のURLがあります。';
+
+  @override
+  String get queueDlgClose => '閉じる';
+
+  @override
+  String get queueSnackEnterUrl => 'スケジュールするURLを入力してください。';
+
+  @override
+  String get queueSnackDownloadScheduled => 'ダウンロードがスケジュールされました。';
+
+  @override
+  String get queueSnackFileMissing => 'ファイルパスが見つからないかファイルが存在しません。';
+
+  @override
+  String get queueSnackFfmpegDownloading => 'FFmpegモジュールはすでにダウンロード中です。';
+
+  @override
+  String get queueSnackFfmpegReady => 'FFmpegツールの準備ができました。';
+
+  @override
+  String get queueDlgFfmpegTitle => 'FFmpegツールをダウンロードしますか？';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'ダウンロードに失敗しました';
+
+  @override
+  String get queueDlgDownload => 'ダウンロード';
+
+  @override
+  String get queueDlgRetry => '再試行';
+
+  @override
+  String get queueDlgSavePartialTitle => '部分ファイルを保存しますか？';
+
+  @override
+  String get queueDlgDismiss => '閉じる';
+
+  @override
+  String get queueDlgMergeAndSave => 'マージして保存';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => 'リンクはすでにキューに入っています';
+
+  @override
+  String get queueDlgCreateNew => '新しく作成';
+
+  @override
+  String get queueSnackNewDownloadCreated => '完了 - 更新されたリンクで新しいダウンロードが作成されました。';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Cloudflareブロックを検出 — ステルスを再適用して再試行中…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'CloudflareがBlocked $host';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'このサイトはアプリ内のAndroid WebViewをブロックします。Chromeなどのフルブラウザはこのブロックをバイパスできます。';
+
+  @override
+  String get snifferCfAlreadyExternal => 'このサイトは常にChromeカスタムタブで開くように設定されています。';
+
+  @override
+  String get snifferCfClose => '閉じる';
+
+  @override
+  String get snifferCfOpenCct => 'Chromeカスタムタブで開く';
+
+  @override
+  String get snifferCfOpenSystem => 'システムブラウザで開く';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return '常に$hostをカスタムタブで開く';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => '要素がブロックされました。元に戻しますか？';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'このページのすべてをダウンロード';
+
+  @override
+  String get snifferDlgCancel => 'キャンセル';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'サイトデータ';
+
+  @override
+  String get snifferDlgClearSiteData => 'クリア';
+
+  @override
+  String get snifferSnackOpenPageFirst => '広告ブロック設定を調整するには、まずページを開いてください。';
+
+  @override
+  String get snifferAdblockTitle => 'このサイトの広告ブロック';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'このページで$count件のリクエストをブロックしました';
+  }
+
+  @override
+  String get snifferAdblockDone => '完了';
+
+  @override
+  String get snifferUndoLabel => '元に戻す';
+
+  @override
+  String get snifferCancelLabel => 'キャンセル';
+
+  @override
+  String get snifferPopupBlockedTitle => 'ポップアップがAuroraによってブロックされました';
+
+  @override
+  String get snifferRedirectBlockedTitle => 'リダイレクトがAuroraによってブロックされました';
+
+  @override
+  String get snifferProfilesTitle => 'まだプロファイルがありません';
+
+  @override
+  String get snifferNewProfileTitle => '新しいプロファイル';
+
+  @override
+  String get queueFlatList => 'フラットリスト（セクションなし）';
 }

@@ -806,4 +806,318 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'Tinggi';
+
+  @override
+  String get cardPriorityLow => 'Rendah';
+
+  @override
+  String get cardTooltipCancelScheduled => 'Batalkan terjadwal';
+
+  @override
+  String get cardTooltipPause => 'Jeda';
+
+  @override
+  String get cardTooltipResume => 'Lanjutkan';
+
+  @override
+  String get cardTooltipRefreshLink => 'Perbarui tautan';
+
+  @override
+  String get cardTooltipRetry => 'Coba lagi';
+
+  @override
+  String get cardTooltipOpen => 'Buka';
+
+  @override
+  String get cardMenuOpen => 'Buka';
+
+  @override
+  String get cardMenuShare => 'Bagikan…';
+
+  @override
+  String get cardMenuSendToPc => 'Kirim ke PC…';
+
+  @override
+  String get cardMenuMoveToVault => 'Pindah ke Vault…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'Edit di FFmpeg Studio';
+
+  @override
+  String get cardMenuRedownload => 'Unduh ulang';
+
+  @override
+  String get cardMenuForceMerge => 'Paksa gabung';
+
+  @override
+  String get cardMenuRefreshLink => 'Perbarui tautan';
+
+  @override
+  String get cardMenuResniffOnPage => 'Sniff ulang di halaman';
+
+  @override
+  String get cardMenuOpenSourcePage => 'Buka halaman sumber';
+
+  @override
+  String get cardMenuScheduleDownload => 'Jadwalkan unduhan';
+
+  @override
+  String get cardMenuRemove => 'Hapus';
+
+  @override
+  String get cardMenuCancel => 'Batalkan';
+
+  @override
+  String get cardMenuProperties => 'Properti';
+
+  @override
+  String get cardStatusStarting => 'Memulai…';
+
+  @override
+  String get cardStatusScheduled => 'Dijadwalkan';
+
+  @override
+  String get cardStatusPaused => 'Dijeda';
+
+  @override
+  String get cardStatusFailed => 'Gagal';
+
+  @override
+  String get cardStatusMerging => 'Menggabungkan…';
+
+  @override
+  String get cardStatusDownloaded => 'diunduh';
+
+  @override
+  String get cardStatusSaved => 'disimpan';
+
+  @override
+  String get cardSegmentsLabel => 'segmen';
+
+  @override
+  String get propDialogTitle => 'Detail file';
+
+  @override
+  String get propDialogFileName => 'Nama file';
+
+  @override
+  String get propDialogLocation => 'Lokasi';
+
+  @override
+  String get propDialogDownloadLink => 'Tautan unduhan';
+
+  @override
+  String get propDialogSourcePage => 'Halaman sumber';
+
+  @override
+  String get propDialogClose => 'Tutup';
+
+  @override
+  String get queueTitle => 'Antrian';
+
+  @override
+  String queueSelected(int count) {
+    return '$count dipilih';
+  }
+
+  @override
+  String get queueTooltipSearch => 'Cari';
+
+  @override
+  String get queueTooltipCloseSearch => 'Tutup pencarian';
+
+  @override
+  String get queueTooltipSelect => 'Pilih';
+
+  @override
+  String get queueTooltipBulkActions => 'Tindakan massal';
+
+  @override
+  String get queueTooltipShowList => 'Tampilkan sebagai daftar';
+
+  @override
+  String get queueTooltipShowGrid => 'Grid riwayat selesai';
+
+  @override
+  String get queueSortBy => 'Urutkan berdasarkan';
+
+  @override
+  String get queueResetFilters => 'Reset filter';
+
+  @override
+  String get queueOpenBrowser => 'Buka Browser';
+
+  @override
+  String get queueBulkPauseAll => 'Jeda semua aktif';
+
+  @override
+  String get queueBulkResumeAll => 'Lanjutkan semua yang dijeda';
+
+  @override
+  String get queueBulkRetryFailed => 'Coba ulang semua yang gagal';
+
+  @override
+  String get queueBulkCancelScheduled => 'Batalkan terjadwal';
+
+  @override
+  String get queueBulkCancelActive => 'Batalkan aktif';
+
+  @override
+  String get queueBulkFindDuplicates => 'Temukan duplikat';
+
+  @override
+  String get queueDlgCancelScheduledTitle => 'Batalkan unduhan terjadwal?';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'Batalkan unduhan aktif?';
+
+  @override
+  String get queueDlgKeep => 'Pertahankan';
+
+  @override
+  String get queueDlgRemoveAll => 'Hapus semua';
+
+  @override
+  String get queueDlgRemoveSelected => 'Hapus unduhan yang dipilih?';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'URL duplikat';
+
+  @override
+  String get queueDlgNoDuplicates =>
+      'Semua tugas dalam antrian memiliki URL yang unik.';
+
+  @override
+  String get queueDlgClose => 'Tutup';
+
+  @override
+  String get queueSnackEnterUrl => 'Masukkan URL untuk dijadwalkan.';
+
+  @override
+  String get queueSnackDownloadScheduled => 'Unduhan dijadwalkan.';
+
+  @override
+  String get queueSnackFileMissing => 'Jalur file hilang atau file tidak ada.';
+
+  @override
+  String get queueSnackFfmpegDownloading => 'Modul FFmpeg sedang diunduh.';
+
+  @override
+  String get queueSnackFfmpegReady => 'Alat FFmpeg siap.';
+
+  @override
+  String get queueDlgFfmpegTitle => 'Unduh alat FFmpeg?';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'Unduhan gagal';
+
+  @override
+  String get queueDlgDownload => 'Unduh';
+
+  @override
+  String get queueDlgRetry => 'Coba lagi';
+
+  @override
+  String get queueDlgSavePartialTitle => 'Simpan file sebagian?';
+
+  @override
+  String get queueDlgDismiss => 'Abaikan';
+
+  @override
+  String get queueDlgMergeAndSave => 'Gabung dan simpan';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => 'Tautan sudah dalam antrian';
+
+  @override
+  String get queueDlgCreateNew => 'Buat baru';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'Selesai - Unduhan baru dibuat dengan tautan yang diperbarui.';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Blokir Cloudflare terdeteksi — menerapkan ulang stealth & mencoba lagi…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare Memblokir $host';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'Situs ini memblokir WebView Android dalam aplikasi. Browser lengkap seperti Chrome melewati pemblokiran ini.';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'Situs ini disetel untuk selalu dibuka di Tab Kustom Chrome.';
+
+  @override
+  String get snifferCfClose => 'Tutup';
+
+  @override
+  String get snifferCfOpenCct => 'Buka di Tab Kustom Chrome';
+
+  @override
+  String get snifferCfOpenSystem => 'Buka di Browser Sistem';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'Selalu buka $host di Tab Kustom';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => 'Elemen diblokir. Batalkan?';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'Unduh semua di halaman ini';
+
+  @override
+  String get snifferDlgCancel => 'Batalkan';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'Data Situs';
+
+  @override
+  String get snifferDlgClearSiteData => 'Hapus';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'Buka halaman terlebih dahulu untuk menyesuaikan pengaturan adblock.';
+
+  @override
+  String get snifferAdblockTitle => 'Adblock di situs ini';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'Memblokir $count permintaan di halaman ini';
+  }
+
+  @override
+  String get snifferAdblockDone => 'Selesai';
+
+  @override
+  String get snifferUndoLabel => 'Batalkan';
+
+  @override
+  String get snifferCancelLabel => 'Batalkan';
+
+  @override
+  String get snifferPopupBlockedTitle => 'Popup diblokir oleh Aurora';
+
+  @override
+  String get snifferRedirectBlockedTitle => 'Pengalihan diblokir oleh Aurora';
+
+  @override
+  String get snifferProfilesTitle => 'Belum ada profil';
+
+  @override
+  String get snifferNewProfileTitle => 'Profil baru';
+
+  @override
+  String get queueFlatList => 'Daftar datar (tanpa bagian)';
 }

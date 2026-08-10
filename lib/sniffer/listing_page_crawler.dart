@@ -71,6 +71,20 @@ class ListingPageCrawler {
   /// Fetches the HTML body of [url]. Return null on failure.
   final Future<String?> Function(String url) fetchHtml;
 
+  /// Optional fallback that loads [url] in a rendered (JS-enabled) context
+  /// and returns every media URL the page exposes — `<video>`/`<source>`
+  /// src, og:video meta, script strings and performance resource entries.
+  ///
+  /// Used when a detail page's static HTML contains no direct media URL
+  /// (JS-constructed player URLs, XHR-loaded playlists, …). Called at most
+  /// [maxRenderedDomFetches] times per crawl.
+  final Future<List<String>> Function(String url)? fetchMediaViaRenderedDom;
+
+  /// Hard cap on rendered-DOM fallback fetches per crawl. Each one spins up
+  /// a headless WebView (~seconds), so the fallback is only worth it for a
+  /// bounded number of detail pages.
+  final int maxRenderedDomFetches;
+
   final int maxPages;
   final int maxDetailPages;
 
@@ -83,6 +97,8 @@ class ListingPageCrawler {
 
   ListingPageCrawler({
     required this.fetchHtml,
+    this.fetchMediaViaRenderedDom,
+    this.maxRenderedDomFetches = 20,
     this.maxPages = 10,
     this.maxDetailPages = 100,
     this.isCancelled,
@@ -202,6 +218,7 @@ class ListingPageCrawler {
     }
 
     // Phase 2: fetch each detail page and extract its media.
+    var renderedDomFetches = 0;
     for (final detailUrl in detailPageUrls) {
       if (cancelled()) break;
       if (detailPagesFetched >= maxDetailPages) break;
@@ -216,8 +233,34 @@ class ListingPageCrawler {
       if (html == null || html.isEmpty) continue;
 
       final title = _extractPageTitle(html);
-      for (final mediaUrl in NativeHtmlMediaExtractor.parseHtmlForMedia(html)) {
+      final staticMedia = NativeHtmlMediaExtractor.parseHtmlForMedia(html);
+      var foundOnPage = staticMedia.length;
+      for (final mediaUrl in staticMedia) {
         _addMedia(mediaByUrl, mediaUrl, detailUrl, pageTitle: title);
+      }
+
+      // JS-rendered fallback: when the static HTML exposes no direct media
+      // URL, load the page in a rendered (headless WebView) context and
+      // collect whatever the player produced — video/src elements, og:video,
+      // script-embedded URLs and XHR-loaded playlists.
+      final fallback = fetchMediaViaRenderedDom;
+      if (foundOnPage == 0 &&
+          fallback != null &&
+          renderedDomFetches < maxRenderedDomFetches) {
+        renderedDomFetches++;
+        onProgress?.call(ListingCrawlProgress(
+          pagesScanned: pagesScanned,
+          totalMediaFound: mediaByUrl.length,
+          currentUrl: detailUrl,
+        ));
+        try {
+          final rendered = await fallback(detailUrl);
+          for (final mediaUrl in rendered) {
+            _addMedia(mediaByUrl, mediaUrl, detailUrl, pageTitle: title);
+          }
+        } catch (_) {
+          // Fallback failure must not abort the whole crawl.
+        }
       }
     }
 

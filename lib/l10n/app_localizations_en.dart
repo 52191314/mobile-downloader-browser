@@ -806,4 +806,319 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'High';
+
+  @override
+  String get cardPriorityLow => 'Low';
+
+  @override
+  String get cardTooltipCancelScheduled => 'Cancel scheduled';
+
+  @override
+  String get cardTooltipPause => 'Pause';
+
+  @override
+  String get cardTooltipResume => 'Resume';
+
+  @override
+  String get cardTooltipRefreshLink => 'Refresh link';
+
+  @override
+  String get cardTooltipRetry => 'Retry';
+
+  @override
+  String get cardTooltipOpen => 'Open';
+
+  @override
+  String get cardMenuOpen => 'Open';
+
+  @override
+  String get cardMenuShare => 'Share…';
+
+  @override
+  String get cardMenuSendToPc => 'Send to PC…';
+
+  @override
+  String get cardMenuMoveToVault => 'Move to Vault…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'Edit in FFmpeg Studio';
+
+  @override
+  String get cardMenuRedownload => 'Redownload';
+
+  @override
+  String get cardMenuForceMerge => 'Force merge';
+
+  @override
+  String get cardMenuRefreshLink => 'Refresh link';
+
+  @override
+  String get cardMenuResniffOnPage => 'Re-sniff on page';
+
+  @override
+  String get cardMenuOpenSourcePage => 'Open source page';
+
+  @override
+  String get cardMenuScheduleDownload => 'Schedule download';
+
+  @override
+  String get cardMenuRemove => 'Remove';
+
+  @override
+  String get cardMenuCancel => 'Cancel';
+
+  @override
+  String get cardMenuProperties => 'Properties';
+
+  @override
+  String get cardStatusStarting => 'Starting…';
+
+  @override
+  String get cardStatusScheduled => 'Scheduled';
+
+  @override
+  String get cardStatusPaused => 'Paused';
+
+  @override
+  String get cardStatusFailed => 'Failed';
+
+  @override
+  String get cardStatusMerging => 'Merging…';
+
+  @override
+  String get cardStatusDownloaded => 'downloaded';
+
+  @override
+  String get cardStatusSaved => 'saved';
+
+  @override
+  String get cardSegmentsLabel => 'segs';
+
+  @override
+  String get propDialogTitle => 'File details';
+
+  @override
+  String get propDialogFileName => 'File name';
+
+  @override
+  String get propDialogLocation => 'Location';
+
+  @override
+  String get propDialogDownloadLink => 'Download link';
+
+  @override
+  String get propDialogSourcePage => 'Source page';
+
+  @override
+  String get propDialogClose => 'Close';
+
+  @override
+  String get queueTitle => 'Queue';
+
+  @override
+  String queueSelected(int count) {
+    return '$count selected';
+  }
+
+  @override
+  String get queueTooltipSearch => 'Search';
+
+  @override
+  String get queueTooltipCloseSearch => 'Close search';
+
+  @override
+  String get queueTooltipSelect => 'Select';
+
+  @override
+  String get queueTooltipBulkActions => 'Bulk actions';
+
+  @override
+  String get queueTooltipShowList => 'Show as list';
+
+  @override
+  String get queueTooltipShowGrid => 'Completed history grid';
+
+  @override
+  String get queueSortBy => 'Sort by';
+
+  @override
+  String get queueResetFilters => 'Reset filters';
+
+  @override
+  String get queueOpenBrowser => 'Open Browser';
+
+  @override
+  String get queueBulkPauseAll => 'Pause all active';
+
+  @override
+  String get queueBulkResumeAll => 'Resume all paused';
+
+  @override
+  String get queueBulkRetryFailed => 'Retry all failed';
+
+  @override
+  String get queueBulkCancelScheduled => 'Cancel scheduled';
+
+  @override
+  String get queueBulkCancelActive => 'Cancel active';
+
+  @override
+  String get queueBulkFindDuplicates => 'Find duplicates';
+
+  @override
+  String get queueDlgCancelScheduledTitle => 'Cancel scheduled downloads?';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'Cancel active downloads?';
+
+  @override
+  String get queueDlgKeep => 'Keep';
+
+  @override
+  String get queueDlgRemoveAll => 'Remove all';
+
+  @override
+  String get queueDlgRemoveSelected => 'Remove selected downloads?';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'Duplicate URLs';
+
+  @override
+  String get queueDlgNoDuplicates => 'All tasks in the queue have unique URLs.';
+
+  @override
+  String get queueDlgClose => 'Close';
+
+  @override
+  String get queueSnackEnterUrl => 'Enter a URL to schedule.';
+
+  @override
+  String get queueSnackDownloadScheduled => 'Download scheduled.';
+
+  @override
+  String get queueSnackFileMissing =>
+      'File path is missing or file does not exist.';
+
+  @override
+  String get queueSnackFfmpegDownloading =>
+      'FFmpeg module is already downloading.';
+
+  @override
+  String get queueSnackFfmpegReady => 'FFmpeg tools ready.';
+
+  @override
+  String get queueDlgFfmpegTitle => 'Download FFmpeg tools?';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'Download failed';
+
+  @override
+  String get queueDlgDownload => 'Download';
+
+  @override
+  String get queueDlgRetry => 'Retry';
+
+  @override
+  String get queueDlgSavePartialTitle => 'Save partial file?';
+
+  @override
+  String get queueDlgDismiss => 'Dismiss';
+
+  @override
+  String get queueDlgMergeAndSave => 'Merge and save';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => 'Link already queued';
+
+  @override
+  String get queueDlgCreateNew => 'Create new';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'Done - New download created with refreshed link.';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Cloudflare block detected — re-applying stealth & retrying…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare Blocked $host';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'This site blocks in-app Android WebViews. Full browsers like Chrome bypass this block.';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'This site is set to always open in Chrome Custom Tab.';
+
+  @override
+  String get snifferCfClose => 'Close';
+
+  @override
+  String get snifferCfOpenCct => 'Open in Chrome Custom Tab';
+
+  @override
+  String get snifferCfOpenSystem => 'Open in System Browser';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'Always open $host in Custom Tab';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => 'Element blocked. Undo?';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'Download all on this page';
+
+  @override
+  String get snifferDlgCancel => 'Cancel';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'Site Data';
+
+  @override
+  String get snifferDlgClearSiteData => 'Clear';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'Open a page first to adjust adblock settings.';
+
+  @override
+  String get snifferAdblockTitle => 'Adblock on this site';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'Blocked $count requests on this page';
+  }
+
+  @override
+  String get snifferAdblockDone => 'Done';
+
+  @override
+  String get snifferUndoLabel => 'Undo';
+
+  @override
+  String get snifferCancelLabel => 'Cancel';
+
+  @override
+  String get snifferPopupBlockedTitle => 'Popup blocked by Aurora';
+
+  @override
+  String get snifferRedirectBlockedTitle => 'Redirect blocked by Aurora';
+
+  @override
+  String get snifferProfilesTitle => 'No profiles yet';
+
+  @override
+  String get snifferNewProfileTitle => 'New profile';
+
+  @override
+  String get queueFlatList => 'Flat list (no sections)';
 }

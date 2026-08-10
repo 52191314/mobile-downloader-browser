@@ -644,10 +644,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     tab.controller.setOnCloudflareBlockDetected((host, retrying) {
       if (!mounted) return;
       if (retrying) {
-        AuroraSnackbar.show(
+        if (mounted) {
+          AuroraSnackbar.show(
           context,
-          'Cloudflare block detected on $host — re-applying stealth & retrying...',
+          AppLocalizations.of(context)!.snifferSnackCloudflareRetrying,
         );
+        }
       } else {
         _showCloudflareBlockSheet(host, tab.currentUrl);
       }
@@ -687,7 +689,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Cloudflare Blocked $host',
+                      AppLocalizations.of(context)!.snifferCfTitle(host),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -708,7 +710,7 @@ class _SnifferScreenState extends State<SnifferScreen>
               // "done" row — re-opening CCT again is the loop the user sees.
               if (alreadyExternal) ...[
                 Text(
-                  'This site is set to always open in Chrome Custom Tab.',
+                  AppLocalizations.of(context)!.snifferCfAlreadyExternal,
                   style: TextStyle(color: Colors.grey[400], fontSize: 13),
                 ),
                 const SizedBox(height: 8),
@@ -730,7 +732,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   icon: const Icon(Icons.tab),
-                  label: const Text('Open in Chrome Custom Tab'),
+                  label: Text(AppLocalizations.of(context)!.snifferCfOpenCct),
                   onPressed: () {
                     Navigator.pop(context);
                     unawaited(CctBrowser.openCustomTab(targetUrl));
@@ -746,7 +748,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   icon: const Icon(Icons.open_in_new),
-                  label: const Text('Open in System Browser'),
+                  label: Text(AppLocalizations.of(context)!.snifferCfOpenSystem),
                   onPressed: () {
                     Navigator.pop(context);
                     unawaited(PublicDownloadsService.openUrlInChrome(targetUrl, preferChrome: false));
@@ -761,7 +763,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     foregroundColor: Colors.orangeAccent,
                   ),
                   icon: const Icon(Icons.star_outline),
-                  label: Text('Always open $host in Custom Tab'),
+                  label: Text(AppLocalizations.of(context)!.snifferCfAlwaysCct(host)),
                   onPressed: () {
                     Navigator.pop(context);
                     final updatedHosts = List<String>.from(widget.settings.externalBrowserHosts);
@@ -2247,7 +2249,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _showStrictRedirectPrompt(
         tab: tab,
         uri: uri,
-        title: 'Popup blocked by Aurora',
+        title: AppLocalizations.of(context)!.snifferPopupBlockedTitle,
         method: event.reason,
         sourcePageUrl: event.sourcePageUrl,
       ),
@@ -2292,7 +2294,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       _showStrictRedirectPrompt(
         tab: tab,
         uri: uri,
-        title: 'Redirect blocked by Aurora',
+        title: AppLocalizations.of(context)!.snifferRedirectBlockedTitle,
         method: data['method'] as String? ?? 'script',
         sourcePageUrl: data['sourcePageUrl'] as String?,
       ),
@@ -2645,7 +2647,7 @@ class _SnifferScreenState extends State<SnifferScreen>
       if (updatedSettings == null) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Element blocked. Undo?'),
+          content: Text(AppLocalizations.of(context)!.snifferSnackElementBlocked),
           duration: const Duration(seconds: 6),
           action: SnackBarAction(
             label: 'Undo',
@@ -2702,7 +2704,15 @@ class _SnifferScreenState extends State<SnifferScreen>
   Future<String?> _fetchHtmlForCrawl(BrowserTab tab, String url) async {
     final viaWebView = await tab.controller.fetchViaJavaScript(url);
     if (viaWebView != null && viaWebView.isNotEmpty) return viaWebView;
-    final native = await NetworkBindingService.fetchUrl(url);
+    final cookies = await _sniffIntakeController.getCookiesForUrl(url);
+    final native = await NetworkBindingService.fetchUrl(
+      url,
+      headers: {
+        'User-Agent': downloadUserAgent(url, tab),
+        'Referer': url,
+      },
+      cookieHeader: cookies['Cookie'],
+    );
     final body = native?['body'];
     return body is String && body.isNotEmpty ? body : null;
   }
@@ -2734,7 +2744,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           valueListenable: progressText,
           builder: (ctx, text, _) {
             return AlertDialog(
-              title: const Text('Download all on this page'),
+              title: Text(AppLocalizations.of(context)!.snifferDlgDownloadAllTitle),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2760,6 +2770,15 @@ class _SnifferScreenState extends State<SnifferScreen>
 
     final crawler = ListingPageCrawler(
       fetchHtml: (url) => _fetchHtmlForCrawl(tab, url),
+      fetchMediaViaRenderedDom: (url) async {
+        // Last-resort tier for JS-built player URLs: load the detail page in
+        // a headless WebView (same WAF-bypass stack as the browser), let the
+        // player boot, then harvest every media URL the rendered DOM and the
+        // performance resource log expose.
+        final resniffer = HeadlessPageResniffer();
+        final found = await resniffer.resniffAll(url);
+        return found;
+      },
       isCancelled: () => cancelled,
       onProgress: (p) {
         progressText.value =
@@ -3028,7 +3047,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                                     showDialog<bool>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
-                                        title: const Text('Site Data'),
+                                        title: Text(AppLocalizations.of(context)!.snifferDlgSiteDataTitle),
                                         content: Text(
                                           host.isNotEmpty
                                               ? 'Clear cookies, localStorage, and cache for $host?'
@@ -3390,7 +3409,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (host.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Open a page first to adjust adblock settings.')));
+      ).showSnackBar(SnackBar(content: Text(AppLocalizations.of(context)!.snifferSnackOpenPageFirst)));
       return;
     }
     final isAllowlisted = settings.adblockAllowlist.contains(host);
@@ -3402,7 +3421,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           children: [
             const Icon(Icons.shield, color: Colors.green),
             const SizedBox(width: 8),
-            const Text('Adblock on this site'),
+            Text(AppLocalizations.of(context)!.snifferAdblockTitle),
           ],
         ),
         content: Column(
@@ -3419,7 +3438,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                   : 'Adblock is turned off globally.',
             ),
             const SizedBox(height: 4),
-            Text('Blocked $blocked requests on this page'),
+            Text(AppLocalizations.of(context)!.snifferAdblockBlockedCount(blocked)),
             const Divider(),
             SwitchListTile(
               title: Text(
@@ -3449,7 +3468,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Done'),
+            child: Text(AppLocalizations.of(context)!.snifferAdblockDone),
           ),
         ],
       ),
@@ -5036,7 +5055,7 @@ class _SnifferScreenState extends State<SnifferScreen>
               if (_autofillProfiles.isEmpty)
                 ListTile(
                   leading: const Icon(Icons.info_outline),
-                  title: const Text('No profiles yet'),
+                  title: Text(AppLocalizations.of(context)!.snifferProfilesTitle),
                   subtitle: const Text(
                     'Add one via Settings → Autofill to begin',
                   ),
@@ -5066,7 +5085,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                   ),
               ListTile(
                 leading: const Icon(Icons.add),
-                title: const Text('New profile'),
+                title: Text(AppLocalizations.of(context)!.snifferNewProfileTitle),
                 onTap: () {
                   Navigator.pop(ctx);
                   unawaited(_editAutofillProfile(null));
@@ -5180,7 +5199,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         margin: EdgeInsets.only(bottom: bottomMargin, left: 16, right: 16),
         duration: const Duration(seconds: 30),
         dismissDirection: DismissDirection.up,
-        action: SnackBarAction(label: 'Cancel', onPressed: onCancel),
+        action: SnackBarAction(label: AppLocalizations.of(context)!.snifferCancelLabel, onPressed: onCancel),
       ),
     );
   }

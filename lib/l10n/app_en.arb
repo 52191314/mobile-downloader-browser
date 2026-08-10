@@ -253,5 +253,133 @@
   "lblPauseAll": "Pause All",
   "lblResumeAll": "Resume All",
   "lblClearCompleted": "Clear Completed",
-  "lblSearchQueue": "Search downloads..."
+  "lblSearchQueue": "Search downloads...",
+  "cardPriorityHigh": "High",
+  "cardPriorityLow": "Low",
+  "cardTooltipCancelScheduled": "Cancel scheduled",
+  "cardTooltipPause": "Pause",
+  "cardTooltipResume": "Resume",
+  "cardTooltipRefreshLink": "Refresh link",
+  "cardTooltipRetry": "Retry",
+  "cardTooltipOpen": "Open",
+  "cardMenuOpen": "Open",
+  "cardMenuShare": "Share…",
+  "cardMenuSendToPc": "Send to PC…",
+  "cardMenuMoveToVault": "Move to Vault…",
+  "cardMenuFfmpegStudio": "Edit in FFmpeg Studio",
+  "cardMenuRedownload": "Redownload",
+  "cardMenuForceMerge": "Force merge",
+  "cardMenuRefreshLink": "Refresh link",
+  "cardMenuResniffOnPage": "Re-sniff on page",
+  "cardMenuOpenSourcePage": "Open source page",
+  "cardMenuScheduleDownload": "Schedule download",
+  "cardMenuRemove": "Remove",
+  "cardMenuCancel": "Cancel",
+  "cardMenuProperties": "Properties",
+  "cardStatusStarting": "Starting…",
+  "cardStatusScheduled": "Scheduled",
+  "cardStatusPaused": "Paused",
+  "cardStatusFailed": "Failed",
+  "cardStatusMerging": "Merging…",
+  "cardStatusDownloaded": "downloaded",
+  "cardStatusSaved": "saved",
+  "cardSegmentsLabel": "segs",
+  "propDialogTitle": "File details",
+  "propDialogFileName": "File name",
+  "propDialogLocation": "Location",
+  "propDialogDownloadLink": "Download link",
+  "propDialogSourcePage": "Source page",
+  "propDialogClose": "Close",
+  "queueTitle": "Queue",
+  "queueSelected": "{count} selected",
+  "@queueSelected": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "queueTooltipSearch": "Search",
+  "queueTooltipCloseSearch": "Close search",
+  "queueTooltipSelect": "Select",
+  "queueTooltipBulkActions": "Bulk actions",
+  "queueTooltipShowList": "Show as list",
+  "queueTooltipShowGrid": "Completed history grid",
+  "queueSortBy": "Sort by",
+  "queueResetFilters": "Reset filters",
+  "queueOpenBrowser": "Open Browser",
+  "queueBulkPauseAll": "Pause all active",
+  "queueBulkResumeAll": "Resume all paused",
+  "queueBulkRetryFailed": "Retry all failed",
+  "queueBulkCancelScheduled": "Cancel scheduled",
+  "queueBulkCancelActive": "Cancel active",
+  "queueBulkFindDuplicates": "Find duplicates",
+  "queueDlgCancelScheduledTitle": "Cancel scheduled downloads?",
+  "queueDlgCancelActiveTitle": "Cancel active downloads?",
+  "queueDlgKeep": "Keep",
+  "queueDlgRemoveAll": "Remove all",
+  "queueDlgRemoveSelected": "Remove selected downloads?",
+  "queueDlgDuplicatesTitle": "Duplicate URLs",
+  "queueDlgNoDuplicates": "All tasks in the queue have unique URLs.",
+  "queueDlgClose": "Close",
+  "queueSnackEnterUrl": "Enter a URL to schedule.",
+  "queueSnackDownloadScheduled": "Download scheduled.",
+  "queueSnackFileMissing": "File path is missing or file does not exist.",
+  "queueSnackFfmpegDownloading": "FFmpeg module is already downloading.",
+  "queueSnackFfmpegReady": "FFmpeg tools ready.",
+  "queueDlgFfmpegTitle": "Download FFmpeg tools?",
+  "queueDlgFfmpegFailedTitle": "Download failed",
+  "queueDlgDownload": "Download",
+  "queueDlgRetry": "Retry",
+  "queueDlgSavePartialTitle": "Save partial file?",
+  "queueDlgDismiss": "Dismiss",
+  "queueDlgMergeAndSave": "Merge and save",
+  "queueDlgLinkAlreadyQueuedTitle": "Link already queued",
+  "queueDlgCreateNew": "Create new",
+  "queueSnackNewDownloadCreated": "Done - New download created with refreshed link.",
+  "snifferSnackCloudflareRetrying": "Cloudflare block detected — re-applying stealth & retrying…",
+  "snifferCfTitle": "Cloudflare Blocked {host}",
+  "@snifferCfTitle": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "snifferCfDesc": "This site blocks in-app Android WebViews. Full browsers like Chrome bypass this block.",
+  "snifferCfAlreadyExternal": "This site is set to always open in Chrome Custom Tab.",
+  "snifferCfClose": "Close",
+  "snifferCfOpenCct": "Open in Chrome Custom Tab",
+  "snifferCfOpenSystem": "Open in System Browser",
+  "snifferCfAlwaysCct": "Always open {host} in Custom Tab",
+  "@snifferCfAlwaysCct": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "snifferSnackElementBlocked": "Element blocked. Undo?",
+  "snifferDlgDownloadAllTitle": "Download all on this page",
+  "snifferDlgCancel": "Cancel",
+  "snifferDlgSiteDataTitle": "Site Data",
+  "snifferDlgClearSiteData": "Clear",
+  "snifferSnackOpenPageFirst": "Open a page first to adjust adblock settings.",
+  "snifferAdblockTitle": "Adblock on this site",
+  "snifferAdblockBlockedCount": "Blocked {count} requests on this page",
+  "@snifferAdblockBlockedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snifferAdblockDone": "Done",
+  "snifferUndoLabel": "Undo",
+  "snifferCancelLabel": "Cancel",
+  "snifferPopupBlockedTitle": "Popup blocked by Aurora",
+  "snifferRedirectBlockedTitle": "Redirect blocked by Aurora",
+  "snifferProfilesTitle": "No profiles yet",
+  "snifferNewProfileTitle": "New profile",
+  "queueFlatList": "Flat list (no sections)"
 }

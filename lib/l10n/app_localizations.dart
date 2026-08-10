@@ -1637,6 +1637,606 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search downloads...'**
   String get lblSearchQueue;
+
+  /// No description provided for @cardPriorityHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get cardPriorityHigh;
+
+  /// No description provided for @cardPriorityLow.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get cardPriorityLow;
+
+  /// No description provided for @cardTooltipCancelScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel scheduled'**
+  String get cardTooltipCancelScheduled;
+
+  /// No description provided for @cardTooltipPause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get cardTooltipPause;
+
+  /// No description provided for @cardTooltipResume.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume'**
+  String get cardTooltipResume;
+
+  /// No description provided for @cardTooltipRefreshLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh link'**
+  String get cardTooltipRefreshLink;
+
+  /// No description provided for @cardTooltipRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get cardTooltipRetry;
+
+  /// No description provided for @cardTooltipOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get cardTooltipOpen;
+
+  /// No description provided for @cardMenuOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get cardMenuOpen;
+
+  /// No description provided for @cardMenuShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share…'**
+  String get cardMenuShare;
+
+  /// No description provided for @cardMenuSendToPc.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to PC…'**
+  String get cardMenuSendToPc;
+
+  /// No description provided for @cardMenuMoveToVault.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to Vault…'**
+  String get cardMenuMoveToVault;
+
+  /// No description provided for @cardMenuFfmpegStudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit in FFmpeg Studio'**
+  String get cardMenuFfmpegStudio;
+
+  /// No description provided for @cardMenuRedownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Redownload'**
+  String get cardMenuRedownload;
+
+  /// No description provided for @cardMenuForceMerge.
+  ///
+  /// In en, this message translates to:
+  /// **'Force merge'**
+  String get cardMenuForceMerge;
+
+  /// No description provided for @cardMenuRefreshLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh link'**
+  String get cardMenuRefreshLink;
+
+  /// No description provided for @cardMenuResniffOnPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Re-sniff on page'**
+  String get cardMenuResniffOnPage;
+
+  /// No description provided for @cardMenuOpenSourcePage.
+  ///
+  /// In en, this message translates to:
+  /// **'Open source page'**
+  String get cardMenuOpenSourcePage;
+
+  /// No description provided for @cardMenuScheduleDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule download'**
+  String get cardMenuScheduleDownload;
+
+  /// No description provided for @cardMenuRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get cardMenuRemove;
+
+  /// No description provided for @cardMenuCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get cardMenuCancel;
+
+  /// No description provided for @cardMenuProperties.
+  ///
+  /// In en, this message translates to:
+  /// **'Properties'**
+  String get cardMenuProperties;
+
+  /// No description provided for @cardStatusStarting.
+  ///
+  /// In en, this message translates to:
+  /// **'Starting…'**
+  String get cardStatusStarting;
+
+  /// No description provided for @cardStatusScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Scheduled'**
+  String get cardStatusScheduled;
+
+  /// No description provided for @cardStatusPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get cardStatusPaused;
+
+  /// No description provided for @cardStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get cardStatusFailed;
+
+  /// No description provided for @cardStatusMerging.
+  ///
+  /// In en, this message translates to:
+  /// **'Merging…'**
+  String get cardStatusMerging;
+
+  /// No description provided for @cardStatusDownloaded.
+  ///
+  /// In en, this message translates to:
+  /// **'downloaded'**
+  String get cardStatusDownloaded;
+
+  /// No description provided for @cardStatusSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'saved'**
+  String get cardStatusSaved;
+
+  /// No description provided for @cardSegmentsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'segs'**
+  String get cardSegmentsLabel;
+
+  /// No description provided for @propDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'File details'**
+  String get propDialogTitle;
+
+  /// No description provided for @propDialogFileName.
+  ///
+  /// In en, this message translates to:
+  /// **'File name'**
+  String get propDialogFileName;
+
+  /// No description provided for @propDialogLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get propDialogLocation;
+
+  /// No description provided for @propDialogDownloadLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Download link'**
+  String get propDialogDownloadLink;
+
+  /// No description provided for @propDialogSourcePage.
+  ///
+  /// In en, this message translates to:
+  /// **'Source page'**
+  String get propDialogSourcePage;
+
+  /// No description provided for @propDialogClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get propDialogClose;
+
+  /// No description provided for @queueTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue'**
+  String get queueTitle;
+
+  /// No description provided for @queueSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String queueSelected(int count);
+
+  /// No description provided for @queueTooltipSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get queueTooltipSearch;
+
+  /// No description provided for @queueTooltipCloseSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Close search'**
+  String get queueTooltipCloseSearch;
+
+  /// No description provided for @queueTooltipSelect.
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get queueTooltipSelect;
+
+  /// No description provided for @queueTooltipBulkActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Bulk actions'**
+  String get queueTooltipBulkActions;
+
+  /// No description provided for @queueTooltipShowList.
+  ///
+  /// In en, this message translates to:
+  /// **'Show as list'**
+  String get queueTooltipShowList;
+
+  /// No description provided for @queueTooltipShowGrid.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed history grid'**
+  String get queueTooltipShowGrid;
+
+  /// No description provided for @queueSortBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort by'**
+  String get queueSortBy;
+
+  /// No description provided for @queueResetFilters.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset filters'**
+  String get queueResetFilters;
+
+  /// No description provided for @queueOpenBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Browser'**
+  String get queueOpenBrowser;
+
+  /// No description provided for @queueBulkPauseAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause all active'**
+  String get queueBulkPauseAll;
+
+  /// No description provided for @queueBulkResumeAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume all paused'**
+  String get queueBulkResumeAll;
+
+  /// No description provided for @queueBulkRetryFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry all failed'**
+  String get queueBulkRetryFailed;
+
+  /// No description provided for @queueBulkCancelScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel scheduled'**
+  String get queueBulkCancelScheduled;
+
+  /// No description provided for @queueBulkCancelActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel active'**
+  String get queueBulkCancelActive;
+
+  /// No description provided for @queueBulkFindDuplicates.
+  ///
+  /// In en, this message translates to:
+  /// **'Find duplicates'**
+  String get queueBulkFindDuplicates;
+
+  /// No description provided for @queueDlgCancelScheduledTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel scheduled downloads?'**
+  String get queueDlgCancelScheduledTitle;
+
+  /// No description provided for @queueDlgCancelActiveTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel active downloads?'**
+  String get queueDlgCancelActiveTitle;
+
+  /// No description provided for @queueDlgKeep.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep'**
+  String get queueDlgKeep;
+
+  /// No description provided for @queueDlgRemoveAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove all'**
+  String get queueDlgRemoveAll;
+
+  /// No description provided for @queueDlgRemoveSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove selected downloads?'**
+  String get queueDlgRemoveSelected;
+
+  /// No description provided for @queueDlgDuplicatesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate URLs'**
+  String get queueDlgDuplicatesTitle;
+
+  /// No description provided for @queueDlgNoDuplicates.
+  ///
+  /// In en, this message translates to:
+  /// **'All tasks in the queue have unique URLs.'**
+  String get queueDlgNoDuplicates;
+
+  /// No description provided for @queueDlgClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get queueDlgClose;
+
+  /// No description provided for @queueSnackEnterUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a URL to schedule.'**
+  String get queueSnackEnterUrl;
+
+  /// No description provided for @queueSnackDownloadScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Download scheduled.'**
+  String get queueSnackDownloadScheduled;
+
+  /// No description provided for @queueSnackFileMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'File path is missing or file does not exist.'**
+  String get queueSnackFileMissing;
+
+  /// No description provided for @queueSnackFfmpegDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'FFmpeg module is already downloading.'**
+  String get queueSnackFfmpegDownloading;
+
+  /// No description provided for @queueSnackFfmpegReady.
+  ///
+  /// In en, this message translates to:
+  /// **'FFmpeg tools ready.'**
+  String get queueSnackFfmpegReady;
+
+  /// No description provided for @queueDlgFfmpegTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download FFmpeg tools?'**
+  String get queueDlgFfmpegTitle;
+
+  /// No description provided for @queueDlgFfmpegFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download failed'**
+  String get queueDlgFfmpegFailedTitle;
+
+  /// No description provided for @queueDlgDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get queueDlgDownload;
+
+  /// No description provided for @queueDlgRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get queueDlgRetry;
+
+  /// No description provided for @queueDlgSavePartialTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Save partial file?'**
+  String get queueDlgSavePartialTitle;
+
+  /// No description provided for @queueDlgDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get queueDlgDismiss;
+
+  /// No description provided for @queueDlgMergeAndSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge and save'**
+  String get queueDlgMergeAndSave;
+
+  /// No description provided for @queueDlgLinkAlreadyQueuedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Link already queued'**
+  String get queueDlgLinkAlreadyQueuedTitle;
+
+  /// No description provided for @queueDlgCreateNew.
+  ///
+  /// In en, this message translates to:
+  /// **'Create new'**
+  String get queueDlgCreateNew;
+
+  /// No description provided for @queueSnackNewDownloadCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Done - New download created with refreshed link.'**
+  String get queueSnackNewDownloadCreated;
+
+  /// No description provided for @snifferSnackCloudflareRetrying.
+  ///
+  /// In en, this message translates to:
+  /// **'Cloudflare block detected — re-applying stealth & retrying…'**
+  String get snifferSnackCloudflareRetrying;
+
+  /// No description provided for @snifferCfTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cloudflare Blocked {host}'**
+  String snifferCfTitle(String host);
+
+  /// No description provided for @snifferCfDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'This site blocks in-app Android WebViews. Full browsers like Chrome bypass this block.'**
+  String get snifferCfDesc;
+
+  /// No description provided for @snifferCfAlreadyExternal.
+  ///
+  /// In en, this message translates to:
+  /// **'This site is set to always open in Chrome Custom Tab.'**
+  String get snifferCfAlreadyExternal;
+
+  /// No description provided for @snifferCfClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get snifferCfClose;
+
+  /// No description provided for @snifferCfOpenCct.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in Chrome Custom Tab'**
+  String get snifferCfOpenCct;
+
+  /// No description provided for @snifferCfOpenSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in System Browser'**
+  String get snifferCfOpenSystem;
+
+  /// No description provided for @snifferCfAlwaysCct.
+  ///
+  /// In en, this message translates to:
+  /// **'Always open {host} in Custom Tab'**
+  String snifferCfAlwaysCct(String host);
+
+  /// No description provided for @snifferSnackElementBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Element blocked. Undo?'**
+  String get snifferSnackElementBlocked;
+
+  /// No description provided for @snifferDlgDownloadAllTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Download all on this page'**
+  String get snifferDlgDownloadAllTitle;
+
+  /// No description provided for @snifferDlgCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get snifferDlgCancel;
+
+  /// No description provided for @snifferDlgSiteDataTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Site Data'**
+  String get snifferDlgSiteDataTitle;
+
+  /// No description provided for @snifferDlgClearSiteData.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get snifferDlgClearSiteData;
+
+  /// No description provided for @snifferSnackOpenPageFirst.
+  ///
+  /// In en, this message translates to:
+  /// **'Open a page first to adjust adblock settings.'**
+  String get snifferSnackOpenPageFirst;
+
+  /// No description provided for @snifferAdblockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Adblock on this site'**
+  String get snifferAdblockTitle;
+
+  /// No description provided for @snifferAdblockBlockedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Blocked {count} requests on this page'**
+  String snifferAdblockBlockedCount(int count);
+
+  /// No description provided for @snifferAdblockDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get snifferAdblockDone;
+
+  /// No description provided for @snifferUndoLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get snifferUndoLabel;
+
+  /// No description provided for @snifferCancelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get snifferCancelLabel;
+
+  /// No description provided for @snifferPopupBlockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Popup blocked by Aurora'**
+  String get snifferPopupBlockedTitle;
+
+  /// No description provided for @snifferRedirectBlockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Redirect blocked by Aurora'**
+  String get snifferRedirectBlockedTitle;
+
+  /// No description provided for @snifferProfilesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No profiles yet'**
+  String get snifferProfilesTitle;
+
+  /// No description provided for @snifferNewProfileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New profile'**
+  String get snifferNewProfileTitle;
+
+  /// No description provided for @queueFlatList.
+  ///
+  /// In en, this message translates to:
+  /// **'Flat list (no sections)'**
+  String get queueFlatList;
 }
 
 class _AppLocalizationsDelegate

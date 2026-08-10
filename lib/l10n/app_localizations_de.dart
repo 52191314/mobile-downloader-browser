@@ -806,4 +806,324 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'Hoch';
+
+  @override
+  String get cardPriorityLow => 'Niedrig';
+
+  @override
+  String get cardTooltipCancelScheduled => 'Geplant abbrechen';
+
+  @override
+  String get cardTooltipPause => 'Pausieren';
+
+  @override
+  String get cardTooltipResume => 'Fortsetzen';
+
+  @override
+  String get cardTooltipRefreshLink => 'Link aktualisieren';
+
+  @override
+  String get cardTooltipRetry => 'Wiederholen';
+
+  @override
+  String get cardTooltipOpen => 'Öffnen';
+
+  @override
+  String get cardMenuOpen => 'Öffnen';
+
+  @override
+  String get cardMenuShare => 'Teilen…';
+
+  @override
+  String get cardMenuSendToPc => 'An PC senden…';
+
+  @override
+  String get cardMenuMoveToVault => 'In Tresor verschieben…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'In FFmpeg Studio bearbeiten';
+
+  @override
+  String get cardMenuRedownload => 'Neu herunterladen';
+
+  @override
+  String get cardMenuForceMerge => 'Erzwingen zusammenführen';
+
+  @override
+  String get cardMenuRefreshLink => 'Link aktualisieren';
+
+  @override
+  String get cardMenuResniffOnPage => 'Auf Seite neu scannen';
+
+  @override
+  String get cardMenuOpenSourcePage => 'Quellseite öffnen';
+
+  @override
+  String get cardMenuScheduleDownload => 'Download planen';
+
+  @override
+  String get cardMenuRemove => 'Entfernen';
+
+  @override
+  String get cardMenuCancel => 'Abbrechen';
+
+  @override
+  String get cardMenuProperties => 'Eigenschaften';
+
+  @override
+  String get cardStatusStarting => 'Starte…';
+
+  @override
+  String get cardStatusScheduled => 'Geplant';
+
+  @override
+  String get cardStatusPaused => 'Pausiert';
+
+  @override
+  String get cardStatusFailed => 'Fehlgeschlagen';
+
+  @override
+  String get cardStatusMerging => 'Zusammenführen…';
+
+  @override
+  String get cardStatusDownloaded => 'heruntergeladen';
+
+  @override
+  String get cardStatusSaved => 'gespeichert';
+
+  @override
+  String get cardSegmentsLabel => 'Seg';
+
+  @override
+  String get propDialogTitle => 'Dateidetails';
+
+  @override
+  String get propDialogFileName => 'Dateiname';
+
+  @override
+  String get propDialogLocation => 'Ort';
+
+  @override
+  String get propDialogDownloadLink => 'Download-Link';
+
+  @override
+  String get propDialogSourcePage => 'Quellseite';
+
+  @override
+  String get propDialogClose => 'Schließen';
+
+  @override
+  String get queueTitle => 'Warteschlange';
+
+  @override
+  String queueSelected(int count) {
+    return '$count ausgewählt';
+  }
+
+  @override
+  String get queueTooltipSearch => 'Suchen';
+
+  @override
+  String get queueTooltipCloseSearch => 'Suche schließen';
+
+  @override
+  String get queueTooltipSelect => 'Auswählen';
+
+  @override
+  String get queueTooltipBulkActions => 'Massenaktionen';
+
+  @override
+  String get queueTooltipShowList => 'Als Liste anzeigen';
+
+  @override
+  String get queueTooltipShowGrid => 'Abgeschlossenes Verlaufsraster';
+
+  @override
+  String get queueSortBy => 'Sortieren nach';
+
+  @override
+  String get queueResetFilters => 'Filter zurücksetzen';
+
+  @override
+  String get queueOpenBrowser => 'Browser öffnen';
+
+  @override
+  String get queueBulkPauseAll => 'Alle aktiven pausieren';
+
+  @override
+  String get queueBulkResumeAll => 'Alle pausierten fortsetzen';
+
+  @override
+  String get queueBulkRetryFailed => 'Alle fehlgeschlagenen wiederholen';
+
+  @override
+  String get queueBulkCancelScheduled => 'Geplante abbrechen';
+
+  @override
+  String get queueBulkCancelActive => 'Aktive abbrechen';
+
+  @override
+  String get queueBulkFindDuplicates => 'Duplikate finden';
+
+  @override
+  String get queueDlgCancelScheduledTitle => 'Geplante Downloads abbrechen?';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'Aktive Downloads abbrechen?';
+
+  @override
+  String get queueDlgKeep => 'Behalten';
+
+  @override
+  String get queueDlgRemoveAll => 'Alle entfernen';
+
+  @override
+  String get queueDlgRemoveSelected => 'Ausgewählte Downloads entfernen?';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'Doppelte URLs';
+
+  @override
+  String get queueDlgNoDuplicates =>
+      'Alle Aufgaben in der Warteschlange haben eindeutige URLs.';
+
+  @override
+  String get queueDlgClose => 'Schließen';
+
+  @override
+  String get queueSnackEnterUrl => 'Geben Sie eine URL zum Planen ein.';
+
+  @override
+  String get queueSnackDownloadScheduled => 'Download geplant.';
+
+  @override
+  String get queueSnackFileMissing =>
+      'Dateipfad fehlt oder Datei existiert nicht.';
+
+  @override
+  String get queueSnackFfmpegDownloading =>
+      'FFmpeg-Modul wird bereits heruntergeladen.';
+
+  @override
+  String get queueSnackFfmpegReady => 'FFmpeg-Tools bereit.';
+
+  @override
+  String get queueDlgFfmpegTitle => 'FFmpeg-Tools herunterladen?';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'Download fehlgeschlagen';
+
+  @override
+  String get queueDlgDownload => 'Herunterladen';
+
+  @override
+  String get queueDlgRetry => 'Wiederholen';
+
+  @override
+  String get queueDlgSavePartialTitle => 'Teildatei speichern?';
+
+  @override
+  String get queueDlgDismiss => 'Schließen';
+
+  @override
+  String get queueDlgMergeAndSave => 'Zusammenführen und speichern';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle =>
+      'Link bereits in der Warteschlange';
+
+  @override
+  String get queueDlgCreateNew => 'Neu erstellen';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'Fertig - Neuer Download mit aktualisiertem Link erstellt.';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Cloudflare-Block erkannt — Stealth wird erneut angewendet und wiederholt…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare hat $host gesperrt';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'Diese Website blockiert In-App-Android-WebViews. Vollständige Browser wie Chrome umgehen diese Blockierung.';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'Diese Website ist so eingestellt, dass sie immer in einem Chrome Custom Tab geöffnet wird.';
+
+  @override
+  String get snifferCfClose => 'Schließen';
+
+  @override
+  String get snifferCfOpenCct => 'In Chrome Custom Tab öffnen';
+
+  @override
+  String get snifferCfOpenSystem => 'Im Systembrowser öffnen';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'Immer $host in Custom Tab öffnen';
+  }
+
+  @override
+  String get snifferSnackElementBlocked =>
+      'Element blockiert. Rückgängig machen?';
+
+  @override
+  String get snifferDlgDownloadAllTitle =>
+      'Alles auf dieser Seite herunterladen';
+
+  @override
+  String get snifferDlgCancel => 'Abbrechen';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'Websitedaten';
+
+  @override
+  String get snifferDlgClearSiteData => 'Löschen';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'Öffnen Sie zuerst eine Seite, um die Adblock-Einstellungen anzupassen.';
+
+  @override
+  String get snifferAdblockTitle => 'Adblock auf dieser Website';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return '$count Anfragen auf dieser Seite blockiert';
+  }
+
+  @override
+  String get snifferAdblockDone => 'Fertig';
+
+  @override
+  String get snifferUndoLabel => 'Rückgängig';
+
+  @override
+  String get snifferCancelLabel => 'Abbrechen';
+
+  @override
+  String get snifferPopupBlockedTitle => 'Popup von Aurora blockiert';
+
+  @override
+  String get snifferRedirectBlockedTitle =>
+      'Weiterleitung von Aurora blockiert';
+
+  @override
+  String get snifferProfilesTitle => 'Noch keine Profile';
+
+  @override
+  String get snifferNewProfileTitle => 'Neues Profil';
+
+  @override
+  String get queueFlatList => 'Flache Liste (ohne Abschnitte)';
 }

@@ -805,4 +805,321 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get lblSearchQueue => 'Search downloads...';
+
+  @override
+  String get cardPriorityHigh => 'उच्च';
+
+  @override
+  String get cardPriorityLow => 'निम्न';
+
+  @override
+  String get cardTooltipCancelScheduled => 'निर्धारित रद्द करें';
+
+  @override
+  String get cardTooltipPause => 'रोकें';
+
+  @override
+  String get cardTooltipResume => 'फिर शुरू करें';
+
+  @override
+  String get cardTooltipRefreshLink => 'लिंक रिफ्रेश करें';
+
+  @override
+  String get cardTooltipRetry => 'पुनः प्रयास';
+
+  @override
+  String get cardTooltipOpen => 'खोलें';
+
+  @override
+  String get cardMenuOpen => 'खोलें';
+
+  @override
+  String get cardMenuShare => 'शेयर करें…';
+
+  @override
+  String get cardMenuSendToPc => 'PC पर भेजें…';
+
+  @override
+  String get cardMenuMoveToVault => 'वॉल्ट में ले जाएं…';
+
+  @override
+  String get cardMenuFfmpegStudio => 'FFmpeg स्टूडियो में संपादित करें';
+
+  @override
+  String get cardMenuRedownload => 'पुनः डाउनलोड';
+
+  @override
+  String get cardMenuForceMerge => 'जबरदस्ती मर्ज';
+
+  @override
+  String get cardMenuRefreshLink => 'लिंक रिफ्रेश करें';
+
+  @override
+  String get cardMenuResniffOnPage => 'पेज पर पुनः स्निफ करें';
+
+  @override
+  String get cardMenuOpenSourcePage => 'स्रोत पृष्ठ खोलें';
+
+  @override
+  String get cardMenuScheduleDownload => 'डाउनलोड शेड्यूल करें';
+
+  @override
+  String get cardMenuRemove => 'हटाएं';
+
+  @override
+  String get cardMenuCancel => 'रद्द करें';
+
+  @override
+  String get cardMenuProperties => 'गुण';
+
+  @override
+  String get cardStatusStarting => 'शुरू हो रहा है…';
+
+  @override
+  String get cardStatusScheduled => 'निर्धारित';
+
+  @override
+  String get cardStatusPaused => 'रोका हुआ';
+
+  @override
+  String get cardStatusFailed => 'विफल';
+
+  @override
+  String get cardStatusMerging => 'मर्ज हो रहा है…';
+
+  @override
+  String get cardStatusDownloaded => 'डाउनलोड हुआ';
+
+  @override
+  String get cardStatusSaved => 'सहेजा गया';
+
+  @override
+  String get cardSegmentsLabel => 'सेग';
+
+  @override
+  String get propDialogTitle => 'फ़ाइल विवरण';
+
+  @override
+  String get propDialogFileName => 'फ़ाइल नाम';
+
+  @override
+  String get propDialogLocation => 'स्थान';
+
+  @override
+  String get propDialogDownloadLink => 'डाउनलोड लिंक';
+
+  @override
+  String get propDialogSourcePage => 'स्रोत पृष्ठ';
+
+  @override
+  String get propDialogClose => 'बंद करें';
+
+  @override
+  String get queueTitle => 'कतार';
+
+  @override
+  String queueSelected(int count) {
+    return '$count चयनित';
+  }
+
+  @override
+  String get queueTooltipSearch => 'खोज';
+
+  @override
+  String get queueTooltipCloseSearch => 'खोज बंद करें';
+
+  @override
+  String get queueTooltipSelect => 'चुनें';
+
+  @override
+  String get queueTooltipBulkActions => 'सामूहिक क्रियाएं';
+
+  @override
+  String get queueTooltipShowList => 'सूची के रूप में दिखाएं';
+
+  @override
+  String get queueTooltipShowGrid => 'पूर्ण इतिहास ग्रिड';
+
+  @override
+  String get queueSortBy => 'इसके अनुसार क्रमबद्ध करें';
+
+  @override
+  String get queueResetFilters => 'फ़िल्टर रीसेट करें';
+
+  @override
+  String get queueOpenBrowser => 'ब्राउज़र खोलें';
+
+  @override
+  String get queueBulkPauseAll => 'सभी सक्रिय रोकें';
+
+  @override
+  String get queueBulkResumeAll => 'सभी रोके हुए फिर शुरू करें';
+
+  @override
+  String get queueBulkRetryFailed => 'सभी विफल पुनः प्रयास';
+
+  @override
+  String get queueBulkCancelScheduled => 'निर्धारित रद्द करें';
+
+  @override
+  String get queueBulkCancelActive => 'सक्रिय रद्द करें';
+
+  @override
+  String get queueBulkFindDuplicates => 'डुप्लिकेट खोजें';
+
+  @override
+  String get queueDlgCancelScheduledTitle => 'निर्धारित डाउनलोड रद्द करें?';
+
+  @override
+  String get queueDlgCancelActiveTitle => 'सक्रिय डाउनलोड रद्द करें?';
+
+  @override
+  String get queueDlgKeep => 'रखें';
+
+  @override
+  String get queueDlgRemoveAll => 'सब हटाएं';
+
+  @override
+  String get queueDlgRemoveSelected => 'चयनित डाउनलोड हटाएं?';
+
+  @override
+  String get queueDlgDuplicatesTitle => 'डुप्लिकेट URL';
+
+  @override
+  String get queueDlgNoDuplicates =>
+      'कतार में सभी कार्यों के पास अद्वितीय URL हैं।';
+
+  @override
+  String get queueDlgClose => 'बंद करें';
+
+  @override
+  String get queueSnackEnterUrl => 'शेड्यूल करने के लिए URL दर्ज करें।';
+
+  @override
+  String get queueSnackDownloadScheduled => 'डाउनलोड शेड्यूल हो गया।';
+
+  @override
+  String get queueSnackFileMissing =>
+      'फ़ाइल पथ गायब है या फ़ाइल मौजूद नहीं है।';
+
+  @override
+  String get queueSnackFfmpegDownloading =>
+      'FFmpeg मॉड्यूल पहले से डाउनलोड हो रहा है।';
+
+  @override
+  String get queueSnackFfmpegReady => 'FFmpeg टूल तैयार हैं।';
+
+  @override
+  String get queueDlgFfmpegTitle => 'FFmpeg टूल डाउनलोड करें?';
+
+  @override
+  String get queueDlgFfmpegFailedTitle => 'डाउनलोड विफल';
+
+  @override
+  String get queueDlgDownload => 'डाउनलोड';
+
+  @override
+  String get queueDlgRetry => 'पुनः प्रयास';
+
+  @override
+  String get queueDlgSavePartialTitle => 'आंशिक फ़ाइल सहेजें?';
+
+  @override
+  String get queueDlgDismiss => 'खारिज करें';
+
+  @override
+  String get queueDlgMergeAndSave => 'मर्ज और सेव करें';
+
+  @override
+  String get queueDlgLinkAlreadyQueuedTitle => 'लिंक पहले से कतार में है';
+
+  @override
+  String get queueDlgCreateNew => 'नया बनाएं';
+
+  @override
+  String get queueSnackNewDownloadCreated =>
+      'पूर्ण - नई डाउनलोड ताज़ी लिंक के साथ बनाई गई।';
+
+  @override
+  String get snifferSnackCloudflareRetrying =>
+      'Cloudflare ब्लॉक का पता चला — स्टेल्थ पुनः लागू करना और पुनः प्रयास…';
+
+  @override
+  String snifferCfTitle(String host) {
+    return 'Cloudflare ने $host को ब्लॉक किया';
+  }
+
+  @override
+  String get snifferCfDesc =>
+      'यह साइट इन-ऐप Android WebView को ब्लॉक करती है। Chrome जैसे पूर्ण ब्राउज़र इस ब्लॉक को बायपास करते हैं।';
+
+  @override
+  String get snifferCfAlreadyExternal =>
+      'यह साइट हमेशा Chrome कस्टम टैब में खोलने के लिए सेट है।';
+
+  @override
+  String get snifferCfClose => 'बंद करें';
+
+  @override
+  String get snifferCfOpenCct => 'Chrome कस्टम टैब में खोलें';
+
+  @override
+  String get snifferCfOpenSystem => 'सिस्टम ब्राउज़र में खोलें';
+
+  @override
+  String snifferCfAlwaysCct(String host) {
+    return 'हमेशा $host को कस्टम टैब में खोलें';
+  }
+
+  @override
+  String get snifferSnackElementBlocked => 'तत्व ब्लॉक हो गया। पूर्ववत करें?';
+
+  @override
+  String get snifferDlgDownloadAllTitle => 'इस पेज पर सब डाउनलोड करें';
+
+  @override
+  String get snifferDlgCancel => 'रद्द करें';
+
+  @override
+  String get snifferDlgSiteDataTitle => 'साइट डेटा';
+
+  @override
+  String get snifferDlgClearSiteData => 'साफ़ करें';
+
+  @override
+  String get snifferSnackOpenPageFirst =>
+      'Adblock सेटिंग समायोजित करने के लिए पहले कोई पेज खोलें।';
+
+  @override
+  String get snifferAdblockTitle => 'इस साइट पर Adblock';
+
+  @override
+  String snifferAdblockBlockedCount(int count) {
+    return 'इस पेज पर $count अनुरोध ब्लॉक किए';
+  }
+
+  @override
+  String get snifferAdblockDone => 'हो गया';
+
+  @override
+  String get snifferUndoLabel => 'पूर्ववत करें';
+
+  @override
+  String get snifferCancelLabel => 'रद्द करें';
+
+  @override
+  String get snifferPopupBlockedTitle => 'पॉपअप Aurora द्वारा ब्लॉक किया गया';
+
+  @override
+  String get snifferRedirectBlockedTitle =>
+      'रीडायरेक्ट Aurora द्वारा ब्लॉक किया गया';
+
+  @override
+  String get snifferProfilesTitle => 'अभी तक कोई प्रोफ़ाइल नहीं';
+
+  @override
+  String get snifferNewProfileTitle => 'नई प्रोफ़ाइल';
+
+  @override
+  String get queueFlatList => 'सपाट सूची (कोई अनुभाग नहीं)';
 }
