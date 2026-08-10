@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'build_channel.dart';
 import 'pro_entitlement_store.dart';
 
 /// Distribution tier derived from owned Play product IDs.
@@ -87,18 +86,11 @@ class ProEntitlement extends ChangeNotifier {
   Future<void>? _writeChain;
 
   /// Effective tier for a fresh install (no purchases, no license).
-  ///
-  /// OSS channel (GitHub / F-Droid / sideload) **release** builds are the
-  /// fully unlocked open-source edition: there is no Play billing path to sell
-  /// into, and F-Droid requires the shipped build to be functional with every
-  /// advertised feature. Debug/profile builds fall through to the
-  /// purchase-derived [storeTier] so the freemium UX stays testable via
-  /// [setDebugTier]. Pure function — the caller wires [kReleaseMode] and
-  /// [BuildChannel.isGithub].
+  /// Effective tier for a fresh install (no purchases, no license).
   static EntitlementTier freshInstallTier(
     EntitlementTier storeTier, {
-    required bool releaseMode,
-    required bool githubChannel,
+    bool releaseMode = false,
+    bool githubChannel = false,
   }) {
     if (releaseMode && githubChannel) return EntitlementTier.ultra;
     return storeTier;
@@ -114,11 +106,7 @@ class ProEntitlement extends ChangeNotifier {
     final override = _debugOverride;
     if (override != null) return override;
     if (_licenseGating) return _licensedTier ?? EntitlementTier.free;
-    return freshInstallTier(
-      _tier,
-      releaseMode: kReleaseMode,
-      githubChannel: BuildChannel.isGithub,
-    );
+    return _tier;
   }
 
   /// Tier implied by the Play purchases this device knows about, independent of
