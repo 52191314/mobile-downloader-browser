@@ -24,7 +24,7 @@ const String _kHlsDomQueryJs = '''
     const scripts = root.querySelectorAll('script');
     for (const sc of scripts) {
       const text = sc.textContent || '';
-      const match = text.match(/https?:\\/\\/[^"\\\\s]+\\.m3u8[^"\\\\s]*/);
+      const match = text.match(/https?:\\/\\/[^"\\s]+\\.m3u8[^"\\s]*/);
       if (match) {
         const u = match[0];
         if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) return u;
@@ -287,11 +287,15 @@ class HeadlessPageResniffer {
   /// Returns every `.m3u8` / `.mpd` / `.mp4` URL visible in the rendered
   /// DOM: `<source src>`, `<video>/<audio>` src/currentSrc, meta
   /// og:video/twitter:player, and inline `<script>` text. Null on failure.
+  ///
+  /// The script-string regex deliberately avoids `$` anchors (Dart string
+  /// interpolation) — a `(?!\\w)` lookahead guards against matching
+  /// `.m3u8x`-style false positives instead.
   Future<List<String>?> _queryAllMediaUrls() async {
     final ctrl = _controller;
     if (ctrl == null) return null;
     try {
-      final result = await ctrl.evaluateJavascript(source: '''
+      final result = await ctrl.evaluateJavascript(source: r'''
 (() => {
   const out = new Set();
   function scan(root) {
@@ -299,25 +303,25 @@ class HeadlessPageResniffer {
     const sources = root.querySelectorAll('source[src]');
     for (const s of sources) {
       const src = s.src || s.getAttribute('src') || '';
-      if (src && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(src)) out.add(src);
+      if (src && /\.(m3u8|mpd|mp4)(?!\w)/i.test(src)) out.add(src);
     }
     const medias = root.querySelectorAll('video, audio');
     for (const m of medias) {
       const src = m.currentSrc || m.src || '';
-      if (src && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(src)) out.add(src);
+      if (src && /\.(m3u8|mpd|mp4)(?!\w)/i.test(src)) out.add(src);
     }
     const metas = root.querySelectorAll('meta[property="og:video"], meta[property="twitter:player:stream"], meta[itemprop="contentURL"]');
     for (const mt of metas) {
       const c = mt.content || '';
-      if (c && /\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(c)) out.add(c);
+      if (c && /\.(m3u8|mpd|mp4)(?!\w)/i.test(c)) out.add(c);
     }
     const scripts = root.querySelectorAll('script');
     for (const sc of scripts) {
       const text = sc.textContent || '';
-      const re = /https?:\\\\/\\\\/[^"'\\\\s]+?\\.(m3u8|mpd|mp4)(\\\\?[^"'\\\\s]*)?/gi;
+      const re = /https?:\/\/[^"'\s]+?\.(m3u8|mpd|mp4)(?!\w)/gi;
       let m;
       while ((m = re.exec(text)) !== null) {
-        const u = m[0].replace(/\\\\\\//g, '/');
+        const u = m[0].replace(/\\\//g, '/');
         if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) out.add(u);
       }
     }
@@ -349,14 +353,14 @@ class HeadlessPageResniffer {
     final ctrl = _controller;
     if (ctrl == null) return null;
     try {
-      final result = await ctrl.evaluateJavascript(source: '''
+      final result = await ctrl.evaluateJavascript(source: r'''
         (() => {
           try {
             const out = new Set();
             const entries = performance.getEntriesByType('resource');
             for (const e of entries) {
               const u = e.name;
-              if (/\\.(m3u8|mpd|mp4)(\\?|#|$)/i.test(u) &&
+              if (/\.(m3u8|mpd|mp4)(?!\w)/i.test(u) &&
                   u.indexOf('ping.m3u8') === -1 &&
                   u.indexOf('/ping') === -1) {
                 out.add(u);
