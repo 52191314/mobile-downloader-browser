@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'l10n/app_localizations.dart';
@@ -77,6 +79,15 @@ final ValueNotifier<Locale?> appLocaleNotifier = ValueNotifier(null);
 
 enum BatteryOptChoice { openSettings, later, neverAskAgain }
 
+/// Firebase Analytics event name for a download state transition, or null
+/// when the state has no funnel event (Play-only analytics).
+String? analyticsEventNameFor(DownloadState state) => switch (state) {
+  DownloadState.downloading => 'download_started',
+  DownloadState.completed => 'download_completed',
+  DownloadState.failed => 'download_failed',
+  _ => null,
+};
+
 void main() {
   // Global error handlers: catch any uncaught Dart/async errors so a single
   // plugin failure does not silently kill the app (which Android reports as
@@ -86,6 +97,13 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      // Firebase Analytics (Play-only repo). Fail-open: analytics must never
+      // block startup — if init fails, log and continue without it.
+      try {
+        await Firebase.initializeApp();
+      } catch (e, s) {
+        debugPrint('[FirebaseInitError] $e\n$s');
+      }
       try {
         await loadSavedAccentPack();
       } catch (e, s) {
@@ -651,6 +669,9 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             task.state == DownloadState.failed) {
           _prevTaskStates.remove(task.id);
         }
+        // Firebase Analytics funnel: download start / completion / failure.
+        // Fire-and-forget; analytics failures must never affect the queue.
+        unawaited(_logDownloadAnalytics(task.state));
       }
       // Soft battery-opt prompt on first download if launch path has not
       // already handled it this session (Later / never / already exempt).
@@ -1729,6 +1750,18 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _applySettings(settings);
     unawaited(_settingsStore.save(settings));
     debugPrint('Settings updated');
+  }
+
+  /// Logs download lifecycle events to Firebase Analytics (Play-only repo).
+  /// Fire-and-forget; analytics must never affect the queue or the app.
+  Future<void> _logDownloadAnalytics(DownloadState state) async {
+    final eventName = analyticsEventNameFor(state);
+    if (eventName == null) return;
+    try {
+      await FirebaseAnalytics.instance.logEvent(name: eventName);
+    } catch (e) {
+      debugPrint('[AnalyticsEventError] $e');
+    }
   }
 
   void _onProEntitlementChanged() {

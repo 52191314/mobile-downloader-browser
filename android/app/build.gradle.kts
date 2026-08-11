@@ -6,6 +6,9 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Firebase Analytics (Play-only repo). Requires android/app/google-services.json
+    // (downloaded from the Firebase console; the file is gitignored).
+    id("com.google.gms.google-services")
 }
 
 // Release signing: load android/key.properties (gitignored). See docs/play_signing.md.
