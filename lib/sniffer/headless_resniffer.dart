@@ -24,9 +24,10 @@ const String _kHlsDomQueryJs = '''
     const scripts = root.querySelectorAll('script');
     for (const sc of scripts) {
       const text = sc.textContent || '';
-      const match = text.match(/https?:\\/\\/[^"\\s]+\\.m3u8[^"\\s]*/);
+      const match = text.match(/(?:https?:)?\\?/\\?/[^"\\s]+\\.m3u8[^"\\s]*/);
       if (match) {
-        const u = match[0];
+        let u = match[0];
+        if (u.indexOf('//') === 0) u = 'https:' + u;
         if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) return u;
       }
     }
@@ -41,6 +42,33 @@ const String _kHlsDomQueryJs = '''
   return '';
 })();
 ''';
+
+/// Polls [probe] every [interval] until it returns a non-empty list or
+/// [timeout] elapses. [wakeUp] runs once, right after the first empty probe
+/// (players that need a play gesture), and its completion does not reset the
+/// deadline.
+///
+/// Extracted as a top-level utility so the timing logic is unit-testable
+/// without a WebView.
+Future<List<String>?> pollUntilFound(
+  Future<List<String>?> Function() probe, {
+  Duration timeout = const Duration(seconds: 12),
+  Duration interval = const Duration(seconds: 1),
+  Future<void> Function()? wakeUp,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  var woke = false;
+  while (DateTime.now().isBefore(deadline)) {
+    final result = await probe();
+    if (result != null && result.isNotEmpty) return result;
+    if (!woke && wakeUp != null) {
+      woke = true;
+      await wakeUp();
+    }
+    await Future<void>.delayed(interval);
+  }
+  return null;
+}
 
 /// A single-use headless page loader that navigates to a source page,
 /// waits for the page to render, then queries the DOM for a fresh HLS
@@ -119,18 +147,22 @@ class HeadlessPageResniffer {
       await Future<void>.delayed(_jsGracePeriod);
       if (_isDisposed) return null;
 
-      // Query the DOM for an .m3u8 URL (same JS as _queryHlsFromPage).
-      final fromDom = await _queryDom();
-      if (fromDom != null) {
-        return _validateResult(fromDom, mustMatchPathOf);
-      }
-
-      // Fallback: poll performance entries for fetch-based media loads.
-      await Future<void>.delayed(_resourcePollDelay);
-      if (_isDisposed) return null;
-      final fromPerf = await _queryPerformanceEntries();
-      if (fromPerf != null) {
-        return _validateResult(fromPerf, mustMatchPathOf);
+      // Poll DOM + performance entries until the player exposes a playlist
+      // (slow players fetch it seconds after load). Wake the player once if
+      // the first probes come back empty.
+      final found = await pollUntilFound(
+        () async {
+          final fromDom = await _queryDom();
+          if (fromDom != null) return [fromDom];
+          final fromPerf = await _queryPerformanceEntries();
+          if (fromPerf != null) return [fromPerf];
+          return null;
+        },
+        interval: _resourcePollDelay,
+        wakeUp: _isDisposed ? null : _wakePlayer,
+      );
+      if (found != null && found.isNotEmpty) {
+        return _validateResult(found.first, mustMatchPathOf);
       }
 
       return null;
@@ -264,24 +296,54 @@ class HeadlessPageResniffer {
       await Future<void>.delayed(_jsGracePeriod);
       if (_isDisposed) return const [];
 
-      final results = <String>{};
+      // Poll DOM + performance entries until media appears — players on
+      // many tubes fetch their playlist seconds after load, so a single
+      // fixed-delay probe misses them. Wake the player once if empty.
+      final results = await pollUntilFound(
+        () async {
+          final fromDom = await _queryAllMediaUrls();
+          if (fromDom != null && fromDom.isNotEmpty) return fromDom;
+          final fromPerf = await _queryAllPerformanceEntries();
+          if (fromPerf != null && fromPerf.isNotEmpty) return fromPerf;
+          return null;
+        },
+        interval: _resourcePollDelay,
+        wakeUp: _isDisposed ? null : _wakePlayer,
+      );
+      if (results != null) return results.toSet().toList();
 
-      // DOM + script-string media URLs.
-      final fromDom = await _queryAllMediaUrls();
-      if (fromDom != null) results.addAll(fromDom);
-
-      // fetch/XHR-loaded playlists.
-      await Future<void>.delayed(_resourcePollDelay);
-      if (_isDisposed) return const [];
-      final fromPerf = await _queryAllPerformanceEntries();
-      if (fromPerf != null) results.addAll(fromPerf);
-
-      return results.toList();
+      return const [];
     } catch (_) {
       return const [];
     } finally {
       await dispose();
     }
+  }
+
+  /// Tries to start the page's player programmatically — sites whose
+  /// players only fetch the playlist after a play gesture (click-to-play
+  /// players). Safe to call once per page: `play()` on the first <video>,
+  /// plus a click on the closest player wrapper as a fallback for custom
+  /// UI players. The WebView already runs with
+  /// `mediaPlaybackRequiresUserGesture: false`, so `play()` is allowed.
+  Future<void> _wakePlayer() async {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    try {
+      await ctrl.evaluateJavascript(source: r'''
+(() => {
+  try {
+    const v = document.querySelector('video');
+    if (v) {
+      try { v.play(); } catch (_) {}
+      const wrap = v.closest('[class*=player], [id*=player]');
+      if (wrap) { try { wrap.click(); } catch (_) {} }
+    }
+  } catch (_) {}
+  return true;
+})();
+''');
+    } catch (_) {}
   }
 
   /// Returns every `.m3u8` / `.mpd` / `.mp4` URL visible in the rendered
@@ -318,10 +380,11 @@ class HeadlessPageResniffer {
     const scripts = root.querySelectorAll('script');
     for (const sc of scripts) {
       const text = sc.textContent || '';
-      const re = /https?:\/\/[^"'\s]+?\.(m3u8|mpd|mp4)(?!\w)/gi;
+      const re = /(?:https?:)?\\?/\\?/[^"'\\s]+?\\.(m3u8|mpd|mp4)(?!\\w)/gi;
       let m;
       while ((m = re.exec(text)) !== null) {
-        const u = m[0].replace(/\\\//g, '/');
+        let u = m[0].replace(/\\\//g, '/');
+        if (u.indexOf('//') === 0) u = 'https:' + u;
         if (u.indexOf('ping.m3u8') === -1 && u.indexOf('/ping') === -1) out.add(u);
       }
     }

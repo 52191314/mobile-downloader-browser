@@ -328,3 +328,40 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
   - Increment y (minor) for new features or notable enhancements.
   - Increment x (major) for breaking changes or major product milestones.
 - **Mandatory Release Notes**: Every build code / version release MUST have corresponding release notes documented in RELEASE_NOTES_x.y.z.md or the project's release notes file.
+
+## Site compatibility study — ThePornDude top-10 tubes + top-10 aggregators (2026-08-11)
+
+Live Playwright harness: `tooling/site_study/probe_sites.js` (mobile-UA
+chromium; mirrors the app's T1 static / T2 rendered-DOM / T3 network tiers).
+Run: `cd tooling/site_study && node probe_sites.js --json=out.json` (needs
+local `npm i playwright` — browsers already at `E:\DevTools\ms-playwright`).
+
+Verdicts (2026-08-11):
+
+| Site | Status | Mechanism |
+|------|--------|-----------|
+| pornhub.com | WORKS | T1 static (direct .mp4 in HTML) |
+| xvideos.com / xnxx.com | UNVERIFIED (network-blocked from this host) | on-device check |
+| xhamster.com | WORKS | T1 static + T2 perf (xhcdn HLS) |
+| eporner.com | WORKS (post polling fix) | JS player fetches HLS late — needs the poll loop |
+| hqporner.com | WORKS | T1 static |
+| beeg.com | WORKS (post polling fix) | T2 perf (HLS master via fetch) |
+| yourporn.sexy | WORKS | 301 → youporn.com; T1 static |
+| spankbang.com | UNVERIFIED (WAF-hard-blocks automation) | on-device; stealth stack |
+| xmoviesforyou.com | PARTIAL | click-to-play JS player (separate domain) — wake-click helps; WebView capture on-device |
+| thumbzilla.com | WORKS | T1 static (ypncdn = PH network CDN) |
+| ixxx / fuq / tubegalore | 2-HOP | pure /out/?l=base64 redirect directories — sniff after browser follows |
+| alohatube.com | 2-HOP | /ktm/view.cgi?u=<source> links |
+| iwank.tv / hdroom.xxx / xxxshame.com | 2-HOP | JS-card directories; no anchors (crawler can't batch) |
+| tubesafari.com / pornkai.com | SITE DOWN | 504 / cert error (nothing app can do) |
+
+Notes: hdroom.com is PARKED — real domain is hdroom.xxx. PornHub-network
+tubes (pornhub/youporn/thumbzilla/redtube/tube8) all expose direct
+`*.phncdn.com/*.mp4` URLs in HTML. Eporner/beeg/xhamster build playlists in
+JS. Headless-homepage discovery under-reports JS-card sites (ixxx network
+serves anchor-less grids to automation) — real-device flow is fine.
+
+Hardening shipped 2026-08-11 (see skill `aurora-downloader-development` →
+"Site-compatibility study"): pollUntilFound loop, play-click wake,
+dual-form (plain+escaped) slash regexes in the DOM-script tiers,
+protocol-relative URLs in T1 static.

@@ -8,12 +8,13 @@ import '../platform/network_binding_service.dart';
 /// video streams (.m3u8, .mp4, .mpd) from direct HTML, JS variables, Base64 strings, and iframe embeds.
 class NativeHtmlMediaExtractor {
   static final RegExp _m3u8RegExp = RegExp(
-    r'https?://[^\s"<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^\s"<>]+)?',
+    // Protocol-relative (//host/...) URLs resolve to https: at parse time.
+    r'(?:https?:)?//[^\s"<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^\s"<>]+)?',
     caseSensitive: false,
   );
 
   static final RegExp _escapedM3u8RegExp = RegExp(
-    r'https?:\\/\\/[^\s"<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^\s"<>]+)?',
+    r'(?:https?:)?\\/\\/[^\s"<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^\s"<>]+)?',
     caseSensitive: false,
   );
 
@@ -36,20 +37,23 @@ class NativeHtmlMediaExtractor {
     if (html.isEmpty) return const [];
     final results = <String>{};
 
-    // 1. Direct URLs
+    // 1. Direct URLs (absolute or protocol-relative)
     for (final match in _m3u8RegExp.allMatches(html)) {
       var raw = match.group(0);
       if (raw != null && raw.isNotEmpty) {
+        if (raw.startsWith('//')) raw = 'https:$raw';
         raw = _cleanStreamUrl(raw);
         if (_isValidStreamUrl(raw)) results.add(raw);
       }
     }
 
-    // 2. Escaped JSON URLs e.g. https:\/\/...
+    // 2. Escaped JSON URLs e.g. https:\/\/... or \/\/...
     for (final match in _escapedM3u8RegExp.allMatches(html)) {
       var raw = match.group(0);
       if (raw != null && raw.isNotEmpty) {
-        final unescaped = _cleanStreamUrl(raw.replaceAll(r'\/', '/'));
+        var unescaped = raw.replaceAll(r'\/', '/');
+        if (unescaped.startsWith('//')) unescaped = 'https:$unescaped';
+        unescaped = _cleanStreamUrl(unescaped);
         if (_isValidStreamUrl(unescaped)) results.add(unescaped);
       }
     }
