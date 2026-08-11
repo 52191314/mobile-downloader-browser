@@ -258,6 +258,14 @@ is the supported debugging channel.
 - **Gradle daemon orphans**: killing a `flutter build` mid-run leaves its Gradle daemon holding the
   project lock; the next build then waits for minutes. Fix: `--status` to find BUSY daemons, kill
   them (`Stop-Process -Id <pid> -Force`), then rebuild. Kill ALL `java` processes before a retry.
+- **D: drive near-full (94%+)** breaks release builds: Gradle's Jetifier transform fails with
+  "There is not enough space on the disk" (e.g. transforming `ffmpeg-kit-min-gpl-2.2.2.aar`).
+  Free space, or recover deterministically: kill java (`MSYS_NO_PATHCONV=1 taskkill /F /IM java.exe`),
+  delete `D:\DevTools\.gradle\caches\8.12\transforms` AND `android\.gradle` (the project-local
+  workspace keeps a stale index of deleted transform paths — without clearing both, the next build
+  fails instantly with "Could not read workspace metadata ... metadata.bin"). Then rebuild: full
+  transform regeneration takes ~15 min. `du` is unusably slow on the gradle cache tree (times out);
+  use `df -h` to check space and delete directly.
 - **evaluateJavascript results are json-decoded** by flutter_inappwebview (number → Dart `int`,
   string → decoded `String`, no quotes). Do not `.trim()` ints or `jsonDecode` decoded strings.
 - **`window.find` loops break rendering**: a `while(window.find(...))` counting loop thrashes
