@@ -3,10 +3,9 @@ import '../premium/build_channel.dart';
 /// Play Store compliance gates for media sniffing and downloads.
 ///
 /// **Play channel only:** known DRM / ToS / policy-hotspot platforms are
-/// hard-blocked when `AURORA_BUILD_CHANNEL=play`. GitHub / sideload builds
-/// leave capture and download unrestricted so the open-source APK can keep
-/// full sniffer capability. See `docs/play_store_compliance.md` and
-/// `docs/play_restricted_hosts_plan.md`.
+/// hard-blocked (this repository is Play-only; the open-source APK is
+/// maintained separately and leaves capture unrestricted). See
+/// `docs/play_store_compliance.md` and `docs/play_restricted_hosts_plan.md`.
 ///
 /// Wave 1 groups: YouTube, TikTok, Meta (FB/IG), Netflix, Spotify, Twitch.
 /// Wave 2+ groups (Prime Video, Disney+, Max, Crunchyroll, Apple TV+) will be
@@ -33,8 +32,7 @@ class RestrictedMediaPolicy {
 
   /// True when this binary enforces Play restricted-media rules.
   ///
-  /// Default channel is `github` → false. Play APKs built with
-  /// `--dart-define=AURORA_BUILD_CHANNEL=play` → true.
+  /// This repository is Play-only, so enforcement is always on.
   static bool get enforcementEnabled => BuildChannel.isPlay;
 
   // ---------------------------------------------------------------------------

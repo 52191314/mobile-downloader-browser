@@ -86,16 +86,6 @@ class ProEntitlement extends ChangeNotifier {
   Future<void>? _writeChain;
 
   /// Effective tier for a fresh install (no purchases, no license).
-  /// Effective tier for a fresh install (no purchases, no license).
-  static EntitlementTier freshInstallTier(
-    EntitlementTier storeTier, {
-    bool releaseMode = false,
-    bool githubChannel = false,
-  }) {
-    if (releaseMode && githubChannel) return EntitlementTier.ultra;
-    return storeTier;
-  }
-
   /// Effective tier — what every feature gate reads.
   ///
   /// When server-side licensing is active, a tier is only real if the license
