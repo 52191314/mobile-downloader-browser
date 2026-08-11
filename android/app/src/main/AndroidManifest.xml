@@ -1,5 +1,22 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Firebase's measurement SDKs declare AD_ID in their library manifests,
+         but this app never reads the advertising ID (no ads SDK; Firebase Ads
+         features are OFF). Remove the merged permission so the artifact
+         matches the Play Console "does not use advertising ID" declaration.
+         Restore if Google Ads integration is ever enabled in Firebase. -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+    <!-- Same origin (measurement SDK): the Android 13 ad-services permissions
+         are only needed for ad attribution, which is off. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
+        tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Private Vault (local_auth): USE_BIOMETRIC is merged from the plugin's
          own manifest for API 28+; USE_FINGERPRINT covers API 24-27 (minSdk).
