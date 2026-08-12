@@ -322,6 +322,13 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 
 - **No Emojis in README.md**: Never include emojis (e.g. ⚡, 🏗️, 🚀, 🛡️, ✨, 💚, ℹ️, etc.) in any README.md or markdown documentation files across repositories. Keep headers and text clean and professional.
 - **No Community / Contribution Sections**: Never include Awesome Ecosystem & Community or Open for Contributions sections in README.md files.
+- **OSS porting gate (F-Droid policy)**: Before porting ANY change to the OSS repo (`aurora_downloader_oss`), ask yourself: does this belong in an OSS app that is going to be on F-Droid? F-Droid rejects builds that depend on proprietary / Play-only components. Things that do NOT belong in the OSS edition:
+  - Firebase (Analytics, Crashlytics, Performance Monitoring)
+  - Google Play Billing, license servers (`AURORA_LICENSE_URL`), entitlement checks tied to Play
+  - Play on-demand modules / dynamic features / Play Core
+  - Google Drive / Google-API-backed sync
+  - Any feature that cannot function without a Play or Google service
+  When in doubt, leave it out of the OSS port and note the exclusion in the port commit.
 
 ## Build & Release Policy (APK & Mobile Builds)
 
