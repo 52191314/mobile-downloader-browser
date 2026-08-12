@@ -152,7 +152,9 @@ About page hardcodes the version string in ONE place and it must be updated or
 the About screen shows a stale version (the Settings nav hub subtitle that used
 to be the second spot was removed by the 2026-08-07 dead-code sweep):
 
-- `lib/ui/pages/settings_page.dart` — `_buildAboutPage()`: `Text('vX.Y.Z', ...)`
+- `lib/ui/pages/settings_page.dart` — `_buildAboutPage()`: `Text('vX.Y.Z+N', ...)`
+  (full version + build number, e.g. `v1.2.0+76`; the About card title is
+  `Text('Aurora Download Manager', ...)`).
 
 Search for the previous version string before committing a release bump:
 `grep -rn "v[0-9]*\." lib/ui/pages/settings_page.dart | grep -i "v[0-9]"`.
