@@ -125,7 +125,6 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
       MethodChannel('aurora_downloader/pip');
 
   bool _inPip = false;
-  bool _pipSupported = false;
 
   // --- Lock / orientation ---
   bool _locked = false;
@@ -213,13 +212,6 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
         _handOffToMiniPlayer();
       }
     });
-    try {
-      final supported =
-          await _pipChannel.invokeMethod<bool>('isPipSupported') ?? false;
-      if (mounted) setState(() => _pipSupported = supported);
-    } catch (_) {
-      // Leave the button hidden rather than offering something that no-ops.
-    }
   }
 
   /// Transfers the running engine to [MiniPlayerController] and pops this
@@ -229,18 +221,6 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     MiniPlayerController.instance.adopt(_engine, _source);
     _ownsEngine = false;
     Navigator.of(context).maybePop();
-  }
-
-  Future<void> _enterPip() async {
-    final size = _engine.state.value.videoSize;
-    try {
-      await _pipChannel.invokeMethod('enterPip', {
-        'width': size.width > 0 ? size.width.toInt() : 16,
-        'height': size.height > 0 ? size.height.toInt() : 9,
-      });
-    } catch (_) {
-      // Denied by the system (permission off, unsupported form factor).
-    }
   }
 
   @override
@@ -632,7 +612,7 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
                   favorited: _favorited,
                   landscapeForced: _landscapeForced,
                   onToggleOrientation: _toggleOrientation,
-                  onPip: _pipSupported ? _enterPip : null,
+                  onPip: _handOffToMiniPlayer,
                   onBack: () => Navigator.of(context).maybePop(),
                   onToggleDiagnostics: () =>
                       setState(() => _showDiagnostics = !_showDiagnostics),
@@ -882,7 +862,7 @@ class _TopBar extends StatelessWidget {
             ),
             if (onPip != null)
               _CompactIcon(
-                tooltip: 'Picture-in-picture',
+                tooltip: 'Mini player',
                 icon: Icons.picture_in_picture_alt_rounded,
                 onPressed: onPip!,
               ),

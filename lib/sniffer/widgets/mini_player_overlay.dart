@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/aurora_palette.dart';
 import '../player/mini_player_controller.dart';
+import '../player/playback_engine.dart';
 import '../player/playback_state.dart';
 
 /// Draggable floating video window parked over the browser while a video
@@ -42,6 +43,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> {
   double _clampTo(double value, double limit) {
     if (limit <= 0) return 0;
     return value.clamp(0.0, limit).toDouble();
+  }
+
+  /// Resumes playback, restarting from the beginning when the video already
+  /// ended — both engines sit on the last frame after completion, where
+  /// play() alone is a no-op ("stuck at the last frame").
+  Future<void> _playFrom(PlaybackEngine engine, PlaybackState state) async {
+    if (state.duration > Duration.zero && state.position >= state.duration) {
+      await engine.seek(Duration.zero);
+    }
+    await engine.play();
   }
 
   @override
@@ -128,7 +139,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> {
                                       if (state.isPlaying) {
                                         unawaited(engine.pause());
                                       } else {
-                                        unawaited(engine.play());
+                                        unawaited(_playFrom(engine, state));
                                       }
                                     },
                                   ),

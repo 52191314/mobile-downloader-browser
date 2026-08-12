@@ -9,8 +9,8 @@ App name: "Aurora Download Manager" (23/30 chars). The descriptions below use
 that exact name. Optional per-language app names are at the bottom of this
 file.
 
-Current release: 1.2.0 (build 76). The "What's new" block for 1.2.0 in Play
-Console tag format is at the bottom of this file.
+Current release: 1.2.1 (build 77). The "What's new" block for the current
+release in Play Console tag format is at the bottom of this file.
 
 Short description limit: 80 chars. Full description limit: 4000 chars.
 App name limit: 30 chars.
@@ -925,4 +925,56 @@ Pressione e segure qualquer link e escolha "Visualizar" para ver a página sem s
 <ru-RU>
 «Картинка в картинке» продолжает воспроизведение в перетаскиваемом мини-плеере — нажмите, чтобы вернуться на весь экран.
 Зажмите любую ссылку и выберите «Предпросмотр», чтобы открыть страницу, не покидая текущую; «Назад» мгновенно закрывает.
+</ru-RU>
+
+## Release notes v1.2.1 (Build 77) — "What's new" (Play Console tags)
+
+<en-US>
+The player's mini-player button now minimizes the video straight into the in-app floating player — no more system picture-in-picture window.
+Videos that ended in the mini-player no longer stick on the last frame; pressing play restarts from the beginning.
+</en-US>
+
+<zh-CN>
+播放器的"迷你播放器"按钮现在会直接将视频最小化到应用内的悬浮播放器中——不再使用系统的画中画窗口。
+在迷你播放器中播放结束的视频不再卡在最后一帧；按播放键即可从头重新播放。
+</zh-CN>
+
+<de-DE>
+Die Mini-Player-Taste minimiert das Video jetzt direkt in den schwebenden In-App-Player — kein System-PiP-Fenster mehr.
+Beendete Videos im Mini-Player bleiben nicht mehr am letzten Bild stehen; Play startet von vorn.
+</de-DE>
+
+<es-ES>
+El botón de mini reproductor ahora minimiza el vídeo directamente al reproductor flotante de la app: adiós a la ventana de pantalla en pantalla del sistema.
+Los vídeos terminados en el mini reproductor ya no se quedan en el último fotograma; al pulsar reproducir vuelven a empezar.
+</es-ES>
+
+<fr-FR>
+Le bouton mini-lecteur minimise désormais la vidéo directement dans le lecteur flottant intégré — plus de fenêtre d'incrustation système.
+Les vidéos terminées dans le mini-lecteur ne restent plus bloquées sur la dernière image ; Lecture reprend depuis le début.
+</fr-FR>
+
+<hi-IN>
+प्लेयर का मिनी-प्लेयर बटन अब वीडियो को सीधे ऐप के फ्लोटिंग प्लेयर में छोटा करता है — कोई सिस्टम पिक्चर-इन-पिक्चर विंडो नहीं।
+मिनी-प्लेयर में समाप्त हुए वीडियो अब आखिरी फ्रेम पर नहीं अटकते; प्ले दबाने पर शुरुआत से चलते हैं।
+</hi-IN>
+
+<id>
+Tombol mini-player kini mengecilkan video langsung ke pemutar melayang di dalam aplikasi — tanpa jendela picture-in-picture sistem.
+Video yang selesai di mini-player tidak lagi macet di bingkai terakhir; tekan putar untuk memutar dari awal.
+</id>
+
+<ja-JP>
+プレイヤーのミニプレーヤーボタンで、動画はアプリ内のフローティングプレーヤーに直接最小化されます——システムのピクチャーインピクチャーは使いません。
+ミニプレーヤーで終了した動画が最後のフレームで止まったままになるのを修正。再生を押すと最初から再生します。
+</ja-JP>
+
+<pt-BR>
+O botão de mini player agora minimiza o vídeo direto para o player flutuante do app — sem janela picture-in-picture do sistema.
+Vídeos que terminavam no mini player não ficam mais presos no último quadro; tocar em reproduzir reinicia do início.
+</pt-BR>
+
+<ru-RU>
+Кнопка мини-плеера теперь сворачивает видео прямо во встроенный плавающий плеер — без системного окна «картинка в картинке».
+Видео, завершившиеся в мини-плеере, больше не застревают на последнем кадре — «Играть» запускает с начала.
 </ru-RU>
