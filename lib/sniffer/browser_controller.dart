@@ -1104,6 +1104,23 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     final allowlisted =
         pageHost.isNotEmpty && _adblockAllowlistSet.contains(pageHost);
 
+    // Tracking-parameter stripping ($removeparam rules, AdGuard URL
+    // Tracking): rewrite main-frame navigations to the cleaned URL instead
+    // of loading the tracking-laden one.
+    if (action.isForMainFrame &&
+        !allowlisted &&
+        requestUri != null &&
+        _isHttpLike(requestUri) &&
+        _adBlockerEnabled) {
+      final cleaned = _adBlockEngine.stripTrackingParams(url);
+      if (cleaned != null && cleaned != url) {
+        unawaited(
+          _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(cleaned))),
+        );
+        return NavigationActionPolicy.CANCEL;
+      }
+    }
+
     // Back/forward only for redirect trust — do NOT treat "URL is somewhere
     // in history" as trusted. Ads reusing a previously visited host would
     // otherwise escape the invisible-redirect prompt.

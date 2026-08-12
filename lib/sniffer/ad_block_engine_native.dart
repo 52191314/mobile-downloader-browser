@@ -126,12 +126,14 @@ class AdBlockParseResult {
   final List<CosmeticAdRule> cosmeticRules;
   final List<ScriptletRule> scriptletRules;
   final List<CssInjectionRule> cssInjectionRules;
+  final List<RemoveParamRule> removeParamRules;
 
   const AdBlockParseResult({
     required this.networkRules,
     required this.cosmeticRules,
     this.scriptletRules = const [],
     this.cssInjectionRules = const [],
+    this.removeParamRules = const [],
   });
 }
 
@@ -155,6 +157,19 @@ class CssInjectionRule {
     this.host = '',
     required this.css,
   });
+}
+
+/// A `$removeparam` rule (AdGuard URL Tracking list): strip the named query
+/// parameter from matching URLs instead of blocking them. `param` null means
+/// strip ALL query parameters.
+class RemoveParamRule {
+  /// Pre-modifier pattern: '' (every URL), '||host^', 'host/path', '/path'.
+  final String pattern;
+
+  /// Parameter name to strip; null = strip all query parameters.
+  final String? param;
+
+  const RemoveParamRule({required this.pattern, this.param});
 }
 
 class _ScriptletParseResult {
@@ -183,6 +198,7 @@ class AdBlockEngine {
   final List<CosmeticAdRule> cosmeticRules;
   final List<ScriptletRule> scriptletRules;
   final List<CssInjectionRule> cssInjectionRules;
+  final List<RemoveParamRule> removeParamRules;
   final List<AdblockSourceStatus> sourceStatuses;
   AdBlockNativeEngine? _nativeEngine;
   bool _nativeEngineInitialized = false;
@@ -226,6 +242,7 @@ class AdBlockEngine {
     this.cosmeticRules = const [],
     this.scriptletRules = const [],
     this.cssInjectionRules = const [],
+    this.removeParamRules = const [],
     this.sourceStatuses = const [],
     this.rawRulesText,
   }) : _nativeEngine = null /* created lazily in shouldBlockUrl */ {
@@ -401,6 +418,7 @@ class AdBlockEngine {
       cosmeticRules: parsed.cosmeticRules,
       scriptletRules: parsed.scriptletRules,
       cssInjectionRules: parsed.cssInjectionRules,
+      removeParamRules: parsed.removeParamRules,
       rawRulesText: _builtInRules,
     );
   }
@@ -469,6 +487,7 @@ class AdBlockEngine {
       final scriptlets = <ScriptletRule>[...builtIn.scriptletRules];
       final cssInjections = <CssInjectionRule>[...builtIn.cssInjectionRules];
       final statuses = <AdblockSourceStatus>[];
+      final removeParams = <RemoveParamRule>[...builtIn.removeParamRules];
 
       // Add manual cosmetic rules to rawSb
       for (final rule in manualCosmeticRules) {
@@ -482,6 +501,12 @@ class AdBlockEngine {
       for (final manual in manualRules) {
         final pattern = manual.pattern.trim();
         if (pattern.isEmpty) continue;
+        // Manual $removeparam rules strip parameters; never block.
+        final manualRemoveParams = _parseRemoveParamRule(pattern);
+        if (manualRemoveParams != null) {
+          removeParams.addAll(manualRemoveParams);
+          continue;
+        }
         if (manual.domainRule) {
           rules.add(
             AdBlockRule(type: AdBlockRuleType.domain, pattern: pattern),
@@ -504,6 +529,7 @@ class AdBlockEngine {
           cosmeticRules: cosmetics,
           scriptletRules: scriptlets,
           cssInjectionRules: cssInjections,
+          removeParamRules: removeParams,
           sourceStatuses: [
             for (final source in sources)
               AdblockSourceStatus(
@@ -615,7 +641,8 @@ class AdBlockEngine {
             cosmetics.addAll(parsed.cosmeticRules);
             scriptlets.addAll(parsed.scriptletRules);
             cssInjections.addAll(parsed.cssInjectionRules);
-            rawSb.writeln(filterText);
+            removeParams.addAll(parsed.removeParamRules);
+            rawSb.writeln(_withoutRemoveParamLines(filterText));
             statuses.add(
               AdblockSourceStatus(
                 url: source.url,
@@ -653,6 +680,7 @@ class AdBlockEngine {
         cosmeticRules: cosmetics,
         scriptletRules: scriptlets,
         cssInjectionRules: cssInjections,
+        removeParamRules: removeParams,
         sourceStatuses: statuses,
         rawRulesText: rawSb.toString(),
       );
@@ -894,6 +922,7 @@ class AdBlockEngine {
     final cosmetics = <CosmeticAdRule>[];
     final scriptlets = <ScriptletRule>[];
     final cssInjections = <CssInjectionRule>[];
+    final removeParams = <RemoveParamRule>[];
     for (final rawLine in text.split(RegExp(r'\r?\n'))) {
       final line = rawLine.trim();
       if (line.isEmpty || line.startsWith('!') || line.startsWith('[')) {
@@ -942,6 +971,16 @@ class AdBlockEngine {
 
       final isException = line.startsWith('@@');
       final body = isException ? line.substring(2) : line;
+
+      // `$removeparam` rules strip tracking parameters — they must never
+      // become block rules (the old modifier-stripping turned AdGuard URL
+      // Tracking's 2,600+ rules into full-domain blocks, e.g. youtube.com).
+      final removeParam = _parseRemoveParamRule(body);
+      if (removeParam != null) {
+        removeParams.addAll(removeParam);
+        continue;
+      }
+
       final rule = _parseRuleBody(body, isException: isException);
       if (rule != null) network.add(rule);
     }
@@ -950,7 +989,124 @@ class AdBlockEngine {
       cosmeticRules: cosmetics,
       scriptletRules: scriptlets,
       cssInjectionRules: cssInjections,
+      removeParamRules: removeParams,
     );
+  }
+
+  /// Drops `$removeparam` lines from filter text before it reaches the
+  /// native engine, whose parser also strips `$` modifiers and would
+  /// otherwise turn them into domain-block rules.
+  static String _withoutRemoveParamLines(String text) {
+    if (!text.contains('removeparam')) return text;
+    return text
+        .split(RegExp(r'\r?\n'))
+        .where((line) => _parseRemoveParamRule(line.trim()) == null)
+        .join('\n');
+  }
+
+  /// Parses a `$removeparam[=param]` rule. Returns null when the line is not
+  /// a removeparam rule. `param1|param2` values expand into multiple rules.
+  static List<RemoveParamRule>? _parseRemoveParamRule(String body) {
+    final optionIndex = body.indexOf(r'$');
+    if (optionIndex == -1) return null;
+    final options = body.substring(optionIndex + 1).split(',');
+    String? removeParamValue;
+    for (final option in options) {
+      final trimmed = option.trim();
+      if (trimmed == 'removeparam') {
+        removeParamValue = '';
+        break;
+      }
+      if (trimmed.startsWith('removeparam=')) {
+        removeParamValue = trimmed.substring('removeparam='.length);
+        break;
+      }
+    }
+    if (removeParamValue == null) return null;
+    if (removeParamValue.isEmpty) {
+      return [
+        RemoveParamRule(pattern: body.substring(0, optionIndex).trim()),
+      ];
+    }
+    // Regex-valued removeparam rules are unsupported — drop the rule instead
+    // of stripping everything.
+    if (removeParamValue.startsWith('/')) return const [];
+    return [
+      for (final param in removeParamValue.split('|'))
+        if (param.isNotEmpty)
+          RemoveParamRule(
+            pattern: body.substring(0, optionIndex).trim(),
+            param: param,
+          ),
+    ];
+  }
+
+  /// Strips tracking parameters from [url] per the loaded `$removeparam`
+  /// rules. Returns the cleaned URL, or null when nothing matched.
+  String? stripTrackingParams(String url) {
+    if (removeParamRules.isEmpty) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasQuery) return null;
+    final host = uri.host.toLowerCase();
+    final path = uri.path;
+
+    final stripAll = removeParamRules.any(
+      (r) => r.param == null && _removeParamRuleMatches(r, host, path),
+    );
+    if (stripAll) {
+      return uri.replace(queryParameters: null).toString();
+    }
+    final toStrip = <String>{};
+    for (final rule in removeParamRules) {
+      final param = rule.param;
+      if (param == null || !_removeParamRuleMatches(rule, host, path)) {
+        continue;
+      }
+      toStrip.add(param);
+    }
+    if (toStrip.isEmpty) return null;
+    final remaining = <String, String>{
+      for (final entry in uri.queryParameters.entries)
+        if (!toStrip.contains(entry.key)) entry.key: entry.value,
+    };
+    if (remaining.length == uri.queryParameters.length) return null;
+    return uri.replace(queryParameters: remaining).toString();
+  }
+
+  static bool _removeParamRuleMatches(
+    RemoveParamRule rule,
+    String host,
+    String path,
+  ) {
+    final pattern = rule.pattern;
+    if (pattern.isEmpty) return true;
+    if (pattern.startsWith('||')) {
+      var rest = pattern.substring(2);
+      if (rest.endsWith('^')) rest = rest.substring(0, rest.length - 1);
+      return _hostOrPathMatches(rest, host, path);
+    }
+    if (pattern.startsWith('/')) return path.startsWith(pattern);
+    if (pattern.contains('/')) {
+      final slash = pattern.indexOf('/');
+      final patternHost = pattern.substring(0, slash).replaceAll('^', '');
+      if (!_hostMatches(patternHost, host)) return false;
+      return path.startsWith(pattern.substring(slash));
+    }
+    return _hostMatches(pattern.replaceAll('^', ''), host);
+  }
+
+  static bool _hostOrPathMatches(String pattern, String host, String path) {
+    if (pattern.contains('/')) {
+      final slash = pattern.indexOf('/');
+      if (!_hostMatches(pattern.substring(0, slash), host)) return false;
+      return path.startsWith(pattern.substring(slash));
+    }
+    return _hostMatches(pattern, host);
+  }
+
+  static bool _hostMatches(String pattern, String host) {
+    if (pattern.isEmpty) return true;
+    return host == pattern || host.endsWith('.$pattern');
   }
 
   static AdBlockRule? _parseHostsRule(String line) {

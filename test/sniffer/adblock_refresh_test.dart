@@ -101,4 +101,104 @@ void main() {
       isTrue,
     );
   });
+
+  test('adblock: removeparam rules strip params, never block domains', () {
+    const text = '''
+! AdGuard URL Tracking sample
+\$removeparam=utm_source
+||youtube.com^\$removeparam=feature
+||supply.amazon.com/ref^\$removeparam=ref_
+@@||example.com^\$removeparam=via
+/checkout\$removeparam=fbclid
+''';
+    final parsed = AdBlockEngine.parseFilterText(text);
+
+    // None of the removeparam lines became block rules — youtube.com must
+    // NOT be blocked (this was the over-blocking bug).
+    expect(
+      parsed.networkRules.where((r) => r.pattern.contains('youtube')),
+      isEmpty,
+    );
+    expect(parsed.networkRules.where((r) => r.pattern.contains('amazon')), isEmpty);
+    expect(
+      parsed.networkRules.where((r) => r.pattern.contains('example.com')),
+      isEmpty,
+    );
+
+    expect(parsed.removeParamRules, hasLength(5));
+    final engine = AdBlockEngine(
+      enabled: true,
+      rules: parsed.networkRules,
+      removeParamRules: parsed.removeParamRules,
+    );
+
+    // Generic rule strips utm_source from any URL.
+    expect(
+      engine.stripTrackingParams('https://news.example/a?utm_source=x&id=1'),
+      'https://news.example/a?id=1',
+    );
+    // Domain rule only matches its host (and subdomains).
+    expect(
+      engine.stripTrackingParams(
+          'https://youtube.com/watch?v=abc&feature=share'),
+      'https://youtube.com/watch?v=abc',
+    );
+    expect(
+      engine.stripTrackingParams('https://other.com/watch?feature=share'),
+      isNull,
+    );
+    // Host+path rule.
+    expect(
+      engine.stripTrackingParams(
+          'https://supply.amazon.com/ref/p?ref_=x&k=1'),
+      'https://supply.amazon.com/ref/p?k=1',
+    );
+    // Path-only rule.
+    expect(
+      engine.stripTrackingParams('https://shop.example/checkout?fbclid=9&x=1'),
+      'https://shop.example/checkout?x=1',
+    );
+    // Non-matching URLs are untouched.
+    expect(
+      engine.stripTrackingParams('https://shop.example/home?fbclid=9'),
+      isNull,
+    );
+  });
+
+  test('adblock: removeparam rules never reach the native engine text',
+      () async {
+    final engine = await AdBlockEngine.fromFilterSources(
+      enabled: true,
+      sources: const [
+        AdblockFilterSource(
+          name: 'Mock TrackParam',
+          url: 'https://example.com/trackparam.txt',
+        ),
+      ],
+      client: MockClient((request) async {
+        if (request.url.toString() == 'https://example.com/trackparam.txt') {
+          return http.Response(
+            '||youtube.com^\$removeparam=feature\n||ads.example.com^\n',
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    // The real block rule survives; the removeparam line is gone from the
+    // raw text the native engine parses (its parser strips $ modifiers and
+    // would otherwise block youtube.com entirely).
+    expect(engine.sourceStatuses.single.state, AdblockSourceLoadState.loaded);
+    expect(
+      engine.rules.where((r) => r.pattern == 'ads.example.com'),
+      hasLength(1),
+    );
+    expect(engine.rawRulesText, isNot(contains('removeparam')));
+    expect(engine.rawRulesText, contains('ads.example.com'));
+    expect(
+      engine.removeParamRules.where((r) => r.param == 'feature'),
+      hasLength(1),
+    );
+  });
 }
