@@ -92,6 +92,7 @@ void showElementContextMenu(
   required Future<void> Function(String url) onHandlePickedElement,
   required Future<void> Function(String value, String message) onCopyText,
   required void Function({String? url, bool switchToTab}) onOpenNewTab,
+  required Future<void> Function(String url) onOpenPreview,
   required Future<void> Function() onCopyCurrentUrl,
   required Future<void> Function() onToggleFavorite,
   required Future<void> Function() onSaveCurrentPage,
@@ -230,6 +231,11 @@ void showElementContextMenu(
 
       final linkActions = <Widget>[
         if (href != null) ...[
+          item(
+            Icons.visibility_outlined,
+            'Preview',
+            () => unawaited(onOpenPreview(href)),
+          ),
           item(Icons.open_in_browser, 'Open link', () => openTarget(href)),
           item(
             Icons.tab,

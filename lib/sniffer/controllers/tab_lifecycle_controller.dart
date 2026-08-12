@@ -278,6 +278,8 @@ class TabLifecycleController {
       final dir = Directory(baseDir!);
       if (!await dir.exists()) await dir.create(recursive: true);
       final list = _tabs
+          .where((t) => !t.isPreview)
+          .toList(growable: false)
           .asMap()
           .entries
           .map(

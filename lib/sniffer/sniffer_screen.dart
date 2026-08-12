@@ -93,6 +93,9 @@ import 'widgets/picker_cancel_chip.dart';
 import 'widgets/add_queue_dialog.dart' show showAddQueueDialog;
 import 'widgets/address_suggestion_panel.dart';
 import 'widgets/tab_strip.dart';
+import 'widgets/mini_player_overlay.dart';
+import 'player/aurora_player_screen.dart';
+import 'player/mini_player_controller.dart';
 
 /// Filter options for the rich catch sheet segmented control are defined
 /// in `sheets/sniffed_media_sheet.dart` (re-declared so the file is
@@ -259,6 +262,23 @@ class _SnifferScreenState extends State<SnifferScreen>
   int _lastBarsToggleAtMs = 0;
   bool _barsVisible = true;
   bool _isContextMenuShowing = false;
+
+  // --- Link preview mode -------------------------------------------------
+  // Long-press a link → Preview opens the target in an ephemeral tab shown
+  // over the current page. Back button / edge swipe (or the preview bar's
+  // arrow/close) dismisses it and reveals the previous page untouched — the
+  // old tab's WebView is never disposed, so nothing refreshes.
+
+  /// True while a link preview is showing.
+  bool _previewMode = false;
+
+  /// Id of the ephemeral preview tab (marked [BrowserTab.isPreview]).
+  String? _previewTabId;
+
+  /// Id of the tab to restore when the preview closes (id, not index —
+  /// indices shift if tabs are closed mid-preview).
+  String? _previewReturnTabId;
+
   /// True while the Samsung-style Menu (⋯) general dialog is on the stack.
   /// Used to dismiss it when leaving the Browser shell so it is not sticky.
   bool _browserOverflowOpen = false;
@@ -451,6 +471,12 @@ class _SnifferScreenState extends State<SnifferScreen>
     _onOpenRequestBus();
     widget.controller?.setOnSystemBackRequested(() async {
       if (!mounted) return false;
+      // Link preview: back button / edge swipe dismisses the preview and
+      // reveals the previous page (untouched — its WebView never disposed).
+      if (_previewMode) {
+        _closePreview();
+        return true;
+      }
       final tab = _activeTab;
       if (tab.controller.historyIndex > 0) {
         await tab.controller.goBack();
@@ -791,6 +817,19 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   void _switchToActiveTab(int index) {
     if (_tabs.isEmpty) return;
+    // Leaving the preview via the tab switcher (tabs sheet) converts the
+    // ephemeral preview tab into a regular background tab — it stays open
+    // and is persisted from now on. Without this the tab would be excluded
+    // from persistence forever while the browser stays stuck in preview mode.
+    if (_previewMode && index < _tabs.length && !identical(_tabs[index], _activeTab)) {
+      final previewIndex = _tabs.indexWhere((t) => t.isPreview);
+      if (previewIndex >= 0) {
+        _tabs[previewIndex].isPreview = false;
+      }
+      _previewMode = false;
+      _previewTabId = null;
+      _previewReturnTabId = null;
+    }
     _fetchedIframeSrcs.clear();
     _cancelPickerIfActive();
     _tabManager.switchToActiveTab(index);
@@ -1243,7 +1282,75 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (index >= 0 && index < _tabs.length) {
       _discardPendingStrictRedirectsForTab(_tabs[index].id);
     }
+    // Closing the ephemeral preview tab from the tabs sheet must not leave
+    // the browser stuck in preview mode.
+    if (index >= 0 &&
+        index < _tabs.length &&
+        _tabs[index].isPreview &&
+        _previewMode) {
+      _previewMode = false;
+      _previewTabId = null;
+      _previewReturnTabId = null;
+    }
     _tabLifecycleController.closeTab(index);
+  }
+
+  /// Opens [url] in an ephemeral preview tab shown over the current page.
+  /// The underlying tab is left untouched, so dismissing the preview reveals
+  /// it exactly as it was — no reload.
+  Future<void> _openPreview(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    // Only web pages can be previewed — anything else belongs to the
+    // regular open/download actions.
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return;
+    }
+    // A preview inside a preview: dismiss the outer one first so the return
+    // chain stays a single level.
+    if (_previewMode) {
+      _closePreview();
+    }
+    final returnTabId = _activeTab.id;
+    _previewReturnTabId = returnTabId;
+    _addressExpanded = false;
+    _tabLifecycleController.openNewTab(
+      url: trimmed,
+      switchToTab: true,
+      persist: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      _previewMode = true;
+      _previewTabId = _activeTab.id;
+      _activeTab.isPreview = true;
+    });
+  }
+
+  /// Dismisses the preview: reveals the tab that was active before it opened
+  /// (its WebView was never disposed — no refresh) and disposes the
+  /// ephemeral preview tab.
+  void _closePreview() {
+    if (!_previewMode) return;
+    final previewId = _previewTabId;
+    final returnId = _previewReturnTabId;
+    setState(() {
+      _previewMode = false;
+      _previewTabId = null;
+      _previewReturnTabId = null;
+    });
+    final returnIndex = _tabs.indexWhere((t) => t.id == returnId);
+    if (returnIndex >= 0) {
+      _switchToActiveTab(returnIndex);
+    }
+    if (previewId != null) {
+      final previewIndex = _tabs.indexWhere((t) => t.id == previewId);
+      if (previewIndex >= 0) {
+        _closeTab(previewIndex);
+      }
+    }
   }
 
   @override
@@ -2951,6 +3058,91 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
+  /// Slim bar shown in place of the tab strip + address pill while a link
+  /// preview is open: back arrow (dismiss preview), URL, reload/stop and
+  /// close. The ephemeral page is an overlay, not a tab — the tab carousel
+  /// and address bar are hidden so there is exactly one way back out.
+  Widget _buildPreviewBar(double height) {
+    final tab = _activeTab;
+    return Container(
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: context.ac.glassSurface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: context.ac.glassBorder),
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              key: const Key('preview_back_button'),
+              tooltip: 'Back to previous page',
+              icon: const Icon(Icons.arrow_back, size: 20),
+              onPressed: _closePreview,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            ),
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: context.ac.accentFrost.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'PREVIEW',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                tab.addressController.text.trim().isEmpty
+                    ? 'Loading…'
+                    : tab.addressController.text.trim(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            tab.isLoading
+                ? IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => tab.controller.stop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: () => tab.controller.reload(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
+                    ),
+                  ),
+            IconButton(
+              key: const Key('preview_close_button'),
+              tooltip: 'Close preview',
+              icon: const Icon(Icons.close_rounded, size: 20),
+              onPressed: _closePreview,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tab = _activeTab;
@@ -2991,9 +3183,13 @@ class _SnifferScreenState extends State<SnifferScreen>
     const double tabStripHeight = 34.0;
     const double addressBarHeight = 48.0;
     const double toolbarHeight = 44.0;
-    // Add padding for address bar vertical + toolbar natural height
+    // Add padding for address bar vertical + toolbar natural height.
+    // Preview mode drops the tab strip row (the ephemeral page is an
+    // overlay, not a tab) so the bar is one row shorter.
     final double bottomHeight =
-        tabStripHeight + addressBarHeight + toolbarHeight + 16;
+        (_previewMode ? addressBarHeight : tabStripHeight + addressBarHeight) +
+        toolbarHeight +
+        16;
 
     final bottomBar = AnimatedPositioned(
       duration: const Duration(milliseconds: 200),
@@ -3011,10 +3207,15 @@ class _SnifferScreenState extends State<SnifferScreen>
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Tab carousel (compact pill strip)
-                _buildTabStrip(),
-                // Address bar pill
-                Container(
+                // Link preview: a slim bar replaces the tab strip + address
+                // pill so the ephemeral page reads as an overlay, not a tab.
+                if (_previewMode)
+                  _buildPreviewBar(addressBarHeight)
+                else ...[
+                  // Tab carousel (compact pill strip)
+                  _buildTabStrip(),
+                  // Address bar pill
+                  Container(
                   height: addressBarHeight,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -3226,6 +3427,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     ),
                   ),
                 ),
+                ],
                 // Unified bottom strip — browser nav + app nav in one row
                 _buildConsolidatedStrip(tab, toolbarHeight),
               ],
@@ -3346,6 +3548,13 @@ class _SnifferScreenState extends State<SnifferScreen>
                   ),
                 ),
               if (_elementPickerActive) _buildPickerCancelButton(),
+              // Video minimized from the fullscreen player (PIP exit) keeps
+              // playing in a draggable window over everything else.
+              if (MiniPlayerController.instance.isActive)
+                MiniPlayerOverlay(
+                  bottomInset: bottomHeight + 12,
+                  onExpand: _expandMiniPlayer,
+                ),
             ],
           ),
         ),
@@ -3515,6 +3724,7 @@ class _SnifferScreenState extends State<SnifferScreen>
         insertAtIndex: insertAtIndex,
       );
     },
+    onOpenPreview: _openPreview,
     onCopyCurrentUrl: _copyCurrentUrl,
     onToggleFavorite: _toggleFavorite,
     onSaveCurrentPage: _saveCurrentPage,
@@ -4222,6 +4432,11 @@ class _SnifferScreenState extends State<SnifferScreen>
     SniffedMedia media, {
     List<SniffedMedia> groupVariants = const [],
   }) async {
+    // A new fullscreen session must not play over the minimized video —
+    // two engines decoding at once means double audio.
+    if (MiniPlayerController.instance.isActive) {
+      await MiniPlayerController.instance.close();
+    }
     final qualities = await _resolvePlaybackQualities(
       media,
       groupVariants: groupVariants,
@@ -4419,6 +4634,26 @@ class _SnifferScreenState extends State<SnifferScreen>
               pageUrl.isEmpty ? '__dismissed__' : pageUrl;
         });
       },
+    );
+  }
+
+  /// Expands the floating mini-player back into the fullscreen player. The
+  /// engine is borrowed ([MiniPlayerController] stays the owner), so the
+  /// video continues from its current position without a rebuffer, and
+  /// popping that route minimizes it again.
+  void _expandMiniPlayer() {
+    final controller = MiniPlayerController.instance;
+    final engine = controller.engine;
+    final source = controller.source;
+    if (engine == null || source == null || !mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AuroraPlayerScreen(
+          source: source,
+          initialEngine: engine.kind,
+          adoptEngine: engine,
+        ),
+      ),
     );
   }
 

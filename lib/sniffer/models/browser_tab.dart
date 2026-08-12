@@ -45,6 +45,11 @@ class BrowserTab {
   /// One-shot Play-compliance snackbar when the user lands on a restricted page.
   bool complianceNoticeShown = false;
 
+  /// True for ephemeral preview tabs (long-press link → Preview). They are
+  /// excluded from tab persistence and the tab carousel, and are always
+  /// closed when the preview is dismissed — they never become real tabs.
+  bool isPreview = false;
+
   /// Play channel: when false, all media sniffing is hard-off for this tab
   /// (restricted site). URL-level [RestrictedMediaPolicy.isBlocked] remains a
   /// backstop for paste/queue/CDN. Default true (sniffing allowed).
