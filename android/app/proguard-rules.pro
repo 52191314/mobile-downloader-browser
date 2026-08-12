@@ -35,6 +35,16 @@
 -keep class com.google.android.gms.** { *; }
 -keep class com.google.api.** { *; }
 
+# Firebase Crashlytics + Performance Monitoring (R8 keep rules; the SDKs ship
+# their own consumer rules, these are the documented additions for readable
+# stack traces and the perf gradle plugin's instrumentation classes).
+-keepattributes SourceFile,LineNumberTable        # Keep file names and line numbers for stack traces
+-keep public class * extends java.lang.Exception   # Optional: Keep custom exceptions.
+-keep class com.google.firebase.crashlytics.** { *; }
+-keep class com.google.firebase.perf.** { *; }
+-dontwarn com.google.firebase.perf.**
+-keep class com.google.firebase.analytics.** { *; }
+
 # Google Sign-In (reflection-based)
 -keep class com.google.android.gms.auth.** { *; }
 -keep class com.google.android.gms.common.** { *; }

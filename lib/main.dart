@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'l10n/app_localizations.dart';
@@ -117,6 +118,25 @@ void main() {
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
         debugPrint('[FlutterError] ${details.exceptionAsString()}');
+        // Crashlytics (fail-open, same rule as Analytics): record the fatal
+        // Flutter error, but a crash-reporting failure must never break the
+        // existing handler.
+        unawaited(
+          FirebaseCrashlytics.instance.recordFlutterFatalError(details).catchError(
+                (Object e) => debugPrint('[CrashlyticsError] $e'),
+              ),
+        );
+      };
+      // Engine-level errors (platform-channel exceptions etc.) don't reach
+      // FlutterError.onError or the zone handler — route them to Crashlytics
+      // as fatal and swallow (return true) so the app keeps running.
+      PlatformDispatcher.instance.onError = (error, stack) {
+        unawaited(
+          FirebaseCrashlytics.instance.recordError(error, stack, fatal: true).catchError(
+                (Object e) => debugPrint('[CrashlyticsPlatformError] $e'),
+              ),
+        );
+        return true;
       };
       // In release mode, ErrorWidget shows a blank grey box by default
       // (invisible on a white/dark background). Override it so any build()
@@ -177,6 +197,13 @@ void main() {
     (error, stack) {
       debugPrint('[ZoneError] $error');
       debugPrint('[AuroraZoneError] $error\n$stack');
+      // Crashlytics (fail-open): zone errors are non-fatal by default (the
+      // app keeps running after most of them), so record without terminating.
+      unawaited(
+        FirebaseCrashlytics.instance.recordError(error, stack).catchError(
+              (Object e) => debugPrint('[CrashlyticsZoneError] $e'),
+            ),
+      );
     },
   );
 }

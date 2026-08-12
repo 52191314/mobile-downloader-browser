@@ -72,6 +72,12 @@ dependencies:
     path: packages/media_kit_libs_android_video
   firebase_core: ^4.13.0
   firebase_analytics: ^12.4.6
+  # Crash + performance visibility (Play-only repo). Crashlytics captures
+  # Flutter + NDK (ffmpeg/libtorrent/mpv) crashes; Performance Monitoring
+  # auto-instruments app start + OkHttp requests. Both require the matching
+  # gradle plugins (see android/app/build.gradle.kts).
+  firebase_crashlytics: ^5.2.7
+  firebase_performance: ^0.11.4+6
 
 dev_dependencies:
   flutter_test:

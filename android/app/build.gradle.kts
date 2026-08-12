@@ -9,6 +9,10 @@ plugins {
     // Firebase Analytics (Play-only repo). Requires android/app/google-services.json
     // (downloaded from the Firebase console; the file is gitignored).
     id("com.google.gms.google-services")
+    // Crashlytics (Flutter + NDK symbol upload) + Performance Monitoring
+    // (app-start + OkHttp auto-instrumentation). Same Play-only repo.
+    id("com.google.firebase.crashlytics")
+    id("com.google.firebase.firebase-perf")
 }
 
 // Release signing: load android/key.properties (gitignored). See docs/play_signing.md.
