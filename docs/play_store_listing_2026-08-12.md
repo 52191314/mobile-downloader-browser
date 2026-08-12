@@ -9,7 +9,7 @@ App name: "Aurora Download Manager" (23/30 chars). The descriptions below use
 that exact name. Optional per-language app names are at the bottom of this
 file.
 
-Current release: 1.2.1 (build 77). The "What's new" block for the current
+Current release: 1.2.2 (build 78). The "What's new" block for the current
 release in Play Console tag format is at the bottom of this file.
 
 Short description limit: 80 chars. Full description limit: 4000 chars.
@@ -977,4 +977,56 @@ Vídeos que terminavam no mini player não ficam mais presos no último quadro; 
 <ru-RU>
 Кнопка мини-плеера теперь сворачивает видео прямо во встроенный плавающий плеер — без системного окна «картинка в картинке».
 Видео, завершившиеся в мини-плеере, больше не застревают на последнем кадре — «Играть» запускает с начала.
+</ru-RU>
+
+## Release notes v1.2.2 (Build 78) — "What's new" (Play Console tags)
+
+<en-US>
+Ad blocking and anti-tracking stay fresh: filter lists update automatically and reliably, even on slower connections.
+Tracking parameters are stripped from links, cookie banners are blocked by default, and Settings show when each list was last updated.
+</en-US>
+
+<zh-CN>
+广告拦截与反追踪保持最新：过滤列表自动、可靠地更新，即使网络较慢也能更新。
+链接中的追踪参数会被清除，默认拦截Cookie横幅，设置中可查看每个列表的更新时间。
+</zh-CN>
+
+<de-DE>
+Werbe- und Tracking-Blockierung bleibt aktuell: Filterlisten aktualisieren sich automatisch und zuverlässig — auch bei langsameren Verbindungen.
+Tracking-Parameter werden aus Links entfernt, Cookie-Banner sind standardmäßig blockiert, und die Einstellungen zeigen, wann jede Liste zuletzt aktualisiert wurde.
+</de-DE>
+
+<es-ES>
+El bloqueo de anuncios y rastreadores se mantiene al día: las listas de filtros se actualizan solas y de forma fiable, incluso con conexiones lentas.
+Los parámetros de seguimiento se eliminan de los enlaces, los banners de cookies se bloquean por defecto y los ajustes muestran cuándo se actualizó cada lista.
+</es-ES>
+
+<fr-FR>
+Le blocage des pubs et des traqueurs reste à jour : les listes de filtres se mettent à jour automatiquement et fiablement, même en connexion lente.
+Les paramètres de suivi sont retirés des liens, les bannières de cookies sont bloquées par défaut et les réglages indiquent la dernière mise à jour de chaque liste.
+</fr-FR>
+
+<hi-IN>
+विज्ञापन और ट्रैकिंग ब्लॉकिंग अपडेट रहती है: फ़िल्टर सूचियाँ अपने आप और भरोसेमंद रूप से अपडेट होती हैं, धीमे कनेक्शन पर भी।
+लिंक से ट्रैकिंग पैरामीटर हटाए जाते हैं, कुकी बैनर डिफ़ॉल्ट रूप से ब्लॉक होते हैं, और सेटिंग्स में हर सूची का आखिरी अपडेट दिखता है।
+</hi-IN>
+
+<id>
+Pemblokiran iklan dan pelacakan tetap terbaru: daftar filter diperbarui otomatis dan andal, bahkan di koneksi lambat.
+Parameter pelacakan dihapus dari tautan, spanduk cookie diblokir secara default, dan pengaturan menunjukkan kapan tiap daftar terakhir diperbarui.
+</id>
+
+<ja-JP>
+広告・トラッキングブロックは常に最新に：フィルターリストは低速接続でも自動かつ確実に更新されます。
+リンクからトラッキングパラメータを除去、Cookieバナーはデフォルトでブロック、各リストの最終更新日時は設定で確認できます。
+</ja-JP>
+
+<pt-BR>
+O bloqueio de anúncios e rastreadores fica sempre atualizado: as listas de filtros são atualizadas sozinhas e com confiabilidade, mesmo em conexões lentas.
+Parâmetros de rastreamento são removidos dos links, banners de cookies são bloqueados por padrão e as configurações mostram a última atualização de cada lista.
+</pt-BR>
+
+<ru-RU>
+Блокировка рекламы и трекеров всегда актуальна: списки фильтров обновляются автоматически и надёжно, даже на медленных соединениях.
+Параметры отслеживания удаляются из ссылок, баннеры cookie блокируются по умолчанию, а в настройках видно, когда обновлялся каждый список.
 </ru-RU>

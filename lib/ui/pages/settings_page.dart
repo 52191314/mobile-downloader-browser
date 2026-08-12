@@ -2024,7 +2024,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Download Manager',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.2.1+77', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v1.2.2+78', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
