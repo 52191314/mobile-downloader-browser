@@ -281,6 +281,41 @@ class AdBlockEngine {
     }
   }
 
+  /// Resolves `!#include <file>` directives (used by uBlockOrigin uAssets
+  /// lists — e.g. annoyances.txt is a stub whose rules live in
+  /// annoyances-others.txt) by fetching the referenced file from the same
+  /// directory. Depth-capped to guard against pathological chains.
+  static Future<String> _resolveIncludes(
+    http.Client client,
+    String text,
+    Uri baseUri, [
+    int depth = 0,
+  ]) async {
+    if (depth > 3) return text;
+    final includeRe = RegExp(r'^!#include\s+(\S+)');
+    final out = <String>[];
+    for (final line in text.split('\n')) {
+      final m = includeRe.firstMatch(line.trim());
+      if (m == null) {
+        out.add(line);
+        continue;
+      }
+      final includeUri = baseUri.resolve(m.group(1)!);
+      try {
+        final response =
+            await client.get(includeUri).timeout(_filterFetchTimeout);
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          out.add(await _resolveIncludes(client, response.body, includeUri, depth + 1));
+        }
+      } catch (_) {
+        // Keep the include line (harmless comment) rather than dropping the
+        // rest of the list.
+        out.add(line);
+      }
+    }
+    return out.join('\n');
+  }
+
   /// Fetches one filter list with a single retry after a short backoff.
   /// Returns (body, errorMessage) — exactly one of the two is non-null.
   static Future<(String?, String?)> _fetchFilterListWithRetry(
@@ -562,7 +597,7 @@ class AdBlockEngine {
           final (fresh, error) = fetchedByUrl[job.uri.toString()]!;
           errorMessage = error;
           if (fresh != null) {
-            filterText = fresh;
+            filterText = await _resolveIncludes(httpClient, fresh, job.uri);
             loadedFromNetwork = true;
             if (job.cacheFile != null) {
               try {

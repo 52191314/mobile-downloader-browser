@@ -58,6 +58,38 @@ void main() {
     expect(engine.sourceStatuses.single.errorMessage, contains('timed out'));
   });
 
+  test('adblock: !#include stubs are resolved (uAssets annoyances pattern)',
+      () async {
+    final client = MockClient((request) async {
+      // Stub list that includes its real rules from a sibling file.
+      if (request.url.toString() == 'https://example.com/annoy.txt') {
+        return http.Response(
+          '! stub\n!#include annoy-others.txt\n##.cookie-banner\n',
+          200,
+        );
+      }
+      if (request.url.toString() == 'https://example.com/annoy-others.txt') {
+        return http.Response('||ads.tracker.example^\n###newsletter-popup\n', 200);
+      }
+      return http.Response('not found', 404);
+    });
+
+    final engine = await AdBlockEngine.fromFilterSources(
+      enabled: true,
+      sources: const [
+        AdblockFilterSource(
+          name: 'Annoy Stub',
+          url: 'https://example.com/annoy.txt',
+        ),
+      ],
+      client: client,
+    );
+
+    // Stub's own rule + the 2 rules from the included file.
+    expect(engine.sourceStatuses.single.state, AdblockSourceLoadState.loaded);
+    expect(engine.sourceStatuses.single.ruleCount, 3);
+  });
+
   test('adblock: annoyances list ships enabled by default', () {
     final annoyances = AdblockFilterSource.trustedSources
         .where((s) => s.name.contains('Annoyances'))
