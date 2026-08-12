@@ -221,7 +221,7 @@ class AdblockFilterSource {
       name: 'uBlock Annoyances',
       url:
           'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances.txt',
-      enabled: false,
+      enabled: true,
     ),
     AdblockFilterSource(
       name: 'uBlock Quick Fixes',

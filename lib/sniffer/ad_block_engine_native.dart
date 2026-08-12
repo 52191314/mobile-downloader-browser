@@ -21,11 +21,16 @@ class AdblockSourceStatus {
   final int ruleCount;
   final String? errorMessage;
 
+  /// When the list was last fetched successfully (network fetch time, or the
+  /// cache file's mtime when served from cache). Null when never loaded.
+  final DateTime? lastUpdated;
+
   const AdblockSourceStatus({
     required this.url,
     required this.state,
     this.ruleCount = 0,
     this.errorMessage,
+    this.lastUpdated,
   });
 }
 
@@ -46,6 +51,24 @@ class ElementDescriptor {
     this.src,
     this.href,
     this.textHint,
+  });
+}
+
+/// One filter source queued for the refresh pipeline: cached text + whether
+/// the cache is stale enough to warrant a network fetch.
+class _SourceRefreshJob {
+  final AdblockFilterSource source;
+  final Uri uri;
+  final File? cacheFile;
+  final String? cachedText;
+  final bool shouldUpdate;
+
+  const _SourceRefreshJob({
+    required this.source,
+    required this.uri,
+    this.cacheFile,
+    this.cachedText,
+    required this.shouldUpdate,
   });
 }
 
@@ -142,7 +165,17 @@ class _ScriptletParseResult {
 }
 
 class AdBlockEngine {
-  static const Duration _filterSourceTimeout = Duration(seconds: 6);
+  /// Per-source fetch budget. Filter lists are multi-megabyte (EasyList is
+  /// ~2.5 MB) — 6 s was too short on slow mobile networks, so sources timed
+  /// out and silently fell back to stale caches.
+  static const Duration _filterFetchTimeout = Duration(seconds: 20);
+
+  /// Backoff between the first attempt and the single retry.
+  static const Duration _filterFetchRetryDelay = Duration(milliseconds: 1500);
+
+  /// Cached lists are refreshed after this age (uBlock Origin refreshes its
+  /// lists on a similar cadence).
+  static const Duration _filterStaleAfter = Duration(hours: 24);
   static final AdBlockFFIBindings? _bindings = AdBlockFFIBindings.load();
 
   final bool enabled;
@@ -224,6 +257,54 @@ class AdBlockEngine {
   static Future<File> _getCacheFile(String url) async {
     final docs = await getApplicationSupportDirectory();
     return File('${docs.path}/adblock_filter_${url.hashCode}.txt');
+  }
+
+  /// Timestamp of the last successful fetch for a filter source (the cache
+  /// file's mtime), or null when the source was never fetched successfully.
+  /// Used by the settings UI to surface list freshness.
+  static Future<DateTime?> filterSourceLastUpdated(String url) async {
+    try {
+      final cacheFile = await _getCacheFile(url);
+      if (!await cacheFile.exists()) return null;
+      return await cacheFile.lastModified();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<DateTime?> _sourceLastModified(File? cacheFile) async {
+    if (cacheFile == null) return null;
+    try {
+      return await cacheFile.lastModified();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches one filter list with a single retry after a short backoff.
+  /// Returns (body, errorMessage) — exactly one of the two is non-null.
+  static Future<(String?, String?)> _fetchFilterListWithRetry(
+    http.Client client,
+    Uri uri,
+  ) async {
+    String? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future.delayed(_filterFetchRetryDelay);
+      }
+      try {
+        final response = await client.get(uri).timeout(_filterFetchTimeout);
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          return (response.body, null);
+        }
+        lastError = 'Server returned error ${response.statusCode}';
+      } on TimeoutException {
+        lastError = 'Request timed out.';
+      } catch (error) {
+        lastError = '$error';
+      }
+    }
+    return (null, lastError);
   }
 
   static String serializeRules(
@@ -399,6 +480,8 @@ class AdBlockEngine {
         );
       }
 
+      // ---- Pass 1: cache read + staleness check (fast, sequential) ----
+      final jobs = <_SourceRefreshJob>[];
       for (final source in sources) {
         if (!source.enabled) {
           statuses.add(
@@ -424,7 +507,6 @@ class AdBlockEngine {
 
         String? filterText;
         File? cacheFile;
-
         try {
           cacheFile = await _getCacheFile(source.url);
           if (await cacheFile.exists()) {
@@ -432,13 +514,13 @@ class AdBlockEngine {
           }
         } catch (_) {}
 
-        bool shouldUpdate = false;
+        var shouldUpdate = false;
         if (filterText == null) {
           shouldUpdate = true;
         } else if (cacheFile != null) {
           try {
             final lastModified = await cacheFile.lastModified();
-            if (DateTime.now().difference(lastModified).inHours > 24) {
+            if (DateTime.now().difference(lastModified) > _filterStaleAfter) {
               shouldUpdate = true;
             }
           } catch (_) {
@@ -446,27 +528,48 @@ class AdBlockEngine {
           }
         }
 
+        jobs.add(
+          _SourceRefreshJob(
+            source: source,
+            uri: uri,
+            cacheFile: cacheFile,
+            cachedText: filterText,
+            shouldUpdate: shouldUpdate,
+          ),
+        );
+      }
+
+      // ---- Pass 2: refresh stale sources in parallel (one retry each) ----
+      final fetchResults = await Future.wait([
+        for (final job in jobs.where((j) => j.shouldUpdate))
+          _fetchFilterListWithRetry(httpClient, job.uri),
+      ]);
+      final fetchedByUrl = <String, (String?, String?)>{};
+      var fetchIndex = 0;
+      for (final job in jobs) {
+        if (!job.shouldUpdate) continue;
+        fetchedByUrl[job.uri.toString()] = fetchResults[fetchIndex++];
+      }
+
+      // ---- Pass 3: merge results in source order. Parsing stays sequential
+      // so memory stays bounded on low-RAM devices. ----
+      for (final job in jobs) {
+        final source = job.source;
+        var filterText = job.cachedText;
         String? errorMessage;
-        if (shouldUpdate) {
-          try {
-            final response = await httpClient
-                .get(uri)
-                .timeout(_filterSourceTimeout);
-            if (response.statusCode >= 200 && response.statusCode < 300) {
-              filterText = response.body;
-              if (cacheFile != null) {
-                try {
-                  await cacheFile.parent.create(recursive: true);
-                  await cacheFile.writeAsString(filterText);
-                } catch (_) {}
-              }
-            } else {
-              errorMessage = 'Server returned error ${response.statusCode}';
+        var loadedFromNetwork = false;
+        if (job.shouldUpdate) {
+          final (fresh, error) = fetchedByUrl[job.uri.toString()]!;
+          errorMessage = error;
+          if (fresh != null) {
+            filterText = fresh;
+            loadedFromNetwork = true;
+            if (job.cacheFile != null) {
+              try {
+                await job.cacheFile!.parent.create(recursive: true);
+                await job.cacheFile!.writeAsString(fresh);
+              } catch (_) {}
             }
-          } on TimeoutException {
-            errorMessage = 'Request timed out.';
-          } catch (error) {
-            errorMessage = '$error';
           }
         }
 
@@ -484,6 +587,9 @@ class AdBlockEngine {
                 state: AdblockSourceLoadState.loaded,
                 ruleCount:
                     parsed.networkRules.length + parsed.cosmeticRules.length,
+                lastUpdated: loadedFromNetwork
+                    ? DateTime.now()
+                    : await _sourceLastModified(job.cacheFile),
               ),
             );
           } catch (error) {

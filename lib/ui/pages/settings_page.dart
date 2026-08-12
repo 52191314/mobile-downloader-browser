@@ -21,6 +21,7 @@ import '../../backup/auto_backup_models.dart';
 import '../../backup/unified_backup_database.dart';
 
 import '../../settings/download_settings.dart';
+import '../../sniffer/ad_block_engine_native.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
 import '../../premium/pro_upsell_sheet.dart';
@@ -793,6 +794,14 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  String _friendlyAge(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 30) return '${diff.inDays}d ago';
+    return '${(diff.inDays / 30).floor()}mo ago';
+  }
+
   List<Widget> _buildAdblockSourceTiles(
       DownloadSettings local, void Function(void Function()) setLocal, bool isPro) {
     final trustedUrls = {
@@ -805,6 +814,21 @@ class _SettingsPageState extends State<SettingsPage> {
           final isCustom = !trustedUrls.contains(source.url);
           return CheckboxListTile(
             title: Text(source.name, style: const TextStyle(fontSize: 13)),
+            subtitle: FutureBuilder<DateTime?>(
+              future: AdBlockEngine.filterSourceLastUpdated(source.url),
+              builder: (context, snap) {
+                final updated = snap.data;
+                return Text(
+                  updated == null
+                      ? 'Never updated'
+                      : 'Updated ${_friendlyAge(updated)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: context.ac.textSecondary,
+                  ),
+                );
+              },
+            ),
             value: source.enabled,
             onChanged: (v) {
               if (v == true && !isPro) {
@@ -2000,7 +2024,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Download Manager',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.2.0+76', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v1.2.1+77', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
