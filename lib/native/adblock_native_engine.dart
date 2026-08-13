@@ -105,6 +105,38 @@ class AdBlockNativeEngine implements Finalizable {
     }
   }
 
+  /// Like [shouldBlockUrlEx] but with an explicit same-host flag: when
+  /// [isSameHost] is true, host-only rules (e.g. `||example.com^`) are skipped
+  /// in the native engine while path-prefix/contains/regex/anchored rules
+  /// still evaluate. Reuses the same scratch buffers (the extra argument is a
+  /// plain int, so no additional string scratch is needed).
+  bool shouldBlockUrlEx2(
+    String url, {
+    required String sourceHost,
+    required String requestType,
+    required bool isThirdParty,
+    required bool isSameHost,
+  }) {
+    if (_isDestroyed) return false;
+    final urlPtr = _urlScratch.encode(url);
+    final hostPtr = _hostScratch.encode(sourceHost);
+    final typePtr = _typeScratch.encode(requestType);
+    try {
+      return _bindings.shouldBlockEx2(
+            _enginePtr,
+            urlPtr,
+            hostPtr,
+            typePtr,
+            isThirdParty ? 1 : 0,
+            isSameHost ? 1 : 0,
+          ) ==
+          1;
+    } catch (e) {
+      debugPrint('Error checking URL Ex2 with native engine: $e');
+      return false;
+    }
+  }
+
   bool shouldHideElement({
     required String pageHost,
     required String tagName,

@@ -20,6 +20,16 @@ bool AdBlockEngineImpl::should_block_ex(
     return matcher_.should_block_ex(url, source_host, request_type, is_third_party);
 }
 
+bool AdBlockEngineImpl::should_block_ex2(
+    std::string_view url, 
+    std::string_view source_host, 
+    std::string_view request_type, 
+    bool is_third_party,
+    bool skip_host_only
+) const {
+    return matcher_.should_block_ex2(url, source_host, request_type, is_third_party, skip_host_only);
+}
+
 bool AdBlockEngineImpl::should_hide_element(
     std::string_view page_host,
     std::string_view tag_name,

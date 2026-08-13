@@ -53,6 +53,16 @@ public:
         std::string_view request_type, 
         bool is_third_party
     ) const;
+    // Same as should_block_ex, plus: when skip_host_only is true, host-only
+    // DomainMatch rules are skipped (never fire) while path-prefix, contains,
+    // regex and anchored rules still evaluate.
+    bool should_block_ex2(
+        std::string_view url, 
+        std::string_view source_host, 
+        std::string_view request_type, 
+        bool is_third_party,
+        bool skip_host_only
+    ) const;
     
     bool should_hide_element(
         std::string_view page_host,
@@ -66,7 +76,7 @@ private:
     void build_aho_corasick();
     void clear();
     
-    bool evaluate_options(const Rule* rule, std::string_view source_host, std::string_view request_type, bool is_third_party) const;
+    bool evaluate_options(const Rule* rule, std::string_view source_host, std::string_view request_host, std::string_view request_type, bool is_third_party) const;
 
     std::vector<Rule> rules_;
     std::vector<CosmeticRule> cosmetic_rules_;

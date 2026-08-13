@@ -69,13 +69,44 @@ EXPORT int aurora_adblock_should_block_ex(
     }
     
     if (current_impl) {
-        // string_view: zero-copy views over the Dart-provided buffers — no
+        // string_view: zero-copy views over the Dart-provided buffers -- no
         // per-request std::string heap allocations at the FFI boundary.
         std::string_view url(urlUtf8);
         std::string_view source_host(sourceHostUtf8 ? sourceHostUtf8 : "");
         std::string_view request_type(requestTypeUtf8 ? requestTypeUtf8 : "");
         bool third_party = (isThirdParty != 0);
         return current_impl->should_block_ex(url, source_host, request_type, third_party) ? 1 : 0;
+    }
+    return 0;
+}
+
+// Same as aurora_adblock_should_block_ex plus isSameHost: when isSameHost is
+// nonzero, host-only DomainMatch rules are skipped (they never fire) while
+// path-prefix/contains/regex/anchored rules still evaluate.
+EXPORT int aurora_adblock_should_block_ex2(
+    void* engine, 
+    const char* urlUtf8, 
+    const char* sourceHostUtf8, 
+    const char* requestTypeUtf8, 
+    int isThirdParty,
+    int isSameHost
+) {
+    if (!engine || !urlUtf8) return 0;
+    auto* wrapper = static_cast<AdBlockEngineWrapper*>(engine);
+    
+    std::shared_ptr<AdBlockEngineImpl> current_impl;
+    {
+        std::lock_guard<std::mutex> lock(wrapper->mutex);
+        current_impl = wrapper->impl;
+    }
+    
+    if (current_impl) {
+        std::string_view url(urlUtf8);
+        std::string_view source_host(sourceHostUtf8 ? sourceHostUtf8 : "");
+        std::string_view request_type(requestTypeUtf8 ? requestTypeUtf8 : "");
+        bool third_party = (isThirdParty != 0);
+        bool same_host = (isSameHost != 0);
+        return current_impl->should_block_ex2(url, source_host, request_type, third_party, same_host) ? 1 : 0;
     }
     return 0;
 }

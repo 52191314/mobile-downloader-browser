@@ -33,6 +33,25 @@ typedef AuroraAdblockShouldBlockEx =
       int isThirdParty,
     );
 
+typedef AuroraAdblockShouldBlockEx2C =
+    Int32 Function(
+      Pointer<Void> engine,
+      Pointer<Utf8> urlUtf8,
+      Pointer<Utf8> sourceHostUtf8,
+      Pointer<Utf8> requestTypeUtf8,
+      Int32 isThirdParty,
+      Int32 isSameHost,
+    );
+typedef AuroraAdblockShouldBlockEx2 =
+    int Function(
+      Pointer<Void> engine,
+      Pointer<Utf8> urlUtf8,
+      Pointer<Utf8> sourceHostUtf8,
+      Pointer<Utf8> requestTypeUtf8,
+      int isThirdParty,
+      int isSameHost,
+    );
+
 typedef AuroraAdblockShouldHideElementC =
     Int32 Function(
       Pointer<Void> engine,
@@ -59,6 +78,7 @@ class AdBlockFFIBindings {
   late final AuroraAdblockLoadRules loadRules;
   late final AuroraAdblockShouldBlock shouldBlock;
   late final AuroraAdblockShouldBlockEx shouldBlockEx;
+  late final AuroraAdblockShouldBlockEx2 shouldBlockEx2;
   late final AuroraAdblockShouldHideElement shouldHideElement;
   late final AuroraAdblockDestroy destroyEngine;
   late final NativeFinalizer finalizer;
@@ -81,6 +101,11 @@ class AdBlockFFIBindings {
           AuroraAdblockShouldBlockExC,
           AuroraAdblockShouldBlockEx
         >('aurora_adblock_should_block_ex');
+    shouldBlockEx2 = lib
+        .lookupFunction<
+          AuroraAdblockShouldBlockEx2C,
+          AuroraAdblockShouldBlockEx2
+        >('aurora_adblock_should_block_ex2');
     shouldHideElement = lib
         .lookupFunction<
           AuroraAdblockShouldHideElementC,
