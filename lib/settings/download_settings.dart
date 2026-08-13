@@ -272,8 +272,10 @@ class AdblockFilterSource {
     ),
     AdblockFilterSource(
       name: 'AdGuard URL Tracking',
-      url:
-          'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_17_TrackParam/filter.txt',
+      // uBO-optimized build of AdGuard filter 17: ~2,600 `$removeparam`
+      // rules (plain params, /regex/ and ~exception forms) that strip
+      // tracking parameters instead of blocking requests.
+      url: 'https://filters.adtidy.org/extension/ublock/filters/17_optimized.txt',
     ),
     AdblockFilterSource(
       name: 'Fanboy Annoyance',
@@ -358,15 +360,17 @@ class AdblockFilterSource {
   ];
 
   /// Returns the default list of trusted filter sources.
-  /// Exactly 3 slots are enabled by default (fitting within [freeFilterListSlots]):
+  /// Exactly 4 slots are enabled by default:
   /// - EasyList (Ads)
   /// - EasyPrivacy (Trackers & Privacy)
   /// - Peter Lowe's List (Adservers & tracking)
+  /// - AdGuard URL Tracking (query-parameter stripping)
   static List<AdblockFilterSource> defaultSources() {
     const defaultEnabledUrls = {
       'https://easylist.to/easylist/easylist.txt',
       'https://easylist.to/easylist/easyprivacy.txt',
       'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblock&showintro=0&mimetype=plaintext',
+      'https://filters.adtidy.org/extension/ublock/filters/17_optimized.txt',
     };
     return [
       for (final source in trustedSources)

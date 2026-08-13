@@ -128,12 +128,20 @@ class AdBlockParseResult {
   final List<CssInjectionRule> cssInjectionRules;
   final List<RemoveParamRule> removeParamRules;
 
+  /// Hosts whose pages disable generic cosmetic filtering (`$generichide`).
+  final Set<String> genericHideHosts;
+
+  /// Hosts whose pages disable all cosmetic filtering (`$elemhide`).
+  final Set<String> elemHideHosts;
+
   const AdBlockParseResult({
     required this.networkRules,
     required this.cosmeticRules,
     this.scriptletRules = const [],
     this.cssInjectionRules = const [],
     this.removeParamRules = const [],
+    this.genericHideHosts = const {},
+    this.elemHideHosts = const {},
   });
 }
 
@@ -161,15 +169,29 @@ class CssInjectionRule {
 
 /// A `$removeparam` rule (AdGuard URL Tracking list): strip the named query
 /// parameter from matching URLs instead of blocking them. `param` null means
-/// strip ALL query parameters.
+/// strip ALL query parameters (unless [paramRegex] is set).
 class RemoveParamRule {
   /// Pre-modifier pattern: '' (every URL), '||host^', 'host/path', '/path'.
   final String pattern;
 
-  /// Parameter name to strip; null = strip all query parameters.
+  /// Plain parameter name to strip (or, for exception rules, to keep).
+  /// Matched case-insensitively. Null when [paramRegex] is used.
   final String? param;
 
-  const RemoveParamRule({required this.pattern, this.param});
+  /// Regex matched against query parameter NAMES (`$removeparam=/regex/`).
+  /// Compiled case-insensitively. Null for plain-param rules.
+  final RegExp? paramRegex;
+
+  /// True for `$removeparam=~param` rules: the named parameter(s) must never
+  /// be stripped, even when another rule matches them.
+  final bool isException;
+
+  const RemoveParamRule({
+    required this.pattern,
+    this.param,
+    this.paramRegex,
+    this.isException = false,
+  });
 }
 
 class _ScriptletParseResult {
@@ -199,6 +221,15 @@ class AdBlockEngine {
   final List<ScriptletRule> scriptletRules;
   final List<CssInjectionRule> cssInjectionRules;
   final List<RemoveParamRule> removeParamRules;
+
+  /// Hosts with a `$generichide` network rule: generic cosmetic CSS is
+  /// suppressed on their pages; host-specific rules still apply.
+  final Set<String> genericHideHosts;
+
+  /// Hosts with a `$elemhide` network rule: ALL cosmetic filtering is
+  /// suppressed on their pages (generic + host-specific).
+  final Set<String> elemHideHosts;
+
   final List<AdblockSourceStatus> sourceStatuses;
   AdBlockNativeEngine? _nativeEngine;
   bool _nativeEngineInitialized = false;
@@ -243,6 +274,8 @@ class AdBlockEngine {
     this.scriptletRules = const [],
     this.cssInjectionRules = const [],
     this.removeParamRules = const [],
+    this.genericHideHosts = const {},
+    this.elemHideHosts = const {},
     this.sourceStatuses = const [],
     this.rawRulesText,
   }) : _nativeEngine = null /* created lazily in shouldBlockUrl */ {
@@ -419,6 +452,8 @@ class AdBlockEngine {
       scriptletRules: parsed.scriptletRules,
       cssInjectionRules: parsed.cssInjectionRules,
       removeParamRules: parsed.removeParamRules,
+      genericHideHosts: parsed.genericHideHosts,
+      elemHideHosts: parsed.elemHideHosts,
       rawRulesText: _builtInRules,
     );
   }
@@ -488,6 +523,8 @@ class AdBlockEngine {
       final cssInjections = <CssInjectionRule>[...builtIn.cssInjectionRules];
       final statuses = <AdblockSourceStatus>[];
       final removeParams = <RemoveParamRule>[...builtIn.removeParamRules];
+      final genericHideHosts = <String>{...builtIn.genericHideHosts};
+      final elemHideHosts = <String>{...builtIn.elemHideHosts};
 
       // Add manual cosmetic rules to rawSb
       for (final rule in manualCosmeticRules) {
@@ -530,6 +567,8 @@ class AdBlockEngine {
           scriptletRules: scriptlets,
           cssInjectionRules: cssInjections,
           removeParamRules: removeParams,
+          genericHideHosts: genericHideHosts,
+          elemHideHosts: elemHideHosts,
           sourceStatuses: [
             for (final source in sources)
               AdblockSourceStatus(
@@ -642,6 +681,8 @@ class AdBlockEngine {
             scriptlets.addAll(parsed.scriptletRules);
             cssInjections.addAll(parsed.cssInjectionRules);
             removeParams.addAll(parsed.removeParamRules);
+            genericHideHosts.addAll(parsed.genericHideHosts);
+            elemHideHosts.addAll(parsed.elemHideHosts);
             rawSb.writeln(_withoutRemoveParamLines(filterText));
             statuses.add(
               AdblockSourceStatus(
@@ -681,6 +722,8 @@ class AdBlockEngine {
         scriptletRules: scriptlets,
         cssInjectionRules: cssInjections,
         removeParamRules: removeParams,
+        genericHideHosts: genericHideHosts,
+        elemHideHosts: elemHideHosts,
         sourceStatuses: statuses,
         rawRulesText: rawSb.toString(),
       );
@@ -718,10 +761,11 @@ class AdBlockEngine {
     String sourceHost = '',
     String requestType = '',
     bool isThirdParty = false,
+    bool isSameHost = false,
   }) {
     if (!enabled) return false;
 
-    final cacheKey = '$rawUrl|$sourceHost|$requestType|$isThirdParty';
+    final cacheKey = '$rawUrl|$sourceHost|$requestType|$isThirdParty|$isSameHost';
     final cached = _blockCache[cacheKey];
     if (cached != null) {
       _blockCache.remove(cacheKey);
@@ -732,11 +776,12 @@ class AdBlockEngine {
     bool result = false;
     final nativeEngine = _lazyNativeEngine();
     if (nativeEngine != null) {
-      result = nativeEngine.shouldBlockUrlEx(
+      result = nativeEngine.shouldBlockUrlEx2(
         rawUrl,
         sourceHost: sourceHost,
         requestType: requestType,
         isThirdParty: isThirdParty,
+        isSameHost: isSameHost,
       );
     } else {
       final uri = Uri.tryParse(rawUrl);
@@ -745,6 +790,9 @@ class AdBlockEngine {
       } else {
         var blocked = false;
         for (final rule in rules) {
+          // Skip host-only domain rules for same-host requests (mirrors the
+          // native ex2 skip-host-only semantics).
+          if (isSameHost && rule.type == AdBlockRuleType.domain) continue;
           if (!rule.matches(uri, rawUrl)) continue;
           if (rule.isException) {
             blocked = false;
@@ -828,13 +876,21 @@ class AdBlockEngine {
   /// Host-independent cosmetic CSS — rules written as `##selector` with no
   /// domain, which is the bulk of EasyList's element hiding.
   ///
-  /// Installed once as a document_start user script rather than pushed over the
-  /// platform channel on every navigation: the full lists carry thousands of
-  /// generic rules, and re-sending that per page load would cost more than the
-  /// ads it hides. Cached because the result never varies by host, and the
-  /// engine is rebuilt (new instance) whenever the user's filter sources change.
-  String getGenericCosmeticCss() {
+  /// Installed once as a document_start user script rather than pushed over
+  /// the platform channel on every navigation: the full lists carry thousands
+  /// of generic rules, and re-sending that per page load would cost more than
+  /// the ads it hides. Cached because the result never varies by host, and
+  /// the engine is rebuilt (new instance) whenever the user's filter sources
+  /// change.
+  ///
+  /// Pass the page [host] to honor `$generichide` / `$elemhide` rules: hosts
+  /// in those sets get no generic CSS (host-specific rules are unaffected).
+  String getGenericCosmeticCss([String host = '']) {
     if (!enabled) return '';
+    if (_hostInSet(host, genericHideHosts) ||
+        _hostInSet(host, elemHideHosts)) {
+      return '';
+    }
     final cached = _genericCosmeticCssCache;
     if (cached != null) return cached;
     final selectors = <String>[];
@@ -847,9 +903,12 @@ class AdBlockEngine {
   }
 
   /// Returns cosmetic CSS specific to [host]. Generic (hostless) rules are
-  /// deliberately excluded — see [getGenericCosmeticCss].
+  /// deliberately excluded — see [getGenericCosmeticCss]. Hosts with a
+  /// `$elemhide` rule get nothing at all (all cosmetic filtering is
+  /// suppressed on their pages).
   String getCosmeticCssForHost(String host) {
     if (!enabled) return '';
+    if (_hostInSet(host, elemHideHosts)) return '';
     final normalizedHost = host.toLowerCase();
     final selectors = <String>[];
     final cssInjections = <String>[];
@@ -884,6 +943,16 @@ class AdBlockEngine {
       parts.addAll(cssInjections);
     }
     return parts.join('\n');
+  }
+
+  /// Whether [host] (or any of its subdomains) is listed in [hosts].
+  static bool _hostInSet(String host, Set<String> hosts) {
+    if (host.isEmpty || hosts.isEmpty) return false;
+    final normalized = host.toLowerCase();
+    for (final entry in hosts) {
+      if (normalized == entry || normalized.endsWith('.$entry')) return true;
+    }
+    return false;
   }
 
   static bool looksLikeAdMediaUrl(String rawUrl) {
@@ -923,6 +992,8 @@ class AdBlockEngine {
     final scriptlets = <ScriptletRule>[];
     final cssInjections = <CssInjectionRule>[];
     final removeParams = <RemoveParamRule>[];
+    final genericHideHosts = <String>{};
+    final elemHideHosts = <String>{};
     for (final rawLine in text.split(RegExp(r'\r?\n'))) {
       final line = rawLine.trim();
       if (line.isEmpty || line.startsWith('!') || line.startsWith('[')) {
@@ -972,6 +1043,24 @@ class AdBlockEngine {
       final isException = line.startsWith('@@');
       final body = isException ? line.substring(2) : line;
 
+      // Track `$generichide` / `$elemhide` cosmetic-gating options. They
+      // appear on network rules (e.g. `||example.com^$generichide` or
+      // `@@||example.com^$generichide`) and disable generic — or all —
+      // cosmetic filtering on the matched host. The rule itself still
+      // becomes a normal network rule below.
+      final optionIndex = body.indexOf(r'$');
+      if (optionIndex != -1) {
+        final optionNames = <String>{
+          for (final option in body.substring(optionIndex + 1).split(','))
+            option.trim().toLowerCase(),
+        };
+        final host = _extractRuleHost(body.substring(0, optionIndex).trim());
+        if (host != null) {
+          if (optionNames.contains('generichide')) genericHideHosts.add(host);
+          if (optionNames.contains('elemhide')) elemHideHosts.add(host);
+        }
+      }
+
       // `$removeparam` rules strip tracking parameters — they must never
       // become block rules (the old modifier-stripping turned AdGuard URL
       // Tracking's 2,600+ rules into full-domain blocks, e.g. youtube.com).
@@ -990,12 +1079,16 @@ class AdBlockEngine {
       scriptletRules: scriptlets,
       cssInjectionRules: cssInjections,
       removeParamRules: removeParams,
+      genericHideHosts: genericHideHosts,
+      elemHideHosts: elemHideHosts,
     );
   }
 
   /// Drops `$removeparam` lines from filter text before it reaches the
   /// native engine, whose parser also strips `$` modifiers and would
-  /// otherwise turn them into domain-block rules.
+  /// otherwise turn them into domain-block rules. Regex-valued rules
+  /// (`$removeparam=/re/`) parse to non-null rule lists too, so they are
+  /// stripped here as well.
   static String _withoutRemoveParamLines(String text) {
     if (!text.contains('removeparam')) return text;
     return text
@@ -1004,8 +1097,14 @@ class AdBlockEngine {
         .join('\n');
   }
 
-  /// Parses a `$removeparam[=param]` rule. Returns null when the line is not
-  /// a removeparam rule. `param1|param2` values expand into multiple rules.
+  /// Parses a `$removeparam[=value]` rule. Returns null when the line is not
+  /// a removeparam rule. Supported values:
+  ///   * `removeparam=param` — strip that parameter (case-insensitive);
+  ///   * `removeparam=/regex/` — strip every parameter whose NAME matches;
+  ///   * `removeparam=~param` / `removeparam=~/regex/` — exception: never
+  ///     strip, even when another rule matches;
+  ///   * bare `removeparam` — strip all parameters.
+  /// `param1|param2` values expand into multiple rules.
   static List<RemoveParamRule>? _parseRemoveParamRule(String body) {
     final optionIndex = body.indexOf(r'$');
     if (optionIndex == -1) return null;
@@ -1028,17 +1127,106 @@ class AdBlockEngine {
         RemoveParamRule(pattern: body.substring(0, optionIndex).trim()),
       ];
     }
-    // Regex-valued removeparam rules are unsupported — drop the rule instead
-    // of stripping everything.
-    if (removeParamValue.startsWith('/')) return const [];
-    return [
-      for (final param in removeParamValue.split('|'))
-        if (param.isNotEmpty)
+    final pattern = body.substring(0, optionIndex).trim();
+    final rules = <RemoveParamRule>[];
+    for (final item in _splitRemoveParamValues(removeParamValue)) {
+      var value = item.trim();
+      if (value.isEmpty) continue;
+      var isException = false;
+      if (value.startsWith('~')) {
+        isException = true;
+        value = value.substring(1).trim();
+      }
+      if (value.startsWith('/')) {
+        final regex = _compileRemoveParamRegex(value);
+        if (regex != null) {
+          rules.add(
+            RemoveParamRule(
+              pattern: pattern,
+              paramRegex: regex,
+              isException: isException,
+            ),
+          );
+        }
+        continue;
+      }
+      if (value.isNotEmpty) {
+        rules.add(
           RemoveParamRule(
-            pattern: body.substring(0, optionIndex).trim(),
-            param: param,
+            pattern: pattern,
+            param: value.toLowerCase(),
+            isException: isException,
           ),
-    ];
+        );
+      }
+    }
+    return rules;
+  }
+
+  /// Splits a `removeparam=` value on `|`, keeping `/regex/` segments intact
+  /// (AdGuard regex values may contain `|` alternations, e.g.
+  /// `removeparam=~/^(primer|subset_id)=/`).
+  static List<String> _splitRemoveParamValues(String value) {
+    final parts = <String>[];
+    final buffer = StringBuffer();
+    var inRegex = false;
+    for (var i = 0; i < value.length; i++) {
+      final ch = value[i];
+      if (ch == '/' && !inRegex) {
+        // A '/' opens a regex segment at the start of a value or right after
+        // the '~' exception marker.
+        final prev = buffer.isEmpty ? '' : buffer.toString()[buffer.length - 1];
+        if (buffer.isEmpty || prev == '~' || prev == '|' || prev == ' ') {
+          inRegex = true;
+          buffer.write(ch);
+          continue;
+        }
+        buffer.write(ch);
+        continue;
+      }
+      if (ch == '/' && inRegex) {
+        // Close the regex unless the slash is escaped.
+        final prev = buffer.toString()[buffer.length - 1];
+        if (prev == r'\') {
+          buffer.write(ch);
+          continue;
+        }
+        inRegex = false;
+        buffer.write(ch);
+        continue;
+      }
+      if (ch == '|' && !inRegex) {
+        parts.add(buffer.toString());
+        buffer.clear();
+        continue;
+      }
+      buffer.write(ch);
+    }
+    if (buffer.isNotEmpty) parts.add(buffer.toString());
+    return parts;
+  }
+
+  /// Compiles an AdGuard `$removeparam=/regex/` value into a RegExp matched
+  /// against query parameter NAMES. Compiled case-insensitively (parameter
+  /// names are compared case-insensitively throughout). Returns null when
+  /// the pattern is invalid — the rule is dropped rather than risking a
+  /// broad match.
+  static RegExp? _compileRemoveParamRegex(String value) {
+    final lastSlash = value.lastIndexOf('/');
+    if (lastSlash <= 0) return null;
+    final body = value.substring(1, lastSlash);
+    final flags = value.substring(lastSlash + 1);
+    try {
+      return RegExp(
+        body,
+        caseSensitive: false,
+        multiLine: flags.contains('m'),
+        dotAll: flags.contains('s'),
+        unicode: flags.contains('u'),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Strips tracking parameters from [url] per the loaded `$removeparam`
@@ -1050,27 +1238,66 @@ class AdBlockEngine {
     final host = uri.host.toLowerCase();
     final path = uri.path;
 
-    final stripAll = removeParamRules.any(
-      (r) => r.param == null && _removeParamRuleMatches(r, host, path),
-    );
-    if (stripAll) {
-      return uri.replace(queryParameters: null).toString();
-    }
-    final toStrip = <String>{};
+    // Exceptions (`~param` / `~/regex/`) apply first: a parameter named in
+    // an exception rule is never stripped, even when another rule matches it.
+    final exempt = <String>{};
     for (final rule in removeParamRules) {
-      final param = rule.param;
-      if (param == null || !_removeParamRuleMatches(rule, host, path)) {
+      if (!rule.isException || !_removeParamRuleMatches(rule, host, path)) {
         continue;
       }
-      toStrip.add(param);
+      final regex = rule.paramRegex;
+      if (regex != null) {
+        for (final key in uri.queryParameters.keys) {
+          if (regex.hasMatch(key)) exempt.add(key.toLowerCase());
+        }
+      } else if (rule.param != null) {
+        exempt.add(rule.param!.toLowerCase());
+      }
     }
-    if (toStrip.isEmpty) return null;
+
+    final stripAll = removeParamRules.any(
+      (r) =>
+          !r.isException &&
+          r.param == null &&
+          r.paramRegex == null &&
+          _removeParamRuleMatches(r, host, path),
+    );
+
+    final toStrip = <String>{};
+    for (final rule in removeParamRules) {
+      if (rule.isException || !_removeParamRuleMatches(rule, host, path)) {
+        continue;
+      }
+      final regex = rule.paramRegex;
+      if (regex != null) {
+        for (final key in uri.queryParameters.keys) {
+          if (regex.hasMatch(key)) toStrip.add(key.toLowerCase());
+        }
+        continue;
+      }
+      final param = rule.param;
+      if (param != null) toStrip.add(param.toLowerCase());
+    }
+    toStrip.removeAll(exempt);
+
     final remaining = <String, String>{
       for (final entry in uri.queryParameters.entries)
-        if (!toStrip.contains(entry.key)) entry.key: entry.value,
+        if (!toStrip.contains(entry.key.toLowerCase()) &&
+            !(stripAll && !exempt.contains(entry.key.toLowerCase())))
+          entry.key: entry.value,
     };
     if (remaining.length == uri.queryParameters.length) return null;
+    if (remaining.isEmpty) return _uriWithoutQuery(uri);
     return uri.replace(queryParameters: remaining).toString();
+  }
+
+  /// Renders [uri] without its query component. `Uri.replace` treats a null
+  /// query as "leave unchanged", so the query has to be dropped explicitly.
+  static String _uriWithoutQuery(Uri uri) {
+    var s = uri.replace(query: '').toString();
+    s = s.replaceAll('?#', '#');
+    if (s.endsWith('?')) s = s.substring(0, s.length - 1);
+    return s;
   }
 
   static bool _removeParamRuleMatches(
@@ -1136,6 +1363,8 @@ class AdBlockEngine {
     ':-abp-contains(',
     ':xpath(',
     ':matches-css(',
+    ':matches-css-before(',
+    ':matches-css-after(',
     ':matches-attr(',
     ':matches-path(',
     ':min-text-length(',
@@ -1148,12 +1377,27 @@ class AdBlockEngine {
     ':if-not(',
   ];
 
-  static bool _isSupportedSelector(String selector) {
-    final lower = selector.toLowerCase();
+  /// Returns [selector] ready to be emitted into the comma-joined cosmetic
+  /// CSS, or null when it must be dropped.
+  ///
+  /// AdGuard's `:-abp-has(X)` procedural pseudo-class is a plain-CSS alias
+  /// for `:has(X)`, which modern Android System WebView (Chromium 105+)
+  /// supports natively — the token is translated and the rest of the selector
+  /// left intact. Every other procedural token stays unsupported: the browser
+  /// rejects it, and because selectors are emitted as one comma-separated
+  /// list, a single invalid entry would silently void every cosmetic rule on
+  /// the page. The translated selector is re-checked so a rule that still
+  /// carries a procedural token after translation is dropped too.
+  static String? _translateSelector(String selector) {
+    final translated = selector.replaceAll(
+      RegExp(r':-abp-has\(', caseSensitive: false),
+      ':has(',
+    );
+    final lower = translated.toLowerCase();
     for (final token in _proceduralSelectorTokens) {
-      if (lower.contains(token)) return false;
+      if (lower.contains(token)) return null;
     }
-    return true;
+    return translated;
   }
 
   static CosmeticAdRule? _parseCosmeticLine(String line) {
@@ -1164,10 +1408,11 @@ class AdBlockEngine {
     final host = line.substring(0, index).trim();
     final selector = line.substring(index + 2).trim();
     if (selector.isEmpty || host.contains(',')) return null;
-    if (!_isSupportedSelector(selector)) return null;
+    final translated = _translateSelector(selector);
+    if (translated == null) return null;
     // An empty host means "all hosts"; getCosmeticCssForHost already treats
     // CosmeticAdRule.host == '' that way.
-    return CosmeticAdRule(host: host, selector: selector);
+    return CosmeticAdRule(host: host, selector: translated);
   }
 
   static _ScriptletParseResult _parseScriptletArgs(String argsStr) {
@@ -1272,6 +1517,22 @@ class AdBlockEngine {
         !host.contains('*') &&
         !host.contains('/') &&
         !host.contains(':');
+  }
+
+  /// Extracts the host from the pre-modifier pattern of a network rule
+  /// (`||example.com^`, `example.com/path`, ...). Returns null when the
+  /// pattern carries no usable host (regex rules, wildcard-only patterns).
+  static String? _extractRuleHost(String pattern) {
+    var clean = pattern.trim();
+    if (clean.isEmpty) return null;
+    if (clean.startsWith('||')) {
+      clean = clean.substring(2);
+    } else if (clean.startsWith('|')) {
+      clean = clean.substring(1);
+    }
+    final host = clean.split(RegExp(r'[/^]')).first.trim().toLowerCase();
+    if (host.isEmpty || host.contains('*') || host.contains(':')) return null;
+    return host;
   }
 }
 

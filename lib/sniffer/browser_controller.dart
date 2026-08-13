@@ -723,12 +723,14 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     String sourceHost = '',
     String requestType = '',
     bool isThirdParty = false,
+    bool isSameHost = false,
   }) {
     return _adBlockEngine.shouldBlockUrl(
       url,
       sourceHost: sourceHost,
       requestType: requestType,
       isThirdParty: isThirdParty,
+      isSameHost: isSameHost,
     );
   }
 
@@ -845,10 +847,6 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       return null;
     }
 
-    if (pageUri != null && requestUri.host == pageUri.host) {
-      return null;
-    }
-
     // Skip non-http(s) schemes
     final scheme = requestUri.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') return null;
@@ -861,6 +859,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     if (pageUri != null && requestUri.host != pageUri.host) {
       isThirdParty = true;
     }
+    final bool isSameHost = pageUri != null && requestUri.host == pageUri.host;
 
     // Infer request type from URL extension and headers
     final requestType = _inferRequestType(url, request.method ?? 'GET');
@@ -870,6 +869,7 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
       sourceHost: sourceHost,
       requestType: requestType,
       isThirdParty: isThirdParty,
+      isSameHost: isSameHost,
     )) {
       _blockedRequestCount++;
       // Return an empty 204 No Content response to block the request
@@ -945,6 +945,26 @@ class SnifferWebViewControllerImpl implements SnifferBrowserController {
     }
     if (ext.endsWith('.html') || ext.endsWith('.htm')) return 'subdocument';
     if (ext.endsWith('.xml') || ext.endsWith('.json')) return 'xmlhttprequest';
+    if (ext.endsWith('.m3u8') ||
+        ext.endsWith('.m3u') ||
+        ext.endsWith('.ts') ||
+        ext.endsWith('.m4s') ||
+        ext.endsWith('.mpd') ||
+        ext.endsWith('.mp4') ||
+        ext.endsWith('.m4v') ||
+        ext.endsWith('.flv') ||
+        ext.endsWith('.webm') ||
+        ext.endsWith('.mkv') ||
+        ext.endsWith('.mov') ||
+        ext.endsWith('.avi') ||
+        ext.endsWith('.mp3') ||
+        ext.endsWith('.aac') ||
+        ext.endsWith('.m4a') ||
+        ext.endsWith('.ogg') ||
+        ext.endsWith('.opus') ||
+        ext.endsWith('.wav')) {
+      return 'media';
+    }
     return 'other';
   }
 

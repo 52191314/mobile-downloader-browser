@@ -556,4 +556,210 @@
     });
   };
 
+  // ===============================================================
+  // SCRIPLET 16: json-prune
+  // Removes properties (by exact name, regex, or dotted path) from
+  // objects passing through JSON.stringify and JSON.parse.
+  // Usage: json-prune('propName', '/regex/', 'path.to.prop')
+  // ===============================================================
+  _registry['json-prune'] = function(args) {
+    if (!args || !args.length) return;
+
+    var patterns = [];
+    for (var i = 0; i < args.length; i++) {
+      var arg = args[i];
+      if (!arg) continue;
+      var m = /^\/(.+)\/([a-z]*)$/.exec(arg);
+      if (m) {
+        try { patterns.push(new RegExp(m[1], m[2])); } catch (_) {}
+      } else {
+        patterns.push(arg);
+      }
+    }
+    if (!patterns.length) return;
+
+    function prune(obj, path) {
+      if (!obj || typeof obj !== 'object') return;
+      if (Object.prototype.toString.call(obj) === '[object Array]') {
+        for (var i = 0; i < obj.length; i++) prune(obj[i], path);
+        return;
+      }
+      for (var key in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+        var keyPath = path ? path + '.' + key : key;
+        var remove = false;
+        for (var p = 0; p < patterns.length; p++) {
+          var pattern = patterns[p];
+          if (typeof pattern === 'string') {
+            if (pattern.indexOf('.') === -1 ? key === pattern : keyPath === pattern) {
+              remove = true;
+              break;
+            }
+          } else if (pattern.test(key)) {
+            remove = true;
+            break;
+          }
+        }
+        if (remove) {
+          try { delete obj[key]; } catch (_) {}
+        } else {
+          prune(obj[key], keyPath);
+        }
+      }
+    }
+
+    var nativeStringify = JSON.stringify;
+    JSON.stringify = function(value, replacer, space) {
+      try { prune(value, ''); } catch (_) {}
+      return nativeStringify.call(this, value, replacer, space);
+    };
+
+    var nativeParse = JSON.parse;
+    JSON.parse = function(text, reviver) {
+      var result = nativeParse.call(this, text, reviver);
+      try { prune(result, ''); } catch (_) {}
+      return result;
+    };
+  };
+
+  // ===============================================================
+  // SCRIPLET 17: set-local-storage-item
+  // Sets a localStorage item unless it already holds a different
+  // non-empty value (existing values win, never clobbered).
+  // Usage: set-local-storage-item('key', 'value')
+  // ===============================================================
+  _registry['set-local-storage-item'] = function(args) {
+    if (!args || args.length < 2) return;
+    var key = args[0];
+    var value = args[1];
+    try {
+      var current = localStorage.getItem(key);
+      if (current !== null && current !== '' && current !== value) return;
+      localStorage.setItem(key, value);
+    } catch (_) {}
+  };
+
+  // ===============================================================
+  // SCRIPLET 18: trusted-set-local-storage-item
+  // Unconditionally sets a localStorage item, overwriting any value.
+  // Usage: trusted-set-local-storage-item('key', 'value')
+  // ===============================================================
+  _registry['trusted-set-local-storage-item'] = function(args) {
+    if (!args || args.length < 2) return;
+    try {
+      localStorage.setItem(args[0], args[1]);
+    } catch (_) {}
+  };
+
+  // ===============================================================
+  // SCRIPLET 19: prevent-fetch
+  // Aborts fetch() calls whose URL matches a regex pattern.
+  // Usage: prevent-fetch('/pattern/')
+  // ===============================================================
+  _registry['prevent-fetch'] = function(args) {
+    if (!args || !args[0]) return;
+    var pattern = toRegExp(args[0]);
+    var nativeFetch = window.fetch;
+    if (typeof nativeFetch !== 'function') return;
+    window.fetch = function(input, init) {
+      var url = typeof input === 'string' ? input :
+                input instanceof Request ? input.url : '';
+      if (url && pattern.test(url)) {
+        return Promise.reject(new Error('Blocked by adblocker'));
+      }
+      return nativeFetch.apply(this, arguments);
+    };
+  };
+
+  // ===============================================================
+  // SCRIPLET 20: set-attr
+  // Sets an attribute on elements matching a selector (current and
+  // future). A value of 'removeattr' removes the attribute instead.
+  // Usage: set-attr('attribute', 'value', 'selector')
+  // ===============================================================
+  _registry['set-attr'] = function(args) {
+    if (!args || args.length < 2) return;
+    var attr = args[0];
+    var value = args[1];
+    var selector = args.length >= 3 ? args[2] : '*';
+
+    function applyAttr() {
+      try {
+        var elements = document.querySelectorAll(selector);
+        for (var i = 0; i < elements.length; i++) {
+          if (value === 'removeattr') {
+            elements[i].removeAttribute(attr);
+          } else {
+            elements[i].setAttribute(attr, value);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Run immediately
+    applyAttr();
+
+    // Run on DOM mutations
+    var observer = new MutationObserver(function() {
+      applyAttr();
+    });
+    if (document.documentElement) {
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true
+      });
+    }
+    // Disconnect after 5 seconds
+    setTimeout(function() { observer.disconnect(); }, 5000);
+  };
+
+  // ===============================================================
+  // SCRIPLET 21: prevent-refresh
+  // Blocks page refresh: removes meta http-equiv=refresh tags and
+  // neutralizes location.reload().
+  // Usage: prevent-refresh()
+  // ===============================================================
+  _registry['prevent-refresh'] = function() {
+    function stripMetaRefresh() {
+      try {
+        var metas = document.querySelectorAll('meta');
+        for (var i = 0; i < metas.length; i++) {
+          var meta = metas[i];
+          if (meta.httpEquiv && meta.httpEquiv.toLowerCase() === 'refresh') {
+            if (meta.parentNode) {
+              meta.parentNode.removeChild(meta);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Remove present refresh metas and any added later
+    stripMetaRefresh();
+    var observer = new MutationObserver(function() {
+      stripMetaRefresh();
+    });
+    if (document.documentElement) {
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true
+      });
+    }
+    setTimeout(function() { observer.disconnect(); }, 5000);
+
+    // Neutralize programmatic reloads (location.reload may live on
+    // Location.prototype or be shadowed on the window.location object)
+    try {
+      if (window.Location && window.Location.prototype &&
+          window.Location.prototype.reload) {
+        window.Location.prototype.reload = function() {};
+      }
+    } catch (_) {}
+    try {
+      if (window.location && window.location.reload) {
+        window.location.reload = function() {};
+      }
+    } catch (_) {}
+  };
+
 })();
