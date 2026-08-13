@@ -4,10 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'browser_controller.dart';
-
-/// Overscroll distance (logical px) that must be exceeded at the top of the
-/// page before a release triggers a refresh.
-const double kPullToRefreshThreshold = 120.0;
+import 'pull_to_refresh_tracker.dart';
 
 class BrowserWidget extends StatefulWidget {
   final SnifferBrowserController controller;
@@ -44,27 +41,19 @@ class _BrowserWidgetState extends State<BrowserWidget> {
   /// loading ([onLoadStop]).
   final ValueNotifier<bool> _refreshing = ValueNotifier<bool>(false);
 
-  /// Most-negative scrollY seen during the current pull (0 while not pulling).
-  double _maxOverscroll = 0;
+  /// Pure overscroll state machine (see [PullToRefreshTracker]).
+  final PullToRefreshTracker _tracker = PullToRefreshTracker();
 
   /// Android WebView reports negative `scrollY` while the user overscrolls
-  /// past the top of the page. We accumulate the most-negative value and, when
-  /// the scroll springs back to >= 0 (finger released), fire the refresh if the
-  /// pull crossed the threshold. Purely observational — no gesture detector,
-  /// so normal WebView scrolling is never affected.
+  /// past the top of the page. The tracker accumulates the most-negative value
+  /// and, when the scroll springs back to >= 0 (finger released), reports
+  /// whether the pull crossed the threshold. Purely observational — no gesture
+  /// detector, so normal WebView scrolling is never affected.
   void _handleScrollChanged(int y) {
-    final dy = y.toDouble();
-    if (dy < 0) {
-      _maxOverscroll = math.min(_maxOverscroll, dy);
-      _pullDistance.value = -dy;
-      return;
-    }
-    // Back at / above the top: the pull is over.
-    if (_maxOverscroll <= -kPullToRefreshThreshold && !_refreshing.value) {
+    if (_tracker.onScroll(y, refreshing: _refreshing.value)) {
       _triggerRefresh();
     }
-    _maxOverscroll = 0;
-    _pullDistance.value = 0;
+    _pullDistance.value = _tracker.pullDistance;
   }
 
   void _triggerRefresh() {
