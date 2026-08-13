@@ -648,7 +648,6 @@ class TabLifecycleController {
   void closeTab(int index) {
     if (_tabs.isEmpty) return;
     final removedTabId = index < _tabs.length ? _tabs[index].id : null;
-    tabManager.fetchedIframeSrcs.clear();
     host.cancelPickerIfActive();
     final wasSingleton = _tabs.length <= 1;
     tabManager.closeTab(index);
@@ -665,7 +664,10 @@ class TabLifecycleController {
   }
 
   /// Close all tabs, then open a single fresh blank tab so the
-  /// browser is never empty.
+  /// browser is never empty. The blank tab is created synchronously in the
+  /// same microtask as the clear — no `await` sits between
+  /// [TabManager.closeAllTabs] and [openNewTab] — so no async callback,
+  /// timer, or media event can observe an empty tab list.
   void closeAllTabs() {
     if (tabManager.tabs.isEmpty) return;
     host.cancelPickerIfActive();
@@ -717,6 +719,13 @@ class TabLifecycleController {
   void closeGroup(String name) {
     final closedIds = tabManager.closeGroup(name);
     host.builtWebViewTabIds.removeAll(closedIds);
+    // Closing a group can remove the last tab (e.g. a single group holding
+    // every tab). Re-add a blank tab synchronously so the list is never
+    // observably empty and the active tab's media subscription is restored.
+    if (tabManager.tabs.isEmpty) {
+      openNewTab(switchToTab: false);
+      host.switchToActiveTab(0);
+    }
     unawaited(saveTabs());
     unawaited(saveGroups());
     if (host.isMounted) host.markNeedsBuild();

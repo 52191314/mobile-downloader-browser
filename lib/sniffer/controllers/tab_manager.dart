@@ -42,8 +42,10 @@ class TabManager {
   Timer? mediaRebuildTimer;
   Timer? mediaSaveTimer;
 
-  /// Set of iframe source URLs already fetched (used to avoid duplicates).
-  final Set<String> fetchedIframeSrcs = {};
+  /// Monotonic tab-switch generation. Bumped on every switch that actually
+  /// proceeds so fire-and-forget suspend/resume completions from a superseded
+  /// switch can be recognised and their stale side effects corrected.
+  int _switchGeneration = 0;
 
   /// Callback invoked after any state change that needs a [State.setState].
   VoidCallback? onRebuild;
@@ -58,7 +60,13 @@ class TabManager {
   // Computed accessors
   // ---------------------------------------------------------------------------
 
-  BrowserTab get activeTab => tabs[activeTabIndex];
+  BrowserTab get activeTab {
+    // The tab lifecycle controller guarantees the list is never observably
+    // empty (every close path re-adds a blank tab synchronously). This assert
+    // catches a violation early in debug/tests instead of a RangeError.
+    assert(tabs.isNotEmpty, 'activeTab accessed while tabs is empty');
+    return tabs[activeTabIndex];
+  }
 
   // ---------------------------------------------------------------------------
   // Tab lifecycle
@@ -75,6 +83,7 @@ class TabManager {
       return previous;
     }
     activeTabIndex = next;
+    final generation = ++_switchGeneration;
 
     snifferSubscription?.cancel();
     snifferSubscription = activeTab.snifferEngine.onMediaChanged.listen((_) {
@@ -89,22 +98,44 @@ class TabManager {
       //   resume, the active page freezes (scrollbar may still move).
       // - freeze() sets visibility:hidden via JS; if thaw races or fails the
       //   user sees a permanent blank/stale surface.
-      unawaited(oldActive.controller.suspendTab());
+      unawaited(_suspendTabIfCurrent(oldActive, generation));
     }
 
     final newActive = activeTab;
     // Sequential resume so resumeTimers always wins over any prior pause.
-    unawaited(_activateTabWebView(newActive));
+    unawaited(_activateTabWebView(newActive, generation));
 
     onRebuild?.call();
     return previous;
   }
 
-  /// Brings [tab]'s WebView back to a live render + timer state.
-  Future<void> _activateTabWebView(BrowserTab tab) async {
+  /// Suspends [tab]'s WebView. When a newer switch has re-activated [tab]
+  /// while this suspend was still in flight, the stale suspend is undone so
+  /// the active WebView is never left paused.
+  Future<void> _suspendTabIfCurrent(BrowserTab tab, int generation) async {
+    try {
+      await tab.controller.suspendTab();
+    } catch (_) {}
+    if (generation == _switchGeneration) return;
+    if (tabs.isEmpty) return;
+    if (identical(tab, activeTab)) {
+      unawaited(tab.controller.resumeWebView());
+    }
+  }
+
+  /// Brings [tab]'s WebView back to a live render + timer state. When a newer
+  /// switch has moved the active tab elsewhere while this resume was in
+  /// flight, the stale resume is reverted so a background WebView isn't left
+  /// running.
+  Future<void> _activateTabWebView(BrowserTab tab, int generation) async {
     try {
       await tab.controller.resumeWebView();
     } catch (_) {}
+    if (generation == _switchGeneration) return;
+    if (tabs.isEmpty) return;
+    if (!identical(tab, activeTab) && tabs.contains(tab)) {
+      unawaited(tab.controller.suspendTab());
+    }
   }
 
   /// Close the tab at [index], returning it if actually removed.
@@ -134,8 +165,9 @@ class TabManager {
   }
 
   /// Close all tabs.  Disposes each tab, clears the list, and resets
-  /// the active index to 0.  The caller should create a new blank tab
-  /// after this so the browser is never empty.
+  /// the active index to 0.  The caller MUST synchronously create a new
+  /// blank tab after this (before any await) so the browser list is never
+  /// observably empty — [activeTab] throws on an empty list.
   void closeAllTabs() {
     snifferSubscription?.cancel();
     for (final tab in tabs) {
@@ -143,7 +175,6 @@ class TabManager {
     }
     tabs.clear();
     activeTabIndex = 0;
-    fetchedIframeSrcs.clear();
     mediaRebuildTimer?.cancel();
     mediaSaveTimer?.cancel();
     onRebuild?.call();

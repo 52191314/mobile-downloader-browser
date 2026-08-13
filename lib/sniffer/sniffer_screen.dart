@@ -198,7 +198,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   List<BrowserTab> get _tabs => _tabManager.tabs;
   int get _activeTabIndex => _tabManager.activeTabIndex;
   BrowserTab get _activeTab => _tabManager.activeTab;
-  Set<String> get _fetchedIframeSrcs => _tabManager.fetchedIframeSrcs;
 
   late final MediaCatchController _mediaCatchController;
   late final ElementPickerController _elementPickerController;
@@ -830,7 +829,6 @@ class _SnifferScreenState extends State<SnifferScreen>
       _previewTabId = null;
       _previewReturnTabId = null;
     }
-    _fetchedIframeSrcs.clear();
     _cancelPickerIfActive();
     _tabManager.switchToActiveTab(index);
     _addressExpanded = false;
@@ -1764,7 +1762,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           setState(() {});
         },
         onCloseAll: (name) {
-          _tabManager.closeGroup(name);
+          _tabLifecycleController.closeGroup(name);
           setState(() {});
         },
         onDisband: (name) {
@@ -1800,7 +1798,6 @@ class _SnifferScreenState extends State<SnifferScreen>
   set lastScrollY(double v) => _lastScrollY = v;
   bool get barsVisible => _barsVisible;
   set barsVisible(bool v) => _barsVisible = v;
-  Set<String> get fetchedIframeSrcs => _tabManager.fetchedIframeSrcs;
   SniffedMedia? get latestVideoMedia => _latestVideoMedia;
   set latestVideoMedia(SniffedMedia? v) => _latestVideoMedia = v;
   Rect? get videoFloatRect => _videoFloatRect;
@@ -1971,13 +1968,13 @@ class _SnifferScreenState extends State<SnifferScreen>
   );
 
   Future<void> _sniffIframeContent(BrowserTab tab, String iframeSrcUrl) async {
-    if (_fetchedIframeSrcs.contains(iframeSrcUrl)) return;
+    if (tab.fetchedIframeSrcs.contains(iframeSrcUrl)) return;
     if (iframeSrcUrl.startsWith('data:') ||
         iframeSrcUrl.startsWith('blob:') ||
         iframeSrcUrl.startsWith('about:')) {
       return;
     }
-    _fetchedIframeSrcs.add(iframeSrcUrl);
+    tab.fetchedIframeSrcs.add(iframeSrcUrl);
 
     try {
       final pageUrl = tab.addressController.text;
@@ -5214,8 +5211,26 @@ class _SnifferScreenState extends State<SnifferScreen>
     );
   }
 
+  // Memoization for [_sortedMedia]: the sniffer engine's `detectedMedia`
+  // getter returns a fresh unmodifiable list instance whenever the underlying
+  // cache mutates (SniffedMediaCache nulls its cached wrapper on every
+  // MutationAwareList change). So reference-identity of the input list plus
+  // the current sort mode is an exact invalidation key, and we can skip
+  // re-sorting the whole list on every sheet rebuild.
+  List<SniffedMedia>? _sortedCacheInput;
+  SniffedMediaSort? _sortedCacheMode;
+  List<SniffedMedia>? _sortedCacheResult;
+
   List<SniffedMedia> _sortedMedia(List<SniffedMedia> media) {
-    return sortSniffedMedia(media, widget.settings.sniffedMediaSort);
+    final mode = widget.settings.sniffedMediaSort;
+    if (identical(_sortedCacheInput, media) && _sortedCacheMode == mode) {
+      return _sortedCacheResult!;
+    }
+    final result = sortSniffedMedia(media, mode);
+    _sortedCacheInput = media;
+    _sortedCacheMode = mode;
+    _sortedCacheResult = result;
+    return result;
   }
 
   bool _isCurrentPageFavorited() {

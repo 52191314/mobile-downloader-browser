@@ -60,8 +60,6 @@ abstract class TabCallbackHost {
   bool get barsVisible;
   set barsVisible(bool v);
 
-  Set<String> get fetchedIframeSrcs;
-
   SniffedMedia? get latestVideoMedia;
   set latestVideoMedia(SniffedMedia? v);
 
@@ -172,7 +170,7 @@ class TabCallbackBinder {
       if (!_host.barsVisible) {
         _host.barsVisible = true;
       }
-      _host.fetchedIframeSrcs.clear();
+      tab.fetchedIframeSrcs.clear();
       debugPrint('Page started: $url');
       tab.authHeaderCache.clear();
       final navHost = Uri.tryParse(url)?.host;

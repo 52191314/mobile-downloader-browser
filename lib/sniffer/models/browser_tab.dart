@@ -68,6 +68,14 @@ class BrowserTab {
   /// and can be re-added at download time. Cleared on each page navigation.
   Map<String, String> authHeaderCache = {};
 
+  /// Per-tab set of iframe source URLs already fetched for media sniffing.
+  /// Kept per tab (not shared) so a background tab that loads the same iframe
+  /// URL as a previously-fetched tab still gets sniffed with its own cookies
+  /// and session. Cleared on each page navigation (via `onPageStarted`) and
+  /// discarded with the tab when it is disposed, so preview tabs and restored
+  /// tabs naturally start with an empty set.
+  final Set<String> fetchedIframeSrcs = {};
+
   /// Headless WebView fetcher used as the last-resort tier for fetching
   /// HLS/DASH playlist bodies. Created lazily by [TabLifecycleController]
   /// and disposed when the tab is closed. Uses same-origin XHR from the
