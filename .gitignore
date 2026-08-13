@@ -195,3 +195,6 @@ opencode.jsonc
 .wrangler
 .dev.vars*
 !.dev.vars.example
+
+# repowise codebase-intelligence artifacts (local tool; regenerated on index)
+.repowise/
