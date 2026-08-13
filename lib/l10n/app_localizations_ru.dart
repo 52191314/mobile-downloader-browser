@@ -1649,4 +1649,43 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'Ostanovit\' dostup';
+
+  @override
+  String get addToDownloadQueue => 'Добавить в очередь загрузок';
+
+  @override
+  String get fromLabel => 'Из';
+
+  @override
+  String get linkLabel => 'Ссылка';
+
+  @override
+  String get priorityLabel => 'Приоритет';
+
+  @override
+  String get cardPriorityMedium => 'Средний';
+
+  @override
+  String get loadingQuality => 'Загрузка параметров качества…';
+
+  @override
+  String get downloadLater => 'Скачать позже';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'Имя файла слишком длинное и было автоматически сокращено до лимита Android в $limit байт. Вы можете переименовать его или оставить это имя.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'Очистить файлы cookie, локальное хранилище и кеш для $host?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'Очистить файлы cookie, локальное хранилище и кеш для этого сайта?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'Добавьте загрузку и выберите «Скачать позже», чтобы запланировать её здесь.';
 }

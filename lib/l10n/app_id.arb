@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "Tambahkan ke antrean unduhan",
+  "fromLabel": "Dari",
+  "linkLabel": "Tautan",
+  "priorityLabel": "Prioritas",
+  "cardPriorityMedium": "Sedang",
+  "loadingQuality": "Memuat opsi kualitas…",
+  "downloadLater": "Unduh nanti",
+  "filenameLongWarning": "Nama file panjang dan dipotong otomatis agar sesuai batas {limit} byte Android. Anda dapat mengganti namanya atau mempertahankan nama ini.",
+  "snifferDlgClearSiteDataHost": "Hapus cookie, penyimpanan lokal, dan cache untuk {host}?",
+  "snifferDlgClearSiteDataThis": "Hapus cookie, penyimpanan lokal, dan cache untuk situs ini?",
+  "settingsScheduledEmptyHint": "Tambahkan unduhan dan pilih \"Unduh nanti\" untuk menjadwalkannya di sini."
 }

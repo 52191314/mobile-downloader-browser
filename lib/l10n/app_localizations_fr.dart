@@ -1659,4 +1659,43 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'Arrêter le partage';
+
+  @override
+  String get addToDownloadQueue => 'Ajouter à la file de téléchargement';
+
+  @override
+  String get fromLabel => 'De';
+
+  @override
+  String get linkLabel => 'Lien';
+
+  @override
+  String get priorityLabel => 'Priorité';
+
+  @override
+  String get cardPriorityMedium => 'Moyenne';
+
+  @override
+  String get loadingQuality => 'Chargement des options de qualité…';
+
+  @override
+  String get downloadLater => 'Télécharger plus tard';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'Le nom de fichier est long et a été tronqué automatiquement pour respecter la limite de $limit octets d\'Android. Vous pouvez le renommer ou conserver ce nom.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'Effacer les cookies, le stockage local et le cache de $host ?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'Effacer les cookies, le stockage local et le cache de ce site ?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'Ajoutez un téléchargement et choisissez « Télécharger plus tard » pour le planifier ici.';
 }

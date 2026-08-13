@@ -1649,4 +1649,43 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'साझा करना रोकें';
+
+  @override
+  String get addToDownloadQueue => 'डाउनलोड कतार में जोड़ें';
+
+  @override
+  String get fromLabel => 'से';
+
+  @override
+  String get linkLabel => 'लिंक';
+
+  @override
+  String get priorityLabel => 'प्राथमिकता';
+
+  @override
+  String get cardPriorityMedium => 'मध्यम';
+
+  @override
+  String get loadingQuality => 'गुणवत्ता विकल्प लोड हो रहे हैं…';
+
+  @override
+  String get downloadLater => 'बाद में डाउनलोड करें';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'फ़ाइल नाम लंबा है और Android की $limit बाइट सीमा में फिट होने के लिए इसे स्वतः छोटा किया गया। आप इसका नाम बदल सकते हैं या यह नाम रख सकते हैं।';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return '$host के कुकीज़, स्थानीय संग्रहण और कैश साफ़ करें?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'इस साइट के कुकीज़, स्थानीय संग्रहण और कैश साफ़ करें?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'एक डाउनलोड जोड़ें और इसे यहाँ शेड्यूल करने के लिए \"बाद में डाउनलोड करें\" चुनें।';
 }

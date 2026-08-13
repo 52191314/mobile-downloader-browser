@@ -516,7 +516,13 @@
   "dlgCreateNew": "Create New",
   "dlgUpdateExisting": "Update Existing",
   "dlgDuplicateContent": "A download with this name already exists in the queue.\n\nFile: {filename}",
-  "@dlgDuplicateContent": { "placeholders": { "filename": { "type": "String" } } },
+  "@dlgDuplicateContent": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  },
   "dlgSkip": "Skip",
   "dlgReplace": "Replace",
   "dlgApplyToAll": "Apply to all duplicates",
@@ -553,5 +559,30 @@
   "btnNewTab": "New tab",
   "btnCloseAllTabs": "Close all tabs",
   "btnNotNow": "Not now",
-  "btnStopSharing": "Stop sharing"
+  "btnStopSharing": "Stop sharing",
+  "addToDownloadQueue": "Add to Download Queue",
+  "fromLabel": "From",
+  "linkLabel": "Link",
+  "priorityLabel": "Priority",
+  "cardPriorityMedium": "Medium",
+  "loadingQuality": "Loading quality options...",
+  "downloadLater": "Download later",
+  "filenameLongWarning": "Filename is long and was auto-truncated to fit Android's {limit}-byte file-name limit. You can rename it, or keep this name.",
+  "snifferDlgClearSiteDataHost": "Clear cookies, localStorage, and cache for {host}?",
+  "snifferDlgClearSiteDataThis": "Clear cookies, localStorage, and cache for this site?",
+  "settingsScheduledEmptyHint": "Add a download and choose \"Download later\" to schedule it here.",
+  "@filenameLongWarning": {
+    "placeholders": {
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "@snifferDlgClearSiteDataHost": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  }
 }

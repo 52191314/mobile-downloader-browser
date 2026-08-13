@@ -6,6 +6,7 @@ import '../../compliance/restricted_media_policy.dart';
 import '../../downloader/downloader.dart';
 import '../../downloader/file_classifier.dart';
 import '../../downloader/filename_service.dart';
+import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../ui/notifications/aurora_snackbar.dart';
 import '../filename_utils.dart';
@@ -402,26 +403,27 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     // While submitting, block barrier taps AND system back so the route
     // can't be dismissed under the async submit (a late navigator.pop(true)
     // would then pop the wrong route). Dismissal is still allowed when idle.
     return PopScope(
       canPop: !isSubmitting,
       child: AlertDialog(
-        title: const Text('Add to Download Queue'),
+        title: Text(l.addToDownloadQueue),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'From: ${selectedMedia.sourcePageUrl ?? widget.tab.addressController.text}',
+                '${l.fromLabel}: ${selectedMedia.sourcePageUrl ?? widget.tab.addressController.text}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
               ),
               const SizedBox(height: 4),
               Text(
-                'Link: ${selectedMedia.url}',
+                '${l.linkLabel}: ${selectedMedia.url}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
@@ -434,7 +436,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Filename',
+                          l.propDialogFileName,
                           style: TextStyle(
                             color: context.ac.textSecondary,
                             fontSize: 12,
@@ -461,7 +463,9 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                                 FilenameService.defaultMaxFileNameBytes) ...[
                           const SizedBox(height: 6),
                           Text(
-                            'Filename is long and was auto-truncated to fit Android\'s ${FilenameService.defaultMaxFileNameBytes}-byte file-name limit. You can rename it, or keep this name.',
+                            l.filenameLongWarning(
+                              FilenameService.defaultMaxFileNameBytes,
+                            ),
                             style: const TextStyle(
                               color: Colors.redAccent,
                               fontSize: 11,
@@ -492,14 +496,20 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
               DropdownButtonFormField<DownloadPriority>(
                 key: const Key('dialog_priority_dropdown'),
                 value: selectedPriority,
-                decoration: const InputDecoration(
-                  labelText: 'Priority',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: l.priorityLabel,
+                  border: const OutlineInputBorder(),
                 ),
                 items: DownloadPriority.values.map((priority) {
                   return DropdownMenuItem<DownloadPriority>(
                     value: priority,
-                    child: Text(priority.name.toUpperCase()),
+                    child: Text(
+                      switch (priority) {
+                        DownloadPriority.low => l.cardPriorityLow,
+                        DownloadPriority.medium => l.cardPriorityMedium,
+                        DownloadPriority.high => l.cardPriorityHigh,
+                      }.toUpperCase(),
+                    ),
                   );
                 }).toList(),
                 onChanged: _busy
@@ -516,18 +526,18 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
               // handles real 403 recovery.
               if (isResolvingVariants) ...[
                 const SizedBox(height: 16),
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    SizedBox(
+                    const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                    SizedBox(width: 12),
+                    const SizedBox(width: 12),
                     Text(
-                      'Loading quality options...',
-                      style: TextStyle(fontSize: 13),
+                      l.loadingQuality,
+                      style: const TextStyle(fontSize: 13),
                     ),
                   ],
                 ),
@@ -543,7 +553,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                 : () {
                     Navigator.of(context).pop(false);
                   },
-            child: const Text('Cancel'),
+            child: Text(l.cancel),
           ),
           TextButton(
             key: const Key('dialog_download_later_button'),
@@ -554,7 +564,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                     if (startAt == null || !mounted) return;
                     await _submit(startAt: startAt);
                   },
-            child: const Text('Download later'),
+            child: Text(l.downloadLater),
           ),
           ElevatedButton(
             key: const Key('dialog_add_button'),
@@ -565,7 +575,7 @@ class AddQueueDialogContentState extends State<AddQueueDialogContent> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Download'),
+                : Text(l.actionDownload),
           ),
         ],
       ),

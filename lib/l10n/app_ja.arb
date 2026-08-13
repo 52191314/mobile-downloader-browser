@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "ダウンロードキューに追加",
+  "fromLabel": "送信元",
+  "linkLabel": "リンク",
+  "priorityLabel": "優先度",
+  "cardPriorityMedium": "中",
+  "loadingQuality": "品質オプションを読み込み中…",
+  "downloadLater": "後でダウンロード",
+  "filenameLongWarning": "ファイル名が長いため、Androidの{limit}バイト制限に合わせて自動的に短縮されました。名前を変更するか、この名前を維持できます。",
+  "snifferDlgClearSiteDataHost": "{host} のCookie、ローカルストレージ、キャッシュを削除しますか？",
+  "snifferDlgClearSiteDataThis": "このサイトのCookie、ローカルストレージ、キャッシュを削除しますか？",
+  "settingsScheduledEmptyHint": "ダウンロードを追加して「後でダウンロード」を選ぶと、ここでスケジュールできます。"
 }

@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "डाउनलोड कतार में जोड़ें",
+  "fromLabel": "से",
+  "linkLabel": "लिंक",
+  "priorityLabel": "प्राथमिकता",
+  "cardPriorityMedium": "मध्यम",
+  "loadingQuality": "गुणवत्ता विकल्प लोड हो रहे हैं…",
+  "downloadLater": "बाद में डाउनलोड करें",
+  "filenameLongWarning": "फ़ाइल नाम लंबा है और Android की {limit} बाइट सीमा में फिट होने के लिए इसे स्वतः छोटा किया गया। आप इसका नाम बदल सकते हैं या यह नाम रख सकते हैं।",
+  "snifferDlgClearSiteDataHost": "{host} के कुकीज़, स्थानीय संग्रहण और कैश साफ़ करें?",
+  "snifferDlgClearSiteDataThis": "इस साइट के कुकीज़, स्थानीय संग्रहण और कैश साफ़ करें?",
+  "settingsScheduledEmptyHint": "एक डाउनलोड जोड़ें और इसे यहाँ शेड्यूल करने के लिए \"बाद में डाउनलोड करें\" चुनें।"
 }

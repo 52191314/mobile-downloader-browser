@@ -5590,8 +5590,8 @@ class _SchedulePageContentState extends State<_SchedulePageContent> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Add a download and choose "Download later" '
-                            'to schedule it here.',
+                            AppLocalizations.of(context)!
+                                .settingsScheduledEmptyHint,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 fontSize: 12,

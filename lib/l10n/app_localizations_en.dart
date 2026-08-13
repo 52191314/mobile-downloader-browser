@@ -1645,4 +1645,43 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'Stop sharing';
+
+  @override
+  String get addToDownloadQueue => 'Add to Download Queue';
+
+  @override
+  String get fromLabel => 'From';
+
+  @override
+  String get linkLabel => 'Link';
+
+  @override
+  String get priorityLabel => 'Priority';
+
+  @override
+  String get cardPriorityMedium => 'Medium';
+
+  @override
+  String get loadingQuality => 'Loading quality options...';
+
+  @override
+  String get downloadLater => 'Download later';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'Filename is long and was auto-truncated to fit Android\'s $limit-byte file-name limit. You can rename it, or keep this name.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'Clear cookies, localStorage, and cache for $host?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'Clear cookies, localStorage, and cache for this site?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'Add a download and choose \"Download later\" to schedule it here.';
 }

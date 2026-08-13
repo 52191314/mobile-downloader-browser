@@ -1652,4 +1652,43 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'Freigabe beenden';
+
+  @override
+  String get addToDownloadQueue => 'Zur Download-Warteschlange hinzufügen';
+
+  @override
+  String get fromLabel => 'Von';
+
+  @override
+  String get linkLabel => 'Link';
+
+  @override
+  String get priorityLabel => 'Priorität';
+
+  @override
+  String get cardPriorityMedium => 'Mittel';
+
+  @override
+  String get loadingQuality => 'Qualitätsoptionen werden geladen…';
+
+  @override
+  String get downloadLater => 'Später herunterladen';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'Der Dateiname ist lang und wurde automatisch gekürzt, um das $limit-Byte-Limit von Android einzuhalten. Sie können ihn umbenennen oder diesen Namen behalten.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'Cookies, lokalen Speicher und Cache für $host löschen?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'Cookies, lokalen Speicher und Cache für diese Website löschen?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'Fügen Sie einen Download hinzu und wählen Sie „Später herunterladen“, um ihn hier zu planen.';
 }

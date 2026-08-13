@@ -1596,4 +1596,41 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get btnStopSharing => '停止共享';
+
+  @override
+  String get addToDownloadQueue => '添加到下载队列';
+
+  @override
+  String get fromLabel => '来自';
+
+  @override
+  String get linkLabel => '链接';
+
+  @override
+  String get priorityLabel => '优先级';
+
+  @override
+  String get cardPriorityMedium => '中';
+
+  @override
+  String get loadingQuality => '正在加载质量选项…';
+
+  @override
+  String get downloadLater => '稍后下载';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return '文件名过长，已自动截断以符合 Android 的 $limit 字节限制。您可以重命名，或保留此名称。';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return '清除 $host 的 Cookie、本地存储和缓存？';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis => '清除此网站的 Cookie、本地存储和缓存？';
+
+  @override
+  String get settingsScheduledEmptyHint => '添加下载并选择“稍后下载”，即可在此安排计划。';
 }

@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "Добавить в очередь загрузок",
+  "fromLabel": "Из",
+  "linkLabel": "Ссылка",
+  "priorityLabel": "Приоритет",
+  "cardPriorityMedium": "Средний",
+  "loadingQuality": "Загрузка параметров качества…",
+  "downloadLater": "Скачать позже",
+  "filenameLongWarning": "Имя файла слишком длинное и было автоматически сокращено до лимита Android в {limit} байт. Вы можете переименовать его или оставить это имя.",
+  "snifferDlgClearSiteDataHost": "Очистить файлы cookie, локальное хранилище и кеш для {host}?",
+  "snifferDlgClearSiteDataThis": "Очистить файлы cookie, локальное хранилище и кеш для этого сайта?",
+  "settingsScheduledEmptyHint": "Добавьте загрузку и выберите «Скачать позже», чтобы запланировать её здесь."
 }

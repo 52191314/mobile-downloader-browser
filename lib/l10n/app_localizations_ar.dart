@@ -1648,4 +1648,43 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'إيقاف المشاركة';
+
+  @override
+  String get addToDownloadQueue => 'إضافة إلى قائمة التنزيل';
+
+  @override
+  String get fromLabel => 'من';
+
+  @override
+  String get linkLabel => 'رابط';
+
+  @override
+  String get priorityLabel => 'الأولوية';
+
+  @override
+  String get cardPriorityMedium => 'متوسط';
+
+  @override
+  String get loadingQuality => 'جارٍ تحميل خيارات الجودة…';
+
+  @override
+  String get downloadLater => 'التنزيل لاحقًا';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'اسم الملف طويل وتم اقتطاعه تلقائيًا ليتناسب مع حد Android البالغ $limit بايت. يمكنك إعادة تسميته أو الاحتفاظ بهذا الاسم.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'مسح ملفات تعريف الارتباط والتخزين المحلي وذاكرة التخزين المؤقت لـ $host؟';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'مسح ملفات تعريف الارتباط والتخزين المحلي وذاكرة التخزين المؤقت لهذا الموقع؟';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'أضف تنزيلًا واختر «التنزيل لاحقًا» لجدولته هنا.';
 }

@@ -560,5 +560,16 @@
       }
     }
   },
-  "settingsCategoryMediaImage": "Image"
+  "settingsCategoryMediaImage": "Image",
+  "addToDownloadQueue": "Ajouter à la file de téléchargement",
+  "fromLabel": "De",
+  "linkLabel": "Lien",
+  "priorityLabel": "Priorité",
+  "cardPriorityMedium": "Moyenne",
+  "loadingQuality": "Chargement des options de qualité…",
+  "downloadLater": "Télécharger plus tard",
+  "filenameLongWarning": "Le nom de fichier est long et a été tronqué automatiquement pour respecter la limite de {limit} octets d'Android. Vous pouvez le renommer ou conserver ce nom.",
+  "snifferDlgClearSiteDataHost": "Effacer les cookies, le stockage local et le cache de {host} ?",
+  "snifferDlgClearSiteDataThis": "Effacer les cookies, le stockage local et le cache de ce site ?",
+  "settingsScheduledEmptyHint": "Ajoutez un téléchargement et choisissez « Télécharger plus tard » pour le planifier ici."
 }

@@ -744,7 +744,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                     foregroundColor: Colors.white,
                   ),
                   icon: const Icon(Icons.check_rounded),
-                  label: const Text('Close'),
+                  label: Text(AppLocalizations.of(context)!.queueDlgClose),
                   onPressed: () => Navigator.pop(context),
                 ),
               ] else ...[
@@ -2863,7 +2863,7 @@ class _SnifferScreenState extends State<SnifferScreen>
                   onPressed: () {
                     cancelled = true;
                   },
-                  child: const Text('Cancel'),
+                  child: Text(AppLocalizations.of(context)!.cancel),
                 ),
               ],
             );
@@ -3246,21 +3246,28 @@ class _SnifferScreenState extends State<SnifferScreen>
                                         title: Text(AppLocalizations.of(context)!.snifferDlgSiteDataTitle),
                                         content: Text(
                                           host.isNotEmpty
-                                              ? 'Clear cookies, localStorage, and cache for $host?'
-                                              : 'Clear cookies, localStorage, and cache for this site?',
+                                              ? AppLocalizations.of(context)!
+                                                  .snifferDlgClearSiteDataHost(
+                                                      host)
+                                              : AppLocalizations.of(context)!
+                                                  .snifferDlgClearSiteDataThis,
                                         ),
                                         actions: [
                                           TextButton(
                                             onPressed: () =>
                                                 Navigator.pop(ctx, false),
-                                            child: const Text('Cancel'),
+                                            child: Text(
+                                              AppLocalizations.of(context)!
+                                                  .cancel,
+                                            ),
                                           ),
                                           TextButton(
                                             onPressed: () =>
                                                 Navigator.pop(ctx, true),
-                                            child: const Text(
-                                              'Clear',
-                                              style: TextStyle(
+                                            child: Text(
+                                              AppLocalizations.of(context)!
+                                                  .actionClear,
+                                              style: const TextStyle(
                                                 color: Colors.red,
                                               ),
                                             ),

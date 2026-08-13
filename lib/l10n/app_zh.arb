@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "添加到下载队列",
+  "fromLabel": "来自",
+  "linkLabel": "链接",
+  "priorityLabel": "优先级",
+  "cardPriorityMedium": "中",
+  "loadingQuality": "正在加载质量选项…",
+  "downloadLater": "稍后下载",
+  "filenameLongWarning": "文件名过长，已自动截断以符合 Android 的 {limit} 字节限制。您可以重命名，或保留此名称。",
+  "snifferDlgClearSiteDataHost": "清除 {host} 的 Cookie、本地存储和缓存？",
+  "snifferDlgClearSiteDataThis": "清除此网站的 Cookie、本地存储和缓存？",
+  "settingsScheduledEmptyHint": "添加下载并选择“稍后下载”，即可在此安排计划。"
 }

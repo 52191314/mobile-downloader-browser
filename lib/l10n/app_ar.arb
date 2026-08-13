@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "إضافة إلى قائمة التنزيل",
+  "fromLabel": "من",
+  "linkLabel": "رابط",
+  "priorityLabel": "الأولوية",
+  "cardPriorityMedium": "متوسط",
+  "loadingQuality": "جارٍ تحميل خيارات الجودة…",
+  "downloadLater": "التنزيل لاحقًا",
+  "filenameLongWarning": "اسم الملف طويل وتم اقتطاعه تلقائيًا ليتناسب مع حد Android البالغ {limit} بايت. يمكنك إعادة تسميته أو الاحتفاظ بهذا الاسم.",
+  "snifferDlgClearSiteDataHost": "مسح ملفات تعريف الارتباط والتخزين المحلي وذاكرة التخزين المؤقت لـ {host}؟",
+  "snifferDlgClearSiteDataThis": "مسح ملفات تعريف الارتباط والتخزين المحلي وذاكرة التخزين المؤقت لهذا الموقع؟",
+  "settingsScheduledEmptyHint": "أضف تنزيلًا واختر «التنزيل لاحقًا» لجدولته هنا."
 }

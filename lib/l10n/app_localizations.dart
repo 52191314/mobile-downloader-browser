@@ -3265,6 +3265,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stop sharing'**
   String get btnStopSharing;
+
+  /// No description provided for @addToDownloadQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to Download Queue'**
+  String get addToDownloadQueue;
+
+  /// No description provided for @fromLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get fromLabel;
+
+  /// No description provided for @linkLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Link'**
+  String get linkLabel;
+
+  /// No description provided for @priorityLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Priority'**
+  String get priorityLabel;
+
+  /// No description provided for @cardPriorityMedium.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get cardPriorityMedium;
+
+  /// No description provided for @loadingQuality.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading quality options...'**
+  String get loadingQuality;
+
+  /// No description provided for @downloadLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Download later'**
+  String get downloadLater;
+
+  /// No description provided for @filenameLongWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Filename is long and was auto-truncated to fit Android\'s {limit}-byte file-name limit. You can rename it, or keep this name.'**
+  String filenameLongWarning(int limit);
+
+  /// No description provided for @snifferDlgClearSiteDataHost.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear cookies, localStorage, and cache for {host}?'**
+  String snifferDlgClearSiteDataHost(String host);
+
+  /// No description provided for @snifferDlgClearSiteDataThis.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear cookies, localStorage, and cache for this site?'**
+  String get snifferDlgClearSiteDataThis;
+
+  /// No description provided for @settingsScheduledEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a download and choose \"Download later\" to schedule it here.'**
+  String get settingsScheduledEmptyHint;
 }
 
 class _AppLocalizationsDelegate

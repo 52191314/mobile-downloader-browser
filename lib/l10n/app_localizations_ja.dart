@@ -1610,4 +1610,43 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get btnStopSharing => '共有を停止';
+
+  @override
+  String get addToDownloadQueue => 'ダウンロードキューに追加';
+
+  @override
+  String get fromLabel => '送信元';
+
+  @override
+  String get linkLabel => 'リンク';
+
+  @override
+  String get priorityLabel => '優先度';
+
+  @override
+  String get cardPriorityMedium => '中';
+
+  @override
+  String get loadingQuality => '品質オプションを読み込み中…';
+
+  @override
+  String get downloadLater => '後でダウンロード';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'ファイル名が長いため、Androidの$limitバイト制限に合わせて自動的に短縮されました。名前を変更するか、この名前を維持できます。';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return '$host のCookie、ローカルストレージ、キャッシュを削除しますか？';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'このサイトのCookie、ローカルストレージ、キャッシュを削除しますか？';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'ダウンロードを追加して「後でダウンロード」を選ぶと、ここでスケジュールできます。';
 }

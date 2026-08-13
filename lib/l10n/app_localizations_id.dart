@@ -1644,4 +1644,43 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get btnStopSharing => 'Hentikan berbagi';
+
+  @override
+  String get addToDownloadQueue => 'Tambahkan ke antrean unduhan';
+
+  @override
+  String get fromLabel => 'Dari';
+
+  @override
+  String get linkLabel => 'Tautan';
+
+  @override
+  String get priorityLabel => 'Prioritas';
+
+  @override
+  String get cardPriorityMedium => 'Sedang';
+
+  @override
+  String get loadingQuality => 'Memuat opsi kualitas…';
+
+  @override
+  String get downloadLater => 'Unduh nanti';
+
+  @override
+  String filenameLongWarning(int limit) {
+    return 'Nama file panjang dan dipotong otomatis agar sesuai batas $limit byte Android. Anda dapat mengganti namanya atau mempertahankan nama ini.';
+  }
+
+  @override
+  String snifferDlgClearSiteDataHost(String host) {
+    return 'Hapus cookie, penyimpanan lokal, dan cache untuk $host?';
+  }
+
+  @override
+  String get snifferDlgClearSiteDataThis =>
+      'Hapus cookie, penyimpanan lokal, dan cache untuk situs ini?';
+
+  @override
+  String get settingsScheduledEmptyHint =>
+      'Tambahkan unduhan dan pilih \"Unduh nanti\" untuk menjadwalkannya di sini.';
 }

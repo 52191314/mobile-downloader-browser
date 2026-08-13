@@ -531,5 +531,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "addToDownloadQueue": "Adicionar à fila de downloads",
+  "fromLabel": "De",
+  "linkLabel": "Link",
+  "priorityLabel": "Prioridade",
+  "cardPriorityMedium": "Média",
+  "loadingQuality": "Carregando opções de qualidade…",
+  "downloadLater": "Baixar mais tarde",
+  "filenameLongWarning": "O nome do arquivo é longo e foi truncado automaticamente para caber no limite de {limit} bytes do Android. Você pode renomeá-lo ou manter este nome.",
+  "snifferDlgClearSiteDataHost": "Limpar cookies, armazenamento local e cache de {host}?",
+  "snifferDlgClearSiteDataThis": "Limpar cookies, armazenamento local e cache deste site?",
+  "settingsScheduledEmptyHint": "Adicione um download e escolha \"Baixar mais tarde\" para agendá-lo aqui."
 }
