@@ -166,6 +166,10 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
   // --- Timers ---
   Timer? _autoHideTimer;
   Timer? _clockTimer;
+  /// Header clock, advanced once per second. Only the clock text listens, so
+  /// the 1 Hz tick no longer rebuilds the whole player (P12).
+  final ValueNotifier<DateTime> _clockTime =
+      ValueNotifier<DateTime>(DateTime.now());
 
   // --- Play/pause icon flash (center button / double-feedback) ---
   bool _showPlayPauseIcon = false;
@@ -197,8 +201,9 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     _activeQualityLabel = _labelForUrl(_activeUrl) ?? 'Auto';
     _initPlayer();
     _seedBrightness();
+    _clockTime.value = DateTime.now();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
+      _clockTime.value = DateTime.now();
     });
     _pipChannel.setMethodCallHandler((call) async {
       if (call.method == 'onPipModeChanged') {
@@ -400,6 +405,7 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     );
     _autoHideTimer?.cancel();
     _clockTimer?.cancel();
+    _clockTime.dispose();
     _hudTimer?.cancel();
     _previewSeekDebounce?.cancel();
     if (_controllerListener != null) {
@@ -1132,10 +1138,8 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
     return '$speed×';
   }
 
-  String get _currentTimeString {
-    final now = DateTime.now();
-    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-  }
+  String _formatClock(DateTime now) =>
+      '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
   // ---- Build ----
 
@@ -1517,9 +1521,15 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
                 children: [
                   const Icon(Icons.battery_full_rounded, color: Colors.white70, size: 16),
                   const SizedBox(width: 2),
-                  Text(
-                    _currentTimeString,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ValueListenableBuilder<DateTime>(
+                    valueListenable: _clockTime,
+                    builder: (context, value, _) => Text(
+                      _formatClock(value),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ],
               ),

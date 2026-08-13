@@ -169,6 +169,20 @@ class _QueuePageState extends State<QueuePage> {
   int? _sectionsStateKey;
   AColors? _cachedSectionsAc;
 
+  // -- Filtered-list cache (flat mode) --------------------------------------
+  // Flat mode re-runs queryTasks (full materialize + O(n log n) sort +
+  // substring search) on every rebuild, including the periodic progress-tick
+  // rebuilds. Cache the filtered+sorted list keyed on the same fingerprint
+  // family as the sectioned partition cache — task set + states +
+  // sort-relevant fields + filter/sort/search state — with pure-progress
+  // fields (bytes/speed) excluded so progress ticks reuse the cached list.
+  // Speed-sorted lists are never cached: task.speed mutates every tick and
+  // changes order, so flat speed-sort must keep recomputing (same exception
+  // as the sectioned cache). Reset in initState/dispose.
+  List<DownloadTask>? _cachedFilteredTasks;
+  int? _filteredTasksFingerprint;
+  int? _filteredTasksStateKey;
+
   @override
   void initState() {
     super.initState();
@@ -215,6 +229,9 @@ class _QueuePageState extends State<QueuePage> {
     _sectionsFingerprint = null;
     _sectionsStateKey = null;
     _cachedSectionsAc = null;
+    _cachedFilteredTasks = null;
+    _filteredTasksFingerprint = null;
+    _filteredTasksStateKey = null;
   }
 
   void _onUrlTextChanged() {
@@ -250,6 +267,9 @@ class _QueuePageState extends State<QueuePage> {
     _sectionsFingerprint = null;
     _sectionsStateKey = null;
     _cachedSectionsAc = null;
+    _cachedFilteredTasks = null;
+    _filteredTasksFingerprint = null;
+    _filteredTasksStateKey = null;
     super.dispose();
   }
 
@@ -277,7 +297,7 @@ class _QueuePageState extends State<QueuePage> {
   @override
   Widget build(BuildContext context) {
     final tasks = widget.queue.allTasks;
-    final filteredTasks = _computeFilteredTasks();
+    final filteredTasks = _computeFilteredTasks(tasks);
     final _selectedTasks = filteredTasks
         .where((t) => _selectedIds.contains(t.id))
         .toList();
@@ -347,7 +367,33 @@ class _QueuePageState extends State<QueuePage> {
   // Queue tab
   // ---------------------------------------------------------------------------
 
-  List<DownloadTask> _computeFilteredTasks() {
+  /// Returns the filtered + sorted task list, cached across progress ticks.
+  ///
+  /// Flat mode sorts inside [DownloadQueue.queryTasks], so under speed sort the
+  /// list order depends on live speed and must never be cached — see the
+  /// sectioned-cache speed exception. Otherwise the cache reuses the previous
+  /// result while the task-set fingerprint (states + sort-relevant fields,
+  /// excluding pure progress) and the filter/sort/search state key are
+  /// unchanged, so progress ticks skip the O(n log n) sort + substring search.
+  List<DownloadTask> _computeFilteredTasks(List<DownloadTask> tasks) {
+    final bypassCache = _flatList && _sortBy == TaskSortField.speed;
+    if (!bypassCache) {
+      final fingerprint = _tasksFingerprint(tasks);
+      final stateKey = _computeSectionsStateKey();
+      if (_cachedFilteredTasks != null &&
+          fingerprint == _filteredTasksFingerprint &&
+          stateKey == _filteredTasksStateKey) {
+        return _cachedFilteredTasks!;
+      }
+      _cachedFilteredTasks = _computeFilteredTasksUncached();
+      _filteredTasksFingerprint = fingerprint;
+      _filteredTasksStateKey = stateKey;
+      return _cachedFilteredTasks!;
+    }
+    return _computeFilteredTasksUncached();
+  }
+
+  List<DownloadTask> _computeFilteredTasksUncached() {
     final queriedTasks = widget.queue.queryTasks(
       states: _stateFilter,
       query: _searchQuery.isNotEmpty ? _searchQuery : null,
@@ -492,25 +538,29 @@ class _QueuePageState extends State<QueuePage> {
     return _sortDescending ? -cmp : cmp;
   }
 
-  /// Cheap fingerprint of [tasks] for the partition cache.
+  /// Cheap fingerprint of [tasks] for the partition + filtered-list caches.
   ///
   /// Order-sensitive rolling hash, so even two tasks *swapping* states (e.g.
   /// one pausing while another resumes in the same tick) invalidate the cache
   /// — a plain sum of state indexes would miss that and serve a stale section
-  /// order. Also folds in the sort-relevant field for the current sort so
-  /// mid-download changes (HLS `totalBytes` refinement under size sort,
-  /// priority changes, savePath changes under name sort) can't serve a stale
-  /// partition. Speed-sorted partitions are never cached anyway (task.speed
+  /// order. `savePath` + `url` always fold in because name sort, the folder
+  /// filter, and full-text search all key off them, so an in-place rename /
+  /// re-sniff must invalidate the cache under any sort. Also folds in the
+  /// sort-relevant field for the current sort so mid-download changes (HLS
+  /// `totalBytes` refinement under size sort, priority changes) can't serve a
+  /// stale partition. Speed-sorted lists are never cached anyway (task.speed
   /// mutates every tick), so speed is deliberately omitted.
   int _tasksFingerprint(List<DownloadTask> tasks) {
     var fp = tasks.length;
     for (final task in tasks) {
       fp = fp * 31 + task.state.index;
+      fp = fp * 31 + task.savePath.hashCode;
+      fp = fp * 31 + task.url.hashCode;
       switch (_sortBy) {
         case TaskSortField.date:
           fp = fp * 31 + task.createdAt.millisecondsSinceEpoch;
         case TaskSortField.name:
-          fp = fp * 31 + task.savePath.hashCode;
+          break; // savePath already folded above
         case TaskSortField.size:
           fp = fp * 31 + task.totalBytes;
         case TaskSortField.priority:
@@ -518,7 +568,7 @@ class _QueuePageState extends State<QueuePage> {
         case TaskSortField.state:
           fp = fp * 31 + task.state.index;
         case TaskSortField.speed:
-          break; // speed-sorted partitions are never cached
+          break; // speed-sorted lists are never cached
       }
       // Scheduled-section default order sorts by scheduledStartAt.
       fp = fp * 31 + (task.scheduledStartAt?.millisecondsSinceEpoch ?? 0);
