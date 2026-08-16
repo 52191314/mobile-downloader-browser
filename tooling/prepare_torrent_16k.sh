@@ -29,26 +29,46 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="${PYTHON:-python}"
+PY="${PYTHON:-python3}"
+if ! command -v "$PY" >/dev/null 2>&1; then
+    PY="python"
+fi
 ALIGN="$REPO_ROOT/tooling/align_elf_16k.py"
 OUT_DIR="$REPO_ROOT/tooling/torrent_16k"
 ABIS=(arm64-v8a armeabi-v7a)
 STAMP="$OUT_DIR/VERSION"
 
-# Windows python cannot open MSYS-style /d/... paths
-REPO_ROOT_WIN="$(cygpath -w "$REPO_ROOT")"
-ALIGN_WIN="$(cygpath -w "$ALIGN")"
+to_native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        echo "$1"
+    fi
+}
+
+REPO_ROOT_NATIVE="$(to_native_path "$REPO_ROOT")"
+ALIGN_NATIVE="$(to_native_path "$ALIGN")"
 
 # --- locate the resolved package dir -----------------------------------------
-PKG_DIR="$($PY - "$REPO_ROOT_WIN" <<'EOF'
+PKG_DIR="$($PY - "$REPO_ROOT_NATIVE" <<'EOF'
 import json, os, sys
+from urllib.parse import urlparse, unquote
+
 root = sys.argv[1]
 with open(os.path.join(root, ".dart_tool", "package_config.json")) as f:
     cfg = json.load(f)
 for p in cfg["packages"]:
     if p["name"] == "libtorrent_flutter":
         uri = p["rootUri"]
-        path = uri.replace("file://", "").lstrip("/")  # file:///D:/... -> D:/...
+        if uri.startswith("file://"):
+            parsed = urlparse(uri)
+            path = unquote(parsed.path)
+            if os.name == 'nt' and path.startswith('/'):
+                path = path[1:]
+        elif uri.startswith(".."):
+            path = os.path.normpath(os.path.join(root, ".dart_tool", uri))
+        else:
+            path = uri
         print(os.path.normpath(path))
         sys.exit(0)
 sys.exit("libtorrent_flutter not found in package_config.json")
@@ -76,7 +96,7 @@ for ABI in "${ABIS[@]}"; do
         ZIP_URL="https://github.com/ayman708-UX/libtorrent_flutter/releases/download/v${PKG_VERSION}/android-native-lib-${ABI}.zip"
         TMP_ZIP="$(mktemp -d)/lib-${ABI}.zip"
         echo "downloading $ZIP_URL"
-        curl -fSL -o "$(cygpath -w "$TMP_ZIP")" "$ZIP_URL"
+        curl -fSL -o "$(to_native_path "$TMP_ZIP")" "$ZIP_URL"
         mkdir -p "$(dirname "$SO")"
         unzip -o -q "$TMP_ZIP" -d "$(dirname "$SO")"
         rm -rf "$(dirname "$TMP_ZIP")"
@@ -84,7 +104,7 @@ for ABI in "${ABIS[@]}"; do
 
     # realign (idempotent) and install into package + repo
     TMP_OUT="$(mktemp -d)/liblibtorrent_flutter.so"
-    "$PY" "$ALIGN_WIN" "$(cygpath -w "$SO")" "$(cygpath -w "$TMP_OUT")" || exit 1
+    "$PY" "$ALIGN_NATIVE" "$(to_native_path "$SO")" "$(to_native_path "$TMP_OUT")" || exit 1
     if [ -f "$TMP_OUT" ]; then   # aligner wrote a new file -> install it
         cp "$TMP_OUT" "$SO"
     fi
