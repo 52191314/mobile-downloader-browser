@@ -316,6 +316,7 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 
 ## Repository Rules & Documentation Policy
 
+- **Issue & PR Workflow (No Plain Commits)**: For future development, always initiate a GitHub Issue to define the task/bug and open a Pull Request (PR) from a dedicated branch instead of plainly committing directly to long-lived branches. Every PR should link its corresponding issue (e.g., `Fixes #N` / `Closes #N`) and include clear description of changes, impact, and verification steps.
 - **No Emojis in README.md**: Never include emojis (e.g. ⚡, 🏗️, 🚀, 🛡️, ✨, 💚, ℹ️, etc.) in any README.md or markdown documentation files across repositories. Keep headers and text clean and professional.
 - **No Community / Contribution Sections**: Never include Awesome Ecosystem & Community or Open for Contributions sections in README.md files.
 - **OSS porting gate (F-Droid policy)**: Before porting ANY change to the OSS repo (`aurora_downloader_oss`), ask yourself: does this belong in an OSS app that is going to be on F-Droid? F-Droid rejects builds that depend on proprietary / Play-only components. Things that do NOT belong in the OSS edition:
