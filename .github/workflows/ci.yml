@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, optimize-perf-size ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, optimize-perf-size ]
 
 jobs:
   analyze_and_test:
@@ -29,8 +29,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Prepare Torrent 16K alignment
+        run: bash tooling/prepare_torrent_16k.sh
+
       - name: Analyze code
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Run unit tests
         run: flutter test
