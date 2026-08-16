@@ -222,7 +222,19 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
                     "stop" -> {
-                        stopService(Intent(applicationContext, DownloadForegroundService::class.java))
+                        val stopIntent = Intent(applicationContext, DownloadForegroundService::class.java).apply {
+                            putExtra("action", "stop")
+                        }
+                        try {
+                            startService(stopIntent)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to deliver stop intent to DownloadForegroundService", e)
+                        }
+                        try {
+                            stopService(Intent(applicationContext, DownloadForegroundService::class.java))
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to stopService DownloadForegroundService", e)
+                        }
                         result.success(null)
                     }
                     "requestNotificationPermission" -> {

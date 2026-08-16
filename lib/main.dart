@@ -119,6 +119,7 @@ void main() {
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
         debugPrint('[FlutterError] ${details.exceptionAsString()}');
+        if (details.silent) return;
         // Crashlytics (fail-open, same rule as Analytics): record the fatal
         // Flutter error, but a crash-reporting failure must never break the
         // existing handler.
@@ -452,52 +453,64 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                       const SizedBox(height: 16),
                       ...kAppSupportedLanguages.map((lang) {
                         final isSelected = selectedCode == lang.code;
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Material(
                             color: isSelected
                                 ? ac.accentFrost.withValues(alpha: 0.15)
                                 : const Color(0xFF1E293B),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected
-                                  ? ac.accentFrost
-                                  : Colors.transparent,
-                            ),
-                          ),
-                          child: ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 2,
-                            ),
-                            leading: Icon(
-                              isSelected
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_off,
-                              color: isSelected
-                                  ? ac.accentFrost
-                                  : const Color(0xFF64748B),
-                              size: 20,
-                            ),
-                            title: Text(
-                              lang.name,
-                              style: TextStyle(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: BorderSide(
                                 color: isSelected
-                                    ? Colors.white
-                                    : const Color(0xFFCBD5E1),
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                fontSize: 14,
+                                    ? ac.accentFrost
+                                    : Colors.transparent,
                               ),
                             ),
-                            onTap: () {
-                              setDialogState(() => selectedCode = lang.code);
-                              _updateSettings(
-                                _settings.copyWith(appLanguageCode: lang.code),
-                              );
-                            },
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () {
+                                setDialogState(() => selectedCode = lang.code);
+                                _updateSettings(
+                                  _settings.copyWith(appLanguageCode: lang.code),
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isSelected
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_off,
+                                      color: isSelected
+                                          ? ac.accentFrost
+                                          : const Color(0xFF64748B),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        lang.name,
+                                        style: TextStyle(
+                                          color: isSelected
+                                              ? Colors.white
+                                              : const Color(0xFFCBD5E1),
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
                         );
                       }),

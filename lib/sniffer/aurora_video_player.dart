@@ -1058,42 +1058,62 @@ class _AuroraVideoPlayerState extends State<AuroraVideoPlayer> {
         if (_hasQualityPicker)
           PopupMenuItem(
             value: 'quality',
-            child: ListTile(
-              leading: Icon(Icons.high_quality_rounded,
-                  color: ac.textPrimary, size: 20),
-              title: Text(
-                'Quality ($_activeQualityLabel)',
-                style: TextStyle(color: ac.textPrimary, fontSize: 14),
-              ),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
+            child: Row(
+              children: [
+                Icon(Icons.high_quality_rounded, color: ac.textPrimary, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Quality ($_activeQualityLabel)',
+                    style: TextStyle(color: ac.textPrimary, fontSize: 14),
+                  ),
+                ),
+              ],
             ),
           ),
         PopupMenuItem(
           value: 'open_browser',
-          child: ListTile(
-            leading: Icon(Icons.open_in_browser, color: ac.textPrimary, size: 20),
-            title: Text('Open in browser', style: TextStyle(color: ac.textPrimary, fontSize: 14)),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
+          child: Row(
+            children: [
+              Icon(Icons.open_in_browser, color: ac.textPrimary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Open in browser',
+                  style: TextStyle(color: ac.textPrimary, fontSize: 14),
+                ),
+              ),
+            ],
           ),
         ),
         PopupMenuItem(
           value: 'copy_url',
-          child: ListTile(
-            leading: Icon(Icons.copy, color: ac.textPrimary, size: 20),
-            title: Text('Copy video link', style: TextStyle(color: ac.textPrimary, fontSize: 14)),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
+          child: Row(
+            children: [
+              Icon(Icons.copy, color: ac.textPrimary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Copy video link',
+                  style: TextStyle(color: ac.textPrimary, fontSize: 14),
+                ),
+              ),
+            ],
           ),
         ),
         PopupMenuItem(
           value: 'share',
-          child: ListTile(
-            leading: Icon(Icons.share, color: ac.textPrimary, size: 20),
-            title: Text('Share', style: TextStyle(color: ac.textPrimary, fontSize: 14)),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
+          child: Row(
+            children: [
+              Icon(Icons.share, color: ac.textPrimary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Share',
+                  style: TextStyle(color: ac.textPrimary, fontSize: 14),
+                ),
+              ),
+            ],
           ),
         ),
       ],

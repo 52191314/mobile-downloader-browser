@@ -71,24 +71,27 @@ class GroupDropZone extends StatelessWidget {
                 ? Border.all(color: accentColor, width: 1.2)
                 : Border.all(color: Colors.transparent, width: 1.2),
           ),
-          child: ListTile(
-            key: Key('group_header_$groupName'),
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 0,
-            ),
-            onTap: onToggleExpand,
-            title: header,
-            trailing: AnimatedRotation(
-              turns: isExpanded ? 0.5 : 0.0,
-              duration: const Duration(milliseconds: 180),
-              child: Icon(
-                isExpanded
-                    ? Icons.keyboard_arrow_down_rounded
-                    : Icons.keyboard_arrow_right_rounded,
-                color: hovering ? accentColor : context.ac.textSecondary,
-                size: 18,
+          child: Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              key: Key('group_header_$groupName'),
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 0,
+              ),
+              onTap: onToggleExpand,
+              title: header,
+              trailing: AnimatedRotation(
+                turns: isExpanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 180),
+                child: Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_down_rounded
+                      : Icons.keyboard_arrow_right_rounded,
+                  color: hovering ? accentColor : context.ac.textSecondary,
+                  size: 18,
+                ),
               ),
             ),
           ),

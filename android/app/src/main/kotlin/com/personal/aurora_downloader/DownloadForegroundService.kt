@@ -58,17 +58,54 @@ class DownloadForegroundService : Service() {
 
     override fun onDestroy() {
         releaseWakeLock()
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to remove foreground notification on destroy", e)
+        }
         super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return START_STICKY
+        if (intent == null) {
+            Log.w(TAG, "onStartCommand received null intent, stopping service")
+            handleStop()
+            return START_NOT_STICKY
+        }
+        val action = intent.getStringExtra(EXTRA_ACTION)
+        if (action == null) {
+            Log.w(TAG, "onStartCommand missing action extra, stopping service")
+            handleStop()
+            return START_NOT_STICKY
+        }
         when (action) {
             ACTION_START -> handleStart(intent)
             ACTION_UPDATE -> handleUpdate(intent)
             ACTION_STOP -> handleStop()
+            else -> {
+                Log.w(TAG, "Unknown action: $action")
+                handleStop()
+            }
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    // Android 14+ (API 34) dataSync foreground service timeout callback
+    override fun onTimeout(startId: Int) {
+        Log.w(TAG, "Foreground service dataSync timeout reached (startId=$startId), stopping cleanly")
+        handleStop()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            super.onTimeout(startId)
+        }
+    }
+
+    // Android 15+ (API 35) dataSync foreground service timeout callback with type
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "Foreground service timeout reached (startId=$startId, fgsType=$fgsType), stopping cleanly")
+        handleStop()
+        if (Build.VERSION.SDK_INT >= 35) {
+            super.onTimeout(startId, fgsType)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
