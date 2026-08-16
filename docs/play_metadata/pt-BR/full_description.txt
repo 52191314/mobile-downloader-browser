@@ -1,0 +1,55 @@
+O Aurora Download Manager é um navegador web privado e um baixador de vídeos rápido criado para downloads pesados de arquivos, torrents e captura de mídia.
+
+GERENCIADOR E ACELERADOR DE DOWNLOADS TUDO EM UM
+- Baixador de arquivos em partes paralelas de alta velocidade (até 32 partes no Pro, 64 no Ultra)
+- Acelerador inteligente de downloads para arquivos, vídeos e torrents
+- Gerenciador em segundo plano estável: pause, retome e recupere links quebrados
+- Renovação de links expirados de forma automática
+
+BAIXADOR DE VÍDEOS WEB INTELIGENTE
+- Baixador de vídeos poderoso que detecta mídias e vídeos automaticamente ao navegar
+- Player de vídeo embutido com Picture-in-Picture (PiP), controle de velocidade e gestos
+- Baixador de transmissões: remonta streams m3u8 em arquivos MP4 completos
+- Captura em lote: baixe múltiplos vídeos e arquivos com apenas um toque
+- Organização automática de vídeos, músicas e documentos em pastas dedicadas
+
+NAVEGADOR PRIVADO COM BLOQUEADOR DE ANUNCIOS
+- Navegador privado veloz com bloqueador de anúncios e pop-ups integrado
+- Navegação em abas com grupos e recuperação de sessão após reiniciar
+- Modo de leitura, páginas offline e ocultação de elementos indesejados
+- Privacidade garantida: seu histórico e arquivos permanecem apenas no seu aparelho
+
+CLIENTE TORRENT NATIVO E MAGNET LINKS
+- Baixador de torrents integrado para baixar torrents e links magnet direto no celular
+- Suporte a múltiplos arquivos: escolha o que baixar, pause, retome e envie (seed)
+- Motor P2P rápido com regras e limites personalizados
+
+BACKUP AUTOMÁTICO NO GOOGLE DRIVE
+- Conecte sua conta e envie downloads concluídos direto para o seu Google Drive
+- Programe sua sincronização: instantânea, a cada 15 min, horária ou diária
+- Acesse seus arquivos salvos em qualquer celular ou computador
+
+IMPORTAÇÃO SIMPLES E TRANSFERÊNCIA VIA WI-FI
+- Importe listas de outros gerenciadores Android (JSON, backup files)
+- Compatível com a Pasta Segura da Samsung e perfis de trabalho
+- Transfira arquivos para o computador via Wi-Fi local sem servidores externos
+
+AURORA PRO — PAGAMENTO ÚNICO
+- 16 downloads simultâneos e 32 partes por arquivo (Gratuito: 3 e 8)
+- Sincronização no Google Drive de até 50 arquivos/dia
+- Listas de filtros ilimitadas, proteção contra rastreadores e cofre privado
+- Recuperação automática de links e captura em lote sem limites
+
+AURORA ULTRA — SUITE DEFINITIVA
+- 64 downloads simultâneos e 64 partes por arquivo
+- Até 1.000 sincronizações diárias no Google Drive
+- Conversor de mídia integrado baixado sob demanda
+- API de automação local e monitoramento de pastas
+Pro e Ultra são compras únicas. Sem assinaturas.
+
+AVISO DE POLÍTICA
+- Em conformidade com as regras do Google Play, downloads do YouTube não são suportados.
+- O bloqueador de anúncios funciona apenas no navegador Aurora (não é VPN no sistema).
+- Baixe apenas conteúdos que você tem autorização legal para baixar.
+
+Código aberto (GPL-3.0). Não afiliado ao Google, YouTube ou serviços de terceiros.

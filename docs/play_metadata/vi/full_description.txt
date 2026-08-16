@@ -1,0 +1,54 @@
+Aurora Download Manager là trình duyệt web riêng tư kiêm trình tải video tốc độ cao, được thiết kế tối ưu cho tải tệp dung lượng lớn, torrent và lưu trữ đa phương tiện.
+
+TRÌNH QUẢN LÝ VÀ TĂNG TỐC TẢI XUỐNG TOÀN DIỆN
+- Tải tệp đa luồng siêu tốc với các phần song song (lên đến 32 phần ở bản Pro, 64 ở bản Ultra)
+- Bộ tăng tốc tải thông minh cho tệp, video và torrent
+- Tải ngầm ổn định: tạm dừng (pause), tiếp tục (resume) và tự phục hồi khi mất mạng
+- Tự động làm mới và khôi phục các liên kết tải xuống đã hết hạn
+
+TRÌNH TẢI VIDEO WEB THÔNG MINH & LƯU TRỮ MEDIA
+- Tự động nhận diện video, nhạc và liên kết tệp ngay khi bạn lướt web
+- Trình phát video tích hợp sẵn tính năng Thu nhỏ hình (PiP), chỉnh tốc độ và cử chỉ
+- Tải luồng phát trực tiếp: ghép luồng phát m3u8 thành tệp MP4 hoàn chỉnh
+- Tải hàng loạt (batch download): tải nhiều video cùng lúc chỉ với 1 chạm
+- Tự động phân loại video, nhạc và tài liệu vào từng thư mục ngăn nắp
+
+TRÌNH DUYỆT RIÊNG TƯ CHẶN QUẢNG CÁO MẠNH MẼ
+- Tích hợp sẵn bộ lọc chặn quảng cáo và cửa sổ bật lên (pop-up) giúp lướt web mượt mà
+- Hỗ trợ nhiều tab, nhóm tab và tự khôi phục phiên duyệt web sau khi mở lại
+- Chế độ đọc báo, lưu trang web xem ngoại tuyến và ẩn phần tử thừa
+- Bảo mật tuyệt đối: lịch sử duyệt web và tệp tải chỉ lưu trên thiết bị của bạn
+
+TRÌNH TẢI TORRENT VÀ LIÊN KẾT MAGNET TÍCH HỢP
+- Tải tệp torrent và liên kết magnet trực tiếp không cần cài thêm ứng dụng
+- Hỗ trợ torrent nhiều tệp: chọn tệp cần tải, tạm dừng, tiếp tục và chia sẻ (seed)
+- Công cụ P2P tốc độ cao với các quy tắc tải tùy biến
+
+TỰ ĐỘNG SAO LƯU LÊN GOOGLE DRIVE
+- Kết nối tài khoản Google để tự động đồng bộ tệp tải hoàn tất lên Google Drive
+- Đặt lịch đồng bộ linh hoạt: tức thì, mỗi 15 phút, hàng giờ hoặc hàng ngày
+- Dễ dàng truy cập tệp từ máy tính hoặc điện thoại khác mọi lúc
+
+NHẬP DỮ LIỆU DỄ DÀNG & CHUYỂN TỆP QUA WI-FI
+- Nhập danh sách tải từ các ứng dụng khác (JSON, backup files)
+- Tương thích Thư mục bảo mật Samsung (Secure Folder)
+- Chuyển tệp sang máy tính qua mạng Wi-Fi nội bộ tốc độ cao không qua máy chủ
+
+AURORA PRO — MỞ KHÓA MỘT LẦN DÙNG VĨNH VIỄN
+- Tải đồng thời 16 tệp & 32 phần mỗi tệp (Bản miễn phí: 3 tệp & 8 phần)
+- Tăng giới hạn đồng bộ Google Drive (50 tệp/ngày)
+- Bộ lọc quảng cáo nâng cao, chặn theo dõi và két sắt bảo mật riêng tư
+
+AURORA ULTRA — DÀNH CHO NGƯỜI DÙNG CHUYÊN NGHIỆP
+- Tải đồng thời 64 tệp & 64 phần mỗi tệp
+- Đồng bộ lên đến 1.000 tệp Google Drive mỗi ngày
+- Bộ chuyển đổi định dạng media tải theo nhu cầu
+- API tự động hóa và giám sát thư mục
+Cả Pro và Ultra đều mua 1 lần sở hữu vĩnh viễn. Không thu phí thuê bao.
+
+LƯU Ý CHÍNH SÁCH
+- Tuân thủ nghiêm ngặt chính sách của Google Play: Không hỗ trợ tải từ YouTube.
+- Trình chặn quảng cáo chỉ hoạt động trong Aurora Browser (không phải VPN toàn máy).
+- Vui lòng chỉ tải nội dung mà bạn có quyền hợp pháp.
+
+Mã nguồn mở (GPL-3.0). Không liên kết với Google, YouTube hoặc các nền tảng thứ ba.

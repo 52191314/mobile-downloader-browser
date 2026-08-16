@@ -454,8 +454,10 @@ class DownloadQueue {
     }
   }
 
-  void addTask(DownloadTask task, {bool force = false}) {
-    if (_isDisposed) return;
+  static String normalizeUrl(String url) => _normalizeUrl(url);
+
+  bool addTask(DownloadTask task, {bool force = false}) {
+    if (_isDisposed) return false;
     // Play compliance: never enqueue restricted platform media (Wave 1+).
     // (See lib/compliance/restricted_media_policy.dart.)
     if (RestrictedMediaPolicy.isBlocked(
@@ -467,48 +469,65 @@ class DownloadQueue {
       onRestrictedMediaBlocked?.call(
         RestrictedMediaPolicy.userMessageRestricted,
       );
-      return;
+      return false;
     }
     _autoRetryAttempts.remove(task.id);
     if (!force && !_isLoading) {
-      // Duplicate prevention: skip if a task with the same URL is already
-      // in the queue (idle, downloading, or paused). Completed/failed tasks
-      // don't block re-downloading the same URL.
-      // Guard with !_isLoading so the O(n) scan per task does not compound
-      // to O(n²) during queue-file restore (the persisted file is
-      // authoritative and should never contain duplicates).
       final normalizedUrl = _normalizeUrl(task.url);
-      final existing = _tasks.values.where(
-        (t) =>
-            _normalizeUrl(t.url) == normalizedUrl &&
-            (t.state == DownloadState.idle ||
-                t.state == DownloadState.downloading ||
-                t.state == DownloadState.paused),
-      );
-      if (existing.isNotEmpty) {
-        // When resniff mode is active and the duplicate belongs to the
-        // pending resniff task, delegate to the callback so the user can
-        // choose "Update existing" or "Create new".
-        if (resniffPendingTaskId != null &&
-            onResniffDuplicate != null &&
-            resniffPendingTaskId == existing.first.id) {
-          onResniffDuplicate!(resniffPendingTaskId!, task);
-          return;
+
+      // If this is a backup import, perform strict deduplication across ALL tasks
+      // (including completed/failed/scheduled) by ID or normalized URL to keep only unique tasks.
+      if (task.isBackupImport) {
+        if (_tasks.containsKey(task.id)) {
+          _warn('Task ${task.id} already exists in queue, skipping import.');
+          return false;
         }
-        _warn('Already in queue: ${task.url}');
-        return;
-      }
-      // Resniff mode: a freshly sniffed URL that looks like the same media
-      // as the pending task (same scheme/host/path, e.g. a token-refreshed
-      // variant with a different query string) is routed to the resniff
-      // dialog instead of being added as a silent new download. This is what
-      // makes "Update Existing" actually receive a *new* URL rather than the
-      // identical one already in the queue.
-      if (resniffPendingTaskId != null && onResniffDuplicate != null) {
-        final pending = _tasks[resniffPendingTaskId];
-        if (pending != null && _isLikelySameMedia(pending.url, task.url)) {
-          onResniffDuplicate!(resniffPendingTaskId!, task);
-          return;
+        final existingByUrl = _tasks.values.where(
+          (t) => _normalizeUrl(t.url) == normalizedUrl,
+        );
+        if (existingByUrl.isNotEmpty) {
+          _warn('Task URL ${task.url} already exists in queue, skipping import.');
+          return false;
+        }
+      } else {
+        // Normal duplicate prevention: skip if a task with the same URL is already
+        // in the queue (idle, downloading, or paused). Completed/failed tasks
+        // don't block re-downloading the same URL.
+        // Guard with !_isLoading so the O(n) scan per task does not compound
+        // to O(n²) during queue-file restore (the persisted file is
+        // authoritative and should never contain duplicates).
+        final existing = _tasks.values.where(
+          (t) =>
+              _normalizeUrl(t.url) == normalizedUrl &&
+              (t.state == DownloadState.idle ||
+                  t.state == DownloadState.downloading ||
+                  t.state == DownloadState.paused),
+        );
+        if (existing.isNotEmpty) {
+          // When resniff mode is active and the duplicate belongs to the
+          // pending resniff task, delegate to the callback so the user can
+          // choose "Update existing" or "Create new".
+          if (resniffPendingTaskId != null &&
+              onResniffDuplicate != null &&
+              resniffPendingTaskId == existing.first.id) {
+            onResniffDuplicate!(resniffPendingTaskId!, task);
+            return false;
+          }
+          _warn('Already in queue: ${task.url}');
+          return false;
+        }
+        // Resniff mode: a freshly sniffed URL that looks like the same media
+        // as the pending task (same scheme/host/path, e.g. a token-refreshed
+        // variant with a different query string) is routed to the resniff
+        // dialog instead of being added as a silent new download. This is what
+        // makes "Update Existing" actually receive a *new* URL rather than the
+        // identical one already in the queue.
+        if (resniffPendingTaskId != null && onResniffDuplicate != null) {
+          final pending = _tasks[resniffPendingTaskId];
+          if (pending != null && _isLikelySameMedia(pending.url, task.url)) {
+            onResniffDuplicate!(resniffPendingTaskId!, task);
+            return false;
+          }
         }
       }
     }
@@ -529,7 +548,7 @@ class DownloadQueue {
     // Completed tasks are kept for history only; no downloader needed.
     if (task.state == DownloadState.completed) {
       _emitTask(task);
-      return;
+      return true;
     }
 
     // Blob URLs (e.g. blob:https://example.com/uuid) are created by
@@ -544,7 +563,7 @@ class DownloadQueue {
           'Aurora can\'t download blob: URLs directly. '
           'Look for the .m3u8 or .mpd playlist URL in the captured media list instead.';
       _emitTask(task);
-      return;
+      return true;
     }
 
     // Auto-classify: inject category subfolder into savePath.
@@ -565,6 +584,7 @@ class DownloadQueue {
     if (queuePath != null && !_isLoading) {
       unawaited(saveToFile(queuePath!));
     }
+    return true;
   }
 
   void pauseTask(String taskId) {
@@ -1538,9 +1558,13 @@ class DownloadQueue {
       final uri = Uri.parse(url);
       final params = Map<String, List<String>>.from(uri.queryParametersAll);
       params.removeWhere((k, _) => trackingParams.contains(k.toLowerCase()));
-      return uri
-          .replace(queryParameters: params.isEmpty ? null : params)
-          .toString();
+      if (params.isEmpty) {
+        return uri.replace(query: '').toString();
+      }
+      return uri.replace(queryParameters: {
+        for (final entry in params.entries)
+          entry.key: entry.value.length == 1 ? entry.value.first : entry.value,
+      }).toString();
     } catch (_) {
       return url;
     }

@@ -21,6 +21,7 @@ import '../../backup/auto_backup_models.dart';
 import '../../backup/unified_backup_database.dart';
 
 import '../../settings/download_settings.dart';
+import '../../settings/engagement_prompt_service.dart';
 import '../../sniffer/ad_block_engine_native.dart';
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_features.dart';
@@ -2024,7 +2025,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Download Manager',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.3.0+79', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v1.3.3+82', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
@@ -2052,6 +2053,104 @@ class _SettingsPageState extends State<SettingsPage> {
               const Divider(height: 1, indent: 56),
             ],
           )),
+          const SizedBox(height: 16),
+          PanelHeader(icon: Icons.bug_report_outlined, title: 'Engagement & Prompts Debug'),
+          const SizedBox(height: 8),
+          Panel(
+            child: ListenableBuilder(
+              listenable: EngagementPromptService.instance,
+              builder: (ctx, _) {
+                final s = EngagementPromptService.instance;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile(
+                      secondary: Icon(Icons.touch_app_outlined, color: context.ac.accentFrost),
+                      title: const Text('Enable Open Prompts'),
+                      subtitle: const Text('Trigger Review on 3rd open and Purchase on 7th open'),
+                      value: s.enabled,
+                      onChanged: (val) => s.setEnabled(val),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    ListTile(
+                      leading: Icon(Icons.numbers_rounded, color: context.ac.accentFrost),
+                      title: const Text('App Open Count'),
+                      subtitle: Text(
+                        'Opens: ${s.appOpenCount} • Rated: ${s.hasRated} • Review Dismissed: ${s.reviewDismissed} • Purchase Dismissed: ${s.purchaseDismissed}',
+                        style: TextStyle(fontSize: 12, color: context.ac.textSecondary),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, size: 20),
+                            tooltip: 'Decrement open count',
+                            onPressed: s.appOpenCount > 0 ? () => s.setOpenCount(s.appOpenCount - 1) : null,
+                          ),
+                          Text(
+                            '${s.appOpenCount}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline, size: 20),
+                            tooltip: 'Increment open count',
+                            onPressed: () => s.setOpenCount(s.appOpenCount + 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.star_outline, size: 16),
+                            label: const Text('Test 3rd Open (Review)'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: context.ac.accentFrost,
+                              side: BorderSide(color: context.ac.borderHairline),
+                            ),
+                            onPressed: () => s.showReviewPrompt(context),
+                          ),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.workspace_premium_outlined, size: 16),
+                            label: const Text('Test 7th Open (Purchase)'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: context.ac.accentFrost,
+                              side: BorderSide(color: context.ac.borderHairline),
+                            ),
+                            onPressed: () => s.showPurchasePrompt(
+                              context,
+                              proEntitlement: widget.proEntitlement,
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.restart_alt, size: 16),
+                            label: const Text('Reset State'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.redAccent,
+                              side: BorderSide(color: context.ac.borderHairline),
+                            ),
+                            onPressed: () async {
+                              await s.resetDebugState();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Prompt debug state reset.')),
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -2406,7 +2505,12 @@ class _SettingsPageState extends State<SettingsPage> {
         '${ProFeatures.hlsSegmentCapFree} free / ${ProFeatures.hlsSegmentCapPro} Pro / ${ProFeatures.hlsSegmentCapUltra} Ultra',
       ),
 
-      // Free-Taste Caps
+      // Free-Taste & Library Caps
+      (
+        ProFeature.videoLibrary,
+        'Favorite videos',
+        'Pro+ only (Unlimited)',
+      ),
       (
         ProFeature.batchCapture,
         'Batch / Grab All capture',
@@ -3200,6 +3304,7 @@ class BackupPage extends StatefulWidget {
 
 class _BackupPageState extends State<BackupPage> {
   bool exportFavorites = true;
+  bool exportVideoFavorites = true;
   bool exportHistory = true;
   bool exportSavedPages = true;
   bool exportQueue = true;
@@ -3326,14 +3431,27 @@ class _BackupPageState extends State<BackupPage> {
       } catch (_) {}
 
       final library = await const BrowserLibraryStore().load();
-      final favoritesJson = exportFavorites
-          ? library.favorites.map((f) => f.toJson()).toList()
-          : null;
+      final bool canExportVideos =
+          exportVideoFavorites && widget.proEntitlement.isPro;
+      final List<Map<String, dynamic>>? favoritesJson;
+      if (exportFavorites && canExportVideos) {
+        favoritesJson = library.favorites.map((f) => f.toJson()).toList();
+      } else if (exportFavorites) {
+        favoritesJson =
+            library.siteFavorites.map((f) => f.toJson()).toList();
+      } else if (canExportVideos) {
+        favoritesJson =
+            library.videoFavorites.map((f) => f.toJson()).toList();
+      } else {
+        favoritesJson = null;
+      }
       final foldersJson = exportFavorites
           ? library.folders.map((f) => f.toJson()).toList()
           : null;
       final historyJson = exportHistory
-          ? library.history.map((h) => h.toJson()).toList()
+          ? (widget.proEntitlement.isPro
+              ? library.history.map((h) => h.toJson()).toList()
+              : library.siteHistory.map((h) => h.toJson()).toList())
           : null;
       final savedPagesJson = exportSavedPages
           ? library.savedPages.map((p) => p.toJson()).toList()
@@ -3641,8 +3759,10 @@ class _BackupPageState extends State<BackupPage> {
                   task.state = DownloadState.paused;
                 }
               }
-              widget.downloadQueue.addTask(task);
-              importedQueueCount++;
+              final added = widget.downloadQueue.addTask(task);
+              if (added) {
+                importedQueueCount++;
+              }
             } catch (_) {}
           }
         }
@@ -3723,7 +3843,8 @@ class _BackupPageState extends State<BackupPage> {
             historyMap[h.url] = h;
           }
         }
-        final mergedHistory = historyMap.values.toList();
+        final mergedHistory = historyMap.values.toList()
+          ..sort((a, b) => b.visitedAt.compareTo(a.visitedAt));
 
         updatedLibrary = updatedLibrary.copyWith(history: mergedHistory);
         importedHistoryCount = addedHistoryCount;
@@ -3800,7 +3921,8 @@ class _BackupPageState extends State<BackupPage> {
                 historyMap[h.url] = h;
               }
             }
-            mergedHist = historyMap.values.toList();
+            mergedHist = historyMap.values.toList()
+              ..sort((a, b) => b.visitedAt.compareTo(a.visitedAt));
             importedHistoryCount = addedHistoryCount;
           }
 
@@ -3832,40 +3954,86 @@ class _BackupPageState extends State<BackupPage> {
         final tabsList = decoded['tabs'];
         if (tabsList is List && tabsList.isNotEmpty) {
           final tabsFile = File('$baseDir/browser_tabs.json');
-          await tabsFile.writeAsString(jsonEncode(tabsList));
-          importedTabsCount = tabsList.length;
+          List<dynamic> existingTabs = [];
+          if (await tabsFile.exists()) {
+            try {
+              final raw = await tabsFile.readAsString();
+              final decodedExisting = jsonDecode(raw);
+              if (decodedExisting is List) {
+                existingTabs = decodedExisting;
+              }
+            } catch (_) {}
+          }
 
-          // Collect every imported URL for the live restore below.
-          importedTabUrls.addAll(
-            tabsList.whereType<Map>().map(
-              (item) => (item['url'] as String? ?? '').trim(),
-            ).where((u) => u.isNotEmpty),
-          );
+          final existingUrls = existingTabs
+              .whereType<Map>()
+              .map((t) => (t['url'] as String? ?? '').trim().toLowerCase())
+              .where((u) => u.isNotEmpty)
+              .toSet();
+
+          final uniqueNewTabs = <Map<String, dynamic>>[];
+          final seenImportUrls = <String>{};
+
+          for (final item in tabsList) {
+            if (item is! Map) continue;
+            final map = Map<String, dynamic>.from(item);
+            final url = (map['url'] as String? ?? '').trim();
+            final lower = url.toLowerCase();
+            if (url.isNotEmpty &&
+                !existingUrls.contains(lower) &&
+                !seenImportUrls.contains(lower)) {
+              seenImportUrls.add(lower);
+              uniqueNewTabs.add(map);
+              importedTabUrls.add(url);
+            }
+          }
+
+          if (uniqueNewTabs.isNotEmpty) {
+            final mergedTabs = [...existingTabs, ...uniqueNewTabs];
+            await tabsFile.writeAsString(jsonEncode(mergedTabs));
+            importedTabsCount = uniqueNewTabs.length;
+          }
 
           if (decoded.containsKey('tabGroups')) {
             final groupsFile = File('$baseDir/tab_groups.json');
-            await groupsFile.writeAsString(jsonEncode(decoded['tabGroups']));
+            List<dynamic> existingGroups = [];
+            if (await groupsFile.exists()) {
+              try {
+                final rawGroups = await groupsFile.readAsString();
+                final decodedGroups = jsonDecode(rawGroups);
+                if (decodedGroups is List) existingGroups = decodedGroups;
+              } catch (_) {}
+            }
+            final existingGroupNames = existingGroups
+                .whereType<Map>()
+                .map((g) => (g['name'] as String? ?? '').trim().toLowerCase())
+                .toSet();
+            final importedGroups = (decoded['tabGroups'] as List? ?? [])
+                .whereType<Map>()
+                .where((g) {
+                  final name = (g['name'] as String? ?? '').trim().toLowerCase();
+                  return name.isNotEmpty && !existingGroupNames.contains(name);
+                })
+                .toList();
+            if (importedGroups.isNotEmpty) {
+              final mergedGroups = [...existingGroups, ...importedGroups];
+              await groupsFile.writeAsString(jsonEncode(mergedGroups));
+            }
           }
 
           // Extract active tab URL to reopen in browser view
-          for (final item in tabsList) {
-            if (item is Map) {
-              final url = (item['url'] as String? ?? '').trim();
-              if (item['active'] == true && url.isNotEmpty) {
-                activeTabUrlToReopen = url;
-                break;
-              }
+          for (final item in uniqueNewTabs) {
+            final url = (item['url'] as String? ?? '').trim();
+            if (item['active'] == true && url.isNotEmpty) {
+              activeTabUrlToReopen = url;
+              break;
             }
           }
           if (activeTabUrlToReopen == null || activeTabUrlToReopen.isEmpty) {
-            for (final item in tabsList) {
-              if (item is Map) {
-                final url = (item['url'] as String? ?? '').trim();
-                if (url.isNotEmpty) {
-                  activeTabUrlToReopen = url;
-                  break;
-                }
-              }
+            if (uniqueNewTabs.isNotEmpty) {
+              final first = uniqueNewTabs.first;
+              final url = (first['url'] as String? ?? '').trim();
+              if (url.isNotEmpty) activeTabUrlToReopen = url;
             }
           }
         }
@@ -3875,9 +4043,31 @@ class _BackupPageState extends State<BackupPage> {
       if (importRules && (decoded.containsKey('downloadRules') || decoded.containsKey('download_rules'))) {
         try {
           final rulesData = decoded['downloadRules'] ?? decoded['download_rules'];
-          final rulesFile = File('$baseDir/download_rules.json');
-          await rulesFile.writeAsString(jsonEncode(rulesData));
-          importedRules = true;
+          if (rulesData is List) {
+            final store = const DownloadRulesStore();
+            final currentRules = await store.load();
+            final currentRuleIds = {for (final r in currentRules) r.id};
+            final currentRuleNames = {for (final r in currentRules) r.name.trim().toLowerCase()};
+
+            final uniqueImported = <DownloadRule>[];
+            for (final item in rulesData) {
+              if (item is! Map) continue;
+              try {
+                final rule = DownloadRule.fromJson(Map<String, dynamic>.from(item));
+                final lowerName = rule.name.trim().toLowerCase();
+                if (!currentRuleIds.contains(rule.id) && !currentRuleNames.contains(lowerName)) {
+                  uniqueImported.add(rule);
+                  currentRuleIds.add(rule.id);
+                  currentRuleNames.add(lowerName);
+                }
+              } catch (_) {}
+            }
+            if (uniqueImported.isNotEmpty) {
+              final merged = [...currentRules, ...uniqueImported];
+              await store.save(merged);
+              importedRules = true;
+            }
+          }
         } catch (_) {}
       }
 
@@ -4039,13 +4229,49 @@ class _BackupPageState extends State<BackupPage> {
                         const SizedBox(height: 12),
                         SwitchListTile(
                           activeColor: context.ac.accentFrost,
-                          title: Text('Favorites / Bookmarks', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                          title: Text('Web Bookmarks & Folders', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
                           subtitle: Text(
-                            'Saved bookmarks and folders',
+                            'Saved browser bookmarks and folders',
                             style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
                           ),
                           value: exportFavorites,
                           onChanged: (v) => setState(() => exportFavorites = v),
+                        ),
+                        SwitchListTile(
+                          activeColor: context.ac.accentFrost,
+                          title: Row(
+                            children: [
+                              Text('Favorite Videos', style: TextStyle(color: context.ac.textPrimary, fontSize: 13)),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: context.ac.accentFrost.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'PRO',
+                                  style: TextStyle(
+                                    color: context.ac.accentFrost,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            'Saved video library collection (Pro)',
+                            style: TextStyle(color: context.ac.textTertiary, fontSize: 11),
+                          ),
+                          value: widget.proEntitlement.isPro ? exportVideoFavorites : false,
+                          onChanged: (v) {
+                            if (!widget.proEntitlement.isPro) {
+                              showProUpsell(context, ProFeature.videoLibrary);
+                              return;
+                            }
+                            setState(() => exportVideoFavorites = v);
+                          },
                         ),
                         SwitchListTile(
                           activeColor: context.ac.accentFrost,
@@ -4126,6 +4352,7 @@ class _BackupPageState extends State<BackupPage> {
                           ),
                           onPressed: (_isExporting ||
                                   (!exportFavorites &&
+                                      !(exportVideoFavorites && widget.proEntitlement.isPro) &&
                                       !exportHistory &&
                                       !exportSavedPages &&
                                       !exportQueue &&

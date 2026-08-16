@@ -1,0 +1,55 @@
+Aurora Download Manager es un navegador web privado y un rápido descargador de vídeos diseñado para descargas pesadas de archivos, torrents y captura multimedia.
+
+GESTOR DE DESCARGAS Y ACELERADOR TODO EN UNO
+- Descargador de archivos multiparte de alta velocidad (hasta 32 partes en Pro, 64 en Ultra)
+- Acelerador de descargas inteligente para archivos, vídeos y torrents
+- Gestor en segundo plano fiable: pausa, reanuda y recupera enlaces caídos tras reinicios
+- Renovación de enlaces: actualiza URLs de descarga caducadas automáticamente
+
+DESCARGADOR DE VÍDEOS WEB INTELIGENTE
+- Potente descargador de vídeos que detecta archivos multimedia mientras navegas
+- Reproductor integrado con Picture-in-Picture (PiP), control de velocidad y gestos
+- Descargador de streams y playlists: une secuencias m3u8 en archivos MP4 completos
+- Descarga múltiple en lote: guarda varios vídeos y archivos con un solo toque
+- Organización automática en carpetas para vídeos, música y documentos
+
+NAVEGADOR PRIVADO CON BLOQUEADOR DE ANUNCIOS
+- Navegador privado con bloqueo automático de anuncios y pop-ups para una navegación limpia
+- Pestañas agrupadas, marcadores y recuperación de sesiones
+- Modo lectura, guardado de páginas sin conexión y ocultación de elementos
+- Privacidad total: historial y descargas se guardan exclusivamente en tu dispositivo
+
+DESCARGADOR DE TORRENTS Y ENLACES MAGNET
+- Cliente torrent integrado para descargar archivos torrent y enlaces magnet directamente
+- Soporte para torrents multivariable: selecciona archivos, pausa, reanuda y comparte
+- Motor P2P nativo con límites de velocidad y reglas personalizadas
+
+COPIA DE SEGURIDAD AUTOMÁTICA EN GOOGLE DRIVE
+- Conecta tu cuenta y sincroniza descargas completadas en Google Drive automáticamente
+- Elige tu horario: instantáneo, cada 15 minutos, cada hora o diario
+- Carpeta dedicada en la nube para acceder a tus archivos desde cualquier teléfono o PC
+
+IMPORTACIÓN FÁCIL Y TRANSFERENCIA WI-FI
+- Importa listas de descargas desde otros gestores (JSON, backup files)
+- Compatible con Carpeta Segura de Samsung y perfiles de trabajo
+- Envía archivos a tu ordenador por Wi-Fi local sin pasar por ningún servidor
+
+AURORA PRO — PAGO ÚNICO
+- 16 descargas simultáneas y 32 partes por archivo (Versión gratuita: 3 y 8)
+- Sincronización ampliada con Google Drive (50 archivos/día)
+- Filtros adblock ilimitados, protección contra rastreadores y bóveda privada
+- Renovación automática de enlaces caídos y captura por lotes
+
+AURORA ULTRA — SUITE PARA USUARIOS AVANZADOS
+- 64 descargas a la vez y 64 partes por archivo
+- Hasta 1.000 sincronizaciones diarias en Google Drive
+- Conversor multimedia integrado descargado bajo demanda
+- API de automatización local y monitor de carpetas
+Pro y Ultra son compras de pago único. Sin suscripciones.
+
+AVISO DE POLÍTICA Y USO
+- De acuerdo con las políticas de Google Play, la descarga desde YouTube no está admitida.
+- El bloqueo de anuncios funciona solo dentro del navegador Aurora y no actúa como VPN global.
+- Descarga únicamente contenido sobre el que tengas derechos legales.
+
+El núcleo de Aurora es de código abierto (GPL-3.0). No afiliado a Google, YouTube ni plataformas de terceros.

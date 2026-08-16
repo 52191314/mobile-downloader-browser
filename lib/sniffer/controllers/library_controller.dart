@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ class LibraryImportResult {
   final int historyCount;
   final int savedPagesCount;
   final int queueCount;
+  final int tabsCount;
   final bool settingsImported;
 
   const LibraryImportResult({
@@ -24,6 +26,7 @@ class LibraryImportResult {
     this.historyCount = 0,
     this.savedPagesCount = 0,
     this.queueCount = 0,
+    this.tabsCount = 0,
     this.settingsImported = false,
   });
 }
@@ -274,6 +277,7 @@ class LibraryController {
     DownloadQueue? downloadQueue,
     DownloadSettings? settings,
     ValueChanged<DownloadSettings>? onSettingsChanged,
+    void Function(List<String> urls)? onImportTabs,
     required String baseDir,
     required String baseTemp,
   }) async {
@@ -290,6 +294,7 @@ class LibraryController {
       var historyCount = 0;
       var savedPagesCount = 0;
       var queueCount = 0;
+      var tabsCount = 0;
       var settingsImported = false;
 
       // Settings
@@ -390,11 +395,63 @@ class LibraryController {
         }
       }
 
+      // Tabs
+      if (decoded['tabs'] is List) {
+        final tabsList = decoded['tabs'] as List;
+        if (tabsList.isNotEmpty) {
+          final tabsFile = File('$baseDir/browser_tabs.json');
+          List<dynamic> existingTabs = [];
+          if (await tabsFile.exists()) {
+            try {
+              final raw = await tabsFile.readAsString();
+              final decodedExisting = jsonDecode(raw);
+              if (decodedExisting is List) existingTabs = decodedExisting;
+            } catch (_) {}
+          }
+
+          final existingUrls = existingTabs
+              .whereType<Map>()
+              .map((t) => (t['url'] as String? ?? '').trim().toLowerCase())
+              .where((u) => u.isNotEmpty)
+              .toSet();
+
+          final uniqueNewTabs = <Map<String, dynamic>>[];
+          final seenImportUrls = <String>{};
+          final importedTabUrls = <String>[];
+
+          for (final item in tabsList) {
+            if (item is! Map) continue;
+            final map = Map<String, dynamic>.from(item);
+            final url = (map['url'] as String? ?? '').trim();
+            final lower = url.toLowerCase();
+            if (url.isNotEmpty &&
+                url != 'about:blank' &&
+                !existingUrls.contains(lower) &&
+                !seenImportUrls.contains(lower)) {
+              seenImportUrls.add(lower);
+              uniqueNewTabs.add(map);
+              importedTabUrls.add(url);
+            }
+          }
+
+          if (uniqueNewTabs.isNotEmpty) {
+            final mergedTabs = [...existingTabs, ...uniqueNewTabs];
+            await tabsFile.writeAsString(jsonEncode(mergedTabs));
+            tabsCount = uniqueNewTabs.length;
+          }
+
+          if (onImportTabs != null && importedTabUrls.isNotEmpty) {
+            onImportTabs(importedTabUrls);
+          }
+        }
+      }
+
       return LibraryImportResult(
         favoritesCount: favoritesCount,
         historyCount: historyCount,
         savedPagesCount: savedPagesCount,
         queueCount: queueCount,
+        tabsCount: tabsCount,
         settingsImported: settingsImported,
       );
     } catch (e) {

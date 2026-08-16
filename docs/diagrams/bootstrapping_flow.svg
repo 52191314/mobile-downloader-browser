@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 620" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0f172a; }
+      .zone-bg { fill: #1e293b; fill-opacity: 0.6; stroke: #334155; stroke-width: 1.5; stroke-dasharray: 4 4; rx: 12px; }
+      .zone-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 700; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.12em; }
+      
+      .node-box { fill: #1e293b; stroke: #475569; stroke-width: 1.2; rx: 8px; }
+      .node-focal { fill: rgba(56, 189, 248, 0.12); stroke: #38bdf8; stroke-width: 1.8; rx: 8px; }
+      .node-accent2 { fill: rgba(249, 115, 22, 0.12); stroke: #f97316; stroke-width: 1.6; rx: 8px; }
+      .node-tier-free { fill: #0f172a; stroke: #64748b; stroke-width: 1.2; rx: 6px; }
+      .node-tier-pro { fill: rgba(56, 189, 248, 0.1); stroke: #38bdf8; stroke-width: 1.4; rx: 6px; }
+      .node-tier-ultra { fill: rgba(168, 85, 247, 0.12); stroke: #c084fc; stroke-width: 1.4; rx: 6px; }
+      
+      .title-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 600; fill: #f8fafc; }
+      .title-focal { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 12.5px; font-weight: 700; fill: #38bdf8; }
+      .sub-text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 9.5px; fill: #94a3b8; }
+      
+      .conn-line { fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linejoin: round; }
+      .conn-focal { fill: none; stroke: #38bdf8; stroke-width: 1.6; stroke-linejoin: round; }
+      
+      .hdr-main { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #f8fafc; letter-spacing: -0.01em; }
+      .hdr-sub { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; fill: #38bdf8; font-weight: 500; }
+    </style>
+
+    <marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#64748b" />
+    </marker>
+    <marker id="arrow-focal" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#38bdf8" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#c084fc" />
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" class="bg" rx="14px"/>
+
+  <!-- Top Header Title -->
+  <g transform="translate(36, 32)">
+    <text class="hdr-sub" y="0">APPLICATION BOOTSTRAP &amp; SECURITY</text>
+    <text class="hdr-main" y="22">Bootstrapping &amp; Tier Entitlement Architecture</text>
+  </g>
+
+  <!-- ZONE 1: Entry & Channel Resolution -->
+  <g transform="translate(36, 75)">
+    <rect width="280" height="505" class="zone-bg" />
+    <text x="16" y="24" class="zone-title">1. Initialization &amp; Channel</text>
+
+    <!-- Node: main() App Entry -->
+    <g transform="translate(16, 44)">
+      <rect width="248" height="56" class="node-box" />
+      <text x="12" y="22" class="title-text">main() App Entry Point</text>
+      <text x="12" y="40" class="sub-text">WidgetsFlutterBinding.ensureInitialized()</text>
+    </g>
+
+    <!-- Node: DB & Preferences Store -->
+    <g transform="translate(16, 130)">
+      <rect width="248" height="56" class="node-box" />
+      <text x="12" y="22" class="title-text">ThemeNotifier &amp; Preferences</text>
+      <text x="12" y="40" class="sub-text">Load Theme, Hive DB &amp; Accent Pack</text>
+    </g>
+
+    <!-- Node: Channel Resolution -->
+    <g transform="translate(16, 216)">
+      <rect width="248" height="64" class="node-box" />
+      <text x="12" y="22" class="title-text">Build Channel Resolution</text>
+      <text x="12" y="38" class="sub-text">Read AURORA_BUILD_CHANNEL</text>
+      <text x="12" y="52" class="sub-text" fill="#38bdf8">Mode: Play Store (Dynamic Modules)</text>
+    </g>
+
+    <!-- Node: System UI Edge to Edge -->
+    <g transform="translate(16, 310)">
+      <rect width="248" height="56" class="node-box" />
+      <text x="12" y="22" class="title-text">System UI &amp; Native JNI</text>
+      <text x="12" y="40" class="sub-text">Edge-to-Edge Navigation Bar Insets</text>
+    </g>
+
+    <!-- Connections in Zone 1 -->
+    <path d="M 140 100 V 128" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 140 186 V 214" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 140 280 V 308" class="conn-line" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Connect Zone 1 -> Zone 2 -->
+  <path d="M 316 323 H 360" class="conn-focal" marker-end="url(#arrow-focal)"/>
+
+  <!-- ZONE 2: Entitlement & License Evaluation -->
+  <g transform="translate(360, 75)">
+    <rect width="360" height="505" class="zone-bg" />
+    <text x="16" y="24" class="zone-title">2. Entitlement &amp; License Store</text>
+
+    <!-- Node: Evaluation Engine -->
+    <g transform="translate(16, 44)">
+      <rect width="328" height="64" class="node-focal" />
+      <text x="12" y="24" class="title-focal">ProEntitlementStore.evaluateTier()</text>
+      <text x="12" y="42" class="sub-text">Check Aurora License Server · Play In-App Purchase</text>
+      <text x="12" y="54" class="sub-text" fill="#7dd3fc">Cryptographic Signature Verification</text>
+    </g>
+
+    <!-- Tier Free -->
+    <g transform="translate(16, 140)">
+      <rect width="328" height="74" class="node-tier-free" />
+      <text x="12" y="20" class="title-text" fill="#cbd5e1">Free Tier (Base)</text>
+      <text x="12" y="38" class="sub-text">▪ Standard parallel download slots (capped)</text>
+      <text x="12" y="52" class="sub-text">▪ Basic media stream sniffer</text>
+      <text x="12" y="66" class="sub-text">▪ Direct single/multi HTTP engine</text>
+    </g>
+
+    <!-- Tier Pro -->
+    <g transform="translate(16, 230)">
+      <rect width="328" height="88" class="node-tier-pro" />
+      <text x="12" y="20" class="title-text" fill="#38bdf8">Pro Tier (Unlocked)</text>
+      <text x="12" y="38" class="sub-text">▪ Turbo Segmented Engine (16–32 threads)</text>
+      <text x="12" y="52" class="sub-text">▪ Native C++ Rust AdBlock (Trie + Aho-Corasick)</text>
+      <text x="12" y="66" class="sub-text">▪ Dead-Link Revival (Headless token refresh)</text>
+      <text x="12" y="80" class="sub-text">▪ AES-256 Encrypted Storage Vault</text>
+    </g>
+
+    <!-- Tier Ultra -->
+    <g transform="translate(16, 334)">
+      <rect width="328" height="96" class="node-tier-ultra" />
+      <text x="12" y="20" class="title-text" fill="#c084fc">Ultra Tier (Complete Suite)</text>
+      <text x="12" y="38" class="sub-text">▪ Native FFmpeg Studio on-demand module</text>
+      <text x="12" y="52" class="sub-text">▪ Aurora Watcher automated media triggers</text>
+      <text x="12" y="66" class="sub-text">▪ Local REST / Automation API endpoint</text>
+      <text x="12" y="80" class="sub-text">▪ E2EE Encrypted Google Drive sync</text>
+      <text x="12" y="94" class="sub-text">▪ Custom User-Agent &amp; Header Overrides</text>
+    </g>
+
+    <!-- Connectors inside Zone 2 -->
+    <path d="M 180 108 V 138" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 180 214 V 228" class="conn-focal" marker-end="url(#arrow-focal)"/>
+    <path d="M 180 318 V 332" class="conn-line" marker-end="url(#arrow-purple)"/>
+  </g>
+
+  <!-- Connect Zone 2 -> Zone 3 -->
+  <path d="M 720 323 H 764" class="conn-focal" marker-end="url(#arrow-focal)"/>
+
+  <!-- ZONE 3: Onboarding & App Launch -->
+  <g transform="translate(764, 75)">
+    <rect width="280" height="505" class="zone-bg" />
+    <text x="16" y="24" class="zone-title">3. First Launch &amp; Shell</text>
+
+    <!-- Node: First Launch Check -->
+    <g transform="translate(16, 44)">
+      <rect width="248" height="56" class="node-box" />
+      <text x="12" y="22" class="title-text">First Launch Router</text>
+      <text x="12" y="40" class="sub-text">AURORA_ENABLE_ONBOARDING check</text>
+    </g>
+
+    <!-- Node: Tour Page -->
+    <g transform="translate(16, 130)">
+      <rect width="248" height="64" class="node-accent2" />
+      <text x="12" y="22" class="title-text" fill="#fdba74">Interactive App Tour</text>
+      <text x="12" y="38" class="sub-text">Nordic feature walkthrough</text>
+      <text x="12" y="52" class="sub-text" fill="#fb923c">Deferred permissions request</text>
+    </g>
+
+    <!-- Node: Permissions Request -->
+    <g transform="translate(16, 216)">
+      <rect width="248" height="56" class="node-box" />
+      <text x="12" y="22" class="title-text">System Permissions</text>
+      <text x="12" y="40" class="sub-text">Storage Access (SAF) &amp; Notifications</text>
+    </g>
+
+    <!-- Node: Background Services -->
+    <g transform="translate(16, 302)">
+      <rect width="248" height="60" class="node-box" />
+      <text x="12" y="22" class="title-text">Background Services</text>
+      <text x="12" y="38" class="sub-text">In-App Timers, Watcher Poll</text>
+      <text x="12" y="50" class="sub-text">Local HTTP Server (if enabled)</text>
+    </g>
+
+    <!-- Node: Shell Launch -->
+    <g transform="translate(16, 390)">
+      <rect width="248" height="56" class="node-focal" />
+      <text x="12" y="22" class="title-focal">Launch Core Navigation</text>
+      <text x="12" y="40" class="sub-text" fill="#7dd3fc">Render AuroraDock &amp; Active Tab</text>
+    </g>
+
+    <!-- Connections in Zone 3 -->
+    <path d="M 140 100 V 128" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 140 194 V 214" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 140 272 V 300" class="conn-line" marker-end="url(#arrow)"/>
+    <path d="M 140 362 V 388" class="conn-focal" marker-end="url(#arrow-focal)"/>
+  </g>
+
+</svg>

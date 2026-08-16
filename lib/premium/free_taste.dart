@@ -95,8 +95,6 @@ class FreeTaste {
         return FreeTasteMode.dailyQuota;
       case ProFeature.privateVault:
         return FreeTasteMode.inventoryCap;
-      case ProFeature.videoLibrary:
-        return FreeTasteMode.inventoryCap;
       default:
         return null; // hard lock — Pro+ only
     }

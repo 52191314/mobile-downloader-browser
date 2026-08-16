@@ -1,0 +1,55 @@
+Aurora Download Manager is a supercharged private web browser and fast video downloader built for serious file downloads, torrents, and media capture.
+
+ALL-IN-ONE DOWNLOAD MANAGER & ACCELERATOR
+- High-speed multi-threaded file downloader with parallel parts (up to 32 parts on Pro, 64 on Ultra)
+- Smart download accelerator that speeds up file, video, and torrent transfers
+- Reliable background download manager: pause, resume, and pick up broken links after app restarts or network drops
+- Dead-link revival: refresh expired download URLs automatically
+
+SMART WEB VIDEO DOWNLOADER & MEDIA SAVER
+- Powerful web video downloader that detects downloadable videos, audio, and media streams as you browse
+- Built-in video player with speed control, gesture seek, and Picture-in-Picture (PiP) to preview files before downloading
+- Stream & playlist downloader: reassembles m3u8 and video streams into full offline MP4 files
+- One-tap batch video downloader: grab multiple media files and links simultaneously
+- Auto-organize: downloaded videos, music, and documents are automatically sorted into organized folders
+
+PRIVATE BROWSER WITH BUILT-IN ADBLOCK
+- Fast private browser with automatic ad blocker and popup blocker for clean, secure browsing
+- Multi-tab browsing with tab groups, bookmarks, and persistent session recovery
+- Reader mode, offline page saver, and custom element hiding for distraction-free reading
+- Incognito privacy: your browsing history and downloaded files stay strictly on your local device
+
+NATIVE TORRENT DOWNLOADER & MAGNET CLIENT
+- Built-in torrent client to download torrents and magnet links directly to your device
+- Multi-file torrent support: select specific files, pause, resume, and seed without extra apps
+- Fast native P2P engine with custom download rules and speed limits
+
+AUTOMATIC GOOGLE DRIVE CLOUD BACKUP
+- Connect your Google account and auto-sync completed downloads to Google Drive
+- Set flexible sync schedules: instant, every 15 minutes, hourly, or daily
+- Dedicated Aurora cloud folder ensures your files are backed up and accessible from any phone or PC
+
+EASY IMPORT & WI-FI FILE TRANSFER
+- Import download queues and history from other Android download managers (JSON, backup files)
+- Secure Folder & work-profile compatible
+- Transfer files to your PC or Mac over local Wi-Fi with zero server intermediary
+
+AURORA PRO — ONE-TIME UNLOCK
+- 16 parallel downloads & 32 parts per file (Free: 3 downloads & 8 parts)
+- Higher Google Drive sync limits (50 files/day)
+- Unlimited adblock filter lists, tracker protection, and custom element rules
+- Automatic dead-link revival, series auto-grab, and private vault
+
+AURORA ULTRA — POWER USER SUITE
+- 64 downloads at once & 64 parts per file
+- Up to 1,000 Google Drive syncs daily
+- Built-in media converter suite (downloaded on demand to avoid app bloat)
+- Local automation API and folder watcher
+Both Pro and Ultra are one-time purchases. No recurring subscriptions.
+
+USAGE & POLICY NOTICE
+- In strict compliance with Google Play Developer Terms, downloading from YouTube is not supported.
+- Ad blocking operates exclusively within Aurora Browser and does not act as a system-wide VPN.
+- Users are responsible for ensuring they have the legal right to download content from third-party sites.
+
+Aurora's core is open source (GPL-3.0). Official Play Edition includes verified updates and optional Pro/Ultra features. Not affiliated with Google, YouTube, or third-party media platforms.

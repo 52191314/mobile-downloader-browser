@@ -45,24 +45,19 @@ class VideoLibrary {
 
   static const ProFeature feature = ProFeature.videoLibrary;
 
-  /// Free cap applied to each list separately. Null once the user is Pro+.
+  /// Free cap applied to favorite videos. Pro is unlimited (null), Free is 0 (Pro-only).
   static int? freeLimitFor(EntitlementTier tier) =>
-      tier.isAtLeastPro ? null : ProFeatures.freeVideoLibraryItems;
+      tier.isAtLeastPro ? null : 0;
 
   /// True when [tier] may hold more saved videos.
   static Future<bool> canSaveAnother(
     EntitlementTier tier,
     BrowserLibrary library,
   ) async {
-    final decision = await FreeTaste.evaluate(
-      feature: feature,
-      tier: tier,
-      inventoryCount: library.videoFavorites.length,
-    );
-    return decision.allowed;
+    return tier.isAtLeastPro;
   }
 
-  /// Adds a saved video, honouring the free inventory cap.
+  /// Adds a saved video, honouring the Pro-only gate.
   static Future<VideoSaveResult> addFavorite({
     required BrowserLibrary library,
     required EntitlementTier tier,
@@ -115,9 +110,8 @@ class VideoLibrary {
   ///
   /// Replaying the same URL moves the existing entry to the top rather than
   /// stacking duplicates — a watch list of the same video ten times is noise.
-  /// Free users keep a rolling window of the newest
-  /// [ProFeatures.freeVideoLibraryItems]; Pro+ keeps everything, subject to the
-  /// same overall history bound the browser already applies.
+  /// Free users keep a rolling window of the newest 10 videos; Pro+ keeps
+  /// everything, subject to the same overall history bound the browser already applies.
   static BrowserLibrary recordPlay({
     required BrowserLibrary library,
     required EntitlementTier tier,
@@ -151,7 +145,7 @@ class VideoLibrary {
       ..insert(0, entry)
       ..sort((a, b) => b.visitedAt.compareTo(a.visitedAt));
 
-    final limit = freeLimitFor(tier) ?? maxVideoEntries;
+    final limit = tier.isAtLeastPro ? maxVideoEntries : 10;
     final capped =
         videos.length > limit ? videos.sublist(0, limit) : videos;
 

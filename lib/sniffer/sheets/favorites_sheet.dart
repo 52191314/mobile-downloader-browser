@@ -427,7 +427,11 @@ class _FavoritesSheetContentState extends State<FavoritesSheetContent>
               },
               onOpenSourcePage: (fav) {
                 Navigator.of(context).pop();
-                unawaited(widget.onLoadUrl(fav.sourcePageUrl!));
+                final target = (fav.sourcePageUrl != null &&
+                        fav.sourcePageUrl!.trim().isNotEmpty)
+                    ? fav.sourcePageUrl!.trim()
+                    : fav.url;
+                unawaited(widget.onLoadUrl(target));
               },
               onRemove: (fav) async {
                 await _onLibrarySaved(

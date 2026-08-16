@@ -1,0 +1,54 @@
+Aurora Download Manager ist ein privater Webbrowser und schneller Video Downloader für anspruchsvolle Datei-Downloads, Torrents und Medien.
+
+ALL-IN-ONE DOWNLOAD-MANAGER & BESCHLEUNIGER
+- Extrem schneller mehrteiliger Datei-Downloader (bis zu 32 Teile in Pro, 64 in Ultra)
+- Intelligenter Download-Beschleuniger für Dateien, Videos und Torrents
+- Zuverlässiges Herunterladen im Hintergrund: Pausieren, Fortsetzen und Wiederherstellen
+- Automatische Erneuerung abgelaufener Download-Links
+
+SMARTER WEB-VIDEO-DOWNLOADER & MEDIEN-SAVER
+- Erkennt Videos, Musik und Mediendateien automatisch beim Surfen
+- Integrierter Videoplayer mit Bild-in-Bild (PiP), Geschwindigkeitsregler und Gesten
+- Stream-Downloader: Fügt m3u8-Streams zu vollständigen MP4-Dateien zusammen
+- Stapel-Download (Batch): Mehrere Videos und Dateien mit einem Fingertipp laden
+- Automatische Sortierung von Videos, Musik und Dokumenten in eigene Ordner
+
+PRIVATER BROWSER MIT INTEGRIERTEM WERBEBLOCKER
+- Schneller privater Browser mit Werbe- und Popup-Blocker für ungestörtes Surfen
+- Multi-Tab-Browsing mit Tab-Gruppen und automatischer Sitzungswiederherstellung
+- Lesemodus, Offline-Seiten und Ausblenden störender Web-Elemente
+- Höchste Privatsphäre: Verlauf und Downloads bleiben ausschließlich auf Ihrem Gerät
+
+NATIVER TORRENT-DOWNLOADER & MAGNET-CLIENT
+- Integrierter Torrent-Client zum direkten Laden von Torrents und Magnet-Links
+- Mehrdatei-Torrents: Bestimmte Dateien auswählen, pausieren, fortsetzen und seeden
+- Schnelle P2P-Engine mit flexiblen Regeln und Geschwindigkeitsbegrenzungen
+
+AUTOMATISCHES GOOGLE DRIVE BACKUP
+- Verbinden Sie Ihr Google-Konto für die automatische Synchronisierung mit Google Drive
+- Flexible Zeitpläne: Sofort, alle 15 Minuten, stündlich oder täglich
+- Eigener Cloud-Ordner für den Zugriff von jedem Smartphone oder PC
+
+EINFACHER IMPORT & WI-FI-DATEIÜBERTRAGUNG
+- Importieren Sie Download-Listen aus anderen Android-Managern (JSON, backup files)
+- Kompatibel mit Samsung Sicherer Ordner und Arbeitsprofilen
+- Dateien über lokales WLAN direkt an Ihren PC übertragen – ohne Fremdserver
+
+AURORA PRO — EINMALIGER KAUF
+- 16 gleichzeitige Downloads & 32 Teile pro Datei (Kostenlos: 3 und 8)
+- Erweitertes Google Drive Limit (50 Dateien/Tag)
+- Unbegrenzte Adblock-Filterlisten, Tracking-Schutz und privater Tresor
+
+AURORA ULTRA — DIE ULTIMATIVE SUITE
+- 64 gleichzeitige Downloads & 64 Teile pro Datei
+- Bis zu 1.000 Google Drive Synchronisierungen täglich
+- Integrierte Medienkonvertierungs-Suite
+- Lokale Automatisierungs-API und Ordnerüberwachung
+Einmaliger Kauf für immer. Kein wiederkehrendes Abonnement.
+
+RICHTLINIEN-HINWEIS
+- Gemäß den Google Play Richtlinien wird das Herunterladen von YouTube nicht unterstützt.
+- Der Werbeblocker arbeitet ausschließlich im Aurora Browser (kein systemweites VPN).
+- Bitte laden Sie nur urheberrechtlich zulässige Inhalte herunter.
+
+Open Source (GPL-3.0). Keine Verbindung zu Google, YouTube oder Drittanbietern.

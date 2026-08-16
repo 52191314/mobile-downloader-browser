@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,6 +19,7 @@ class LibraryTransferImportSummary {
   final int historyCount;
   final int savedPagesCount;
   final int queueCount;
+  final int tabsCount;
   final bool settingsImported;
   final BrowserLibrary? updatedLibrary;
 
@@ -26,6 +28,7 @@ class LibraryTransferImportSummary {
     this.historyCount = 0,
     this.savedPagesCount = 0,
     this.queueCount = 0,
+    this.tabsCount = 0,
     this.settingsImported = false,
     this.updatedLibrary,
   });
@@ -36,6 +39,7 @@ class LibraryTransferImportSummary {
     if (historyCount > 0) summary.add('$historyCount history entries');
     if (savedPagesCount > 0) summary.add('$savedPagesCount saved pages');
     if (queueCount > 0) summary.add('$queueCount download tasks');
+    if (tabsCount > 0) summary.add('$tabsCount open tabs');
     if (settingsImported) summary.add('app settings');
     if (summary.isEmpty) {
       return 'Import completed (no new items found).';
@@ -75,11 +79,20 @@ class LibraryTransfer {
       final settingsJson = options.settings ? settings.toJson() : null;
       final tabsJson = options.tabs
           ? tabs.asMap().entries.map((e) {
+              final url = (e.value.currentUrl ??
+                      e.value.committedMainFrameUrl ??
+                      e.value.addressController.text)
+                  .trim();
               return {
                 'id': e.value.id,
-                'url': e.value.addressController.text.trim(),
+                'url': url,
                 'title': e.value.title,
                 'active': e.key == activeTabIndex,
+                'history': e.value.controller.historyUrls,
+                'historyIndex': e.value.controller.historyIndex,
+                'groupName': e.value.groupName,
+                'groupColorIndex': e.value.groupColorIndex,
+                'autoGrouped': e.value.autoGrouped,
               };
             }).toList()
           : null;
@@ -109,6 +122,7 @@ class LibraryTransfer {
     required Future<void> Function() ensurePaths,
     required Future<void> Function(BrowserLibrary library) saveLibrary,
     required ValueChanged<DownloadSettings>? onSettingsChanged,
+    void Function(List<String> urls)? onImportTabs,
     required void Function(String message) showSnack,
   }) async {
     try {
@@ -135,12 +149,16 @@ class LibraryTransfer {
           (decoded['downloadQueue'] is List) &&
           (decoded['downloadQueue'] as List).isNotEmpty;
       final hasSettings = decoded.containsKey('settings');
+      final hasTabs = decoded.containsKey('tabs') &&
+          (decoded['tabs'] is List) &&
+          (decoded['tabs'] as List).isNotEmpty;
 
       final isLegacy = decoded.containsKey('favorites') ||
           decoded.containsKey('history') ||
           decoded.containsKey('savedPages') ||
           (!decoded.containsKey('settings') &&
               !decoded.containsKey('downloadQueue') &&
+              !decoded.containsKey('tabs') &&
               decoded.isNotEmpty &&
               !decoded.containsKey('favorites') &&
               !decoded.containsKey('history') &&
@@ -154,6 +172,7 @@ class LibraryTransfer {
         hasSavedPages: hasSavedPages,
         hasQueue: hasQueue,
         hasSettings: hasSettings,
+        hasTabs: hasTabs,
         isLegacy: isLegacy,
       );
       if (options == null || !options.anySelected) return null;
@@ -167,6 +186,7 @@ class LibraryTransfer {
         baseTemp: baseTemp ?? '.',
         saveLibrary: saveLibrary,
         onSettingsChanged: onSettingsChanged,
+        onImportTabs: onImportTabs,
       );
       return summary.snackMessage();
     } catch (error, stack) {
@@ -186,11 +206,13 @@ class LibraryTransfer {
     required String baseTemp,
     required Future<void> Function(BrowserLibrary library) saveLibrary,
     ValueChanged<DownloadSettings>? onSettingsChanged,
+    void Function(List<String> urls)? onImportTabs,
   }) async {
     var importedFavoritesCount = 0;
     var importedHistoryCount = 0;
     var importedSavedPagesCount = 0;
     var importedQueueCount = 0;
+    var importedTabsCount = 0;
     var importedSettings = false;
     var updatedLibrary = library;
 
@@ -315,11 +337,92 @@ class LibraryTransfer {
       await saveLibrary(updatedLibrary);
     }
 
+    if (options.tabs && decoded.containsKey('tabs')) {
+      final tabsList = decoded['tabs'];
+      if (tabsList is List && tabsList.isNotEmpty) {
+        final tabsFile = File('$baseDir/browser_tabs.json');
+        List<dynamic> existingTabs = [];
+        if (await tabsFile.exists()) {
+          try {
+            final raw = await tabsFile.readAsString();
+            final decodedExisting = jsonDecode(raw);
+            if (decodedExisting is List) {
+              existingTabs = decodedExisting;
+            }
+          } catch (_) {}
+        }
+
+        final existingUrls = existingTabs
+            .whereType<Map>()
+            .map((t) => (t['url'] as String? ?? '').trim().toLowerCase())
+            .where((u) => u.isNotEmpty)
+            .toSet();
+
+        final uniqueNewTabs = <Map<String, dynamic>>[];
+        final seenImportUrls = <String>{};
+        final importedTabUrls = <String>[];
+
+        for (final item in tabsList) {
+          if (item is! Map) continue;
+          final map = Map<String, dynamic>.from(item);
+          final url = (map['url'] as String? ?? '').trim();
+          final lower = url.toLowerCase();
+          if (url.isNotEmpty &&
+              url != 'about:blank' &&
+              !existingUrls.contains(lower) &&
+              !seenImportUrls.contains(lower)) {
+            seenImportUrls.add(lower);
+            uniqueNewTabs.add(map);
+            importedTabUrls.add(url);
+          }
+        }
+
+        if (uniqueNewTabs.isNotEmpty) {
+          final mergedTabs = [...existingTabs, ...uniqueNewTabs];
+          await tabsFile.writeAsString(jsonEncode(mergedTabs));
+          importedTabsCount = uniqueNewTabs.length;
+        }
+
+        if (decoded.containsKey('tabGroups')) {
+          final groupsFile = File('$baseDir/tab_groups.json');
+          List<dynamic> existingGroups = [];
+          if (await groupsFile.exists()) {
+            try {
+              final rawGroups = await groupsFile.readAsString();
+              final decodedGroups = jsonDecode(rawGroups);
+              if (decodedGroups is List) existingGroups = decodedGroups;
+            } catch (_) {}
+          }
+          final existingGroupNames = existingGroups
+              .whereType<Map>()
+              .map((g) => (g['name'] as String? ?? '').trim().toLowerCase())
+              .toSet();
+          final importedGroups = (decoded['tabGroups'] as List? ?? [])
+              .whereType<Map>()
+              .where((g) {
+                final name =
+                    (g['name'] as String? ?? '').trim().toLowerCase();
+                return name.isNotEmpty && !existingGroupNames.contains(name);
+              })
+              .toList();
+          if (importedGroups.isNotEmpty) {
+            final mergedGroups = [...existingGroups, ...importedGroups];
+            await groupsFile.writeAsString(jsonEncode(mergedGroups));
+          }
+        }
+
+        if (onImportTabs != null && importedTabUrls.isNotEmpty) {
+          onImportTabs(importedTabUrls);
+        }
+      }
+    }
+
     return LibraryTransferImportSummary(
       favoritesCount: importedFavoritesCount,
       historyCount: importedHistoryCount,
       savedPagesCount: importedSavedPagesCount,
       queueCount: importedQueueCount,
+      tabsCount: importedTabsCount,
       settingsImported: importedSettings,
       updatedLibrary: updatedLibrary,
     );

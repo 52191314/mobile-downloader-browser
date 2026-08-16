@@ -84,9 +84,13 @@ class SniffedMediaCache {
       final uri = Uri.parse(url);
       final params = Map<String, List<String>>.from(uri.queryParametersAll);
       params.removeWhere((k, _) => _trackingParams.contains(k.toLowerCase()));
-      return uri
-          .replace(queryParameters: params.isEmpty ? null : params)
-          .toString();
+      if (params.isEmpty) {
+        return uri.replace(query: '').toString();
+      }
+      return uri.replace(queryParameters: {
+        for (final entry in params.entries)
+          entry.key: entry.value.length == 1 ? entry.value.first : entry.value,
+      }).toString();
     } catch (_) {
       return url;
     }

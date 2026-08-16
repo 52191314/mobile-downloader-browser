@@ -132,6 +132,8 @@ class TabLifecycleController {
   final SafeBrowsingService safeBrowsing;
   final SessionRecovery sessionRecovery;
 
+  static int _tabCounter = 0;
+
   /// Pre-built controller for the first tab (test injection).
   final SnifferBrowserController? injectedController;
 
@@ -283,15 +285,22 @@ class TabLifecycleController {
           .asMap()
           .entries
           .map(
-            (e) => {
-              'id': e.value.id,
-              'url': e.value.addressController.text.trim(),
-              'active': e.key == tabManager.activeTabIndex,
-              'history': e.value.controller.historyUrls,
-              'historyIndex': e.value.controller.historyIndex,
-              'groupName': e.value.groupName,
-              'groupColorIndex': e.value.groupColorIndex,
-              'autoGrouped': e.value.autoGrouped,
+            (e) {
+              final tab = e.value;
+              final url = (tab.currentUrl ??
+                      tab.committedMainFrameUrl ??
+                      tab.addressController.text)
+                  .trim();
+              return {
+                'id': tab.id,
+                'url': url,
+                'active': e.key == tabManager.activeTabIndex,
+                'history': tab.controller.historyUrls,
+                'historyIndex': tab.controller.historyIndex,
+                'groupName': tab.groupName,
+                'groupColorIndex': tab.groupColorIndex,
+                'autoGrouped': tab.autoGrouped,
+              };
             },
           )
           .toList(growable: false);
@@ -421,8 +430,14 @@ class TabLifecycleController {
           disabledMediaTypes: settings.disabledMediaTypes,
         );
     final addressController = TextEditingController();
-    final tabId =
-        restoredId ?? DateTime.now().millisecondsSinceEpoch.toString();
+    final String tabId;
+    if (restoredId != null &&
+        restoredId.isNotEmpty &&
+        !_tabs.any((t) => t.id == restoredId)) {
+      tabId = restoredId;
+    } else {
+      tabId = '${DateTime.now().microsecondsSinceEpoch}_${++_tabCounter}';
+    }
     final tab = BrowserTab(
       id: tabId,
       controller: controller,

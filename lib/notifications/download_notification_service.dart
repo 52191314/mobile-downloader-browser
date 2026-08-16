@@ -247,6 +247,7 @@ class DownloadNotificationService {
   }
 
   void _onTaskUpdated(DownloadTask task) {
+    if (task.isBackupImport) return;
     try {
       switch (task.state) {
         case DownloadState.downloading:

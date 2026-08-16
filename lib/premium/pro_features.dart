@@ -166,9 +166,9 @@ enum ProFeature {
   /// Vault sync. Ultra only.
   vaultSync,
 
-  /// Saved videos + watch history (the Videos subpages of Favorites and
-  /// History). Free: [ProFeatures.freeVideoLibraryItems] entries in each list.
-  /// Pro+: unlimited. Page bookmarks and page history stay free and uncapped.
+  /// Saved video favorites (the Videos subpage of Favorites). Pro-only feature.
+  /// Free tier has 0 saved video items; Pro+ is unlimited. Page bookmarks and
+  /// page history stay free and uncapped.
   videoLibrary,
 }
 
@@ -246,10 +246,8 @@ class ProFeatures {
   /// Private vault: free inventory item cap.
   static const int freeVaultItems = 25;
 
-  /// Saved videos / watch history: free inventory cap, applied to each list
-  /// separately. Generous enough that a casual user never meets it, small
-  /// enough that anyone actually collecting videos does.
-  static const int freeVideoLibraryItems = 10;
+  /// Saved video favorites: Pro only (0 free items).
+  static const int freeVideoLibraryItems = 0;
 
   // -- Pure helpers for free-taste cap decisions (mirror batch pattern) --
 

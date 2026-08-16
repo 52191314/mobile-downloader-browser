@@ -31,6 +31,7 @@ class LibraryImportOptions {
   final bool savedPages;
   final bool queue;
   final bool settings;
+  final bool tabs;
 
   const LibraryImportOptions({
     this.favorites = false,
@@ -38,10 +39,11 @@ class LibraryImportOptions {
     this.savedPages = false,
     this.queue = false,
     this.settings = false,
+    this.tabs = false,
   });
 
   bool get anySelected =>
-      favorites || history || savedPages || queue || settings;
+      favorites || history || savedPages || queue || settings || tabs;
 }
 
 /// Shows the export category picker. Returns null if cancelled.
@@ -229,6 +231,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
   required bool hasSavedPages,
   required bool hasQueue,
   required bool hasSettings,
+  bool hasTabs = false,
   required bool isLegacy,
 }) {
   var options = LibraryImportOptions(
@@ -237,6 +240,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
     savedPages: hasSavedPages || isLegacy,
     queue: hasQueue,
     settings: hasSettings,
+    tabs: hasTabs,
   );
   if (!hasFavorites && !isLegacy) {
     options = LibraryImportOptions(
@@ -245,6 +249,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
       savedPages: options.savedPages,
       queue: options.queue,
       settings: options.settings,
+      tabs: options.tabs,
     );
   }
   if (!hasHistory && !isLegacy) {
@@ -254,6 +259,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
       savedPages: options.savedPages,
       queue: options.queue,
       settings: options.settings,
+      tabs: options.tabs,
     );
   }
   if (!hasSavedPages && !isLegacy) {
@@ -263,6 +269,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
       savedPages: false,
       queue: options.queue,
       settings: options.settings,
+      tabs: options.tabs,
     );
   }
 
@@ -311,6 +318,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
                                 savedPages: options.savedPages,
                                 queue: options.queue,
                                 settings: options.settings,
+                                tabs: options.tabs,
                               ),
                             )
                         : null,
@@ -327,6 +335,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
                                 savedPages: options.savedPages,
                                 queue: options.queue,
                                 settings: options.settings,
+                                tabs: options.tabs,
                               ),
                             )
                         : null,
@@ -343,6 +352,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
                                 savedPages: val,
                                 queue: options.queue,
                                 settings: options.settings,
+                                tabs: options.tabs,
                               ),
                             )
                         : null,
@@ -359,6 +369,7 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
                                 savedPages: options.savedPages,
                                 queue: val,
                                 settings: options.settings,
+                                tabs: options.tabs,
                               ),
                             )
                         : null,
@@ -375,10 +386,27 @@ Future<LibraryImportOptions?> showLibraryImportOptionsSheet({
                                 savedPages: options.savedPages,
                                 queue: options.queue,
                                 settings: val,
+                                tabs: options.tabs,
                               ),
                             )
                         : null,
                   ),
+                  if (hasTabs)
+                    _switchTile(
+                      context,
+                      title: 'Open Tabs',
+                      value: options.tabs,
+                      onChanged: (val) => setModalState(
+                        () => options = LibraryImportOptions(
+                          favorites: options.favorites,
+                          history: options.history,
+                          savedPages: options.savedPages,
+                          queue: options.queue,
+                          settings: options.settings,
+                          tabs: val,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,

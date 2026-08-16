@@ -35,6 +35,10 @@ val extractTorrentJni by tasks.registering {
         var copied = 0
 
         fun findPrebuiltDir(): File? {
+            // Attempt 0: Vendored 16 KB-aligned binaries in tooling/torrent_16k
+            val vendoredDir = rootProject.file("../tooling/torrent_16k")
+            if (vendoredDir.exists() && File(vendoredDir, "arm64-v8a").isDirectory) return vendoredDir
+
             // Attempt 1: Gradle subproject reference
             val subprojectDir = findProject(":libtorrent_flutter")?.projectDir?.let { File(it.parentFile, "prebuilt/android") }
             if (subprojectDir != null && subprojectDir.exists()) return subprojectDir

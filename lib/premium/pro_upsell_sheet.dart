@@ -210,12 +210,12 @@ Widget _buildBenefitsList(AColors palette, bool ultra) {
           (Icons.auto_awesome, 'Server-grade\nengine'),
         ]
       : [
-          (Icons.filter_alt_outlined, 'All filter lists\n+ extended tracker pack'),
-          (Icons.swap_horiz, '16 concurrent\n32 chunks'),
-          (Icons.cloud_sync_outlined, 'Drive sync\nAuto-backup'),
+          (Icons.star_rounded, 'Favorite videos\n+ LAN Send to PC'),
+          (Icons.speed, '16 concurrent\n32 chunks (Turbo)'),
+          (Icons.shield_outlined, 'Private vault\nAuto-backup'),
           (Icons.group_work_outlined, 'Unlimited tab\ngroups & colors'),
-          (Icons.tab_outlined, 'Per-site profiles\n& UA maps'),
-          (Icons.auto_awesome, 'Download rules\n& schedules'),
+          (Icons.filter_alt_outlined, 'Extra filter lists\n& tracker pack'),
+          (Icons.auto_awesome, 'Batch capture\n& series grab'),
         ];
 
   return Column(

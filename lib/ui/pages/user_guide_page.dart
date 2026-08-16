@@ -218,6 +218,10 @@ class _UserGuidePageState extends State<UserGuidePage> {
 • Lock Icon: View SSL certificate details, security status, and domain info.
 • Purple Shield: Indicates active Private / Incognito mode.
 
+### Video Favorites & Watch History
+• Video Watch History: Videos played in Aurora's custom player are automatically logged in History → Videos. Tap any entry to replay, or tap Open Source Page to revisit the original hosting webpage.
+• Favorite Videos (Pro): Tap the Star icon in the custom player to save video streams to Favorites → Videos for one-tap playback anytime.
+
 ### Browser Tools Menu
 • Bookmarks, Saved Pages (offline HTML reader), Browsing History, Find in Page, Autofill, Reader Mode, Element Blocker, Adblocker, and Series Grabber.
 
@@ -368,7 +372,7 @@ Process and edit completed video and audio downloads directly on device without 
         badge: null,
         content: '''
 ### Database Backups & Cloud Sync
-• Transactional Database Backup (Solution B): Export and restore full app state (download queues, history, bookmarks, saved pages, and tabs) into an atomic, zero-freeze transactional database snapshot off-thread.
+• Granular Backup Export: Choose exactly what to export (Web Bookmarks & Folders, Favorite Videos (Pro), Web History, Saved Pages, Queue, App Settings, Tabs, and Download Rules). Free users export site bookmarks and history; Pro users can export their entire saved video favorites and video watch history collections.
 • 1DM (.1dmbak / .1dm) Import Migration: Import legacy 1DM and 1DM+ backup archives directly off-thread into Aurora's unified database.
 • WebDAV Backup (Pro): Backup and restore app settings, rules, and download queues to personal WebDAV servers (Nextcloud, Synology, ownCloud).
 • Encrypted Vault Cloud Sync (Ultra): End-to-end PBKDF2-SHA256 + AES-GCM encrypted backup of vault files over WebDAV for multi-device security.
@@ -405,11 +409,12 @@ Integrate Aurora Downloader with Tasker, MacroDroid, shortcuts, or external scri
         number: 17,
         title: AppLocalizations.of(context)!.guidePipMode,
         icon: Icons.picture_in_picture_rounded,
-        keywords: ['pip', 'picture in picture', 'floating player', 'video', 'background'],
+        keywords: ['pip', 'picture in picture', 'floating player', 'video', 'background', 'favorites'],
         badge: null,
         content: '''
-### Floating Video Player
-Tap the PiP button in Aurora's built-in media player to shrink video into a floating window. Continue browsing or managing downloads while video playback continues seamlessly.
+### Floating Video Player & Stream Actions
+• Picture-in-Picture (PiP): Tap the PiP button in Aurora's built-in media player to shrink video into a floating window. Continue browsing or managing downloads while video playback continues seamlessly.
+• Video Stream Actions: Star/Favorite videos (Pro), open the original source webpage, switch between ExoPlayer and MediaKit playback engines, or jump directly to download.
 ''',
       ),
       _GuideSectionData(
@@ -435,8 +440,8 @@ Toggle Private mode via Settings → Search & Privacy or address bar shield butt
 • Google Play Release: Store build (`play` channel) with integrated Google Play Billing for Pro/Ultra activation.
 
 ### Feature Matrix & Caps
-• Free: 3 concurrent downloads, 8 chunks/task, 4 HLS segments, 3 tab groups, 25 vault items, 3 adblock filters, 20 Send to PC transfers/day, 5 Series Grab items/action.
-• Pro: 16 concurrent downloads, 32 chunks/task, 8 HLS segments, unlimited tab groups & vault, Wi-Fi only mode, Download Rules, Schedule, Proxy, WebDAV backup, unlimited Send to PC & Series Grab.
+• Free: 3 concurrent downloads, 8 chunks/task, 4 HLS segments, 3 tab groups, 25 vault items, 3 adblock filters, 20 Send to PC transfers/day, 5 Series Grab items/action, 10 rolling video watch history entries (read-only), 0 video favorite slots.
+• Pro: 16 concurrent downloads, 32 chunks/task, 8 HLS segments, unlimited tab groups & vault, unlimited favorite videos collection, video history management, full backup export (including video favorites and history), Wi-Fi only mode, Download Rules, Schedule, Proxy, WebDAV backup, unlimited Send to PC & Series Grab.
 • Ultra: 64 concurrent downloads, 64 chunks/task, unlimited HLS segments, FFmpeg Studio, Watcher RSS, Automation API, Encrypted Vault Sync, Server-grade engine.
 ''',
       ),

@@ -1,0 +1,55 @@
+Aurora Download Manager adalah browser web privat dan pengunduh video cepat yang dirancang untuk unduhan file besar, torrent, dan penangkap media.
+
+PENGUNDUH FILE & MANAJER DOWNLOAD SERBAGUNA
+- Pengunduh file multi-thread berkecepatan tinggi (hingga 32 bagian di Pro, 64 di Ultra)
+- Akselerator download pintar yang mempercepat transfer file, video, dan torrent
+- Pengunduh latar belakang andal: jeda (pause), lanjutkan (resume), dan pulihkan tautan putus
+- Pembaruan tautan mati/kedaluwarsa secara otomatis
+
+PENGUNDUH VIDEO WEB PINTAR & PENYIMPAN MEDIA
+- Pengunduh video canggih yang mendeteksi video dan media saat Anda menjelajah web
+- Pemutar video internal dengan Picture-in-Picture (PiP), kontrol kecepatan, dan gestur
+- Pengunduh streaming: menggabungkan playlist stream m3u8 menjadi file MP4 utuh
+- Download massal (batch): unduh banyak video dan file sekaligus dalam satu ketukan
+- Pengorganisasian otomatis: file video, musik, dan dokumen langsung tersusun rapi di folder
+
+BROWSER PRIVAT DENGAN PEMBLOKIR IKLAN (ADBLOCK)
+- Browser privat dengan pemblokir iklan & pop-up otomatis untuk penjelajahan bersih dan cepat
+- Tab grup, bookmark, dan pemulihan sesi otomatis setelah aplikasi ditutup
+- Mode baca, simpan halaman offline, dan sembunyikan elemen web yang mengganggu
+- Privasi terjamin: riwayat penelusuran dan unduhan tersimpan aman di perangkat Anda
+
+PENGUNDUH TORRENT & TAUTAN MAGNET NATIV
+- Klien torrent internal untuk download torrent dan magnet link langsung tanpa aplikasi tambahan
+- Dukungan torrent multi-file: pilih file tertentu, jeda, lanjutkan, dan seeding
+- Mesin P2P cepat dengan pengaturan batas kecepatan unduh
+
+CADANGAN OTOMATIS KE GOOGLE DRIVE
+- Hubungkan akun Google dan sinkronkan hasil unduhan ke Google Drive secara otomatis
+- Jadwal sinkronisasi fleksibel: instan, tiap 15 menit, per jam, atau harian
+- Folder khusus Aurora memastikan file Anda aman dan dapat diakses dari perangkat mana pun
+
+IMPOR MUDAH & TRANSFER FILE VIA WI-FI
+- Impor daftar antrean download dari aplikasi lain (JSON, backup files)
+- Kompatibel dengan Samsung Secure Folder dan profil kerja
+- Kirim file ke PC/laptop melalui jaringan Wi-Fi lokal tanpa server perantara
+
+AURORA PRO — SEKALI BAYAR
+- 16 unduhan bersamaan & 32 bagian per file (Versi gratis: 3 dan 8)
+- Batas sinkronisasi Google Drive lebih besar (50 file/hari)
+- Filter adblock tanpa batas, pelindung pelacak, dan brankas privat
+- Pemulihan tautan mati otomatis dan unduhan batch tanpa batas
+
+AURORA ULTRA — SUITE POWER USER
+- 64 unduhan sekaligus & 64 bagian per file
+- Hingga 1.000 sinkronisasi Google Drive per hari
+- Suite konversi media internal yang diunduh sesuai kebutuhan
+- API otomatisasi lokal dan pemantau folder
+Beli sekali untuk selamanya. Tanpa biaya langganan bulanan.
+
+PEMBERITAHUAN KEBIJAKAN
+- Sesuai kebijakan Google Play Store, pengunduhan dari YouTube tidak didukung.
+- Pemblokir iklan hanya berfungsi di dalam browser Aurora (bukan VPN sistem).
+- Harap hanya mengunduh konten yang sah dan legal.
+
+Sumber terbuka (GPL-3.0). Tidak berafiliasi dengan Google, YouTube, atau layanan pihak ketiga.

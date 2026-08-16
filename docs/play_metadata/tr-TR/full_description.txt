@@ -1,0 +1,54 @@
+Aurora Download Manager, büyük dosya indirmeleri, torrentler ve medya yakalama için tasarlanmış özel bir web tarayıcısı ve hızlı video indiricidir.
+
+HEPSİ BİR ARADA İNDİRME YÖNETİCİSİ VE HIZLANDIRICI
+- Çok parçalı yüksek hızlı dosya indirme (Pro'da 32 parça, Ultra'da 64 parçaya kadar)
+- Dosya, video ve torrent transferlerini hızlandıran akıllı indirme motoru
+- Güvenilir arka plan indirme: duraklat, devam et ve kopan bağlantıları otomatik kurtar
+- Süresi dolan veya geçersiz kalan indirme linklerini otomatik yenileme
+
+AKILLI WEB VİDEO İNDİRİCİ VE MEDYA KAYDEDİCİ
+- Web'de gezinirken indirilebilir videoları, sesleri ve medya akışlarını anında tespit eder
+- Resim İçinde Resim (PiP), hız kontrolü ve hareketlerle kontrol edilebilen dahili video oynatıcı
+- Yayın indirici: m3u8 akışlarını birleştirerek tam MP4 video dosyası olarak kaydeder
+- Tek dokunuşla toplu indirme: birden fazla video ve dosyayı aynı anda indirin
+- İndirilen videoları, müzikleri ve belgeleri otomatik olarak klasörlere ayırır
+
+REKLAM ENGELLEYİCİLİ GİZLİ TARAYICI
+- Reklamları ve açılır pencereleri engelleyen hızlı ve temiz gizli tarayıcı
+- Sekme grupları, yer imleri ve oturum kurtarma desteği
+- Okuma modu, çevrimdışı sayfa kaydetme ve istenmeyen öğeleri gizleme
+- Tam gizlilik: tarama geçmişiniz ve dosyalarınız sadece kendi cihazınızda kalır
+
+DAHİLİ TORRENT İNDİRİCİ VE MAGNET BAĞLANTILARI
+- Ek bir uygulamaya gerek kalmadan torrent ve magnet bağlantılarını doğrudan indirin
+- Çoklu dosya desteği: istediğiniz dosyaları seçin, duraklatın, devam ettirin ve seed edin
+- Hız sınırları belirlenebilen hızlı P2P motoru
+
+GOOGLE DRIVE'A OTOMATİK BULUT YEDEKLEME
+- Google hesabınızı bağlayın ve tamamlanan indirmeleri Google Drive'a otomatik yedekleyin
+- Esnek senkronizasyon: anında, 15 dakikada bir, saatlik veya günlük
+- Dosyalarınıza herhangi bir bilgisayardan veya telefondan kolayca erişin
+
+KOLAY İÇE AKTARMA VE WI-FI İLE DOSYA AKTARIMI
+- Diğer indirme yöneticilerinden (JSON, backup files) indirme listelerinizi içe aktarın
+- Samsung Güvenli Klasör (Secure Folder) ve iş profilleriyle uyumlu
+- Dosyalarınızı yerel Wi-Fi üzerinden sunucu kullanmadan doğrudan bilgisayarınıza aktarın
+
+AURORA PRO — TEK SEFERLİK ÖDEME
+- Aynı anda 16 indirme ve dosya başına 32 parça (Ücretsiz: 3 indirme ve 8 parça)
+- Daha yüksek Google Drive senkronizasyon limiti (50 dosya/gün)
+- Sınırsız reklam engelleme filtresi, takipçi koruması ve özel kasa
+
+AURORA ULTRA — POWER USER PAKETİ
+- Aynı anda 64 indirme ve dosya başına 64 parça
+- Günde 1.000 adede kadar Google Drive senkronizasyonu
+- İsteğe bağlı indirilen dahili medya dönüştürücü paketi
+- Yerel otomasyon API'si ve klasör izleyici
+Hem Pro hem Ultra tek seferlik satın alımdır. Abonelik gerektirmez.
+
+POLİTİKA VE KULLANIM BİLDİRİMİ
+- Google Play Geliştirici Politikaları gereğince YouTube'dan video indirme desteklenmez.
+- Reklam engelleme yalnızca Aurora Tarayıcı içinde çalışır (sistem genelinde VPN değildir).
+- Lütfen yalnızca yasal olarak indirme hakkına sahip olduğunuz içerikleri indirin.
+
+Açık kaynaklıdır (GPL-3.0). Google, YouTube veya üçüncü taraf platformlarla ilişkili değildir.

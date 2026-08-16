@@ -1133,13 +1133,45 @@ class _SnifferScreenState extends State<SnifferScreen>
 
   /// Inserts each URL as a new background tab right after the active one,
   /// preserving order. Each insert lands at the same relative position.
+  /// Deduplicates against currently open tabs so import does not create duplicate tabs.
+  /// If the current active tab is blank, navigates it to the first imported URL.
   void _openTabsAfterActive(List<String> urls) {
     if (!mounted || _tabs.isEmpty || urls.isEmpty) return;
-    var insertAt = _activeTabIndex + 1;
+    final existingUrls = _tabs
+        .map((t) => (t.currentUrl ?? t.committedMainFrameUrl ?? t.addressController.text).trim().toLowerCase())
+        .where((u) => u.isNotEmpty)
+        .toSet();
+    final uniqueUrls = <String>[];
+    final seen = <String>{};
     for (final url in urls) {
+      final trimmed = url.trim();
+      final lower = trimmed.toLowerCase();
+      if (trimmed.isNotEmpty && !existingUrls.contains(lower) && !seen.contains(lower)) {
+        seen.add(lower);
+        uniqueUrls.add(trimmed);
+      }
+    }
+    if (uniqueUrls.isEmpty) return;
+
+    final activeUrl = (_activeTab.currentUrl ??
+            _activeTab.committedMainFrameUrl ??
+            _activeTab.addressController.text)
+        .trim();
+    final isActiveTabBlank = activeUrl.isEmpty || activeUrl == 'about:blank';
+
+    List<String> urlsToInsertAsBackground = uniqueUrls;
+    if (isActiveTabBlank) {
+      final firstUrl = uniqueUrls.first;
+      _navigateActiveTabToExternalUrl(firstUrl);
+      urlsToInsertAsBackground = uniqueUrls.skip(1).toList();
+    }
+
+    var insertAt = _activeTabIndex + 1;
+    for (final url in urlsToInsertAsBackground) {
       _tabLifecycleController.openNewTab(
         url: url,
         switchToTab: false,
+        deferStartupWork: true,
         insertAtIndex: insertAt,
       );
       insertAt++;
@@ -1532,6 +1564,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// after the user taps a star reads as a broken button.
   Future<void> _saveVideoFavorite(SniffedMedia media) async {
     final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final pageUrl = (media.sourcePageUrl != null && media.sourcePageUrl!.trim().isNotEmpty)
+        ? media.sourcePageUrl!.trim()
+        : (_activeTab.currentUrl?.trim().isNotEmpty == true
+            ? _activeTab.currentUrl!.trim()
+            : _activeTab.addressController.text.trim());
     final result = await VideoLibrary.addFavorite(
       library: _library,
       tier: tier,
@@ -1540,7 +1577,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           ? media.pageTitle!.trim()
           : media.name,
       thumbnailUrl: media.thumbnailUrl,
-      sourcePageUrl: media.sourcePageUrl,
+      sourcePageUrl: pageUrl.isNotEmpty ? pageUrl : null,
     );
     if (!mounted) return;
 
@@ -1565,6 +1602,11 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// failing to record a watch must never interrupt playback.
   void _recordVideoPlay(SniffedMedia media) {
     final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final pageUrl = (media.sourcePageUrl != null && media.sourcePageUrl!.trim().isNotEmpty)
+        ? media.sourcePageUrl!.trim()
+        : (_activeTab.currentUrl?.trim().isNotEmpty == true
+            ? _activeTab.currentUrl!.trim()
+            : _activeTab.addressController.text.trim());
     final updated = VideoLibrary.recordPlay(
       library: _library,
       tier: tier,
@@ -1573,7 +1615,7 @@ class _SnifferScreenState extends State<SnifferScreen>
           ? media.pageTitle!.trim()
           : media.name,
       thumbnailUrl: media.thumbnailUrl,
-      sourcePageUrl: media.sourcePageUrl,
+      sourcePageUrl: pageUrl.isNotEmpty ? pageUrl : null,
     );
     unawaited(_saveLibrary(updated));
   }
@@ -4441,11 +4483,22 @@ class _SnifferScreenState extends State<SnifferScreen>
     if (MiniPlayerController.instance.isActive) {
       await MiniPlayerController.instance.close();
     }
+    final pageUrl = (media.sourcePageUrl != null &&
+            media.sourcePageUrl!.trim().isNotEmpty)
+        ? media.sourcePageUrl!.trim()
+        : (_activeTab.currentUrl?.trim().isNotEmpty == true
+            ? _activeTab.currentUrl!.trim()
+            : _activeTab.addressController.text.trim());
+    final effectiveMedia = (media.sourcePageUrl != null &&
+            media.sourcePageUrl!.trim().isNotEmpty)
+        ? media
+        : media.copyWith(sourcePageUrl: pageUrl.isNotEmpty ? pageUrl : null);
+
     final qualities = await _resolvePlaybackQualities(
-      media,
+      effectiveMedia,
       groupVariants: groupVariants,
     );
-    final start = pickStartQuality(media, qualities);
+    final start = pickStartQuality(effectiveMedia, qualities);
     if (!mounted) return;
     await _showMediaPreview(start, qualityVariants: qualities);
   }
@@ -4656,6 +4709,23 @@ class _SnifferScreenState extends State<SnifferScreen>
           source: source,
           initialEngine: engine.kind,
           adoptEngine: engine,
+          onFavorite: (url) => _saveVideoFavorite(
+            SniffedMedia(
+              url: source.url,
+              name: source.title,
+              type: MediaType.video,
+              sourcePageUrl: source.sourcePageUrl,
+            ),
+          ),
+          onDownload: () {
+            final media = SniffedMedia(
+              url: source.url,
+              name: source.title,
+              type: MediaType.video,
+              sourcePageUrl: source.sourcePageUrl,
+            );
+            _showAddQueueDialog(context, media);
+          },
         ),
       ),
     );

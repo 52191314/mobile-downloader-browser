@@ -5,10 +5,41 @@ import '../../l10n/app_localizations.dart';
 
 import '../../premium/pro_entitlement.dart';
 import '../../premium/pro_upsell_sheet.dart';
+import '../../theme/aurora_palette.dart';
 import '../browser_library.dart';
 import '../models/browser_tab.dart';
 import '../video_library.dart';
 import 'video_library_views.dart';
+
+/// Time filter options for browser and video history.
+enum HistoryTimeFilter {
+  all('All'),
+  today('Today'),
+  thisWeek('This week'),
+  thisMonth('This month');
+
+  final String label;
+  const HistoryTimeFilter(this.label);
+
+  bool matches(DateTime visitedAt) {
+    final now = DateTime.now();
+    switch (this) {
+      case HistoryTimeFilter.all:
+        return true;
+      case HistoryTimeFilter.today:
+        return visitedAt.year == now.year &&
+            visitedAt.month == now.month &&
+            visitedAt.day == now.day;
+      case HistoryTimeFilter.thisWeek:
+        final startOfWeek = DateTime(now.year, now.month, now.day)
+            .subtract(Duration(days: now.weekday - 1));
+        return !visitedAt.isBefore(startOfWeek);
+      case HistoryTimeFilter.thisMonth:
+        final startOfMonth = DateTime(now.year, now.month, 1);
+        return !visitedAt.isBefore(startOfMonth);
+    }
+  }
+}
 
 /// Shows the browser-history bottom sheet with multi-select, range-select,
 /// and "open all selected" support.
@@ -79,6 +110,7 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
   int? _rangeAnchorIndex;
 
   LibrarySection _section = LibrarySection.sites;
+  HistoryTimeFilter _timeFilter = HistoryTimeFilter.all;
 
   BrowserLibrary get _library => widget.library;
 
@@ -98,12 +130,24 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
   // ---------------------------------------------------------------------------
 
   List<BrowserHistoryEntry> get _filteredItems {
-    if (_searchQuery.isEmpty) return _items;
+    var items = _items;
+    if (_timeFilter != HistoryTimeFilter.all) {
+      items = items.where((e) => _timeFilter.matches(e.visitedAt)).toList();
+    }
+    if (_searchQuery.isEmpty) return items;
     final q = _searchQuery.toLowerCase();
-    return _items.where((e) {
+    return items.where((e) {
       return e.title.toLowerCase().contains(q) ||
           e.url.toLowerCase().contains(q);
     }).toList();
+  }
+
+  List<BrowserHistoryEntry> get _filteredVideoItems {
+    var videos = _library.videoHistory;
+    if (_timeFilter != HistoryTimeFilter.all) {
+      videos = videos.where((e) => _timeFilter.matches(e.visitedAt)).toList();
+    }
+    return videos;
   }
 
   void _enterSelectionMode(BrowserHistoryEntry item, int index) {
@@ -130,7 +174,7 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
 
   List<BrowserHistoryEntry> get _currentSectionItems {
     return _section == LibrarySection.videos
-        ? _library.videoHistory
+        ? _filteredVideoItems
         : _filteredItems;
   }
 
@@ -249,6 +293,9 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
             }),
           ),
 
+          // ---- Time Filter Bar ----
+          _buildTimeFilterBar(),
+
           const Divider(height: 1),
 
           if (_section == LibrarySection.videos)
@@ -265,15 +312,17 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
                     child: Padding(
                       padding: const EdgeInsets.all(24.0),
                       child: Text(
-                        _searchQuery.isEmpty
-                            ? 'No history yet. Browsed pages appear here automatically.'
-                            : 'No items match your search.',
+                        _searchQuery.isNotEmpty
+                            ? 'No items match your search.'
+                            : _timeFilter != HistoryTimeFilter.all
+                                ? 'No history found for ${_timeFilter.label.toLowerCase()}.'
+                                : 'No history yet. Browsed pages appear here automatically.',
                         style: const TextStyle(color: Colors.grey),
                       ),
                     ),
                   )
                 : ListView.builder(
-                    key: ValueKey('history_list_${_selectionMode}'),
+                    key: ValueKey('history_list_${_selectionMode}_${_timeFilter}'),
                     itemCount: filtered.length,
                     itemBuilder: (_, index) {
                       final item = filtered[index];
@@ -303,18 +352,70 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
     );
   }
 
+  Widget _buildTimeFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: HistoryTimeFilter.values.map((filter) {
+            final isSelected = _timeFilter == filter;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                label: Text(filter.label),
+                selected: isSelected,
+                onSelected: (_) {
+                  setState(() {
+                    _timeFilter = filter;
+                    _selectionMode = false;
+                    _selectedUrls.clear();
+                    _rangeAnchorIndex = null;
+                  });
+                },
+                selectedColor: context.ac.accentFrost.withValues(alpha: 0.2),
+                checkmarkColor: context.ac.accentFrost,
+                labelStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected
+                      ? context.ac.accentFrost
+                      : context.ac.textSecondary,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: isSelected
+                        ? context.ac.accentFrost
+                        : context.ac.borderHairline,
+                    width: 1,
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   /// Watch history. No selection mode — the multi-select flow exists to open
   /// many pages in tabs, which does not translate to replaying videos.
   Widget _buildVideosSection() {
     final tier = proUpsellEntitlement?.tier ?? EntitlementTier.free;
+    final isPro = tier.isAtLeastPro;
     final limit = VideoLibrary.freeLimitFor(tier);
-    final videos = _library.videoHistory;
+    final videos = _filteredVideoItems;
+    final allVideosCount = _library.videoHistory.length;
 
     return Column(
       children: [
         if (limit != null)
           VideoGateBanner(
-            used: videos.length,
+            used: allVideosCount,
             limit: limit,
             tier: tier,
             message: 'Pro keeps your full watch history',
@@ -322,10 +423,6 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
         Expanded(
           child: VideoHistoryList(
             items: videos,
-            selectionMode: _selectionMode,
-            selectedUrls: _selectedUrls,
-            onToggleSelected: _toggleSelection,
-            onSelectRange: _handleLongPress,
             onOpen: (entry) async {
               Navigator.pop(context);
               final play = widget.onPlayVideo;
@@ -337,8 +434,27 @@ class _HistorySheetContentState extends State<_HistorySheetContent> {
             },
             onOpenSourcePage: (entry) {
               Navigator.pop(context);
-              unawaited(widget.onLoadUrl(entry.sourcePageUrl!));
+              final target = (entry.sourcePageUrl != null &&
+                      entry.sourcePageUrl!.trim().isNotEmpty)
+                  ? entry.sourcePageUrl!.trim()
+                  : entry.url;
+              unawaited(widget.onLoadUrl(target));
             },
+            onRemove: isPro
+                ? (entry) {
+                    unawaited(
+                      widget.onSaveLibrary(
+                        _library.copyWith(
+                          history: _library.history
+                              .where((e) =>
+                                  !(e.url == entry.url &&
+                                      e.kind == LibraryEntryKind.video))
+                              .toList(growable: false),
+                        ),
+                      ),
+                    );
+                  }
+                : null,
           ),
         ),
       ],

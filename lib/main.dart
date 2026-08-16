@@ -18,6 +18,7 @@ import 'notifications/download_notification_service.dart';
 import 'platform/download_foreground_service.dart';
 import 'platform/public_downloads_service.dart';
 import 'settings/download_settings.dart';
+import 'settings/engagement_prompt_service.dart';
 import 'sniffer/browser_controller.dart';
 import 'sniffer/browser_open_request.dart';
 import 'sniffer/sniffer_screen.dart';
@@ -388,6 +389,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         // Unlock + request only after finish / skip.
         _permissionPromptsAllowed = true;
         unawaited(_requestPostOnboardingPermissions());
+        unawaited(
+          EngagementPromptService.instance.recordAppOpen(
+            context,
+            proEntitlement: _proEntitlement,
+          ),
+        );
       },
     );
   }
@@ -690,15 +697,22 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             'Task "$fileName": ${prevState?.name ?? "new"} → ${task.state.name}',
           );
         }
-        // Prune terminal tasks so the map stays bounded over a long session
-        // (optimization research 2026-08-07, P13).
-        if (task.state == DownloadState.completed ||
-            task.state == DownloadState.failed) {
-          _prevTaskStates.remove(task.id);
+        // Keep state in cache so subsequent emissions for the same state
+        // (e.g. error updates, auto-retry ticks) do not re-trigger analytics.
+        // Cap map size defensively to avoid unbounded growth over long sessions.
+        if (_prevTaskStates.length > 500) {
+          final activeKeys = _downloadQueue.allTasks.map((t) => t.id).toSet();
+          _prevTaskStates.removeWhere((k, _) => !activeKeys.contains(k));
+          if (_prevTaskStates.length > 500) {
+            final keysToRemove = _prevTaskStates.keys.take(100).toList();
+            for (final k in keysToRemove) {
+              _prevTaskStates.remove(k);
+            }
+          }
         }
         // Firebase Analytics funnel: download start / completion / failure.
         // Fire-and-forget; analytics failures must never affect the queue.
-        unawaited(_logDownloadAnalytics(task.state));
+        unawaited(_logDownloadAnalytics(task));
       }
       // Soft battery-opt prompt on first download if launch path has not
       // already handled it this session (Later / never / already exempt).
@@ -733,6 +747,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       }
       _permissionPromptsAllowed = true;
       unawaited(_requestPostOnboardingPermissions());
+      unawaited(
+        EngagementPromptService.instance.recordAppOpen(
+          context,
+          proEntitlement: _proEntitlement,
+        ),
+      );
     });
   }
 
@@ -1781,11 +1801,55 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
 
   /// Logs download lifecycle events to Firebase Analytics (Play-only repo).
   /// Fire-and-forget; analytics must never affect the queue or the app.
-  Future<void> _logDownloadAnalytics(DownloadState state) async {
-    final eventName = analyticsEventNameFor(state);
+  Future<void> _logDownloadAnalytics(DownloadTask task) async {
+    final eventName = analyticsEventNameFor(task.state);
     if (eventName == null) return;
     try {
-      await FirebaseAnalytics.instance.logEvent(name: eventName);
+      final Map<String, Object> parameters = {};
+
+      // Determine protocol / engine type
+      final String protocol;
+      if (task.url.startsWith('magnet:') ||
+          task.url.toLowerCase().endsWith('.torrent') ||
+          task.contentType == 'application/x-bittorrent') {
+        protocol = 'torrent';
+      } else {
+        final ct = task.contentType?.toLowerCase().split(';').first.trim();
+        final path = Uri.tryParse(task.url)?.path.toLowerCase() ?? '';
+        if (ct == 'application/vnd.apple.mpegurl' ||
+            ct == 'application/x-mpegurl' ||
+            ct == 'application/dash+xml' ||
+            (ct != null && ct.contains('mpegurl')) ||
+            path.endsWith('.m3u8') ||
+            path.endsWith('.m3u') ||
+            path.endsWith('.mpd')) {
+          protocol = 'hls';
+        } else {
+          protocol = 'direct';
+        }
+      }
+      parameters['protocol'] = protocol;
+
+      if (task.state == DownloadState.failed) {
+        if (task.failureReason != null) {
+          parameters['failure_reason'] = task.failureReason!.name;
+        }
+        if (task.errorMessage != null && task.errorMessage!.isNotEmpty) {
+          final msg = task.errorMessage!;
+          // Firebase Analytics string parameters are limited to 100 characters.
+          parameters['error_snippet'] =
+              msg.length > 95 ? msg.substring(0, 95) : msg;
+        }
+      } else if (task.state == DownloadState.completed) {
+        if (task.totalBytes > 0) {
+          parameters['total_bytes'] = task.totalBytes;
+        }
+      }
+
+      await FirebaseAnalytics.instance.logEvent(
+        name: eventName,
+        parameters: parameters.isNotEmpty ? parameters : null,
+      );
     } catch (e) {
       debugPrint('[AnalyticsEventError] $e');
     }

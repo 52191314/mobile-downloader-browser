@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/l10n/app_localizations.dart';
 import 'package:aurora_downloader/premium/pro_entitlement.dart';
 import 'package:aurora_downloader/premium/pro_features.dart';
 import 'package:aurora_downloader/premium/upsell_controller.dart';
@@ -101,7 +102,9 @@ class VideoGateBanner extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$used of $limit free · $message',
+                    limit == 0
+                        ? 'Aurora Pro feature · $message'
+                        : '$used of $limit free · $message',
                     style: TextStyle(fontSize: 11, color: ac.textSecondary),
                   ),
                 ),
@@ -227,14 +230,20 @@ class VideoFavoritesList extends StatelessWidget {
                     if (a == 'remove') onRemove(fav);
                     if (a == 'page') onOpenSourcePage?.call(fav);
                   },
-                  itemBuilder: (_) => [
-                    if (fav.sourcePageUrl != null && onOpenSourcePage != null)
-                      const PopupMenuItem(value: 'page', child: Text('Open page')),
-                    const PopupMenuItem(
-                      value: 'remove',
-                      child: Text('Remove'),
-                    ),
-                  ],
+                  itemBuilder: (ctx) {
+                    final l10n = AppLocalizations.of(ctx);
+                    return [
+                      if (onOpenSourcePage != null)
+                        PopupMenuItem(
+                          value: 'page',
+                          child: Text(l10n?.cardMenuOpenSourcePage ?? 'Open source page'),
+                        ),
+                      PopupMenuItem(
+                        value: 'remove',
+                        child: Text(l10n?.cardMenuRemove ?? 'Remove'),
+                      ),
+                    ];
+                  },
                 ),
         );
       },
@@ -242,26 +251,20 @@ class VideoFavoritesList extends StatelessWidget {
   }
 }
 
-/// Watch history.
+/// Watch history (read-only for Free, manageable for Pro/Ultra).
 class VideoHistoryList extends StatelessWidget {
   const VideoHistoryList({
     super.key,
     required this.items,
     required this.onOpen,
     this.onOpenSourcePage,
-    this.selectionMode = false,
-    this.selectedUrls = const {},
-    this.onToggleSelected,
-    this.onSelectRange,
+    this.onRemove,
   });
 
   final List<BrowserHistoryEntry> items;
   final ValueChanged<BrowserHistoryEntry> onOpen;
   final ValueChanged<BrowserHistoryEntry>? onOpenSourcePage;
-  final bool selectionMode;
-  final Set<String> selectedUrls;
-  final ValueChanged<BrowserHistoryEntry>? onToggleSelected;
-  final void Function(BrowserHistoryEntry entry, int index)? onSelectRange;
+  final ValueChanged<BrowserHistoryEntry>? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -272,15 +275,12 @@ class VideoHistoryList extends StatelessWidget {
         body: 'Videos you play in Aurora\'s player show up here.',
       );
     }
+    final l10n = AppLocalizations.of(context);
     return ListView.builder(
       itemCount: items.length,
       itemBuilder: (context, i) {
         final entry = items[i];
-        final isSelected = selectedUrls.contains(entry.url);
-        final theme = Theme.of(context);
         return ListTile(
-          selected: isSelected,
-          selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.15),
           leading: _VideoThumb(url: entry.thumbnailUrl),
           title:
               Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -288,19 +288,33 @@ class VideoHistoryList extends StatelessWidget {
             _relative(entry.visitedAt),
             style: const TextStyle(fontSize: 11),
           ),
-          onTap: () {
-            if (selectionMode) {
-              onToggleSelected?.call(entry);
-            } else {
-              onOpen(entry);
-            }
-          },
-          onLongPress: () => onSelectRange?.call(entry, i),
-          trailing: selectionMode
-              ? null
-              : (entry.sourcePageUrl != null && onOpenSourcePage != null
+          onTap: () => onOpen(entry),
+          trailing: onRemove != null
+              ? PopupMenuButton<String>(
+                  onSelected: (a) {
+                    if (a == 'remove') onRemove!(entry);
+                    if (a == 'page') onOpenSourcePage?.call(entry);
+                  },
+                  itemBuilder: (ctx) {
+                    final itemL10n = AppLocalizations.of(ctx);
+                    return [
+                      if (onOpenSourcePage != null)
+                        PopupMenuItem(
+                          value: 'page',
+                          child: Text(
+                            itemL10n?.cardMenuOpenSourcePage ?? 'Open source page',
+                          ),
+                        ),
+                      PopupMenuItem(
+                        value: 'remove',
+                        child: Text(itemL10n?.cardMenuRemove ?? 'Remove'),
+                      ),
+                    ];
+                  },
+                )
+              : (onOpenSourcePage != null
                   ? IconButton(
-                      tooltip: 'Open page',
+                      tooltip: l10n?.cardMenuOpenSourcePage ?? 'Open source page',
                       icon: const Icon(Icons.open_in_new, size: 18),
                       onPressed: () => onOpenSourcePage!(entry),
                     )

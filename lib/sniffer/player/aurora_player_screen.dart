@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'package:aurora_downloader/theme/aurora_palette.dart';
 
+import '../browser_library.dart';
 import 'engine_factory.dart';
 import 'mini_player_controller.dart';
 import 'playback_engine.dart';
@@ -167,9 +168,26 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     _setKeepScreenOn(true);
     _initPip();
     _seedBrightness();
+    _checkInitialFavorited();
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  Future<void> _checkInitialFavorited() async {
+    try {
+      final lib = await const BrowserLibraryStore().load();
+      if (!mounted) return;
+      final isFav = lib.videoFavorites.any(
+        (f) =>
+            f.url == _source.url ||
+            (f.sourcePageUrl != null &&
+                f.sourcePageUrl == _source.sourcePageUrl),
+      );
+      if (isFav && mounted) {
+        setState(() => _favorited = true);
+      }
+    } catch (_) {}
   }
 
   /// Start the brightness drag wherever the device already is, so the first
@@ -621,7 +639,7 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
                       ? null
                       : () async {
                           await widget.onFavorite!(_source.url);
-                          if (mounted) setState(() => _favorited = true);
+                          await _checkInitialFavorited();
                         },
                 ),
                 _BottomBar(
