@@ -58,6 +58,9 @@ REPO_ROOT_NATIVE="$(to_native_path "$REPO_ROOT")"
 ALIGN_NATIVE="$(to_native_path "$ALIGN")"
 
 # --- locate the resolved package dir -----------------------------------------
+# Print the resolved package dir on stdout and signal via exit code:
+#  0 = path printed on stdout,  2 = package_config.json absent,  3 = package absent
+set +e
 PKG_DIR="$($PY - "$REPO_ROOT_NATIVE" <<'EOF'
 import json, os, sys
 from urllib.parse import urlparse, unquote
@@ -65,7 +68,7 @@ from urllib.parse import urlparse, unquote
 root = sys.argv[1]
 cfg_path = os.path.join(root, ".dart_tool", "package_config.json")
 if not os.path.exists(cfg_path):
-    sys.exit("_NO_PACKAGE_CONFIG")
+    sys.exit(2)
 with open(cfg_path) as f:
     cfg = json.load(f)
 for p in cfg["packages"]:
@@ -82,15 +85,18 @@ for p in cfg["packages"]:
             path = uri
         print(os.path.normpath(path))
         sys.exit(0)
-sys.exit("_NOT_FOUND")
+sys.exit(3)
 EOF
-)" || true
+)"
+_PY_RC=$?
+set -e
 # The closed-source merge replaced libtorrent_flutter with the in-house
 # aurora_torrent_engine.dart FFI engine (no prebuilt .so to align). When the
-# package is absent there is nothing to do — exit cleanly so CI stays green
-# instead of failing the "Prepare Torrent 16K alignment" step.
-if [ "$PKG_DIR" = "_NO_PACKAGE_CONFIG" ] || [ "$PKG_DIR" = "_NOT_FOUND" ]; then
-    echo "libtorrent_flutter not a dependency (closed-source engine) — nothing to align."
+# package (or package_config.json) is absent there is nothing to do — exit
+# cleanly so CI stays green instead of failing the "Prepare Torrent 16K
+# alignment" step.
+if [ "$_PY_RC" -ne 0 ]; then
+    echo "libtorrent_flutter not a dependency (closed-source engine) — nothing to align. (rc=$_PY_RC)"
     exit 0
 fi
 if [ ! -d "$PKG_DIR" ]; then
