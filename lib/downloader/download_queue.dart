@@ -2078,10 +2078,7 @@ class DownloadQueue {
   /// Removes oldest completed/failed tasks when the history limit is exceeded.
   /// This prevents unbounded memory and JSON-serialization growth.
   void _evictOldCompletedTasks() {
-    if (maxCompletedTasks <= 0) return;
-    // The effective gate is the terminal-length check below; keep the cheap
-    // total-size fast path to avoid building the list when obviously fine.
-    if (_tasks.length <= maxCompletedTasks) return;
+    if (maxCompletedTasks <= 0 || _tasks.length <= maxCompletedTasks) return;
 
     // Collect terminal (completed/failed) task IDs sorted by last update
     // (most recent first). We keep the newest ones.
