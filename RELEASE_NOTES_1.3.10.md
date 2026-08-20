@@ -2,11 +2,21 @@
 
 ## Highlights
 
-* **Closed-source conversion**: Aurora is now distributed as a proprietary,
-  closed-source app. The GPL-3.0 `libtorrent_flutter` dependency was replaced
-  with an in-house native BitTorrent engine, and FFmpeg links the LGPL
-  `ffmpeg-kit-min` build (still dynamically linkable/replaceable per LGPL).
+* **Closed-source conversion (partial)**: Aurora's Dart codebase is now
+  proprietary. However, the **BitTorrent feature still bundles the GPL-3.0
+  `libtorrent_flutter` native library** (`torrent/` dynamic feature module) —
+  this must be resolved before the build can be distributed closed-source (see
+  known issue below). FFmpeg now links the LGPL `ffmpeg-kit-min` build.
   Third-party open-source licenses are documented in `THIRD_PARTY_NOTICES.md`.
+
+## Known issue (must fix before closed-source release)
+
+* The `:torrent` dynamic-feature module still downloads and packages the GPL
+  `liblibtorrent_flutter.so` (`android/torrent/build.gradle.kts`), and
+  `lib/torrent/aurora_torrent_engine.dart` loads that same `.so`. Shipping this
+  under the proprietary license is a GPL violation. Options: (a) remove the
+  torrent feature until a permissible engine exists, or (b) keep the whole app
+  GPL. This is tracked separately and must be decided before Play upload.
 
 ## Bug Fixes
 
