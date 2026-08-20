@@ -12,6 +12,7 @@ import '../l10n/app_localizations.dart';
 import 'models/site_profile.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../analytics/aurora_analytics_service.dart';
 import '../compliance/restricted_media_policy.dart';
 import '../downloader/downloader.dart';
 import '../downloader/download_rules.dart';
@@ -498,6 +499,14 @@ class _SnifferScreenState extends State<SnifferScreen>
     unawaited(_initPaths().then((_) => _libraryController.load()));
     unawaited(_loadAutofillProfiles());
     widget.libraryUpdateNotifier?.addListener(_onLibraryUpdate);
+    MiniPlayerController.instance.revision.addListener(_onMiniPlayerRevisionChanged);
+  }
+
+  void _onMiniPlayerRevisionChanged() {
+    if (mounted && widget.isShellVisible) {
+      unawaited(_resumeBrowserShell());
+      setState(() {});
+    }
   }
 
   void _onLibraryUpdate() {
@@ -1424,6 +1433,7 @@ class _SnifferScreenState extends State<SnifferScreen>
     widget.controller?.setOnOpenUrlInNewTab(null);
     widget.controller?.setOnOpenUrlsInNewTabs(null);
     widget.openRequestBus?.removeListener(_onOpenRequestBus);
+    MiniPlayerController.instance.revision.removeListener(_onMiniPlayerRevisionChanged);
     _tabManager.dispose();
     super.dispose();
   }
@@ -3024,6 +3034,10 @@ class _SnifferScreenState extends State<SnifferScreen>
       }
     }
 
+    if (added > 0) {
+      AuroraAnalyticsService.instance.logBatchDownloadStarted(itemCount: added);
+    }
+
     if (!mounted) return;
     final summary = added > 0
         ? 'Added $added video(s) to the queue'
@@ -4501,6 +4515,9 @@ class _SnifferScreenState extends State<SnifferScreen>
     final start = pickStartQuality(effectiveMedia, qualities);
     if (!mounted) return;
     await _showMediaPreview(start, qualityVariants: qualities);
+    if (mounted && widget.isShellVisible) {
+      await _resumeBrowserShell();
+    }
   }
 
   /// Collects alternate renditions for [media]: capture-group siblings,
@@ -4698,12 +4715,12 @@ class _SnifferScreenState extends State<SnifferScreen>
   /// engine is borrowed ([MiniPlayerController] stays the owner), so the
   /// video continues from its current position without a rebuffer, and
   /// popping that route minimizes it again.
-  void _expandMiniPlayer() {
+  void _expandMiniPlayer() async {
     final controller = MiniPlayerController.instance;
     final engine = controller.engine;
     final source = controller.source;
     if (engine == null || source == null || !mounted) return;
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => AuroraPlayerScreen(
           source: source,
@@ -4729,6 +4746,9 @@ class _SnifferScreenState extends State<SnifferScreen>
         ),
       ),
     );
+    if (mounted && widget.isShellVisible) {
+      await _resumeBrowserShell();
+    }
   }
 
   /// Handles JS [AuroraPlayChannel] when replace-site-player is on.

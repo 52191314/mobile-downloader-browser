@@ -189,6 +189,9 @@ dependencies {
     // GitHub fat APK builds don't include this but it's harmless (no-op).
     implementation("com.google.android.play:feature-delivery:2.1.0")
     implementation("com.google.android.play:feature-delivery-ktx:2.1.0")
+    // Google Play In-App Updates (Immediate & Flexible updates).
+    implementation("com.google.android.play:app-update:2.1.0")
+    implementation("com.google.android.play:app-update-ktx:2.1.0")
     implementation("androidx.webkit:webkit:1.12.0")
     implementation("androidx.browser:browser:1.8.0")
 }

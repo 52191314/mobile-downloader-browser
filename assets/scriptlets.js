@@ -1,99 +1,79 @@
+// Copyright (c) 2026 Aurora Downloader Authors. All rights reserved.
+// Proprietary & Confidential — In-house Scriptlet Engine for content protection & ad defusal.
+
 (function() {
   'use strict';
 
-  // ---------------------------------------------------------------
-  // Aurora Scriptlet Engine — curated subset of AdGuard scriptlets
-  // Adapted from @adguard/scriptlets (GPL-3.0)
-  // ---------------------------------------------------------------
-  // Scriptlets patch browser APIs to prevent anti-adblock detection.
-  // They run at document_start, before any page script executes.
-  // ---------------------------------------------------------------
+  if (window.__auroraScriptletsLoaded) return;
+  window.__auroraScriptletsLoaded = true;
 
-  var _registry = {};
-  var _invoked = {};
+  var _registry = Object.create(null);
+  var _invoked = Object.create(null);
 
-  // --- Utilities --------------------------------------------------
+  // --- Internal Utility Helpers ---
 
-  function randomId() {
-    return Math.random().toString(36).slice(2, 9);
+  function makeRandomToken() {
+    return Math.random().toString(36).substring(2, 11);
   }
 
-  // Convert a regex pattern string to a RegExp object.
-  // Supports both /pattern/flags notation and plain strings.
-  function toRegExp(pattern) {
-    if (!pattern || pattern === '') return new RegExp('.?');
-    // /pattern/flags notation
-    if (pattern.startsWith('/') && pattern.lastIndexOf('/') > 0) {
-      var lastSlash = pattern.lastIndexOf('/');
-      var body = pattern.slice(1, lastSlash);
-      var flags = pattern.slice(lastSlash + 1);
-      try { return new RegExp(body, flags); } catch (_) {}
+  function compileRegex(raw) {
+    if (!raw || typeof raw !== 'string') return new RegExp('.?');
+    if (raw.charCodeAt(0) === 47 /* '/' */ && raw.lastIndexOf('/') > 0) {
+      var lastIdx = raw.lastIndexOf('/');
+      var pattern = raw.slice(1, lastIdx);
+      var flags = raw.slice(lastIdx + 1);
+      try {
+        return new RegExp(pattern, flags);
+      } catch (_) {}
     }
-    // Plain string — escape special characters
-    var escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(escaped);
   }
 
-  // Get a property from a chain (e.g. 'window.foo.bar')
-  function getPropInChain(obj, chain) {
-    var parts = chain.split('.');
-    var current = obj;
-    for (var i = 0; i < parts.length; i++) {
-      if (current == null) return undefined;
-      current = current[parts[i]];
-    }
-    return current;
-  }
-
-  // Set a property in a chain, creating intermediate objects as needed
-  function setPropInChain(obj, chain, value) {
-    var parts = chain.split('.');
-    var current = obj;
-    for (var i = 0; i < parts.length - 1; i++) {
-      if (current[parts[i]] == null) {
-        current[parts[i]] = {};
+  function resolvePath(root, pathStr) {
+    if (!root || !pathStr) return null;
+    var segments = pathStr.split('.');
+    var current = root;
+    for (var i = 0; i < segments.length - 1; i++) {
+      var seg = segments[i];
+      if (current[seg] == null) {
+        current[seg] = {};
       }
-      current = current[parts[i]];
+      current = current[seg];
     }
-    current[parts[parts.length - 1]] = value;
-  }
-
-  // Override a property with a getter/setter that throws ReferenceError
-  function abortProperty(obj, prop, onRead, onWrite) {
-    var origValue = obj[prop];
-    var rid = randomId();
-
-    Object.defineProperty(obj, prop, {
-      get: onRead ? function() {
-        throw new ReferenceError(rid);
-      } : function() { return origValue; },
-      set: onWrite ? function() { throw new ReferenceError(rid); } : function(v) { origValue = v; },
-      configurable: true,
-      enumerable: true
-    });
-
-    // Catch the ReferenceError to suppress it
-    var origOnError = window.onerror;
-    window.onerror = function(msg) {
-      if (typeof msg === 'string' && msg.includes(rid)) return true;
-      if (origOnError) return origOnError.apply(window, arguments);
-      return false;
+    return {
+      parent: current,
+      prop: segments[segments.length - 1]
     };
-    return rid;
   }
 
-  // --- Scriptlet Invocation ---------------------------------------
+  function parseConstantValue(val) {
+    if (val === 'true') return true;
+    if (val === 'false') return false;
+    if (val === 'null') return null;
+    if (val === 'undefined') return undefined;
+    if (val === 'noopFunc' || val === 'noopCallback') return function() {};
+    if (val === 'trueFunc') return function() { return true; };
+    if (val === 'falseFunc') return function() { return false; };
+    if (val === 'emptyObj') return {};
+    if (val === 'emptyArr') return [];
+    if (!isNaN(Number(val)) && val.trim() !== '') return Number(val);
+    return val;
+  }
+
+  // --- Public Interface ---
 
   var __auroraScriptlets = {
     invoke: function(name, args) {
-      var key = name + '_' + (args ? args.join('_') : '');
-      if (_invoked[key]) return;
-      _invoked[key] = true;
+      if (!name) return;
+      var callSig = name + (args && args.length ? '::' + args.join(';') : '');
+      if (_invoked[callSig]) return;
+      _invoked[callSig] = true;
 
-      var fn = _registry[name];
-      if (fn) {
+      var handler = _registry[name];
+      if (typeof handler === 'function') {
         try {
-          fn(args || []);
+          handler(args || []);
         } catch (_) {}
       }
     }
@@ -101,549 +81,387 @@
 
   window.__auroraScriptlets = __auroraScriptlets;
 
-  // ===============================================================
-  // SCRIPLET 1: abort-on-property-read
-  // Throws ReferenceError when a target property is read.
-  // Usage: abort-on-property-read('window.property')
-  // ===============================================================
+  // --- 1. abort-on-property-read ---
   _registry['abort-on-property-read'] = function(args) {
     if (!args || !args[0]) return;
-    var prop = args[0];
-    var parts = prop.split('.');
-    if (parts.length < 2) return;
-    var objName = parts.slice(0, -1).join('.');
-    var propName = parts[parts.length - 1];
+    var target = resolvePath(window, args[0]);
+    if (!target) return;
 
-    var target = window;
-    for (var i = 0; i < parts.length - 1; i++) {
-      if (target[parts[i]] == null) {
-        // Create intermediate object
-        target[parts[i]] = {};
-      }
-      target = target[parts[i]];
-    }
+    var token = makeRandomToken();
+    var storedValue = target.parent[target.prop];
 
-    var origValue = target[propName];
-    var rid = randomId();
-    Object.defineProperty(target, propName, {
-      get: function() { throw new ReferenceError(rid); },
-      set: function(v) { origValue = v; },
+    Object.defineProperty(target.parent, target.prop, {
+      get: function() {
+        throw new ReferenceError(token);
+      },
+      set: function(v) {
+        storedValue = v;
+      },
       configurable: true
     });
 
-    var origOnError = window.onerror;
+    var prevErr = window.onerror;
     window.onerror = function(msg) {
-      if (typeof msg === 'string' && msg.includes(rid)) return true;
-      if (origOnError) return origOnError.apply(window, arguments);
+      if (typeof msg === 'string' && msg.indexOf(token) !== -1) return true;
+      if (typeof prevErr === 'function') return prevErr.apply(window, arguments);
       return false;
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 2: abort-on-property-write
-  // Throws ReferenceError when a target property is written.
-  // Usage: abort-on-property-write('window.property')
-  // ===============================================================
+  // --- 2. abort-on-property-write ---
   _registry['abort-on-property-write'] = function(args) {
     if (!args || !args[0]) return;
-    var prop = args[0];
-    var parts = prop.split('.');
-    if (parts.length < 2) return;
+    var target = resolvePath(window, args[0]);
+    if (!target) return;
 
-    var target = window;
-    for (var i = 0; i < parts.length - 1; i++) {
-      if (target[parts[i]] == null) return;
-      target = target[parts[i]];
-    }
-    var propName = parts[parts.length - 1];
-    var rid = randomId();
-
-    Object.defineProperty(target, propName, {
-      get: function() { return undefined; },
-      set: function() { throw new ReferenceError(rid); },
+    var token = makeRandomToken();
+    Object.defineProperty(target.parent, target.prop, {
+      get: function() {
+        return undefined;
+      },
+      set: function() {
+        throw new ReferenceError(token);
+      },
       configurable: true
     });
 
-    var origOnError = window.onerror;
+    var prevErr = window.onerror;
     window.onerror = function(msg) {
-      if (typeof msg === 'string' && msg.includes(rid)) return true;
-      if (origOnError) return origOnError.apply(window, arguments);
+      if (typeof msg === 'string' && msg.indexOf(token) !== -1) return true;
+      if (typeof prevErr === 'function') return prevErr.apply(window, arguments);
       return false;
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 3: abort-current-inline-script
-  // Aborts an inline script element whose content matches a pattern.
-  // Usage: abort-current-inline-script('property', 'searchPattern')
-  // ===============================================================
+  // --- 3. abort-current-inline-script ---
   _registry['abort-current-inline-script'] = function(args) {
-    if (!args || !args[0] || !args[1]) return;
-    var property = args[0];
-    var search = args[1];
-    var searchRegexp = toRegExp(search);
+    if (!args || args.length < 2) return;
+    var pathStr = args[0];
+    var matcher = compileRegex(args[1]);
+    var target = resolvePath(window, pathStr);
+    if (!target) return;
 
-    var rid = randomId();
+    var original = target.parent[target.prop];
+    if (typeof original !== 'function') return;
+    var token = makeRandomToken();
 
-    // Override the property so that when it's accessed on a script,
-    // if the script's textContent matches the pattern, we abort.
-    var parts = property.split('.');
-    if (parts.length < 2) return;
-
-    var obj = window;
-    for (var i = 0; i < parts.length - 1; i++) {
-      if (obj[parts[i]] == null) return;
-      obj = obj[parts[i]];
-    }
-    var propName = parts[parts.length - 1];
-
-    var nativeFn = obj[propName];
-    if (typeof nativeFn !== 'function') return;
-
-    obj[propName] = function() {
-      // Check if we can access the current script
+    target.parent[target.prop] = function() {
       try {
-        var script = document.currentScript;
-        if (script && script.textContent) {
-          if (searchRegexp.test(script.textContent)) {
-            throw new ReferenceError(rid);
-          }
+        var current = document.currentScript;
+        if (current && current.textContent && matcher.test(current.textContent)) {
+          throw new ReferenceError(token);
         }
       } catch (e) {
-        if (e instanceof ReferenceError && e.message === rid) {
+        if (e instanceof ReferenceError && e.message === token) {
           throw e;
         }
       }
-      return nativeFn.apply(this, arguments);
+      return original.apply(this, arguments);
     };
 
-    var origOnError = window.onerror;
+    var prevErr = window.onerror;
     window.onerror = function(msg) {
-      if (typeof msg === 'string' && msg.includes(rid)) {
-        // Suppress the error — the inline script is aborted
-        return true;
-      }
-      if (origOnError) return origOnError.apply(window, arguments);
+      if (typeof msg === 'string' && msg.indexOf(token) !== -1) return true;
+      if (typeof prevErr === 'function') return prevErr.apply(window, arguments);
       return false;
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 4: set-constant
-  // Overrides a property with a constant value to prevent
-  // anti-adblock detection (e.g. canRunAds = true).
-  // Usage: set-constant('window.property', 'value')
-  // ===============================================================
+  // --- 4. set-constant ---
   _registry['set-constant'] = function(args) {
     if (!args || !args[0]) return;
-    var prop = args[0];
-    var value = args.length >= 2 ? args[1] : 'true';
+    var target = resolvePath(window, args[0]);
+    if (!target) return;
 
-    // Parse value
-    var parsedValue;
-    if (value === 'true') parsedValue = true;
-    else if (value === 'false') parsedValue = false;
-    else if (value === 'undefined') parsedValue = undefined;
-    else if (value === 'null') parsedValue = null;
-    else if (value === 'noopFunc' || value === 'noopCallback') {
-      parsedValue = function() {};
-    } else if (value === 'trueFunc') {
-      parsedValue = function() { return true; };
-    } else if (value === 'falseFunc') {
-      parsedValue = function() { return false; };
-    } else if (!isNaN(Number(value))) {
-      parsedValue = Number(value);
-    } else {
-      parsedValue = value;
-    }
-
-    var parts = prop.split('.');
-    if (parts.length < 2) return;
-
-    var target = window;
-    for (var i = 0; i < parts.length - 1; i++) {
-      if (target[parts[i]] == null) {
-        target[parts[i]] = {};
-      }
-      target = target[parts[i]];
-    }
-    var propName = parts[parts.length - 1];
-
-    Object.defineProperty(target, propName, {
-      get: function() { return parsedValue; },
+    var constantVal = args.length >= 2 ? parseConstantValue(args[1]) : true;
+    Object.defineProperty(target.parent, target.prop, {
+      get: function() {
+        return constantVal;
+      },
       set: function() {},
       configurable: true
     });
   };
 
-  // ===============================================================
-  // SCRIPLET 5: prevent-addEventListener
-  // Blocks event listeners from being registered when the event type
-  // matches a pattern.
-  // Usage: prevent-addEventListener('click', 'searchPattern')
-  // ===============================================================
+  // --- 5. prevent-addEventListener ---
   _registry['prevent-addEventListener'] = function(args) {
     if (!args || !args[0]) return;
+    var eventMatcher = compileRegex(args[0]);
+    var handlerMatcher = args.length >= 2 ? compileRegex(args[1]) : null;
 
-    var eventTypeFilter = toRegExp(args[0]);
-    var handlerFilter = args.length >= 2 ? toRegExp(args[1]) : null;
-
-    var nativeAddEventListener = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-      if (eventTypeFilter.test(type)) {
-        // If handler filter is specified, also check the handler
-        if (handlerFilter && listener) {
-          var handlerStr = listener.toString();
-          if (!handlerFilter.test(handlerStr)) {
-            return nativeAddEventListener.call(this, type, listener, options);
+    var origAdd = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(evtType, listener, options) {
+      if (eventMatcher.test(evtType)) {
+        if (handlerMatcher && listener) {
+          var handlerBody = String(listener);
+          if (!handlerMatcher.test(handlerBody)) {
+            return origAdd.call(this, evtType, listener, options);
           }
         }
-        // Block this event listener
         return;
       }
-      return nativeAddEventListener.call(this, type, listener, options);
+      return origAdd.call(this, evtType, listener, options);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 6: noeval
-  // Blocks eval() calls.
-  // Usage: noeval()
-  // ===============================================================
+  // --- 6. noeval ---
   _registry['noeval'] = function() {
-    var rid = randomId();
-    var nativeEval = window.eval;
+    var token = makeRandomToken();
     window.eval = function() {
-      throw new ReferenceError(rid);
+      throw new ReferenceError(token);
     };
-    // Also block Function constructor
-    var nativeFunction = window.Function;
     window.Function = function() {
-      throw new ReferenceError(rid);
+      throw new ReferenceError(token);
     };
-
-    var origOnError = window.onerror;
+    var prevErr = window.onerror;
     window.onerror = function(msg) {
-      if (typeof msg === 'string' && msg.includes(rid)) return true;
-      if (origOnError) return origOnError.apply(window, arguments);
+      if (typeof msg === 'string' && msg.indexOf(token) !== -1) return true;
+      if (typeof prevErr === 'function') return prevErr.apply(window, arguments);
       return false;
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 7: no-fetch-if
-  // Blocks fetch() requests whose URL matches a pattern.
-  // Usage: no-fetch-if('pattern')
-  // ===============================================================
-  _registry['no-fetch-if'] = function(args) {
+  // --- 7. no-fetch-if & 19. prevent-fetch ---
+  var blockFetchHandler = function(args) {
     if (!args || !args[0]) return;
-    var pattern = toRegExp(args[0]);
+    var matcher = compileRegex(args[0]);
+    var origFetch = window.fetch;
+    if (typeof origFetch !== 'function') return;
 
-    var nativeFetch = window.fetch;
     window.fetch = function(input, init) {
-      var url = typeof input === 'string' ? input :
-                input instanceof Request ? input.url : '';
-      if (url && pattern.test(url)) {
-        return Promise.reject(new Error('Blocked by adblocker'));
+      var reqUrl = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+      if (reqUrl && matcher.test(reqUrl)) {
+        return Promise.reject(new TypeError('AdShield intercepted request'));
       }
-      return nativeFetch.apply(this, arguments);
+      return origFetch.apply(this, arguments);
     };
   };
+  _registry['no-fetch-if'] = blockFetchHandler;
+  _registry['prevent-fetch'] = blockFetchHandler;
 
-  // ===============================================================
-  // SCRIPLET 8: no-xhr-if
-  // Blocks XMLHttpRequest calls whose URL matches a pattern.
-  // Usage: no-xhr-if('pattern')
-  // ===============================================================
+  // --- 8. no-xhr-if ---
   _registry['no-xhr-if'] = function(args) {
     if (!args || !args[0]) return;
-    var pattern = toRegExp(args[0]);
+    var matcher = compileRegex(args[0]);
+    var origOpen = XMLHttpRequest.prototype.open;
 
-    var nativeOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url) {
-      if (pattern.test(url)) {
-        // Abort this request — don't even open it
+      if (url && matcher.test(String(url))) {
         return;
       }
-      return nativeOpen.apply(this, arguments);
+      return origOpen.apply(this, arguments);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 9: no-window-open-if
-  // Blocks window.open calls whose URL matches a pattern.
-  // Usage: no-window-open-if('pattern')
-  // ===============================================================
+  // --- 9. no-window-open-if ---
   _registry['no-window-open-if'] = function(args) {
     if (!args || !args[0]) return;
-    var pattern = toRegExp(args[0]);
+    var matcher = compileRegex(args[0]);
+    var origWinOpen = window.open;
 
-    var nativeOpen = window.open;
-    window.open = function(url, name, features) {
-      if (pattern.test(url)) {
+    window.open = function(url) {
+      if (url && matcher.test(String(url))) {
         return null;
       }
-      return nativeOpen.apply(this, arguments);
+      return origWinOpen.apply(this, arguments);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 10: set-timeout-defuser
-  // Blocks setTimeout calls whose callback matches a pattern.
-  // Usage: set-timeout-defuser('pattern')
-  // ===============================================================
+  // --- 10. set-timeout-defuser ---
   _registry['set-timeout-defuser'] = function(args) {
     if (!args || !args[0]) return;
-    var callbackPattern = toRegExp(args[0]);
-    var delayPattern = args.length >= 2 && args[1] !== '*' ? parseInt(args[1], 10) : -1;
+    var callbackMatcher = compileRegex(args[0]);
+    var delayFilter = (args.length >= 2 && args[1] !== '*') ? parseInt(args[1], 10) : -1;
+    var origSetTimeout = window.setTimeout;
 
-    var nativeSetTimeout = window.setTimeout;
-    window.setTimeout = function(callback, delay) {
-      var match = false;
-      if (typeof callback === 'function' || typeof callback === 'string') {
-        var callbackStr = typeof callback === 'function' ? callback.toString() : callback;
-        if (callbackPattern.test(callbackStr)) {
-          if (delayPattern === -1 || delay === delayPattern) {
-            match = true;
+    window.setTimeout = function(fn, delay) {
+      if (typeof fn === 'function' || typeof fn === 'string') {
+        var str = typeof fn === 'function' ? String(fn) : fn;
+        if (callbackMatcher.test(str)) {
+          if (delayFilter === -1 || delay === delayFilter) {
+            return 0;
           }
         }
       }
-      if (match) {
-        // Return a timer ID that will be ignored
-        return 0;
-      }
-      return nativeSetTimeout.apply(this, arguments);
+      return origSetTimeout.apply(this, arguments);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 11: prevent-setInterval
-  // Blocks setInterval calls whose callback matches a pattern.
-  // Usage: prevent-setInterval('pattern')
-  // ===============================================================
+  // --- 11. prevent-setInterval ---
   _registry['prevent-setInterval'] = function(args) {
     if (!args || !args[0]) return;
-    var callbackPattern = toRegExp(args[0]);
+    var callbackMatcher = compileRegex(args[0]);
+    var origInterval = window.setInterval;
 
-    var nativeSetInterval = window.setInterval;
-    window.setInterval = function(callback, delay) {
-      if (typeof callback === 'function' || typeof callback === 'string') {
-        var callbackStr = typeof callback === 'function' ? callback.toString() : callback;
-        if (callbackPattern.test(callbackStr)) {
+    window.setInterval = function(fn, delay) {
+      if (typeof fn === 'function' || typeof fn === 'string') {
+        var str = typeof fn === 'function' ? String(fn) : fn;
+        if (callbackMatcher.test(str)) {
           return 0;
         }
       }
-      return nativeSetInterval.apply(this, arguments);
+      return origInterval.apply(this, arguments);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 12: prevent-setTimeout
-  // Blocks setTimeout calls whose callback matches a pattern.
-  // Usage: prevent-setTimeout('pattern')
-  // ===============================================================
+  // --- 12. prevent-setTimeout ---
   _registry['prevent-setTimeout'] = function(args) {
     if (!args || !args[0]) return;
-    var callbackPattern = toRegExp(args[0]);
+    var callbackMatcher = compileRegex(args[0]);
+    var origSetTimeout = window.setTimeout;
 
-    var nativeSetTimeout = window.setTimeout;
-    window.setTimeout = function(callback, delay) {
-      if (typeof callback === 'function' || typeof callback === 'string') {
-        var callbackStr = typeof callback === 'function' ? callback.toString() : callback;
-        if (callbackPattern.test(callbackStr)) {
+    window.setTimeout = function(fn, delay) {
+      if (typeof fn === 'function' || typeof fn === 'string') {
+        var str = typeof fn === 'function' ? String(fn) : fn;
+        if (callbackMatcher.test(str)) {
           return 0;
         }
       }
-      return nativeSetTimeout.apply(this, arguments);
+      return origSetTimeout.apply(this, arguments);
     };
   };
 
-  // ===============================================================
-  // SCRIPLET 13: remove-attr
-  // Removes a specified attribute from elements matching a selector.
-  // Usage: remove-attr('attribute', 'selector')
-  // ===============================================================
+  // --- 13. remove-attr ---
   _registry['remove-attr'] = function(args) {
     if (!args || !args[0]) return;
-    var attrName = args[0];
+    var attr = args[0];
     var selector = args.length >= 2 ? args[1] : '*';
 
-    function removeAttrFromMatching() {
+    function stripAttrs() {
       try {
-        var elements = document.querySelectorAll(selector);
-        for (var i = 0; i < elements.length; i++) {
-          elements[i].removeAttribute(attrName);
+        var nodes = document.querySelectorAll(selector);
+        for (var i = 0; i < nodes.length; i++) {
+          nodes[i].removeAttribute(attr);
         }
       } catch (_) {}
     }
 
-    // Run immediately
-    removeAttrFromMatching();
-
-    // Run on DOM mutations
-    var observer = new MutationObserver(function() {
-      removeAttrFromMatching();
-    });
+    stripAttrs();
+    var observer = new MutationObserver(stripAttrs);
     if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(function() { observer.disconnect(); }, 6000);
     }
-    // Disconnect after 5 seconds
-    setTimeout(function() { observer.disconnect(); }, 5000);
   };
 
-  // ===============================================================
-  // SCRIPLET 14: remove-class
-  // Removes a specified class from elements matching a selector.
-  // Usage: remove-class('className', 'selector')
-  // ===============================================================
+  // --- 14. remove-class ---
   _registry['remove-class'] = function(args) {
     if (!args || !args[0]) return;
-    var className = args[0];
+    var clsName = args[0];
     var selector = args.length >= 2 ? args[1] : '*';
 
-    function removeClassFromMatching() {
+    function stripClasses() {
       try {
-        var elements = document.querySelectorAll(selector);
-        for (var i = 0; i < elements.length; i++) {
-          elements[i].classList.remove(className);
+        var nodes = document.querySelectorAll(selector);
+        for (var i = 0; i < nodes.length; i++) {
+          nodes[i].classList.remove(clsName);
         }
       } catch (_) {}
     }
 
-    // Run immediately
-    removeClassFromMatching();
-
-    // Run on DOM mutations
-    var observer = new MutationObserver(function() {
-      removeClassFromMatching();
-    });
+    stripClasses();
+    var observer = new MutationObserver(stripClasses);
     if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(function() { observer.disconnect(); }, 6000);
     }
-    // Disconnect after 5 seconds
-    setTimeout(function() { observer.disconnect(); }, 5000);
   };
 
-  // ===============================================================
-  // SCRIPLET 15: no-referrer-when-downgrade
-  // Prevents referrer leakage by setting meta referrer policy.
-  // Usage: no-referrer-when-downgrade()
-  // ===============================================================
+  // --- 15. no-referrer-when-downgrade ---
   _registry['no-referrer-when-downgrade'] = function() {
-    // The browser already has a default behaviour; this scriptlet
-    // strengthens it by setting the meta tag explicitly.
-    if (!document.querySelector('meta[name="referrer"]')) {
-      var meta = document.createElement('meta');
-      meta.name = 'referrer';
-      meta.content = 'no-referrer';
-      var target = document.head || document.documentElement;
-      if (target) {
-        target.appendChild(meta);
-      }
-    }
-
-    // Also override the referrer property on any anchor/area elements
-    Object.defineProperty(HTMLAnchorElement.prototype, 'referrerPolicy', {
-      get: function() { return 'no-referrer'; },
-      set: function() {},
-      configurable: true
-    });
-  };
-
-  // ===============================================================
-  // SCRIPLET 16: json-prune
-  // Removes properties (by exact name, regex, or dotted path) from
-  // objects passing through JSON.stringify and JSON.parse.
-  // Usage: json-prune('propName', '/regex/', 'path.to.prop')
-  // ===============================================================
-  _registry['json-prune'] = function(args) {
-    if (!args || !args.length) return;
-
-    var patterns = [];
-    for (var i = 0; i < args.length; i++) {
-      var arg = args[i];
-      if (!arg) continue;
-      var m = /^\/(.+)\/([a-z]*)$/.exec(arg);
-      if (m) {
-        try { patterns.push(new RegExp(m[1], m[2])); } catch (_) {}
-      } else {
-        patterns.push(arg);
-      }
-    }
-    if (!patterns.length) return;
-
-    function prune(obj, path) {
-      if (!obj || typeof obj !== 'object') return;
-      if (Object.prototype.toString.call(obj) === '[object Array]') {
-        for (var i = 0; i < obj.length; i++) prune(obj[i], path);
-        return;
-      }
-      for (var key in obj) {
-        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-        var keyPath = path ? path + '.' + key : key;
-        var remove = false;
-        for (var p = 0; p < patterns.length; p++) {
-          var pattern = patterns[p];
-          if (typeof pattern === 'string') {
-            if (pattern.indexOf('.') === -1 ? key === pattern : keyPath === pattern) {
-              remove = true;
-              break;
-            }
-          } else if (pattern.test(key)) {
-            remove = true;
-            break;
-          }
-        }
-        if (remove) {
-          try { delete obj[key]; } catch (_) {}
-        } else {
-          prune(obj[key], keyPath);
-        }
-      }
-    }
-
-    var nativeStringify = JSON.stringify;
-    JSON.stringify = function(value, replacer, space) {
-      try { prune(value, ''); } catch (_) {}
-      return nativeStringify.call(this, value, replacer, space);
-    };
-
-    var nativeParse = JSON.parse;
-    JSON.parse = function(text, reviver) {
-      var result = nativeParse.call(this, text, reviver);
-      try { prune(result, ''); } catch (_) {}
-      return result;
-    };
-  };
-
-  // ===============================================================
-  // SCRIPLET 17: set-local-storage-item
-  // Sets a localStorage item unless it already holds a different
-  // non-empty value (existing values win, never clobbered).
-  // Usage: set-local-storage-item('key', 'value')
-  // ===============================================================
-  _registry['set-local-storage-item'] = function(args) {
-    if (!args || args.length < 2) return;
-    var key = args[0];
-    var value = args[1];
     try {
-      var current = localStorage.getItem(key);
-      if (current !== null && current !== '' && current !== value) return;
-      localStorage.setItem(key, value);
+      if (!document.querySelector('meta[name="referrer"]')) {
+        var meta = document.createElement('meta');
+        meta.name = 'referrer';
+        meta.content = 'no-referrer';
+        var head = document.head || document.documentElement;
+        if (head) head.appendChild(meta);
+      }
+      Object.defineProperty(HTMLAnchorElement.prototype, 'referrerPolicy', {
+        get: function() { return 'no-referrer'; },
+        set: function() {},
+        configurable: true
+      });
     } catch (_) {}
   };
 
-  // ===============================================================
-  // SCRIPLET 18: trusted-set-local-storage-item
-  // Unconditionally sets a localStorage item, overwriting any value.
-  // Usage: trusted-set-local-storage-item('key', 'value')
-  // ===============================================================
+  // --- 16. json-prune ---
+  _registry['json-prune'] = function(args) {
+    if (!args || !args.length) return;
+
+    var filterMatchers = [];
+    for (var i = 0; i < args.length; i++) {
+      var item = args[i];
+      if (!item) continue;
+      var match = /^\/(.+)\/([a-z]*)$/.exec(item);
+      if (match) {
+        try { filterMatchers.push(new RegExp(match[1], match[2])); } catch (_) {}
+      } else {
+        filterMatchers.push(item);
+      }
+    }
+    if (!filterMatchers.length) return;
+
+    function deepPrune(data, currentPath) {
+      if (!data || typeof data !== 'object') return;
+      if (Array.isArray(data)) {
+        for (var idx = 0; idx < data.length; idx++) {
+          deepPrune(data[idx], currentPath);
+        }
+        return;
+      }
+      var keys = Object.keys(data);
+      for (var k = 0; k < keys.length; k++) {
+        var key = keys[k];
+        var fullPath = currentPath ? currentPath + '.' + key : key;
+        var shouldDrop = false;
+
+        for (var f = 0; f < filterMatchers.length; f++) {
+          var rule = filterMatchers[f];
+          if (typeof rule === 'string') {
+            if (rule.indexOf('.') === -1 ? key === rule : fullPath === rule) {
+              shouldDrop = true;
+              break;
+            }
+          } else if (rule.test(key) || rule.test(fullPath)) {
+            shouldDrop = true;
+            break;
+          }
+        }
+
+        if (shouldDrop) {
+          try { delete data[key]; } catch (_) {}
+        } else {
+          deepPrune(data[key], fullPath);
+        }
+      }
+    }
+
+    var origParse = JSON.parse;
+    JSON.parse = function(text, reviver) {
+      var parsed = origParse.call(this, text, reviver);
+      try { deepPrune(parsed, ''); } catch (_) {}
+      return parsed;
+    };
+
+    var origStringify = JSON.stringify;
+    JSON.stringify = function(val, replacer, space) {
+      try { deepPrune(val, ''); } catch (_) {}
+      return origStringify.call(this, val, replacer, space);
+    };
+  };
+
+  // --- 17. set-local-storage-item ---
+  _registry['set-local-storage-item'] = function(args) {
+    if (!args || args.length < 2) return;
+    try {
+      var existing = localStorage.getItem(args[0]);
+      if (existing !== null && existing !== '' && existing !== args[1]) return;
+      localStorage.setItem(args[0], args[1]);
+    } catch (_) {}
+  };
+
+  // --- 18. trusted-set-local-storage-item ---
   _registry['trusted-set-local-storage-item'] = function(args) {
     if (!args || args.length < 2) return;
     try {
@@ -651,107 +469,56 @@
     } catch (_) {}
   };
 
-  // ===============================================================
-  // SCRIPLET 19: prevent-fetch
-  // Aborts fetch() calls whose URL matches a regex pattern.
-  // Usage: prevent-fetch('/pattern/')
-  // ===============================================================
-  _registry['prevent-fetch'] = function(args) {
-    if (!args || !args[0]) return;
-    var pattern = toRegExp(args[0]);
-    var nativeFetch = window.fetch;
-    if (typeof nativeFetch !== 'function') return;
-    window.fetch = function(input, init) {
-      var url = typeof input === 'string' ? input :
-                input instanceof Request ? input.url : '';
-      if (url && pattern.test(url)) {
-        return Promise.reject(new Error('Blocked by adblocker'));
-      }
-      return nativeFetch.apply(this, arguments);
-    };
-  };
-
-  // ===============================================================
-  // SCRIPLET 20: set-attr
-  // Sets an attribute on elements matching a selector (current and
-  // future). A value of 'removeattr' removes the attribute instead.
-  // Usage: set-attr('attribute', 'value', 'selector')
-  // ===============================================================
+  // --- 20. set-attr ---
   _registry['set-attr'] = function(args) {
     if (!args || args.length < 2) return;
     var attr = args[0];
-    var value = args[1];
+    var val = args[1];
     var selector = args.length >= 3 ? args[2] : '*';
 
-    function applyAttr() {
+    function setAttributes() {
       try {
         var elements = document.querySelectorAll(selector);
         for (var i = 0; i < elements.length; i++) {
-          if (value === 'removeattr') {
+          if (val === 'removeattr') {
             elements[i].removeAttribute(attr);
           } else {
-            elements[i].setAttribute(attr, value);
+            elements[i].setAttribute(attr, val);
           }
         }
       } catch (_) {}
     }
 
-    // Run immediately
-    applyAttr();
-
-    // Run on DOM mutations
-    var observer = new MutationObserver(function() {
-      applyAttr();
-    });
+    setAttributes();
+    var observer = new MutationObserver(setAttributes);
     if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(function() { observer.disconnect(); }, 6000);
     }
-    // Disconnect after 5 seconds
-    setTimeout(function() { observer.disconnect(); }, 5000);
   };
 
-  // ===============================================================
-  // SCRIPLET 21: prevent-refresh
-  // Blocks page refresh: removes meta http-equiv=refresh tags and
-  // neutralizes location.reload().
-  // Usage: prevent-refresh()
-  // ===============================================================
+  // --- 21. prevent-refresh ---
   _registry['prevent-refresh'] = function() {
-    function stripMetaRefresh() {
+    function stripRefresh() {
       try {
-        var metas = document.querySelectorAll('meta');
+        var metas = document.querySelectorAll('meta[http-equiv]');
         for (var i = 0; i < metas.length; i++) {
-          var meta = metas[i];
-          if (meta.httpEquiv && meta.httpEquiv.toLowerCase() === 'refresh') {
-            if (meta.parentNode) {
-              meta.parentNode.removeChild(meta);
-            }
+          if (metas[i].httpEquiv.toLowerCase() === 'refresh') {
+            metas[i].remove();
           }
         }
       } catch (_) {}
     }
 
-    // Remove present refresh metas and any added later
-    stripMetaRefresh();
-    var observer = new MutationObserver(function() {
-      stripMetaRefresh();
-    });
+    stripRefresh();
+    var observer = new MutationObserver(stripRefresh);
     if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(function() { observer.disconnect(); }, 6000);
     }
-    setTimeout(function() { observer.disconnect(); }, 5000);
 
-    // Neutralize programmatic reloads (location.reload may live on
-    // Location.prototype or be shadowed on the window.location object)
     try {
-      if (window.Location && window.Location.prototype &&
-          window.Location.prototype.reload) {
+      if (window.Location && window.Location.prototype && window.Location.prototype.reload) {
         window.Location.prototype.reload = function() {};
       }
     } catch (_) {}

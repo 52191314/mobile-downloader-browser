@@ -710,19 +710,6 @@ class DownloadCard extends StatelessWidget {
     );
   }
 
-  bool _isRefreshableFailure(DownloadFailure reason) {
-    switch (reason) {
-      case DownloadFailure.urlExpired:
-      case DownloadFailure.httpForbidden:
-      case DownloadFailure.httpUnauthorized:
-      case DownloadFailure.hlsTokenExpired:
-      case DownloadFailure.hlsCircuitBreaker:
-        return true;
-      default:
-        return false;
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Action buttons
   // ---------------------------------------------------------------------------
@@ -803,24 +790,12 @@ class DownloadCard extends StatelessWidget {
         ),
       );
     } else if (task.state == DownloadState.failed) {
-      // Smart primary: Refresh link for expired/auth/forbidden failures
-      final needsRefresh = task.failureReason != null &&
-          _isRefreshableFailure(task.failureReason!);
-      if (needsRefresh && onResniffAuto != null) {
-        primaryAction = _compactButton(
-          icon: Icons.find_replace_rounded,
-          color: ac.accentFrost,
-          tooltip: l10n.cardTooltipRefreshLink,
-          onPressed: () => onResniffAuto!(task),
-        );
-      } else {
-        primaryAction = _compactButton(
-          icon: Icons.refresh_rounded,
-          color: ac.statusError,
-          tooltip: l10n.cardTooltipRetry,
-          onPressed: onRetry ?? () {},
-        );
-      }
+      primaryAction = _compactButton(
+        icon: Icons.refresh_rounded,
+        color: ac.statusError,
+        tooltip: l10n.cardTooltipRetry,
+        onPressed: onRetry ?? () {},
+      );
     } else if (task.state == DownloadState.completed) {
       primaryAction = _compactButton(
         icon: Icons.open_in_new,

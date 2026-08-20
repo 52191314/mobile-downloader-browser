@@ -14,6 +14,7 @@ import 'hls_downloader.dart';
 import 'speed_limiter.dart';
 import 'torrent_downloader.dart';
 import '../platform/download_foreground_service.dart';
+import '../platform/ts_remux_service.dart';
 import '../settings/download_settings.dart' show ProxyType;
 import '../sniffer/sniffer_url_utils.dart';
 import 'file_classifier.dart';
@@ -145,6 +146,13 @@ class DownloadQueue {
   final StreamController<String> _taskRemovedController =
       StreamController<String>.broadcast();
   Stream<String> get onTaskRemoved => _taskRemovedController.stream;
+
+  /// Fired when a task exhausts auto-retries (`attempts >= retryLimit`).
+  /// Payload is the `taskId`; UI should offer to resniff the link rather
+  /// than silently leaving a zombie `failed` row. See issue #13.
+  final StreamController<String> _resniffSuggestedController =
+      StreamController<String>.broadcast();
+  Stream<String> get onResniffSuggested => _resniffSuggestedController.stream;
 
   /// Per-task progress notifiers (P1b): the queue page drives each card's
   /// live progress area with these instead of rebuilding the whole list on
@@ -684,9 +692,66 @@ class DownloadQueue {
     }
   }
 
+  static String _stripPlaylistExtensions(String filePath) {
+    var path = filePath;
+    while (true) {
+      final ext = p.extension(path).toLowerCase();
+      if (ext == '.m3u8' || ext == '.m3u' || ext == '.mpd') {
+        path = p.withoutExtension(path);
+      } else {
+        break;
+      }
+    }
+    return path;
+  }
+
+  bool _isTaskMpegTs(DownloadTask task) {
+    if (_isHlsTask(task)) {
+      try {
+        final dir = Directory(task.tempDir);
+        if (dir.existsSync()) {
+          final entities = dir.listSync();
+          for (final entity in entities) {
+            if (entity is File) {
+              final name = p.basename(entity.path);
+              if (name.startsWith('segment_') && name.endsWith('.ts')) {
+                return true;
+              }
+            }
+          }
+          final hasFmp4 = entities.any(
+            (e) =>
+                e is File &&
+                p.basename(e.path).startsWith('segment_') &&
+                (p.basename(e.path).endsWith('.m4s') ||
+                    p.basename(e.path).endsWith('.mp4')),
+          );
+          if (hasFmp4) return false;
+        }
+      } catch (_) {}
+    }
+
+    final ext = p.extension(task.savePath).toLowerCase();
+    if (ext == '.ts') return true;
+
+    final urlLower = task.url.toLowerCase();
+    if (urlLower.contains('.ts') ||
+        task.contentType?.toLowerCase().contains('mp2t') == true ||
+        task.contentType?.toLowerCase().contains('video/ts') == true) {
+      return true;
+    }
+
+    if (_isHlsTask(task)) {
+      return true;
+    }
+
+    return false;
+  }
+
   /// User-initiated force-merge for a failed task. Combines whatever
   /// chunk bytes are still on disk into a usable output file at
-  /// [task.savePath] without re-downloading. Returns true if the
+  /// [task.savePath] without re-downloading. Remuxes MPEG-TS / HLS .m3u8
+  /// streams to .mp4 container when enabled. Returns true if the
   /// destination was written, false otherwise (no data, refused for a
   /// still-downloading task, or unknown task id).
   Future<bool> forceMergeTask(String taskId) async {
@@ -732,14 +797,27 @@ class DownloadQueue {
     task.state = DownloadState.merging;
     task.downloadedBytes = 0;
     task.totalBytes = _isHlsTask(task) ? -1 : task.chunks.length;
+    task.statusMessage = null;
+    task.errorMessage = null;
     _emitTask(task);
 
     try {
+      final isTs = _isTaskMpegTs(task);
+      final rawBase = _stripPlaylistExtensions(task.savePath);
+      final String mergeDestPath;
+
+      if (isTs) {
+        mergeDestPath = '${p.withoutExtension(rawBase)}.ts';
+      } else {
+        final ext = p.extension(rawBase);
+        mergeDestPath = ext.isEmpty ? '$rawBase.mp4' : rawBase;
+      }
+
       final PartialMergeResult result;
       if (_isHlsTask(task)) {
         result = await FileCombiner.combineHlsPartial(
           tempDir: task.tempDir,
-          destination: File(task.savePath),
+          destination: File(mergeDestPath),
           onProgress: (current, total) {
             task.downloadedBytes = current;
             task.totalBytes = total;
@@ -752,7 +830,7 @@ class DownloadQueue {
         result = await FileCombiner.combinePartial(
           chunks: task.chunks,
           tempDir: task.tempDir,
-          destination: File(task.savePath),
+          destination: File(mergeDestPath),
           onProgress: (chunkIndex, totalChunks) {
             task.downloadedBytes = chunkIndex;
             task.totalBytes = totalChunks;
@@ -770,11 +848,59 @@ class DownloadQueue {
         return false;
       }
 
+      String finalPath = mergeDestPath;
+      int finalBytes = result.bytesWritten;
+
+      // Remux MPEG-TS (.ts) → .mp4 if enabled so the finished file plays in any player.
+      if (remuxTsToMp4 &&
+          (isTs || p.extension(mergeDestPath).toLowerCase() == '.ts')) {
+        final mp4Path = '${p.withoutExtension(mergeDestPath)}.mp4';
+        task.statusMessage = 'Converting .ts to .mp4 so it plays in any app.';
+        task.errorMessage = null;
+        _emitTask(task);
+
+        if (mp4Path != mergeDestPath) {
+          try {
+            final oldMp4 = File(mp4Path);
+            if (await oldMp4.exists()) {
+              await oldMp4.delete();
+            }
+          } catch (_) {}
+        }
+
+        final remux = await TsRemuxService.remuxTsToMp4(mergeDestPath, mp4Path);
+        if (remux.success) {
+          try {
+            await File(mergeDestPath).delete();
+          } catch (_) {}
+          finalPath = mp4Path;
+          try {
+            final mp4File = File(mp4Path);
+            if (await mp4File.exists()) {
+              finalBytes = await mp4File.length();
+            }
+          } catch (_) {}
+          task.statusMessage = null;
+          task.errorMessage = null;
+        } else {
+          debugPrint(
+            'TS→MP4 remux failed for ${task.savePath.split("/").last}: '
+            '${remux.error ?? "unknown"}',
+          );
+          finalPath = mergeDestPath;
+          task.statusMessage = null;
+          task.errorMessage =
+              'Couldn\'t convert to .mp4 — keeping original .ts. '
+              'Open it in a player that supports MPEG-TS, or re-download. '
+              '${remux.error ?? "The stream may use an unsupported codec."}';
+        }
+      }
+
+      task.savePath = finalPath;
       task.state = DownloadState.completed;
-      task.downloadedBytes = result.bytesWritten;
-      task.totalBytes = result.bytesWritten;
+      task.downloadedBytes = finalBytes;
+      task.totalBytes = finalBytes;
       task.actualHash = null;
-      task.errorMessage = null;
 
       if (autoClassifyEnabled) {
         final oldPath = task.savePath;
@@ -820,6 +946,7 @@ class DownloadQueue {
       task.state = DownloadState.failed;
       task.failureReason = DownloadFailure.mergeFailed;
       task.errorMessage = 'Force merge failed. Error: $e';
+      task.statusMessage = null;
       _emitTask(task);
       if (queuePath != null && !_isLoading) {
         unawaited(saveToFile(queuePath!));
@@ -1194,6 +1321,9 @@ class DownloadQueue {
           updatedTask.errorMessage =
               'Auto-retry exhausted after $retryLimit attempts. $cleanError';
           _emitTask(updatedTask);
+          if (!_resniffSuggestedController.isClosed) {
+            _resniffSuggestedController.add(updatedTask.id);
+          }
         }
       }
     }
@@ -2070,6 +2200,9 @@ class DownloadQueue {
     }
     if (!_warningController.isClosed) {
       await _warningController.close();
+    }
+    if (!_resniffSuggestedController.isClosed) {
+      await _resniffSuggestedController.close();
     }
     if (_ownsClient) {
       _client.close();

@@ -4,16 +4,23 @@ import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
+import '../analytics/aurora_analytics_service.dart';
 import 'build_channel.dart';
 import 'license/license_api_client.dart';
 import 'license/license_service.dart';
 import 'local_funnel_store.dart';
 import 'pro_entitlement.dart';
 
-/// Optional hook for local funnel analytics (wired by PR-04b). Kept as a
-/// static callback so PR-03 has no hard dependency on [LocalFunnelStore].
+/// Optional hook for funnel analytics. Routes to both Firebase Analytics
+/// and LocalFunnelStore.
 void Function(String event, {Map<String, dynamic>? props})? auroraFunnelRecorder =
-    (event, {props}) => LocalFunnelStore.record(event, props: props);
+    (event, {props}) {
+      LocalFunnelStore.record(event, props: props);
+      AuroraAnalyticsService.instance.logEvent(
+        event,
+        props?.map((k, v) => MapEntry(k, v as Object)),
+      );
+    };
 
 /// Wraps Google Play Billing for the Play channel only.
 ///
@@ -21,8 +28,8 @@ void Function(String event, {Map<String, dynamic>? props})? auroraFunnelRecorder
 /// purchase/restore are no-ops so free-tier gates still apply without
 /// external checkout links.
 ///
-/// Three one-time SKUs are supported: Pro ($1.99), Ultra ($9.99), and the
-/// Pro→Ultra upgrade ($7.99). The upgrade SKU is **hard-gated** to Pro owners
+/// Three one-time SKUs are supported: Pro ($1.99), Ultra ($5.99), and the
+/// Pro→Ultra upgrade ($3.99). The upgrade SKU is **hard-gated** to Pro owners
 /// on honest clients; if a purchase of it is observed anyway (e.g. patched
 /// client / Console misconfig), we still grant Ultra and record the
 /// `upgrade_arbitrage` funnel event.

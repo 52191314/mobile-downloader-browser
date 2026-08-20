@@ -47,6 +47,7 @@ import 'vault_page.dart';
 import 'watcher_page.dart';
 import '../../sync/sync.dart';
 import 'webdav_settings_page.dart';
+import '../../platform/app_update_service.dart';
 
 class SettingsPage extends StatefulWidget {
   final DriveSyncService? driveSyncService;
@@ -134,18 +135,28 @@ class _SettingsPageState extends State<SettingsPage> {
 
   late DownloadSettings _settings;
   late double _speedLimitKbps;
+  late final TextEditingController _customVideoHostsController;
 
   @override
   void initState() {
     super.initState();
     _settings = widget.settings;
     _speedLimitKbps = widget.speedLimitKbps;
+    _customVideoHostsController = TextEditingController(
+      text: _settings.customVideoHosts.join('\n'),
+    );
   }
 
   @override
   void didUpdateWidget(covariant SettingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.settings != widget.settings) _settings = widget.settings;
+    if (oldWidget.settings != widget.settings) {
+      _settings = widget.settings;
+      final expectedText = _settings.customVideoHosts.join('\n');
+      if (_customVideoHostsController.text != expectedText) {
+        _customVideoHostsController.text = expectedText;
+      }
+    }
     if (oldWidget.speedLimitKbps != widget.speedLimitKbps) {
       _speedLimitKbps = widget.speedLimitKbps;
     }
@@ -153,6 +164,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    _customVideoHostsController.dispose();
     super.dispose();
   }
 
@@ -528,8 +540,9 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: (v) {
                 final pos = v.round();
                 final mbps = _speedPositionToMbps(pos);
-                // Upstream expects KB/s
-                widget.onSpeedLimitChanged(mbps * 1024);
+                final kbps = mbps * 1024;
+                _speedLimitKbps = kbps;
+                widget.onSpeedLimitChanged(kbps);
                 setLocal(() {});
               })),
       Text(l?.lblSpeedLimitHelp ?? 'Set to 0 for no limit, or drag right to cap speed (up to 500 MB/s)',
@@ -690,10 +703,19 @@ class _SettingsPageState extends State<SettingsPage> {
                           }
                           final url = widget.adblockSourceController.text.trim();
                           if (url.isNotEmpty) {
+                            final uri = Uri.tryParse(url);
+                            if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {
+                              AuroraSnackbar.show(context, 'Please enter a valid http:// or https:// filter URL.');
+                              return;
+                            }
+                            if (local.adblockFilterSources.any((s) => s.url.toLowerCase() == url.toLowerCase())) {
+                              AuroraSnackbar.show(context, 'This filter source is already added.');
+                              return;
+                            }
                             final updated = local.copyWith(
                                 adblockFilterSources: [
                                   ...local.adblockFilterSources,
-                                  AdblockFilterSource(url: url, name: url),
+                                  AdblockFilterSource(url: url, name: uri.host.isNotEmpty ? uri.host : url),
                                 ]);
                             setLocal(() => local = updated);
                             _update(updated);
@@ -906,58 +928,80 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 20),
             PanelHeader(icon: Icons.search_rounded, title: l?.lblSearchEngineHeader ?? 'Search Engine'),
             const SizedBox(height: 8),
-            Panel(child: Column(children: [
-            DropdownButtonFormField<String>(
-                value: _settings.searchEngine.id == 'custom'
-                    ? 'custom'
-                    : _settings.searchEngine.id,
-                decoration: InputDecoration(
-                    labelText: l?.lblSearchEngine ?? 'Search engine',
-                    border:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-                items: ['google', 'duckduckgo', 'bing', 'brave', 'custom']
-                    .map((id) => DropdownMenuItem(
-                        value: id,
-                        child: Text(switch (id) {
-                          'google' => 'Google',
-                          'duckduckgo' => 'DuckDuckGo',
-                          'bing' => 'Bing',
-                          'brave' => 'Brave',
-                          _ => 'Custom',
-                        })))
-                    .toList(),
-                onChanged: (id) {
-                  if (id == null) return;
-                  if (id == 'custom') {
-                    _update(_settings.copyWith(
-                        searchEngine: SearchEngine(
-                            id: 'custom',
-                            name: 'Custom',
-                            templateUrl:
-                                _settings.searchEngine.templateUrl)));
-                  } else {
-                    _update(_settings.copyWith(
-                        searchEngine: switch (id) {
+            Panel(
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: local.searchEngine.id == 'custom'
+                        ? 'custom'
+                        : local.searchEngine.id,
+                    decoration: InputDecoration(
+                      labelText: l?.lblSearchEngine ?? 'Search engine',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    items: ['google', 'duckduckgo', 'bing', 'brave', 'custom']
+                        .map((id) => DropdownMenuItem(
+                              value: id,
+                              child: Text(switch (id) {
+                                'google' => 'Google',
+                                'duckduckgo' => 'DuckDuckGo',
+                                'bing' => 'Bing',
+                                'brave' => 'Brave',
+                                _ => 'Custom',
+                              }),
+                            ))
+                        .toList(),
+                    onChanged: (id) {
+                      if (id == null) return;
+                      final SearchEngine newEngine;
+                      if (id == 'custom') {
+                        newEngine = SearchEngine(
+                          id: 'custom',
+                          name: 'Custom',
+                          templateUrl: local.searchEngine.templateUrl,
+                        );
+                      } else {
+                        newEngine = switch (id) {
                           'google' => SearchEngine.google,
                           'duckduckgo' => SearchEngine.duckDuckGo,
                           'bing' => SearchEngine.bing,
                           _ => SearchEngine.brave,
-                        }));
-                  }
-                }),
-            if (_settings.searchEngine.id == 'custom') ...[
-              const SizedBox(height: 16),
-              TextField(
-                  controller: widget.customSearchController,
-                  decoration: InputDecoration(
-                      labelText: l?.lblCustomUrlTemplate ?? 'Custom URL template (use %s for query)',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8))),
-                  onChanged: (v) => _update(_settings.copyWith(
-                      searchEngine: SearchEngine(
-                          id: 'custom', name: 'Custom', templateUrl: v)))),
-            ],
-            ])),
+                        };
+                      }
+                      final updated = local.copyWith(searchEngine: newEngine);
+                      setLocal(() => local = updated);
+                      _update(updated);
+                    },
+                  ),
+                  if (local.searchEngine.id == 'custom') ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: widget.customSearchController,
+                      decoration: InputDecoration(
+                        labelText: l?.lblCustomUrlTemplate ??
+                            'Custom URL template (use %s for query)',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onChanged: (v) {
+                        final updated = local.copyWith(
+                          searchEngine: SearchEngine(
+                            id: 'custom',
+                            name: 'Custom',
+                            templateUrl: v,
+                          ),
+                        );
+                        setLocal(() => local = updated);
+                        _update(updated);
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1095,9 +1139,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: 8),
                   TextField(
-                    controller: TextEditingController(
-                      text: _settings.customVideoHosts.join('\n'),
-                    )..selection = TextSelection.collapsed(offset: 0),
+                    controller: _customVideoHostsController,
                     maxLines: 4,
                     minLines: 2,
                     style: const TextStyle(fontSize: 13, fontFamily: 'JetBrainsMono'),
@@ -2025,13 +2067,28 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('Aurora Download Manager',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ac.textPrimary)),
               const SizedBox(height: 4),
-              Text('v1.3.4+83', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
+              Text('v1.3.10+89', style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
               const SizedBox(height: 16),
               Text('Android download manager with segmented downloads, streaming video, torrents, and in-browser media detection.',
                   style: TextStyle(fontSize: 13, color: context.ac.textSecondary)),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               Text('Built with Flutter and the Nord color palette.',
                   style: TextStyle(fontSize: 12, color: context.ac.textTertiary)),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                leading: Icon(Icons.system_update_rounded, color: context.ac.accentFrost),
+                title: const Text('Check for Updates'),
+                subtitle: Text('Check Google Play for the latest release',
+                    style: TextStyle(fontSize: 12, color: context.ac.textSecondary)),
+                trailing: Icon(Icons.chevron_right_rounded, color: context.ac.textTertiary),
+                onTap: () => AppUpdateService.instance.checkAndPromptAutoUpdate(
+                  context,
+                  currentBuildCode: 89,
+                  isInteractive: true,
+                ),
+              ),
             ],
           )),
           const SizedBox(height: 16),
@@ -2361,6 +2418,30 @@ class _SettingsPageState extends State<SettingsPage> {
                             : 'Get Aurora Pro on Google Play',
                       ),
                       style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        textStyle: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // Free tier -> Get Ultra button (direct full purchase)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _onGetUltraPressed(context),
+                      icon: const Icon(Icons.star_outlined, size: 18),
+                      label: Text(
+                        BuildChannel.isPlay
+                            ? (widget.playBilling?.localizedUltraPrice != null
+                                ? 'Get Aurora Ultra — ${widget.playBilling!.localizedUltraPrice}'
+                                : 'Get Aurora Ultra')
+                            : 'Get Aurora Ultra on Google Play',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: context.ac.accentPurple,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         textStyle: const TextStyle(
                           fontSize: 15,

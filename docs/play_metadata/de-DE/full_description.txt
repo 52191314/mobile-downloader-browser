@@ -51,4 +51,4 @@ RICHTLINIEN-HINWEIS
 - Der Werbeblocker arbeitet ausschließlich im Aurora Browser (kein systemweites VPN).
 - Bitte laden Sie nur urheberrechtlich zulässige Inhalte herunter.
 
-Open Source (GPL-3.0). Keine Verbindung zu Google, YouTube oder Drittanbietern.
+Keine Verbindung zu Google, YouTube oder Drittanbietern.

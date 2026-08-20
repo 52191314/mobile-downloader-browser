@@ -40,6 +40,13 @@ import com.google.android.play.core.splitinstall.SplitInstallManagerFactory
 import com.google.android.play.core.splitinstall.SplitInstallRequest
 import com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
 import com.google.android.play.core.splitinstall.model.SplitInstallSessionStatus
+import com.google.android.play.core.appupdate.AppUpdateInfo
+import com.google.android.play.core.appupdate.AppUpdateManager
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.InstallStatus
+import com.google.android.play.core.install.model.UpdateAvailability
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -108,6 +115,9 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingExportSourcePath: String? = null
     private var pendingPickUriResult: MethodChannel.Result? = null
     private var pendingPickDirectoryResult: MethodChannel.Result? = null
+    private var appUpdateManager: AppUpdateManager? = null
+    private var cachedAppUpdateInfo: AppUpdateInfo? = null
+    private var pendingAppUpdateResult: MethodChannel.Result? = null
     private lateinit var nativeDownloadEngine: NativeDownloadEngine
 
     /// Feature-module plugins registered at runtime after SplitInstall
@@ -120,6 +130,7 @@ class MainActivity : FlutterFragmentActivity() {
         private const val REQUEST_EXPORT_FILE = 1002
         private const val REQUEST_PICK_EXPORT_URI = 1003
         private const val REQUEST_PICK_DIRECTORY = 1004
+        private const val REQUEST_APP_UPDATE = 7001
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val NETWORK_TAG = "AuroraNet"
     }
@@ -499,6 +510,75 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
+        // -------------------------------------------------------------------
+        // Google Play In-App Updates API (Immediate & Flexible updates).
+        // Supports checking update availability and triggering the update flow.
+        // -------------------------------------------------------------------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aurora_downloader/app_update")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "checkAppUpdate" -> {
+                        try {
+                            val mgr = appUpdateManager ?: AppUpdateManagerFactory.create(this).also { appUpdateManager = it }
+                            mgr.appUpdateInfo
+                                .addOnSuccessListener { info ->
+                                    cachedAppUpdateInfo = info
+                                    val staleness = try { info.clientVersionStalenessDays() } catch (_: Exception) { null }
+                                    result.success(mapOf(
+                                        "availability" to info.updateAvailability(),
+                                        "availableVersionCode" to info.availableVersionCode(),
+                                        "isImmediateAllowed" to info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE),
+                                        "isFlexibleAllowed" to info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE),
+                                        "clientVersionStalenessDays" to staleness,
+                                        "updatePriority" to info.updatePriority(),
+                                        "packageName" to packageName
+                                    ))
+                                }
+                                .addOnFailureListener { error ->
+                                    Log.w(TAG, "AppUpdateInfo check failed: ${error.message}")
+                                    result.error("update_check_failed", error.message, null)
+                                }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "AppUpdateManager initialization error", e)
+                            result.error("init_error", e.message, null)
+                        }
+                    }
+                    "startUpdate" -> {
+                        val typeStr = call.argument<String>("type") ?: "immediate"
+                        val updateType = if (typeStr == "flexible") AppUpdateType.FLEXIBLE else AppUpdateType.IMMEDIATE
+                        try {
+                            val mgr = appUpdateManager ?: AppUpdateManagerFactory.create(this).also { appUpdateManager = it }
+                            val info = cachedAppUpdateInfo
+                            if (info == null) {
+                                mgr.appUpdateInfo
+                                    .addOnSuccessListener { freshInfo ->
+                                        cachedAppUpdateInfo = freshInfo
+                                        startAppUpdateFlow(mgr, freshInfo, updateType, result)
+                                    }
+                                    .addOnFailureListener { error ->
+                                        result.error("update_start_failed", error.message, null)
+                                    }
+                            } else {
+                                startAppUpdateFlow(mgr, info, updateType, result)
+                            }
+                        } catch (e: Exception) {
+                            result.error("start_update_error", e.message, null)
+                        }
+                    }
+                    "completeFlexibleUpdate" -> {
+                        try {
+                            val mgr = appUpdateManager ?: AppUpdateManagerFactory.create(this).also { appUpdateManager = it }
+                            mgr.completeUpdate()
+                                .addOnSuccessListener { result.success(true) }
+                                .addOnFailureListener { error -> result.error("complete_failed", error.message, null) }
+                        } catch (e: Exception) {
+                            result.error("complete_error", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // Picture-in-Picture (PiP) channel
         pipChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pipChannelName)
         pipChannel?.setMethodCallHandler { call, result ->
@@ -810,6 +890,26 @@ class MainActivity : FlutterFragmentActivity() {
         val url = getInitialUrl()
         if (url != null) {
             intentUrlChannel?.invokeMethod("onNewUrl", url)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            val mgr = appUpdateManager ?: AppUpdateManagerFactory.create(this).also { appUpdateManager = it }
+            mgr.appUpdateInfo.addOnSuccessListener { info ->
+                cachedAppUpdateInfo = info
+                if (info.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
+                    try {
+                        val options = AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build()
+                        mgr.startUpdateFlowForResult(info, this, options, REQUEST_APP_UPDATE)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to resume immediate update in onResume", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "onResume AppUpdate check exception", e)
         }
     }
 
@@ -1429,6 +1529,39 @@ class MainActivity : FlutterFragmentActivity() {
                 pendingPickDirectoryResult?.success(null)
             }
             pendingPickDirectoryResult = null
+        } else if (requestCode == REQUEST_APP_UPDATE) {
+            when (resultCode) {
+                Activity.RESULT_OK -> pendingAppUpdateResult?.success("ok")
+                Activity.RESULT_CANCELED -> pendingAppUpdateResult?.success("canceled")
+                com.google.android.play.core.install.model.ActivityResult.RESULT_IN_APP_UPDATE_FAILED ->
+                    pendingAppUpdateResult?.error("failed", "In-app update failed", null)
+                else -> pendingAppUpdateResult?.success("result_$resultCode")
+            }
+            pendingAppUpdateResult = null
+        }
+    }
+
+    private fun startAppUpdateFlow(
+        manager: AppUpdateManager,
+        info: AppUpdateInfo,
+        updateType: Int,
+        result: MethodChannel.Result
+    ) {
+        if (!info.isUpdateTypeAllowed(updateType)) {
+            result.error("not_allowed", "Update type $updateType is not allowed", null)
+            return
+        }
+        pendingAppUpdateResult = result
+        try {
+            val options = AppUpdateOptions.newBuilder(updateType).build()
+            val started = manager.startUpdateFlowForResult(info, this, options, REQUEST_APP_UPDATE)
+            if (!started) {
+                pendingAppUpdateResult = null
+                result.error("start_failed", "startUpdateFlowForResult returned false", null)
+            }
+        } catch (e: Exception) {
+            pendingAppUpdateResult = null
+            result.error("start_exception", e.message, null)
         }
     }
 

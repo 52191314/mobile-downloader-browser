@@ -6,6 +6,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
+import 'package:aurora_downloader/analytics/aurora_analytics_service.dart';
 import 'package:aurora_downloader/premium/free_taste.dart';
 import 'package:aurora_downloader/premium/pro_entitlement.dart';
 import 'package:aurora_downloader/premium/pro_features.dart';
@@ -118,6 +119,10 @@ void showSniffedMediaSheet(
 }) {
   if (!isMounted) return;
   mediaCatchController.clearSelection();
+
+  AuroraAnalyticsService.instance.logSnifferRadarOpened(
+    mediaCount: activeTab.snifferEngine.detectedMedia.length,
+  );
 
   developer.log('Capture sheet open', name: 'capture_sheet');
 

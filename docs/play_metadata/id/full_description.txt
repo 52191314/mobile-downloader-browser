@@ -52,4 +52,4 @@ PEMBERITAHUAN KEBIJAKAN
 - Pemblokir iklan hanya berfungsi di dalam browser Aurora (bukan VPN sistem).
 - Harap hanya mengunduh konten yang sah dan legal.
 
-Sumber terbuka (GPL-3.0). Tidak berafiliasi dengan Google, YouTube, atau layanan pihak ketiga.
+Tidak berafiliasi dengan Google, YouTube, atau layanan pihak ketiga.

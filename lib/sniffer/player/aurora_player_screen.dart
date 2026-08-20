@@ -238,7 +238,9 @@ class _AuroraPlayerScreenState extends State<AuroraPlayerScreen> {
     if (!mounted) return;
     MiniPlayerController.instance.adopt(_engine, _source);
     _ownsEngine = false;
-    Navigator.of(context).maybePop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
