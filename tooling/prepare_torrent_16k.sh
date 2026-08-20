@@ -63,7 +63,10 @@ import json, os, sys
 from urllib.parse import urlparse, unquote
 
 root = sys.argv[1]
-with open(os.path.join(root, ".dart_tool", "package_config.json")) as f:
+cfg_path = os.path.join(root, ".dart_tool", "package_config.json")
+if not os.path.exists(cfg_path):
+    sys.exit("_NO_PACKAGE_CONFIG")
+with open(cfg_path) as f:
     cfg = json.load(f)
 for p in cfg["packages"]:
     if p["name"] == "libtorrent_flutter":
@@ -79,9 +82,17 @@ for p in cfg["packages"]:
             path = uri
         print(os.path.normpath(path))
         sys.exit(0)
-sys.exit("libtorrent_flutter not found in package_config.json")
+sys.exit("_NOT_FOUND")
 EOF
-)"
+)" || true
+# The closed-source merge replaced libtorrent_flutter with the in-house
+# aurora_torrent_engine.dart FFI engine (no prebuilt .so to align). When the
+# package is absent there is nothing to do — exit cleanly so CI stays green
+# instead of failing the "Prepare Torrent 16K alignment" step.
+if [ "$PKG_DIR" = "_NO_PACKAGE_CONFIG" ] || [ "$PKG_DIR" = "_NOT_FOUND" ]; then
+    echo "libtorrent_flutter not a dependency (closed-source engine) — nothing to align."
+    exit 0
+fi
 if [ ! -d "$PKG_DIR" ]; then
     echo "FATAL: package dir not found: $PKG_DIR" >&2
     exit 1
