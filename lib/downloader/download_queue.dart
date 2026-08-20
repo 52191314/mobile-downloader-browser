@@ -1482,19 +1482,6 @@ class DownloadQueue {
             continue;
           }
           addTask(task);
-          // _autoRetryAttempts is volatile (not persisted): on cold start a
-          // restored failed task would re-enter the queue and burn 3 fresh
-          // auto-retries against a URL that already exhausted them. Pre-seed
-          // the counter so a broken link (auth/token/host issues) does not
-          // auto-retry again until the user manually Resniffs.
-          if (task.state != DownloadState.idle &&
-              task.state != DownloadState.completed &&
-              (task.failureReason == DownloadFailure.urlExpired ||
-                  task.failureReason == DownloadFailure.hlsTokenExpired ||
-                  task.failureReason == DownloadFailure.hlsCircuitBreaker ||
-                  task.failureReason == DownloadFailure.httpForbidden)) {
-            _autoRetryAttempts[task.id] = retryLimit;
-          }
         } catch (e, s) {
           _logError('Skipped loading corrupted task in queue file', e, s);
         }
