@@ -1633,11 +1633,15 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         final newId = DateTime.now().microsecondsSinceEpoch.toString();
         final baseDir = await _completedWorkspaceDirectory();
         final tempDir = await _tempWorkspaceDirectory();
+        final newSavePath = FilenameService.uniquePath(
+          p.join(baseDir.path, _taskFileName(freshUrl)),
+          reservedPaths: _downloadQueue.allTasks.map((t) => t.savePath),
+        );
         final newTask = DownloadTask(
           id: newId,
           url: freshUrl,
           headers: task.headers,
-          savePath: '${baseDir.path}/${_taskFileName(freshUrl)}',
+          savePath: newSavePath,
           tempDir: '${tempDir.path}/$newId',
           contentType: task.contentType,
           sourcePageUrl: task.sourcePageUrl,

@@ -1490,6 +1490,10 @@ class DownloadQueue {
       await _preserveCorruptQueueFile(file, e.toString());
     } finally {
       _isLoading = false;
+      // Enforce the history cap immediately on restore — the queue file may
+      // hold more terminal rows than maxCompletedTasks, and _emitTask-based
+      // eviction never runs during loadFromFile.
+      _evictOldCompletedTasks();
       // Tasks are already in _executionQueue as idle. Hold multi-connection
       // resume for a few seconds so browser/WebView cold start can finish.
       // Without this, Secure Folder freezes ~10–15s under HLS+GPU load.
@@ -2098,8 +2102,11 @@ class DownloadQueue {
         continue;
       }
       final task = _tasks[id];
-      // Best-effort: free temp workspace when dropping a failed history row.
-      if (task != null && task.state == DownloadState.failed) {
+      // Best-effort: free temp workspace when dropping a history row.
+      // Completed tasks are evicted too — they are published (private copy
+      // already deleted), so the leftover temp/part-tree is pure garbage
+      // (HLS segment_*.ts trees can be GBs and were never cleaned up).
+      if (task != null) {
         unawaited(() async {
           try {
             final tempDir = Directory(task.tempDir);
