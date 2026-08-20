@@ -4,11 +4,11 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:libtorrent_flutter/libtorrent_flutter.dart' as lt hide TorrentStateX;
 import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'magnet_link.dart';
 import 'torrent_metadata.dart';
+import '../torrent/aurora_torrent_engine.dart';
 import '../premium/ffmpeg/ffmpeg_module_loader.dart';
 import '../premium/build_channel.dart';
 
@@ -51,7 +51,7 @@ bool _isMissingNativeLibrary(Object error) {
 }
 
 Future<_LtLoadResult> _ensureLtLoaded(String saveDirectory) async {
-  if (lt.LibtorrentFlutter.isInitialized) return _LtLoadResult.ready;
+  if (AuroraTorrentEngine.isInitialized) return _LtLoadResult.ready;
   final loader = FeatureModuleLoader.instance;
   try {
     // Download the :torrent on-demand module from Play Store if needed.
@@ -64,8 +64,8 @@ Future<_LtLoadResult> _ensureLtLoaded(String saveDirectory) async {
     // mark ready after init succeeded; otherwise an auto-retry re-runs this
     // whole path instead of blindly re-trying a failed dlopen.
     await Directory(saveDirectory).create(recursive: true);
-    if (!lt.LibtorrentFlutter.isInitialized) {
-      await lt.LibtorrentFlutter.init(
+    if (!AuroraTorrentEngine.isInitialized) {
+      await AuroraTorrentEngine.init(
         defaultSavePath: saveDirectory,
         pollInterval: const Duration(milliseconds: 600),
       );
@@ -132,8 +132,8 @@ class TorrentDownloader implements BaseDownloader {
   }) : corruptPieceIndices = Set<int>.from(corruptPieceIndices ?? <int>{});
 
   static Future<void> setNativeDownloadLimit(int bytesPerSecond) async {
-    if (_isLtLoaded && lt.LibtorrentFlutter.isInitialized) {
-      lt.LibtorrentFlutter.instance.setDownloadLimit(bytesPerSecond);
+    if (_isLtLoaded && AuroraTorrentEngine.isInitialized) {
+      AuroraTorrentEngine.instance.setDownloadLimit(bytesPerSecond);
     }
   }
 
@@ -202,8 +202,8 @@ class TorrentDownloader implements BaseDownloader {
     _timer?.cancel();
     await _nativeSubscription?.cancel();
     _nativeSubscription = null;
-    if (_isLtLoaded && _nativeTorrentId != null && lt.LibtorrentFlutter.isInitialized) {
-      lt.LibtorrentFlutter.instance.pauseTorrent(_nativeTorrentId!);
+    if (_isLtLoaded && _nativeTorrentId != null && AuroraTorrentEngine.isInitialized) {
+      AuroraTorrentEngine.instance.pauseTorrent(_nativeTorrentId!);
     }
     task.state = targetState;
     task.speed = 0.0;
@@ -243,7 +243,7 @@ class TorrentDownloader implements BaseDownloader {
     // (_schedule) sets the state to `downloading` BEFORE calling start(), so a
     // state-based guard would skip native init entirely — torrent tasks would
     // hang at 0% and the :torrent on-demand module would never install. Re-entry
-    // is already safe: LibtorrentFlutter.isInitialized skips init and
+    // is already safe: AuroraTorrentEngine.isInitialized skips init and
     // _nativeTorrentId != null resumes instead of re-adding.
 
     _isPaused = false;
@@ -280,14 +280,14 @@ class TorrentDownloader implements BaseDownloader {
         return;
       }
       await Directory(saveDirectory).create(recursive: true);
-      if (!lt.LibtorrentFlutter.isInitialized) {
-        await lt.LibtorrentFlutter.init(
+      if (!AuroraTorrentEngine.isInitialized) {
+        await AuroraTorrentEngine.init(
           defaultSavePath: saveDirectory,
           pollInterval: const Duration(milliseconds: 600),
         );
       }
 
-      final engine = lt.LibtorrentFlutter.instance;
+      final engine = AuroraTorrentEngine.instance;
       _nativeSubscription ??= engine.torrentUpdates.listen(_handleNativeUpdate);
 
       if (_nativeTorrentId == null) {
@@ -321,7 +321,7 @@ class TorrentDownloader implements BaseDownloader {
     }
   }
 
-  void _handleNativeUpdate(Map<int, dynamic> torrents) {
+  void _handleNativeUpdate(Map<int, AuroraTorrentInfo> torrents) {
     final nativeId = _nativeTorrentId;
     if (nativeId == null) return;
 
@@ -345,12 +345,11 @@ class TorrentDownloader implements BaseDownloader {
       ];
     }
 
-    final stateStr = info.state.toString();
-    task.state = switch (stateStr) {
-      'TorrentState.error' => DownloadState.failed,
-      'TorrentState.finished' ||
-      'TorrentState.seeding' => DownloadState.completed,
-      _ when info.isPaused == true => DownloadState.paused,
+    task.state = switch (info.state) {
+      AuroraTorrentState.error => DownloadState.failed,
+      AuroraTorrentState.finished ||
+      AuroraTorrentState.seeding => DownloadState.completed,
+      _ when info.isPaused => DownloadState.paused,
       _ => DownloadState.downloading,
     };
 

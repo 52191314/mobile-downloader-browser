@@ -52,4 +52,4 @@ AVISO DE POLÍTICA
 - O bloqueador de anúncios funciona apenas no navegador Aurora (não é VPN no sistema).
 - Baixe apenas conteúdos que você tem autorização legal para baixar.
 
-Código aberto (GPL-3.0). Não afiliado ao Google, YouTube ou serviços de terceiros.
+Não afiliado ao Google, YouTube ou serviços de terceiros.

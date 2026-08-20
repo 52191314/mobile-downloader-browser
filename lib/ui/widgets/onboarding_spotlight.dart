@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../analytics/aurora_analytics_service.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/aurora_palette.dart';
 import '../../settings/onboarding_experiment.dart';
@@ -69,6 +70,7 @@ class _OnboardingSpotlightOverlayState
   @override
   void initState() {
     super.initState();
+    AuroraAnalyticsService.instance.logOnboardingStarted();
     // Defer tab switches / parent setState until after this Overlay Builder
     // finishes building — calling onStepEntered synchronously here causes
     // "setState() called during build" on AuroraHome.
@@ -83,6 +85,10 @@ class _OnboardingSpotlightOverlayState
   void _enterCurrentStep() {
     if (!mounted || widget.steps.isEmpty) return;
     final index = _currentStepIndex.clamp(0, widget.steps.length - 1);
+    AuroraAnalyticsService.instance.logOnboardingStepViewed(
+      stepIndex: index + 1,
+      stepTitle: widget.steps[index].title,
+    );
     widget.steps[index].onStepEntered?.call();
     _scheduleRetry();
   }
@@ -99,6 +105,7 @@ class _OnboardingSpotlightOverlayState
   }
 
   Future<void> _finishOnboarding() async {
+    AuroraAnalyticsService.instance.logOnboardingCompleted();
     await OnboardingExperiment.markCompleted();
     if (mounted) {
       widget.onDismissed?.call();
@@ -290,7 +297,12 @@ class _OnboardingSpotlightOverlayState
                       children: [
                         // Skip Button
                         TextButton(
-                          onPressed: _finishOnboarding,
+                          onPressed: () {
+                            AuroraAnalyticsService.instance.logOnboardingSkipped(
+                              lastStepIndex: _currentStepIndex + 1,
+                            );
+                            _finishOnboarding();
+                          },
                           style: TextButton.styleFrom(
                             foregroundColor: ac.textSecondary,
                             padding: const EdgeInsets.symmetric(

@@ -28,11 +28,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="${PYTHON:-python3}"
-if ! command -v "$PY" >/dev/null 2>&1; then
-    PY="python"
+PY="${PYTHON:-}"
+if [ -z "$PY" ]; then
+    if [ -f "/c/Users/Renzu/AppData/Local/Programs/Python/Python312/python.exe" ]; then
+        PY="/c/Users/Renzu/AppData/Local/Programs/Python/Python312/python.exe"
+    elif command -v python3 >/dev/null 2>&1; then
+        PY="python3"
+    elif command -v python >/dev/null 2>&1; then
+        PY="python"
+    elif command -v py >/dev/null 2>&1; then
+        PY="py"
+    fi
 fi
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ALIGN="$REPO_ROOT/tooling/align_elf_16k.py"
 OUT_DIR="$REPO_ROOT/tooling/torrent_16k"
 ABIS=(arm64-v8a armeabi-v7a)

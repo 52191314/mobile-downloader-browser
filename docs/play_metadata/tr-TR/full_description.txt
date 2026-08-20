@@ -51,4 +51,4 @@ POLİTİKA VE KULLANIM BİLDİRİMİ
 - Reklam engelleme yalnızca Aurora Tarayıcı içinde çalışır (sistem genelinde VPN değildir).
 - Lütfen yalnızca yasal olarak indirme hakkına sahip olduğunuz içerikleri indirin.
 
-Açık kaynaklıdır (GPL-3.0). Google, YouTube veya üçüncü taraf platformlarla ilişkili değildir.
+Google, YouTube veya üçüncü taraf platformlarla ilişkili değildir.

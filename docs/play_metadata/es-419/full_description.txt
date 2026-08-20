@@ -52,4 +52,4 @@ AVISO DE POLÍTICA Y USO
 - El bloqueo de anuncios funciona solo dentro del navegador Aurora y no actúa como VPN global.
 - Descarga únicamente contenido sobre el que tengas derechos legales.
 
-El núcleo de Aurora es de código abierto (GPL-3.0). No afiliado a Google, YouTube ni plataformas de terceros.
+No afiliado a Google, YouTube ni plataformas de terceros.

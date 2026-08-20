@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../compliance/restricted_media_policy.dart';
 import '../../downloader/downloader.dart';
 import '../../premium/ffmpeg/ffmpeg_module_loader.dart';
 import '../../premium/ffmpeg/ffmpeg_service.dart';
@@ -1041,6 +1042,16 @@ class _QueuePageState extends State<QueuePage> {
       );
       return;
     }
+
+    if (RestrictedMediaPolicy.isBlocked(mediaUrl: rawUrl)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(RestrictedMediaPolicy.userMessageRestricted),
+        ),
+      );
+      return;
+    }
+
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().add(const Duration(hours: 1)),
@@ -1060,14 +1071,30 @@ class _QueuePageState extends State<QueuePage> {
       time.hour,
       time.minute,
     );
+
     final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+    final docsDir = await getApplicationDocumentsDirectory();
+    final tempDir = await getTemporaryDirectory();
+    final baseDir = Directory(p.join(docsDir.path, 'completed'));
+    if (!baseDir.existsSync()) {
+      await baseDir.create(recursive: true);
+    }
+
+    var baseName = rawUrl.split('/').last.split('?').first.trim();
+    if (baseName.isEmpty) baseName = 'download';
+    baseName = FilenameService.sanitize(baseName);
+    if (baseName.isEmpty) baseName = 'download';
+
+    final savePath = FilenameService.uniquePath(
+      p.join(baseDir.path, baseName),
+      reservedPaths: widget.queue.allTasks.map((t) => t.savePath),
+    );
+
     final task = DownloadTask(
       id: taskId,
       url: rawUrl,
-      savePath: rawUrl.split('/').last.isNotEmpty
-          ? rawUrl.split('/').last
-          : 'download',
-      tempDir: 'temp_$taskId',
+      savePath: savePath,
+      tempDir: p.join(tempDir.path, taskId),
     );
     widget.queue.scheduleTask(task, startAt);
     widget.urlController.clear();

@@ -51,4 +51,4 @@ MENTIONS LÉGALES ET POLITIQUES
 - Le bloqueur de pubs fonctionne uniquement dans le navigateur Aurora (pas un VPN global).
 - Ne téléchargez que les contenus que vous avez le droit légal de posséder.
 
-Open source (GPL-3.0). Non affilié à Google, YouTube ou des services tiers.
+Non affilié à Google, YouTube ou des services tiers.

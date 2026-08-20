@@ -52,4 +52,4 @@ USAGE & POLICY NOTICE
 - Ad blocking operates exclusively within Aurora Browser and does not act as a system-wide VPN.
 - Users are responsible for ensuring they have the legal right to download content from third-party sites.
 
-Aurora's core is open source (GPL-3.0). Official Play Edition includes verified updates and optional Pro/Ultra features. Not affiliated with Google, YouTube, or third-party media platforms.
+Official Play Edition includes verified updates and optional Pro/Ultra features. Not affiliated with Google, YouTube, or third-party media platforms.

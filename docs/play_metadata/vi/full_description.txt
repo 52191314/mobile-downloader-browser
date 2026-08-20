@@ -51,4 +51,4 @@ LƯU Ý CHÍNH SÁCH
 - Trình chặn quảng cáo chỉ hoạt động trong Aurora Browser (không phải VPN toàn máy).
 - Vui lòng chỉ tải nội dung mà bạn có quyền hợp pháp.
 
-Mã nguồn mở (GPL-3.0). Không liên kết với Google, YouTube hoặc các nền tảng thứ ba.
+Không liên kết với Google, YouTube hoặc các nền tảng thứ ba.

@@ -24,7 +24,7 @@ val ffmpegNativeConfig = configurations.create("ffmpegNative") {
 dependencies {
     implementation(project(":app"))
     // Same artifact the Flutter plugin uses — provides jni/**/*.so inside the AAR.
-    add("ffmpegNative", "com.antonkarpenko:ffmpeg-kit-min-gpl:$ffmpegKitNativeVersion")
+    add("ffmpegNative", "com.antonkarpenko:ffmpeg-kit-min:$ffmpegKitNativeVersion")
 }
 
 val extractFfmpegJni by tasks.registering {
@@ -42,7 +42,7 @@ val extractFfmpegJni by tasks.registering {
         if (aars.isEmpty()) {
             throw GradleException(
                 "[aurora-ffmpeg] No ffmpeg-kit AAR resolved from " +
-                    "com.antonkarpenko:ffmpeg-kit-min-gpl:$ffmpegKitNativeVersion",
+                    "com.antonkarpenko:ffmpeg-kit-min:$ffmpegKitNativeVersion",
             )
         }
 

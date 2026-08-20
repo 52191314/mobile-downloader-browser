@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../analytics/aurora_analytics_service.dart';
 import '../theme/aurora_palette.dart';
 import '../theme/aurora_tokens.dart';
 import 'build_channel.dart';
@@ -38,6 +39,11 @@ Future<void> showProUpsell(
   final tier = userTier ?? proUpsellEntitlement?.tier ?? EntitlementTier.free;
   final featureName = ProFeatures.displayName(feature);
   final minTier = ProFeatures.minimumTier[feature]!;
+
+  AuroraAnalyticsService.instance.logUpsellViewed(
+    trigger: feature.name,
+    currentTier: tier.name,
+  );
 
   return showModalBottomSheet<void>(
     context: context,
@@ -109,6 +115,10 @@ Future<void> showProUpsell(
                     onPressed: () async {
                       Navigator.of(ctx).pop();
                       if (!BuildChannel.isPlay || billing == null) return;
+                      AuroraAnalyticsService.instance.logPurchaseInitiated(
+                        productId: 'aurora_pro',
+                        targetTier: 'pro',
+                      );
                       await billing.buyPro();
                     },
                     icon: const Icon(Icons.shopping_cart_outlined, size: 18),
@@ -138,8 +148,16 @@ Future<void> showProUpsell(
                             Navigator.of(ctx).pop();
                             if (!BuildChannel.isPlay || billing == null) return;
                             if (ultraUpgradeAvailable) {
+                              AuroraAnalyticsService.instance.logPurchaseInitiated(
+                                productId: 'aurora_ultra_upgrade',
+                                targetTier: 'ultra',
+                              );
                               await billing.buyUltraUpgrade();
                             } else {
+                              AuroraAnalyticsService.instance.logPurchaseInitiated(
+                                productId: 'aurora_ultra',
+                                targetTier: 'ultra',
+                              );
                               await billing.buyUltra();
                             }
                           }

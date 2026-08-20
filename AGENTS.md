@@ -187,7 +187,8 @@ Gotchas:
 
 - **Indonesian is `id`**, **Arabic is `ar`**, **Vietnamese is `vi`** (bare language codes).
 - Standard BCP 47 region suffixes are used for all other tags (e.g. `es-419`, `es-ES`, `pt-BR`, `pt-PT`, `zh-CN`).
-- Always maintain all 15 language blocks in `PLAY_STORE_RELEASE_NOTES.md` for every release.
+- Always maintain all 15 language blocks in `PLAY_STORE_RELEASE_NOTES.txt` for every release.
+- **Output format**: When providing release notes to the user, ALWAYS provide plain text (`.txt` format / code block) without rich Markdown formatting or markdown tables, so it is instantly copy-pasteable directly into Google Play Console.
 
 ## Play Console recommendations (release 54, 1.0.1) — status
 
@@ -334,7 +335,7 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
   - Increment z (patch) for bug fixes, performance tweaks, and refactors.
   - Increment y (minor) for new features or notable enhancements.
   - Increment x (major) for breaking changes or major product milestones.
-- **Mandatory Release Notes**: Every build code / version release MUST have corresponding release notes documented in RELEASE_NOTES_x.y.z.md or the project's release notes file.
+- **Mandatory Release Notes**: Every build code / version release MUST have corresponding release notes documented in `.txt` format (`PLAY_STORE_RELEASE_NOTES.txt` / `RELEASE_NOTES_x.y.z.txt` or markdown release notes file) and provided in clean plain text for immediate copy-pasting into Play Console.
 
 ## Site compatibility study — ThePornDude top-10 tubes + top-10 aggregators (2026-08-11)
 

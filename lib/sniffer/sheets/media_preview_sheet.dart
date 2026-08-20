@@ -197,6 +197,9 @@ Future<void> showMediaPreview(
         ),
       ),
     );
+    try {
+      await activeTab.controller.resumeWebView();
+    } catch (_) {}
     if (!isMounted()) return;
     if (result == 'download') {
       await onAddToQueue(finalMedia);

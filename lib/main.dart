@@ -11,6 +11,7 @@ import 'l10n/app_localizations.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'analytics/aurora_analytics_service.dart';
 import 'dev/screenshot_fixtures.dart';
 import 'downloader/download_rules.dart';
 import 'downloader/downloader.dart';
@@ -56,6 +57,7 @@ import 'premium/watcher/watcher_service.dart';
 import 'premium/automation/automation_api_service.dart';
 import 'settings/onboarding_experiment.dart';
 import 'ui/widgets/onboarding_spotlight.dart';
+import 'platform/app_update_service.dart';
 
 /// Browser User-Agent used for manually pasted download URLs. Mirrors the
 /// same constant in sniffer_screen.dart so manually-pasted HLS requests look
@@ -396,6 +398,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
             proEntitlement: _proEntitlement,
           ),
         );
+        unawaited(
+          AppUpdateService.instance.checkAndPromptAutoUpdate(
+            context,
+            currentBuildCode: 87,
+          ),
+        );
       },
     );
   }
@@ -414,10 +422,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           builder: (dialogCtx, setDialogState) {
             final l = AppLocalizations.of(dialogCtx);
             return AlertDialog(
-              backgroundColor: const Color(0xFF0F172A),
+              backgroundColor: ac.surfaceCard,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: ac.accentFrost.withValues(alpha: 0.3)),
+                side: BorderSide(color: ac.glassBorder),
               ),
               title: Row(
                 children: [
@@ -426,8 +434,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                   Expanded(
                     child: Text(
                       l?.onboardingWelcomeTitle ?? 'App Language',
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: ac.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -445,8 +453,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                       Text(
                         l?.onboardingWelcomeDesc ??
                             'Select your display language for Aurora Downloader interface:',
-                        style: const TextStyle(
-                          color: Color(0xFF94A3B8),
+                        style: TextStyle(
+                          color: ac.textSecondary,
                           fontSize: 13,
                         ),
                       ),
@@ -458,14 +466,14 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                           child: Material(
                             color: isSelected
                                 ? ac.accentFrost.withValues(alpha: 0.15)
-                                : const Color(0xFF1E293B),
+                                : ac.surfaceElevated,
                             borderRadius: BorderRadius.circular(8),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                               side: BorderSide(
                                 color: isSelected
                                     ? ac.accentFrost
-                                    : Colors.transparent,
+                                    : ac.borderHairline,
                               ),
                             ),
                             clipBehavior: Clip.antiAlias,
@@ -489,7 +497,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                                           : Icons.radio_button_off,
                                       color: isSelected
                                           ? ac.accentFrost
-                                          : const Color(0xFF64748B),
+                                          : ac.textTertiary,
                                       size: 20,
                                     ),
                                     const SizedBox(width: 12),
@@ -498,8 +506,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                                         lang.name,
                                         style: TextStyle(
                                           color: isSelected
-                                              ? Colors.white
-                                              : const Color(0xFFCBD5E1),
+                                              ? ac.textPrimary
+                                              : ac.textSecondary,
                                           fontWeight: isSelected
                                               ? FontWeight.bold
                                               : FontWeight.normal,
@@ -522,7 +530,10 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ac.accentFrost,
-                    foregroundColor: Colors.black,
+                    foregroundColor:
+                        Theme.of(dialogCtx).brightness == Brightness.dark
+                            ? Colors.black
+                            : Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -615,6 +626,8 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     tempDirProvider: () => _tempWorkspaceDirectory().then((d) => d.path),
   );
   StreamSubscription<DownloadTask>? _queueSubscription;
+  StreamSubscription<String>? _resniffSuggestedSubscription;
+  final Set<String> _resniffPromptedTaskIds = <String>{};
   DownloadSettings _settings = DownloadSettings.defaults();
   DownloadRuleEngine? _ruleEngine;
   double _speedLimitKbps = 0;
@@ -734,6 +747,17 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         unawaited(_promptBatteryOptIfNeeded());
       }
     });
+    _resniffSuggestedSubscription =
+        _downloadQueue.onResniffSuggested.listen((taskId) {
+      final task = _downloadQueue.getTask(taskId);
+      if (task == null || !mounted) return;
+      if (_resniffPromptedTaskIds.contains(taskId)) return;
+      _resniffPromptedTaskIds.add(taskId);
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _resniffPromptedTaskIds.remove(taskId);
+      });
+      unawaited(_showResniffSuggestedDialog(task));
+    });
     _initIntentChannel();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_watcherService.initialize());
@@ -764,6 +788,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         EngagementPromptService.instance.recordAppOpen(
           context,
           proEntitlement: _proEntitlement,
+        ),
+      );
+      unawaited(
+        AppUpdateService.instance.checkAndPromptAutoUpdate(
+          context,
+          currentBuildCode: 87,
         ),
       );
     });
@@ -1094,6 +1124,7 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     _adblockRefreshTimer?.cancel();
     _resniffModeTimer?.cancel();
     _queueSubscription?.cancel();
+    _resniffSuggestedSubscription?.cancel();
     _driveSubscription?.cancel();
     _urlController.dispose();
     _sniffedCountNotifier.dispose();
@@ -1624,6 +1655,43 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
+  /// Shown when a link exhausts auto-retries (attempts >= retryLimit).
+  /// Offers auto-resniff, manual resniff, and dismiss.
+  Future<void> _showResniffSuggestedDialog(DownloadTask task) async {
+    if (!mounted) return;
+    final name = task.savePath.split('/').last;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Link keeps failing'),
+        content: Text(
+          '"$name" failed 3 times. The link may have expired. '
+          'Refresh it from the source page?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('dismiss'),
+            child: const Text('Dismiss'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('manual'),
+            child: const Text('Open source page'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop('auto'),
+            child: const Text('Refresh automatically'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'auto') {
+      await _resniffAuto(task);
+    } else if (choice == 'manual') {
+      await _resniffManual(task);
+    }
+  }
+
   /// Manual resniff: open the task's source page in the browser so the
   /// user can re-navigate and re-sniff the media URL manually.  Sets the
   /// queue into "resniff mode" so that duplicate URLs trigger a dialog
@@ -1812,14 +1880,12 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     debugPrint('Settings updated');
   }
 
-  /// Logs download lifecycle events to Firebase Analytics (Play-only repo).
+  /// Logs download lifecycle events to Firebase Analytics and LocalFunnelStore.
   /// Fire-and-forget; analytics must never affect the queue or the app.
   Future<void> _logDownloadAnalytics(DownloadTask task) async {
     final eventName = analyticsEventNameFor(task.state);
     if (eventName == null) return;
     try {
-      final Map<String, Object> parameters = {};
-
       // Determine protocol / engine type
       final String protocol;
       if (task.url.startsWith('magnet:') ||
@@ -1841,28 +1907,27 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
           protocol = 'direct';
         }
       }
-      parameters['protocol'] = protocol;
 
-      if (task.state == DownloadState.failed) {
-        if (task.failureReason != null) {
-          parameters['failure_reason'] = task.failureReason!.name;
-        }
-        if (task.errorMessage != null && task.errorMessage!.isNotEmpty) {
-          final msg = task.errorMessage!;
-          // Firebase Analytics string parameters are limited to 100 characters.
-          parameters['error_snippet'] =
-              msg.length > 95 ? msg.substring(0, 95) : msg;
-        }
+      final host = AuroraAnalyticsService.sanitizeHost(task.url);
+
+      if (task.state == DownloadState.downloading) {
+        await AuroraAnalyticsService.instance.logDownloadStarted(
+          protocol: protocol,
+          host: host,
+          contentType: task.contentType,
+        );
       } else if (task.state == DownloadState.completed) {
-        if (task.totalBytes > 0) {
-          parameters['total_bytes'] = task.totalBytes;
-        }
+        await AuroraAnalyticsService.instance.logDownloadCompleted(
+          protocol: protocol,
+          totalBytes: task.totalBytes,
+        );
+      } else if (task.state == DownloadState.failed) {
+        await AuroraAnalyticsService.instance.logDownloadFailed(
+          protocol: protocol,
+          failureReason: task.failureReason?.name ?? 'unknown',
+          errorSnippet: task.errorMessage,
+        );
       }
-
-      await FirebaseAnalytics.instance.logEvent(
-        name: eventName,
-        parameters: parameters.isNotEmpty ? parameters : null,
-      );
     } catch (e) {
       debugPrint('[AnalyticsEventError] $e');
     }
@@ -2048,6 +2113,11 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
         expectedHash: task.expectedHash,
       );
       newTask.copyBrowserBridgesFrom(task);
+      // Redownload of a failed entry replaces it — otherwise the queue shows
+      // two rows for the same URL (old `failed` + new `downloading`).
+      if (task.state == DownloadState.failed) {
+        await _downloadQueue.cancelTaskAsync(task.id);
+      }
       _downloadQueue.addTask(newTask, force: true);
       if (mounted) {
         _showSnack('Redownload started.');
@@ -2089,13 +2159,44 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
     }
   }
 
+  /// Materializes a completed task to a real filesystem path if its private
+  /// copy was deleted after publishing to MediaStore.
+  Future<String?> _materializeSourceForTask(DownloadTask task) async {
+    final path = task.savePath;
+    if (await File(path).exists()) return path;
+
+    final uri = task.publicUri?.trim();
+    if (uri != null && uri.isNotEmpty) {
+      try {
+        final docs = await getApplicationDocumentsDirectory();
+        final dir = Directory(p.join(docs.path, 'temp_sources'));
+        if (!dir.existsSync()) await dir.create(recursive: true);
+        var baseName = p.basename(task.savePath);
+        if (baseName.isEmpty || baseName == '.') baseName = 'download';
+        final dest = p.join(dir.path, baseName);
+        final copied = await const MethodChannel(
+          'aurora_downloader/public_downloads',
+        ).invokeMethod<String>('copyContentUriToFile', {
+          'uri': uri,
+          'destPath': dest,
+        });
+        if (copied != null && copied.isNotEmpty && File(copied).existsSync()) {
+          return copied;
+        }
+      } catch (e) {
+        debugPrint('[Main] Failed to materialize source: $e');
+      }
+    }
+    return null;
+  }
+
   /// P6 — Send the completed download to a PC over the local network.
   Future<void> _sendToPc(DownloadTask task) async {
     try {
-      final source = await _resolvedCompletedSource(task);
-      if (source == null || !source.startsWith('/')) {
+      final source = await _materializeSourceForTask(task);
+      if (source == null) {
         if (!mounted) return;
-        _showSnack('Couldn’t send — the file isn’t available locally yet.');
+        _showSnack('Couldn’t send — the file isn’t available locally.');
         return;
       }
       final tier = _proEntitlement.tier;
@@ -2152,17 +2253,18 @@ class _AuroraHomeState extends State<AuroraHome> with WidgetsBindingObserver {
       );
       return;
     }
-    final file = File(task.savePath);
-    if (!await file.exists()) {
-      _showSnack('File not found: ${task.savePath}');
-      return;
-    }
     // Deleting the source file out from under an unfinished download would
     // corrupt the download (e.g. a seeding torrent or a paused/partial file).
     if (task.state != DownloadState.completed) {
       _showSnack('Only completed downloads can be moved to the vault.');
       return;
     }
+    final sourcePath = await _materializeSourceForTask(task);
+    if (sourcePath == null) {
+      _showSnack('File not found: ${task.savePath}');
+      return;
+    }
+    final file = File(sourcePath);
     final vaultName = await _vaultService.store(file, tier: tier);
     if (vaultName != null) {
       try {
