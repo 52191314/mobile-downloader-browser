@@ -889,7 +889,18 @@ class DownloadCard extends StatelessWidget {
     }
 
     // Redownload — fresh queue entry (not the same as Retry of a partial).
-    if (onRedownload != null && !isActive && !isMagnet && !isBlob) {
+    // Meaningful only for a task that finished or failed. Show it for
+    // paused too; NEVER for idle/scheduled (already queued/not started) —
+    // there it would just create a duplicate before the task even runs.
+    final isRedownloadable =
+        onRedownload != null &&
+        !isActive &&
+        !isMagnet &&
+        !isBlob &&
+        (task.state == DownloadState.failed ||
+            task.state == DownloadState.completed ||
+            task.state == DownloadState.paused);
+    if (isRedownloadable) {
       popupItems.add(
         PopupMenuItem(
           value: 'redownload',

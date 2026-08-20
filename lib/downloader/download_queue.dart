@@ -1135,6 +1135,10 @@ class DownloadQueue {
     if (tokenChanged) {
       existing.downloadedBytes = 0;
       existing.totalBytes = donor.totalBytes > 0 ? donor.totalBytes : 0;
+      // A fresh URL is a fresh start for auto-retry accounting; otherwise the
+      // counter would still be at retryLimit and the next failure would jump
+      // straight to "Auto-retry exhausted" with no retries on the new URL.
+      _autoRetryAttempts.remove(existingTaskId);
       if (wipeOnUrlChange) {
         await _wipeTaskTemp(existing);
       }
@@ -1478,6 +1482,19 @@ class DownloadQueue {
             continue;
           }
           addTask(task);
+          // _autoRetryAttempts is volatile (not persisted): on cold start a
+          // restored failed task would re-enter the queue and burn 3 fresh
+          // auto-retries against a URL that already exhausted them. Pre-seed
+          // the counter so a broken link (auth/token/host issues) does not
+          // auto-retry again until the user manually Resniffs.
+          if (task.state != DownloadState.idle &&
+              task.state != DownloadState.completed &&
+              (task.failureReason == DownloadFailure.urlExpired ||
+                  task.failureReason == DownloadFailure.hlsTokenExpired ||
+                  task.failureReason == DownloadFailure.hlsCircuitBreaker ||
+                  task.failureReason == DownloadFailure.httpForbidden)) {
+            _autoRetryAttempts[task.id] = retryLimit;
+          }
         } catch (e, s) {
           _logError('Skipped loading corrupted task in queue file', e, s);
         }
@@ -1490,6 +1507,10 @@ class DownloadQueue {
       await _preserveCorruptQueueFile(file, e.toString());
     } finally {
       _isLoading = false;
+      // Enforce the history cap immediately on restore — the queue file may
+      // hold more terminal rows than maxCompletedTasks, and _emitTask-based
+      // eviction never runs during loadFromFile.
+      _evictOldCompletedTasks();
       // Tasks are already in _executionQueue as idle. Hold multi-connection
       // resume for a few seconds so browser/WebView cold start can finish.
       // Without this, Secure Folder freezes ~10–15s under HLS+GPU load.
@@ -2074,7 +2095,16 @@ class DownloadQueue {
   /// Removes oldest completed/failed tasks when the history limit is exceeded.
   /// This prevents unbounded memory and JSON-serialization growth.
   void _evictOldCompletedTasks() {
-    if (maxCompletedTasks <= 0 || _tasks.length <= maxCompletedTasks) return;
+    // Gate on the terminal count, not the total task count: active / queued /
+    // paused tasks must never delay eviction of stale history rows, and the
+    // overflow must actually be reached in terminal rows to evict anything.
+    if (maxCompletedTasks <= 0) return;
+    final terminalCount = _tasks.values.where(
+      (t) =>
+          t.state == DownloadState.completed ||
+          t.state == DownloadState.failed,
+    ).length;
+    if (terminalCount <= maxCompletedTasks) return;
 
     // Collect terminal (completed/failed) task IDs sorted by last update
     // (most recent first). We keep the newest ones.
@@ -2098,8 +2128,11 @@ class DownloadQueue {
         continue;
       }
       final task = _tasks[id];
-      // Best-effort: free temp workspace when dropping a failed history row.
-      if (task != null && task.state == DownloadState.failed) {
+      // Best-effort: free temp workspace when dropping a history row.
+      // Completed tasks are evicted too — they are published (private copy
+      // already deleted), so the leftover temp/part-tree is pure garbage
+      // (HLS segment_*.ts trees can be GBs and were never cleaned up).
+      if (task != null) {
         unawaited(() async {
           try {
             final tempDir = Directory(task.tempDir);
