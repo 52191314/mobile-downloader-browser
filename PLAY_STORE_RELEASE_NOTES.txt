@@ -1,0 +1,15 @@
+<en-US>Bug fixes: Redownload now replaces a failed item instead of duplicating it. Links that fail 3x now prompt you to refresh. Faster, more reliable queue and history handling.
+<ar>إصلاحات الأخطاء: إعادة التنزيل الآن تستبدل العنصر الفاشل بدلاً من تكراره. الروابط التي تفشل 3 مرات تطلب منك الآن التحديث. معالجة قائمة الانتظار والسجل أصبحت أسرع وأكثر موثوقية.
+<de-DE>Fehlerbehebungen: „Erneut herunterladen" ersetzt jetzt ein fehlgeschlagenes Element, statt es zu duplizieren. Links, die 3-mal fehlschlagen, fordern Sie jetzt zum Aktualisieren auf. Schnellere und zuverlässigere Warteschlangen- und Verlaufsverwaltung.
+<es-419>Correcciones: Volver a descargar ahora reemplaza un elemento fallido en lugar de duplicarlo. Los enlaces que fallan 3 veces ahora te piden actualizar. Gestión de cola e historial más rápida y confiable.
+<es-ES>Correcciones: Volver a descargar ahora reemplaza un elemento fallido en lugar de duplicarlo. Los enlaces que fallan 3 veces ahora te piden actualizar. Gestión de cola e historial más rápida y fiable.
+<fr-FR>Corrections : Télécharger à nouveau remplace désormais un élément en échec au lieu de le dupliquer. Les liens qui échouent 3 fois vous proposent maintenant de les actualiser. Gestion de la file et de l'historique plus rapide et plus fiable.
+<hi-IN>बग सुधार: फिर से डाउनलोड करें अब विफल आइटम की नकल बनाने के बजाय उसे बदल देता है। 3 बार विफल होने वाले लिंक अब आपसे रिफ़्रेश करने को कहते हैं। कतार और इतिहास प्रबंधन तेज़ और अधिक विश्वसनीय।
+<id>Perbaikan bug: Unduh ulang kini menggantikan item yang gagal alih-alih menduplikasinya. Tautan yang gagal 3 kali kini meminta Anda untuk menyegarkan. Manajemen antrean dan riwayat lebih cepat dan andal.
+<ja-JP>バグ修正: 再ダウンロードは失敗した項目を複製せず置き換えるようになりました。3回失敗したリンクは更新を促します。キューと履歴の管理がより高速で信頼性の高いものになりました。
+<pt-BR>Correções: Baixar novamente agora substitui um item com falha em vez de duplicá-lo. Links que falham 3 vezes agora pedem para você atualizar. Gerenciamento de fila e histórico mais rápido e confiável.
+<pt-PT>Correções: Transferir novamente agora substitui um item com falha em vez de duplicar. Ligações que falham 3 vezes agora pedem para atualizar. Gestão de fila e histórico mais rápida e fiável.
+<ru-RU>Исправления: повторная загрузка теперь заменяет неудачный элемент вместо его дублирования. Ссылки, которые не срабатывают 3 раза, теперь предлагают обновить. Управление очередью и историей стало быстрее и надёжнее.
+<tr-TR>Hata düzeltmeleri: Yeniden indirme artık başarısız öğeyi kopyalamak yerine değiştiriyor. 3 kez başarısız olan bağlantılar artık yenilemenizi istiyor. Kuyruk ve geçmiş yönetimi daha hızlı ve güvenilir.
+<vi>Sửa lỗi: Tải lại giờ đây thay thế mục đã thất bại thay vì tạo bản sao. Liên kết thất bại 3 lần giờ sẽ nhắc bạn làm mới. Quản lý hàng đợi và lịch sử nhanh hơn, đáng tin cậy hơn.
+<zh-CN>错误修复：重新下载现在会替换失败的项目，而不是复制它。失败 3 次的链接现在会提示您刷新。队列和历史记录管理更快、更可靠。
