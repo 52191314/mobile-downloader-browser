@@ -66,7 +66,11 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // arm64-v8a only. Android Play requires 64-bit support, and the
+            // closed-source BSD torrent engine is built for arm64. Keeping a
+            // single ABI keeps the base + dynamic-feature modules ABI-aligned
+            // (Android refuses to package modules with mismatched ABI sets).
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -143,10 +147,13 @@ android {
             excludes += listOf(
                 "**/mips/**",
                 "**/mips64/**",
-                // No x86/x86_64 anywhere — app ships arm64-v8a + armeabi-v7a
-                // only. Keeps the AAB free of ~15 MB of emulator-only .so
-                // (upload size) and keeps the base's ABI set in sync with the
-                // on-demand feature modules (bundletool requires a match).
+                // arm64-v8a only. Play requires 64-bit, and the dynamic feature
+                // modules (ffmpeg/mediakit/torrent) are each arm64-only, so the
+                // base must strip armeabi-v7a too — bundletool refuses to bundle
+                // modules with mismatched ABI sets, and shipping 32-bit would
+                // break that contract. Keeps upload size down as well.
+                "**/armeabi-v7a/**",
+                "**/armeabi/**",
                 "**/x86/**",
                 "**/x86_64/**",
             )

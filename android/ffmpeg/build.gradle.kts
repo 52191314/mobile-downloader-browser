@@ -47,10 +47,10 @@ val extractFfmpegJni by tasks.registering {
         }
 
         // Bundletool requires every module with natives to advertise the *same*
-        // ABI set as base. Base ships arm64-v8a + armeabi-v7a only (see
-        // :app abiFilters + packaging excludes), so extract the same set here.
-        // Play still delivers only the device ABI at install time.
-        val abis = listOf("arm64-v8a", "armeabi-v7a")
+        // ABI set as base. Base now ships arm64-v8a only (see :app abiFilters +
+        // packaging excludes), so extract the same set here. Play still delivers
+        // only the device ABI at install time.
+        val abis = listOf("arm64-v8a")
         var copied = 0
         aars.forEach { aar ->
             copy {

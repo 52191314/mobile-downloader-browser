@@ -2,21 +2,21 @@
 
 ## Highlights
 
-* **Closed-source conversion (partial)**: Aurora's Dart codebase is now
-  proprietary. However, the **BitTorrent feature still bundles the GPL-3.0
-  `libtorrent_flutter` native library** (`torrent/` dynamic feature module) —
-  this must be resolved before the build can be distributed closed-source (see
-  known issue below). FFmpeg now links the LGPL `ffmpeg-kit-min` build.
-  Third-party open-source licenses are documented in `THIRD_PARTY_NOTICES.md`.
+* **Closed-source conversion, BitTorrent now BSD**: Aurora's Dart codebase and
+  native stack are proprietary. The BitTorrent feature now uses a **BSD-3-Clause
+  rasterbar libtorrent** build behind a fresh, BSD-clean `lt_*` bridge
+  (`android/torrent/src/main/cpp/aurora_torrent_bridge.cpp`) — replacing the
+  GPL-3.0 `libtorrent_flutter` prebuilt, which is no longer compiled or packaged.
+  FFmpeg links the LGPL `ffmpeg-kit-min` build (dynamically relinkable per LGPL).
+  Third-party licenses: `THIRD_PARTY_NOTICES.md`.
 
-## Known issue (must fix before closed-source release)
+## Native licensing
 
-* The `:torrent` dynamic-feature module still downloads and packages the GPL
-  `liblibtorrent_flutter.so` (`android/torrent/build.gradle.kts`), and
-  `lib/torrent/aurora_torrent_engine.dart` loads that same `.so`. Shipping this
-  under the proprietary license is a GPL violation. Options: (a) remove the
-  torrent feature until a permissible engine exists, or (b) keep the whole app
-  GPL. This is tracked separately and must be decided before Play upload.
+* **BitTorrent**: BSD-3-Clause rasterbar libtorrent 2.1.1, shipped as
+  `liblibtorrent_flutter.so` (arm64-v8a). Built per `tooling/build_bsd_torrent.sh`.
+  armeabi-v7a currently not shipped for torrent (see notes).
+* **FFmpeg**: LGPL-3.0 `ffmpeg-kit-min` (dynamically linked, replaceable).
+* **Media**: LGPL `libmpv` + MIT `media_kit`.
 
 ## Bug Fixes
 

@@ -16,9 +16,9 @@ val extractMediakitJni by tasks.registering {
         destRoot.deleteRecursively()
         destRoot.mkdirs()
 
-        // arm64-v8a + armeabi-v7a only — must match the base module's ABI set
-        // (x86_64 is not shipped; Play never installs it on ARM devices).
-        val abis = listOf("arm64-v8a", "armeabi-v7a")
+        // arm64-v8a only — must match the base module's ABI set
+        // (base is 64-bit-only; Play requires 64-bit and does not install x86).
+        val abis = listOf("arm64-v8a")
         var copied = 0
 
         val mediaKitProject = findProject(":media_kit_libs_android_video")

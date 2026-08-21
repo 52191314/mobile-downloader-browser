@@ -29,9 +29,12 @@ val extractTorrentJni by tasks.registering {
         destRoot.deleteRecursively()
         destRoot.mkdirs()
 
-        // arm64-v8a + armeabi-v7a only — must match the base module's ABI set
-        // (x86_64 is not shipped; Play never installs it on ARM devices).
-        val abis = listOf("arm64-v8a", "armeabi-v7a")
+        // arm64-v8a only for the torrent feature. The closed-source BSD
+        // libtorrent bridge is built for 64-bit; the armeabi-v7a vcpkg build is
+        // blocked by a CMake 4.4 / NDK legacy-toolchain incompatibility on this
+        // machine. 32-bit devices keep every other feature; torrent simply does
+        // not install there.
+        val abis = listOf("arm64-v8a")
         var copied = 0
 
         fun findPrebuiltDir(): File? {
@@ -96,41 +99,21 @@ val extractTorrentJni by tasks.registering {
             }
         }
 
-        // Fallback Attempt 4: Download prebuilt native zips if not found in pub cache
+        // Closed-source build: the only sanctioned source is the vendored BSD
+        // libtorrent build (tooling/torrent_16k). Never fall back to downloading
+        // the GPL-3.0 libtorrent_flutter prebuilts — that would reintroduce a GPL
+        // dependency into the proprietary app. Hard-fail instead so the mismatch
+        // is caught, not silently packaged.
         if (copied == 0) {
-            val version = "1.9.2"
-            abis.forEach { abi ->
-                val abiDestDir = File(destRoot, "jni/$abi")
-                abiDestDir.mkdirs()
-                val zipUrl = "https://github.com/ayman708-UX/libtorrent_flutter/releases/download/v$version/android-native-lib-$abi.zip"
-                val cacheZip = outDir.get().asFile.resolve("download-cache/torrent-$abi.zip")
-                cacheZip.parentFile.mkdirs()
-                if (!cacheZip.exists()) {
-                    logger.quiet("[aurora-torrent] Downloading prebuilt $abi libtorrent from $zipUrl")
-                    runCatching {
-                        URI(zipUrl).toURL().openStream().use { input: InputStream ->
-                            cacheZip.outputStream().use { output -> input.copyTo(output) }
-                        }
-                    }
-                }
-                if (cacheZip.exists()) {
-                    copy {
-                        from(zipTree(cacheZip))
-                        into(abiDestDir)
-                        include("**/lib*.so")
-                        eachFile { path = name }
-                        includeEmptyDirs = false
-                    }
-                    val count = abiDestDir.listFiles()?.count { it.extension == "so" } ?: 0
-                    copied += count
-                }
-            }
+            throw GradleException(
+                "[aurora-torrent] No BSD libtorrent .so found in " +
+                    "tooling/torrent_16k/<abi>/liblibtorrent_flutter.so. " +
+                    "Build it from tooling (see android/torrent/src/main/cpp) " +
+                    "and place the arm64-v8a + armeabi-v7a binaries into " +
+                    "tooling/torrent_16k. Refusing to download GPL libtorrent."
+            )
         }
-
-        if (copied == 0) {
-            throw GradleException("[aurora-torrent] Extracted no libtorrent .so files into feature module jniLibs")
-        }
-        logger.quiet("[aurora-torrent] Successfully extracted $copied libtorrent .so file(s) into feature module jniLibs")
+        logger.quiet("[aurora-torrent] Successfully extracted $copied BSD libtorrent .so file(s) into feature module jniLibs")
     }
 }
 
